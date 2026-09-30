@@ -11,34 +11,20 @@ import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.service.A11yService
 
-/** 浴室 App 页面状态（resId 特征判定）。 */
-enum class PageState {
-    HOME, // 喷头选择首页
-    ID_VERIFY, // 账号密码验证页
-    HINT, // 提示页（短暂停留后自动回 HOME）
-    VF_RESULT, // 验证结果页（短暂停留后自动回 HOME）
-    BOOKING, // 预约页
-    BOOKING_CODE, // 预约码输入页
-    UNKNOWN,
-}
-
 /**
- * 浴室 App 页面导航与元素操作。
+ * 浴室 App 的导航与元素操作。
  *
- * 页面判定与 resId 语义提取自对浴室 App 的实测（见 docs/ARCHITECTURE.md）；
- * 页面检测用单次 DFS 同时匹配全部特征，HOME 命中即短路。
+ * 页面识别（[PageState] / [PageSnapshot]）住在 [BathAppPage]：它要同时服务自动化流程、
+ * 浴室 App 的退出监控和网页端的按状态展示，是那份状态的唯一来源。这里只负责**动作**——
+ * 等页面、回首页、找元素、点下去。
+ *
+ * resId 语义提取自对浴室 App 的实测（见 docs/ARCHITECTURE.md）。
  */
 @Suppress("TooManyFunctions") // 页面导航原语集合：查找/操作/状态三组共享同一套资源 ID 与节点遍历上下文
 object BathAppNavigator {
 
     // ── resId 特征（浴室 App 固定 UI 结构）──
 
-    private const val RID_GV_SPRINKLER = "com.datalook.bath:id/gv_sprinkler"
-    private const val RID_LL_VERIFY_IDSERIAL = "com.datalook.bath:id/ll_verify_idserial"
-    private const val RID_TV_HINT = "com.datalook.bath:id/tv_hint"
-    private const val RID_TV_VF_RESULT = "com.datalook.bath:id/tv_vf_result"
-    private const val RID_LL_BOOKING = "com.datalook.bath:id/ll_booking"
-    private const val RID_LL_VERIFY_BOOKINGCODE = "com.datalook.bath:id/ll_verify_bookingcode"
     private const val RID_TV_BACKPREPAGE = "com.datalook.bath:id/tv_backprepage"
     private const val RID_TV_TITLE = "com.datalook.bath:id/tv_title"
     private const val RID_TV_BUTTON_NOCARD = "com.datalook.bath:id/tv_button_nocard"
@@ -48,81 +34,11 @@ object BathAppNavigator {
     private const val RID_TVB_ID_OK = "com.datalook.bath:id/tvb_id_ok"
     private const val RID_TV_NOWDATE = "com.datalook.bath:id/tv_nowdate"
 
+    /** 喷头网格的容器。定位单个喷头要从它开始。 */
+    private const val RID_GV_SPRINKLER = "com.datalook.bath:id/gv_sprinkler"
+
     /** 通知栏与最近任务面板的表面：它们压在最上层，热切前台拗不过，必须先关掉。 */
     private const val SYSTEM_UI_PACKAGE = "com.android.systemui"
-
-    private data class PageInfo(
-        var hasHome: Boolean = false,
-        var hasIdVerify: Boolean = false,
-        var hasHint: Boolean = false,
-        var hasVfResult: Boolean = false,
-        var hasBooking: Boolean = false,
-        var hasBookingCode: Boolean = false,
-        var hintText: String? = null,
-        var vfResultText: String? = null,
-    )
-
-    /** 页面识别结果：状态，以及该页面的提示文本（仅 HINT/VF_RESULT 非空）。 */
-    data class PageSnapshot(val state: PageState, val message: String = "")
-
-    /** 单次 DFS 同时检测页面状态与提示文本。 */
-    fun detectPage(): PageSnapshot {
-        val a11y = A11yService.instance ?: return PageSnapshot(PageState.UNKNOWN)
-        val root = a11y.rootInActiveWindow ?: return PageSnapshot(PageState.UNKNOWN)
-        try {
-            val info = PageInfo()
-            scanNode(root, info)
-            val state = when {
-                info.hasHome -> PageState.HOME
-                info.hasIdVerify -> PageState.ID_VERIFY
-                info.hasHint -> PageState.HINT
-                info.hasVfResult -> PageState.VF_RESULT
-                info.hasBooking -> PageState.BOOKING
-                info.hasBookingCode -> PageState.BOOKING_CODE
-                else -> PageState.UNKNOWN
-            }
-            val text = when (state) {
-                PageState.HINT -> info.hintText ?: ""
-                PageState.VF_RESULT -> info.vfResultText ?: ""
-                else -> ""
-            }
-            return PageSnapshot(state, text)
-        } finally {
-            root.recycle()
-        }
-    }
-
-    private fun scanNode(node: AccessibilityNodeInfo, info: PageInfo) {
-        val rid = node.viewIdResourceName ?: ""
-        when {
-            matches(rid, RID_GV_SPRINKLER) -> {
-                info.hasHome = true
-                return
-            }
-
-            matches(rid, RID_LL_VERIFY_IDSERIAL) -> info.hasIdVerify = true
-
-            matches(rid, RID_TV_HINT) -> {
-                info.hasHint = true
-                if (info.hintText == null) info.hintText = node.text?.toString()
-            }
-
-            matches(rid, RID_TV_VF_RESULT) -> {
-                info.hasVfResult = true
-                if (info.vfResultText == null) info.vfResultText = node.text?.toString()
-            }
-
-            matches(rid, RID_LL_BOOKING) -> info.hasBooking = true
-
-            matches(rid, RID_LL_VERIFY_BOOKINGCODE) -> info.hasBookingCode = true
-        }
-        for (i in 0 until node.childCount) {
-            val child = node.getChild(i) ?: continue
-            scanNode(child, info)
-            child.recycle()
-            if (info.hasHome) return
-        }
-    }
 
     // ── 导航 ──
 
@@ -133,7 +49,7 @@ object BathAppNavigator {
         while (System.currentTimeMillis() - start < budgetMs) {
             // 标记取在检测之前：检测本身要遍历一遍节点树，那期间发生的变化也该算数
             val mark = A11yService.pageChangeMark()
-            when (detectPage().state) {
+            when (BathAppPage.snapshot().state) {
                 PageState.HOME -> return true
 
                 PageState.ID_VERIFY, PageState.BOOKING, PageState.BOOKING_CODE, PageState.UNKNOWN ->
@@ -199,7 +115,7 @@ object BathAppNavigator {
         var relaunched = false
         while (System.currentTimeMillis() - start < timeoutMs) {
             val mark = A11yService.pageChangeMark()
-            if (detectPage().state == target) return true
+            if (BathAppPage.snapshot().state == target) return true
             if (!relaunched && !A11yService.bathAppInForeground) {
                 a11y.launchBathApp()
                 relaunched = true

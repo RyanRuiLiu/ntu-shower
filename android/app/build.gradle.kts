@@ -107,6 +107,9 @@ val frameworkBoundClasses = listOf(
     // （CommandScheduler 只剩线程编排，其串行决策已抽为 SerialCommandQueue 并纳入覆盖）
     "**/features/automation/AutomationFlow*",
     "**/features/automation/BathAppNavigator*",
+    // 页面状态源：遍历整棵 AccessibilityNodeInfo 树，系统类搬不进 JVM。
+    // 判定规则已抽成 internal 的 Features 并由 BathAppPageTest 覆盖
+    "**/features/automation/BathAppPage*",
     "**/features/automation/CommandScheduler*",
     "**/features/automation/CoverOverlay*",
     "**/features/automation/PhotoCapture*",
