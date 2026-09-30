@@ -5,8 +5,6 @@ import logging
 import uuid
 from dataclasses import dataclass
 
-from typing_extensions import TypedDict
-
 from app.core import protocol
 from app.core.clock import rfc3339_after
 from app.core.config import settings
@@ -14,26 +12,11 @@ from app.core.protocol import JsonObject
 from app.gateway.manager import manager
 from app.modules.sessions import repository
 
+from .schemas import CommandOutcome, ConfigPushResult
+
 logger = logging.getLogger("ntu-shower.sessions")
 
 DEFAULT_TIMEOUT_S = 30.0
-
-
-class CommandOutcome(TypedDict):
-    """命令下发结果，形状对应 protocol/schema/session.command_result.json。"""
-
-    status: str
-    reason_code: str
-    terminal_message: str
-    data: JsonObject | None
-
-
-class ConfigPushResult(TypedDict, total=False):
-    """配置推送结果；reason 仅在下发或确认失败时出现。"""
-
-    notified: bool
-    applied: bool
-    reason: str
 
 
 @dataclass

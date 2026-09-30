@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from app.core import config as config_module
 from app.core import wechat
 from app.modules.access import repository, service
+from app.modules.access.identity import IdentityKind
 
 ADMIN = {"X-Admin-Token": "test-token"}
 
@@ -143,7 +144,7 @@ def test_me_returns_all_capabilities(client: TestClient, ops_headers: dict[str, 
 
 def test_capability_denied_when_missing(client: TestClient) -> None:
     """有身份但缺该能力：403 且 type 可区分于"没身份"。"""
-    repository.put_grant("photo-only-user", "token", ["photo"], "只拍照")
+    repository.put_grant("photo-only-user", IdentityKind.WEB, ["photo"], "只拍照")
 
     r = client.post(
         "/api/v1/sessions/assign",
@@ -203,7 +204,7 @@ def test_grants_list_shows_both_kinds(client: TestClient) -> None:
 
     kinds = {item["kind"] for item in client.get("/admin/grants", headers=ADMIN).json()}
 
-    assert kinds == {"openid", "token"}
+    assert kinds == {"openid", "web"}
 
 
 def test_delete_grant_idempotent_from_api(client: TestClient) -> None:
