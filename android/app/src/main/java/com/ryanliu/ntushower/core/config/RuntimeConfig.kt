@@ -124,6 +124,43 @@ object RuntimeConfig {
         private set
 
     /**
+     * 把每个键复位为 [ConfigDefaults] 的值。
+     *
+     * 存在的原因是本对象是进程内的全局单例：一处改过之后，别处读到的不再是默认值，
+     * 而测试需要在每个用例开始前拿回确定的状态。**复位必须也读 [ConfigDefaults]**——
+     * 测试里另写一份默认值副本是与它必然分叉的第二个来源，而且分叉了测试照样通过
+     * （它断言的是自己刚设进去的那个值）。
+     *
+     * 生产代码不走这里：配置一旦下发就生效到进程结束。
+     */
+    fun resetToDefaults() {
+        heartbeatIntervalS = ConfigDefaults.HEARTBEAT_INTERVAL_S.toInt()
+        reconnectBaseMs = ConfigDefaults.RECONNECT_BASE_MS
+        reconnectMaxMs = ConfigDefaults.RECONNECT_MAX_MS
+        watchdogIntervalS = ConfigDefaults.WATCHDOG_INTERVAL_S
+        reportDebounceMs = ConfigDefaults.DOOR_REPORT_DEBOUNCE_MS
+        overlayEnabled = ConfigDefaults.OVERLAY_ENABLED
+        overlayMessage = ConfigDefaults.OVERLAY_MESSAGE
+        overlayTextSizeSp = ConfigDefaults.OVERLAY_TEXT_SIZE_SP.toInt()
+        overlayTextColor = ConfigDefaults.OVERLAY_TEXT_COLOR
+        overlayMarginLeftDp = ConfigDefaults.OVERLAY_MARGIN_LEFT_DP.toInt()
+        automationTraceEnabled = ConfigDefaults.AUTOMATION_TRACE_ENABLED
+        serverResponseTimeoutMs = ConfigDefaults.BATH_RESPONSE_TIMEOUT_MS
+        idVerifyWaitMs = ConfigDefaults.CERT_VERIFY_WAIT_MS
+        homeBudgetMs = ConfigDefaults.HOME_TIMEOUT_MS
+        pollIntervalMs = ConfigDefaults.UI_POLL_INTERVAL_MS
+        uiClickDelayMs = ConfigDefaults.UI_CLICK_DELAY_MS
+        uiDumpMaxNodes = ConfigDefaults.UI_DUMP_MAX_NODES
+        uiSwipeDurationMs = ConfigDefaults.UI_SWIPE_DURATION_MS
+        deviceExecMaxOutputBytes = ConfigDefaults.DEVICE_EXEC_MAX_OUTPUT_BYTES
+        otaCheckIntervalS = ConfigDefaults.OTA_CHECK_INTERVAL_S.toInt()
+        bathGuardEnabled = ConfigDefaults.BATH_APP_GUARD_ENABLED
+        bathExitWindowMs = ConfigDefaults.BATH_APP_EXIT_WINDOW_MS
+        bathExitMaxCount = ConfigDefaults.BATH_APP_EXIT_MAX_COUNT.toInt()
+        bathExitCooldownMs = ConfigDefaults.BATH_APP_EXIT_COOLDOWN_MS
+    }
+
+    /**
      * 键 → 应用函数映射表：新增配置键只需加一行（复杂度不随键数增长）。
      *
      * 每个时长与计数取值都经 atLeastOne 取下限：见类注释的"取值下限"。
