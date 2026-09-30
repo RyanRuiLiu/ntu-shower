@@ -168,15 +168,23 @@ def test_ota_repository_force_release_ignores_version(client: TestClient) -> Non
     assert rel["force"] is True
 
 
-def test_only_healthz_is_served_at_root_level(client: TestClient) -> None:
-    """服务端不再托管前端：前端是独立工程，静态产物由 nginx 服务。
+def test_api_routes_win_over_the_web_mount(client: TestClient) -> None:
+    """网页端挂在根路径，但 API 路由优先。
 
-    根路径与旧的重定向（`/`、`/app`、`/admin`）一并移除——留着它们会让
-    "前端由谁服务"这件事出现两个答案。
+    这是"挂载在最后"这个顺序约束的守护：若哪天把 mount("/") 提到路由注册之前，
+    所有 API 都会变成静态文件查找并返回 404，而这个测试会立刻失败。
     """
     assert client.get("/healthz").status_code == 200
-    for path in ("/", "/app", "/admin"):
-        assert client.get(path, follow_redirects=False).status_code == 404
+
+    # 网页端：根路径返回首页而非 404
+    root = client.get("/")
+    assert root.status_code == 200
+    assert "text/html" in root.headers["content-type"]
+
+    # 各 API 前缀仍由路由处理，未被静态文件抢走
+    assert client.get("/api/v1/doors").status_code == 200
+    assert client.get("/admin/devices").status_code == 401  # 无令牌 → 401 而非 404
+    assert client.get("/ota/releases").status_code == 200
 
 
 def test_settle_roundtrip_success_path(

@@ -1,0 +1,428 @@
+/* 状态视图。样式取自旧系统的 shower-server/app/debug/index.html，
+   视觉原样保留，仅把变量名换成 app.css 里的统一令牌。 */
+
+.main {
+  width: 100%;
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: 20px 24px;
+}
+
+/* ── KPI ───────────────────────────────────────────────── */
+.kpi {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.kpi-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.kpi-label {
+  color: var(--dim);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.kpi-num {
+  font: 700 26px var(--font-mono);
+  line-height: 1;
+}
+
+.kpi-num.cg {
+  color: var(--green);
+}
+
+.kpi-num.cb {
+  color: var(--blue);
+}
+
+.kpi-num.ca {
+  color: var(--amber);
+}
+
+.kpi-num.co {
+  color: var(--orange);
+}
+
+.kpi-num.cp {
+  color: var(--purple);
+}
+
+.kpi-num.ct {
+  color: var(--dim);
+}
+
+.kpi-bar {
+  height: 3px;
+  margin-top: 4px;
+  border-radius: 2px;
+  background: var(--elevated);
+  overflow: hidden;
+}
+
+.kpi-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.4s;
+}
+
+.kpi-fill.cg {
+  background: var(--green);
+}
+
+.kpi-fill.cb {
+  background: var(--blue);
+}
+
+.kpi-fill.ca {
+  background: var(--amber);
+}
+
+.kpi-fill.co {
+  background: var(--orange);
+}
+
+.kpi-fill.cp {
+  background: var(--purple);
+}
+
+.kpi-fill.ct {
+  background: var(--dim);
+}
+
+/* ── 门牌墙 ─────────────────────────────────────────────── */
+.doors {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.door {
+  position: relative;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.door:hover {
+  border-color: var(--dim);
+}
+
+/* 状态变化时闪一下——这是"刚才动了"的提示，不是装饰性的入场动画 */
+.door.flash {
+  animation: flash 1s ease-out;
+}
+
+@keyframes flash {
+  0% {
+    border-color: var(--accent);
+    box-shadow: 0 0 12px rgb(88 166 255 / 30%);
+  }
+
+  100% {
+    border-color: var(--border);
+    box-shadow: none;
+  }
+}
+
+.door-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.door-no {
+  font: 700 18px var(--font-mono);
+  line-height: 1;
+}
+
+.door-tag {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* 七个状态各一色，与 docs/CONTENT.md 的状态表一一对应 */
+.door-tag.free {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.door-tag.waiting {
+  background: var(--blue-bg);
+  color: var(--blue);
+}
+
+.door-tag.bathing {
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+
+.door-tag.paused {
+  background: var(--orange-bg);
+  color: var(--orange);
+}
+
+.door-tag.selected {
+  background: var(--purple-bg);
+  color: var(--purple);
+}
+
+.door-tag.repair {
+  background: var(--red-bg);
+  color: var(--red);
+}
+
+.door-tag.disabled {
+  background: var(--gray-bg);
+  color: var(--gray);
+}
+
+.door-sid {
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font: 13px var(--font-mono);
+  word-break: break-all;
+}
+
+.door-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.door-row .l {
+  flex-shrink: 0;
+  color: var(--dim);
+}
+
+.door-row .v {
+  font-family: var(--font-mono);
+  text-align: right;
+}
+
+.door-row .v.dim {
+  color: var(--dim);
+}
+
+.door-row .v.live {
+  color: var(--accent);
+}
+
+.door-row .v.warn {
+  color: var(--amber);
+}
+
+/* ── 可折叠区段 ─────────────────────────────────────────── */
+.sec {
+  margin-bottom: 20px;
+}
+
+.sec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+}
+
+.sec-head:hover .sec-title {
+  color: var(--text);
+}
+
+.sec-title {
+  color: var(--dim);
+  font-size: 13px;
+  font-weight: 600;
+  transition: color var(--transition);
+}
+
+.sec-arrow {
+  color: var(--muted);
+  font-size: 12px;
+  transition: transform 0.2s;
+}
+
+.sec.collapsed .sec-body {
+  display: none;
+}
+
+.sec.collapsed .sec-arrow {
+  transform: rotate(-90deg);
+}
+
+.sec.collapsed .sec-head {
+  margin-bottom: 0;
+  border-bottom: none;
+}
+
+/* ── 操作卡片 ───────────────────────────────────────────── */
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.act-card {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.act-card.full {
+  grid-column: 1 / -1;
+}
+
+.act-title {
+  margin-bottom: 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.photo-box {
+  display: none;
+  margin-top: 12px;
+  text-align: center;
+}
+
+.photo-box img {
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+/* ── 事件日志 ───────────────────────────────────────────── */
+.log-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.log-count {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.log-body {
+  max-height: 260px;
+  padding: 4px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font: 12px var(--font-mono);
+  overflow-y: auto;
+}
+
+.log-row {
+  display: flex;
+  gap: 8px;
+  padding: 2px 12px;
+  border-bottom: 1px solid rgb(255 255 255 / 2%);
+  cursor: pointer;
+}
+
+.log-row:hover {
+  background: var(--elevated);
+}
+
+.log-t {
+  flex-shrink: 0;
+  min-width: 50px;
+  color: var(--muted);
+}
+
+.log-e {
+  flex-shrink: 0;
+  min-width: 38px;
+  font-weight: 600;
+}
+
+.log-e.i {
+  color: var(--dim);
+}
+
+.log-e.s {
+  color: var(--accent);
+}
+
+.log-e.o {
+  color: var(--green);
+}
+
+.log-e.x {
+  color: var(--red);
+}
+
+.log-e.r {
+  color: var(--amber);
+}
+
+.log-m {
+  flex: 1;
+  max-height: 48px;
+  white-space: pre-wrap;
+  overflow: hidden;
+  word-break: break-all;
+}
+
+.log-m.expand {
+  max-height: none;
+}
+
+/* ── 响应式 ─────────────────────────────────────────────── */
+@media (width <= 1200px) {
+  .kpi {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (width <= 1024px) {
+  .doors {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (width <= 640px) {
+  .main {
+    padding: 12px;
+  }
+
+  .kpi {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .doors {
+    grid-template-columns: 1fr;
+  }
+
+  .btn-row {
+    flex-direction: column;
+  }
+}
