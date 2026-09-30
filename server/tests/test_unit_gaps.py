@@ -137,7 +137,7 @@ def test_ping_payload_is_protocol_frame() -> None:
     assert frame["payload"]["sender_time"].endswith("Z")
 
 
-# ── 门状态派生边界 ──
+# ── 喷头状态派生边界 ──
 
 
 def test_derive_state_safe_int_and_unknown_status() -> None:

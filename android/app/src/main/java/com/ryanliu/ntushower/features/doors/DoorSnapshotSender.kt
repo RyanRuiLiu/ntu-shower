@@ -18,7 +18,7 @@ import java.util.UUID
  * 快照发件箱：本地 SQLite 按序保存未确认快照，收到 door.snapshot_ack 才删除；
  * 未确认的按序重发（断网不丢数据，恢复后续传）。
  *
- * 去重：hashCode 比对门状态列表，内容未变化不上报（浴室 App 占用期每秒写库，
+ * 去重：hashCode 比对喷头状态列表，内容未变化不上报（浴室 App 占用期每秒写库，
  * 无去重会造成每秒一次的无效快照，旧系统同款设计）。
  */
 class DoorSnapshotSender(context: Context) {
@@ -29,7 +29,7 @@ class DoorSnapshotSender(context: Context) {
     private val db: SQLiteDatabase = AgentDatabase.get(context)
 
     /**
-     * 上一次上报的门状态指纹；`null` 表示"还没有指纹"。
+     * 上一次上报的喷头状态指纹；`null` 表示"还没有指纹"。
      *
      * 用可空而不是某个具体的哨兵值：`hashCode()` 的取值范围是整个 Int，拿任何一个数字
      * 当"没有"，都可能与真实指纹撞上。
@@ -39,8 +39,8 @@ class DoorSnapshotSender(context: Context) {
     /**
      * 采集并入队；有变化才会入队，入队后立即尝试发送。
      *
-     * 注意：门状态无变化时本方法直接返回（去重），因此**不能**把它当作重传入口——
-     * 断网期间积压的快照与门状态是否变化无关，重连时必须直接调 [flush]。
+     * 注意：喷头状态无变化时本方法直接返回（去重），因此**不能**把它当作重传入口——
+     * 断网期间积压的快照与喷头状态是否变化无关，重连时必须直接调 [flush]。
      */
     fun captureAndEnqueue(gateway: GatewayClient) {
         val doors = DoorSnapshotReader.readAll()
@@ -71,7 +71,7 @@ class DoorSnapshotSender(context: Context) {
     /**
      * 把发件箱压在 [RuntimeConfig.outboxMaxRows] 行以内，超出丢最旧的。
      *
-     * 断网期间每有一次门状态变化就多一行，而只有收到 ack 才会删。上限是**配置项**（默认值与
+     * 断网期间每有一次喷头状态变化就多一行，而只有收到 ack 才会删。上限是**配置项**（默认值与
      * 服务端登记表同源，那边刻意给得远超真实所需），因此正常情况下它一次也不会触发——留着
      * 它是给极端积压一个终点，而不是当作日常淘汰策略。调小它是主动放弃历史：快照丢了设备
      * 不会重发，服务端的时长与状态迁移就永久缺一块。
@@ -99,8 +99,8 @@ class DoorSnapshotSender(context: Context) {
      * 忘掉内容指纹，让下一次采集无条件入队。
      *
      * 重连后要调它。服务端的 `door_live` 会被清空重建（开发期"删了重建"是常规操作），
-     * 而设备侧门状态可能一直没变、发件箱也早空了——不重置指纹的话，那扇门在网页端会
-     * 一直空白，直到任意一扇门状态变化；浴室没人用的时段，可能几个小时都没有变化。
+     * 而设备侧喷头状态可能一直没变、发件箱也早空了——不重置指纹的话，那个喷头在网页端会
+     * 一直空白，直到任意一个喷头状态变化；浴室没人用的时段，可能几个小时都没有变化。
      */
     fun forgetLastState() {
         lastHash = null
@@ -111,7 +111,7 @@ class DoorSnapshotSender(context: Context) {
      *
      * 遇到解析不出 JSON 的坏行**当场删掉再取下一条**，而不是把异常抛出去。坏行永远排在
      * 最前面（按 id 升序取最旧），每次 flush 都在同一行上失败，后面所有快照全被它堵住
-     * ——这台设备的门状态上报就此彻底停止，而日志里只有一串 JSON 异常，读不出"上报停了"。
+     * ——这台设备的喷头状态上报就此彻底停止，而日志里只有一串 JSON 异常，读不出"上报停了"。
      *
      * 存储损坏才会产生坏行（单条 INSERT 是原子的），概率低，但一旦出现不会自愈。
      */

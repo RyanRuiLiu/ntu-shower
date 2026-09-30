@@ -11,7 +11,6 @@
  */
 import { api } from '../core/api.js'
 import { $, disposer, esc, listen } from '../core/dom.js'
-import { log } from '../core/log.js'
 import { outcomeText } from '../core/outcome.js'
 import { refreshDevices, store, subscribe } from '../core/store.js'
 import { toast } from '../core/toast.js'
@@ -98,7 +97,6 @@ async function runExec() {
   $('execOutput').hidden = true
   try {
     const result = await api.exec(store.deviceId, command)
-    log('info', `device.exec: ${command}`)
     const output = result.data?.output ?? ''
     $('execOutput').textContent = output || outcomeText(result)
     $('execOutput').hidden = false

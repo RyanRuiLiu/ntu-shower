@@ -16,7 +16,6 @@
  */
 import { api, getToken, setToken } from './core/api.js'
 import { $, esc, listen } from './core/dom.js'
-import { log } from './core/log.js'
 import { toast } from './core/toast.js'
 import {
   emit,
@@ -38,19 +37,17 @@ import { overviewView } from './views/overview.js'
 import { releasesView } from './views/releases.js'
 
 /**
- * 运行时报错直接进事件日志。
+ * 运行时报错直接弹提示。
  *
  * 现场用平板或手机打开时没有控制台，报错若不落到页面上，表现只是"某个按钮没反应"，
  * 无从判断是脚本挂了还是后端没回。异步失败（`unhandledrejection`）同样要接——
- * `fetch` 抛出的错误大多走那条路。
+ * `fetch` 抛出的错误大多走那条路，只记进日志等于没有提示（日志区早已不存在）。
  */
 window.addEventListener('error', (event) => {
-  log('err', `脚本错误：${event.message}`)
-  // 同时也弹一下：日志区在概览视图里，而概览本身就可能没渲染出来
   toast(`脚本错误：${event.message}`)
 })
 window.addEventListener('unhandledrejection', (event) => {
-  log('err', `未处理的失败：${event.reason?.message || event.reason}`)
+  toast(`未处理的失败：${event.reason?.message || event.reason}`)
 })
 
 /** 导航顺序即此数组顺序。 */
@@ -164,24 +161,23 @@ function streamUrl() {
 function handle(message) {
   switch (message.type) {
     case 'door_update':
-      // 推送里只有"哪几扇门变了"（`door_no` / `state` / `card_no`），**不是完整
-      // 现态**——分配时间、学号都不在其中。拿它替换列表会让门牌上的明细一夜之间
+      // 推送里只有"哪几个喷头变了"（`door_no` / `state` / `card_no`），**不是完整
+      // 现态**——分配时间、学号都不在其中。拿它替换列表会让喷头卡片上的明细一夜之间
       // 全变成 `--`，所以收到通知后重新拉一次全量。
       scheduleDoorRefresh()
       break
 
     case 'device_online':
       setOnline(true)
-      log('ok', `设备上线：${message.payload.device_id}`)
       break
 
     case 'device_offline':
       setOnline(false)
-      log('err', `设备离线：${message.payload.device_id}`)
       break
 
     default:
-      log('info', `未知事件：${message.type}`)
+      // 未知事件不处理：服务端可能比本页新，这是协议的前向扩展点
+      break
   }
 }
 
@@ -198,18 +194,17 @@ function connect() {
   socket.onopen = () => {
     clearTimeout(reconnectTimer)
     setStreaming(true)
-    log('ok', '实时连接已建立')
   }
   socket.onmessage = (event) => {
     try {
       handle(JSON.parse(event.data))
-    } catch {
-      log('err', '推送消息解析失败')
+    } catch (error) {
+      // 解析失败意味着协议对不上了，不是能忽略的小事——弹出来，别让它静默
+      toast(`推送消息解析失败：${error.message}`)
     }
   }
   socket.onclose = (event) => {
     setStreaming(false)
-    log('err', `实时连接断开（${event.code}），${RECONNECT_MS / 1000} 秒后重连`)
     reconnectTimer = setTimeout(connect, RECONNECT_MS)
   }
   socket.onerror = () => setStreaming(false)
@@ -220,7 +215,7 @@ function connect() {
 /**
  * 提示填写访问令牌。
  *
- * 顶栏按钮与"收到 401"两条路径共用它。填完立刻重拉设备与门——否则用户填了令牌
+ * 顶栏按钮与"收到 401"两条路径共用它。填完立刻重拉设备与喷头——否则用户填了令牌
  * 还得自己再刷一次页面。
  */
 function askForToken() {
@@ -235,9 +230,9 @@ function askForToken() {
 /**
  * 处理鉴权失败：说明原因并请用户补令牌。
  *
- * **必须集中处理**。此前每个调用方各自 `catch` 后只写进事件日志，而那个面板已经
- * 去掉了——于是 401 完全静默，页面只剩空列表，看起来就是"设备离线、刷新也没用"，
- * 而真正的原因（缺令牌）一个字都看不到。返回 true 表示已处理，调用方不必再记一次。
+ * **必须集中处理**。此前每个调用方各自 `catch`，而 401 与其它失败一样只留下一个空列表
+ * ——看起来就是"设备离线、刷新也没用"，真正的原因（缺令牌）一个字都看不到。
+ * 返回 true 表示已处理，调用方不必再自己提示。
  */
 function handleAuthError(error) {
   if (error?.status !== 401) return false
@@ -250,7 +245,9 @@ async function refreshDoors() {
   try {
     setDoors(await api.doors(store.deviceId))
   } catch (error) {
-    if (!handleAuthError(error)) log('err', `获取喷头状态失败：${error.message}`)
+    // 401 由 handleAuthError 引导补令牌；其余错误此前只进日志，而日志区已不存在，
+    // 于是页面只剩一个空列表、看起来跟"设备离线"一样——现在弹出来
+    if (!handleAuthError(error)) toast(`获取喷头状态失败：${error.message}`)
   }
 }
 
@@ -274,7 +271,7 @@ async function refreshDevicesSafely() {
   try {
     await refreshDevices()
   } catch (error) {
-    if (!handleAuthError(error)) log('err', `获取设备清单失败：${error.message}`)
+    if (!handleAuthError(error)) toast(`获取设备清单失败：${error.message}`)
   }
 }
 

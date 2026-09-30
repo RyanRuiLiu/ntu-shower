@@ -56,7 +56,7 @@ class DoorRawTest {
 
     @Test
     fun parseRow_fallsBackToZeroForOptionalNumbers() {
-        // 卡号与时长缺失不应导致整行丢弃：门号与状态才是索引依据
+        // 卡号与时长缺失不应导致整行丢弃：喷头编号与状态才是索引依据
         val row = DoorRaw.parseRow("2|x|c|a|t|||y|1")
 
         assertEquals(2, row?.doorNo)
