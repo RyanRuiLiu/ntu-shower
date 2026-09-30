@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://<public-domain>/schema/door.snapshot.json",
+  "title": "Full door status snapshot from device (raw fields, no derivation)",
+  "allOf": [
+    {
+      "$ref": "https://<public-domain>/schema/envelope.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "door.snapshot"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "snapshot_id",
+            "source",
+            "doors"
+          ],
+          "properties": {
+            "snapshot_id": {
+              "$ref": "https://<public-domain>/schema/envelope.json#/$defs/uuid"
+            },
+            "source": {
+              "enum": [
+                "db_watch",
+                "startup"
+              ]
+            },
+            "doors": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "door_no",
+                  "card_no",
+                  "bath_time_s",
+                  "status_raw"
+                ],
+                "properties": {
+                  "door_no": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "card_no": {
+                    "type": "integer"
+                  },
+                  "cert_no": {
+                    "type": "string"
+                  },
+                  "acc_no": {
+                    "type": "string"
+                  },
+                  "open_time": {
+                    "$ref": "#/$defs/null_or_time"
+                  },
+                  "in_time": {
+                    "$ref": "#/$defs/null_or_time"
+                  },
+                  "close_time": {
+                    "$ref": "#/$defs/null_or_time"
+                  },
+                  "bath_time_s": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "status_raw": {
+                    "type": "integer",
+                    "description": "t_doorlist.status 原始值（0/1/2/3），派生在服务端完成"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "null_or_time": {
+      "oneOf": [
+        {
+          "$ref": "https://<public-domain>/schema/envelope.json#/$defs/rfc3339"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}

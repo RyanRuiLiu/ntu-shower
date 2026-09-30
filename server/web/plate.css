@@ -1,0 +1,115 @@
+/* ============================================================
+   ntu-shower · "门牌" 设计系统（v4）
+   冷纸底 + 白门牌 + 水青单强调。圆角统一 4px。零渐变。
+   ============================================================ */
+
+:root {
+  --wall: #F6F7F4;      /* 挂墙底 */
+  --plate: #FFFFFF;     /* 门牌板 */
+  --ink: #1C2B2E;       /* 深青墨 */
+  --dim: #64777B;       /* 雾灰文字 */
+  --line: #D8DEDC;      /* 板缝 */
+  --accent: #0B7285;    /* 水青强调 */
+  --accent-soft: #E3F0F2;
+  --danger: #E8590C;
+  --ok: #2B8A3E;
+  --warn: #B45309;
+}
+
+* { box-sizing: border-box; }
+
+/* 页面锁定浅色：表单控件（select 弹层）跟随页面令牌，而非系统深色 */
+:root { color-scheme: light; }
+
+body {
+  margin: 0;
+  font-family: system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--wall);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+h1 { font-size: 17px; font-weight: 650; margin: 0; }
+h2 { font-size: 15px; font-weight: 650; margin: 0 0 12px; }
+
+button, input, select {
+  font: inherit;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 8px 12px;
+  background: var(--plate);
+}
+
+button { cursor: pointer; transition: background-color 120ms ease; }
+button:hover { border-color: var(--accent); }
+button:active { background: var(--accent-soft); }
+button:focus-visible, input:focus-visible, select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover { background: #0A6273; }
+button.danger { color: var(--danger); border-color: var(--danger); }
+button:disabled { opacity: 0.5; cursor: wait; }
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 14px 20px;
+}
+
+.topbar .spacer { flex: 1; }
+
+.live-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--dim);
+}
+
+.live-flag::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--line);
+}
+
+.live-flag[data-live="on"] { color: var(--ok); }
+.live-flag[data-live="on"]::before { background: var(--ok); }
+
+.term {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12.5px;
+  background: var(--ink);
+  color: #D9E6E2;
+  border-radius: 4px;
+  padding: 12px;
+  overflow: auto;
+  max-height: 300px;
+  white-space: pre-wrap;
+}
+
+.hint { color: var(--dim); font-size: 12.5px; margin: 8px 0 0; }
+
+.status-flash {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--warn);
+  border-radius: 4px;
+  background: var(--plate);
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--warn);
+}
+
+.status-flash[hidden] { display: none; }

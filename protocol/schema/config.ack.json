@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://<public-domain>/schema/config.ack.json",
+  "title": "Device acknowledgement of applied config revision",
+  "allOf": [
+    {
+      "$ref": "https://<public-domain>/schema/envelope.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "config.ack"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "revision"
+          ],
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
+    }
+  ]
+}
