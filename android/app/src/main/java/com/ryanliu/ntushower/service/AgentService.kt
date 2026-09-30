@@ -61,7 +61,10 @@ class AgentService : Service() {
             client.connect()
             monitor = DoorMonitor {
                 if (trusted) {
-                    worker.execute { sender.captureAndEnqueue(client) }
+                    worker.execute {
+                        sender.captureAndEnqueue(client)
+                        sender.flush(client)
+                    }
                 }
             }.also { it.startWatching() }
             startWatchdog()
@@ -76,7 +79,12 @@ class AgentService : Service() {
             this@AgentService.trusted = trusted
             Log.i(TAG, "gateway connected, trusted=$trusted")
             if (trusted) {
-                worker.execute { sender.captureAndEnqueue(client) }
+                worker.execute {
+                    sender.captureAndEnqueue(client)
+                    // 断网期间积压的快照与门状态是否变化无关：重连时必须直接 flush，
+                    // 否则门状态未变时积压数据永远不会重发。
+                    sender.flush(client)
+                }
             }
             if (upgrade != null) {
                 Log.i(TAG, "upgrade available: ${upgrade.optString("version")}")
@@ -189,7 +197,10 @@ class AgentService : Service() {
         monitor?.stopWatching()
         monitor = DoorMonitor {
             if (trusted) {
-                worker.execute { sender.captureAndEnqueue(client) }
+                worker.execute {
+                    sender.captureAndEnqueue(client)
+                    sender.flush(client)
+                }
             }
         }.also { it.startWatching() }
         client.send("config.ack", JSONObject().put("revision", revision), replyTo = envelope.id)

@@ -24,11 +24,18 @@ class ShowerApp : Application() {
             try {
                 // 堆栈落文件：管理台 debug.exec 可直接拉取（远程无 logcat 时的问题追踪手段）
                 val dir = File(AppConfig.WORK_DIR).apply { mkdirs() }
-                File(dir, "crash.log").appendText(
+                val logFile = File(dir, "crash.log")
+                if (logFile.length() > MAX_CRASH_LOG_BYTES) {
+                    // 超限重置：崩溃日志的价值在近期记录，不设上限会在崩溃循环中撑爆存储
+                    logFile.delete()
+                }
+                logFile.appendText(
                     "\n==== ${System.currentTimeMillis()} ====\n" +
                         Log.getStackTraceString(throwable) + "\n",
                 )
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+                // 落盘失败不能阻碍后续重启流程
+            }
             try {
                 val alarm = getSystemService(Context.ALARM_SERVICE) as AlarmManager
                 val intent = Intent(this, AgentService::class.java)
@@ -49,5 +56,8 @@ class ShowerApp : Application() {
 
     companion object {
         private const val TAG = "ShowerApp"
+
+        /** crash.log 上限：超出即重置，避免崩溃循环把存储写满。 */
+        private const val MAX_CRASH_LOG_BYTES = 256 * 1024L
     }
 }
