@@ -10,6 +10,11 @@ class Settings(BaseSettings):
     max_ota_bytes: int = 50 * 1024 * 1024  # OTA 上传/存储的单文件上限
     ota_dir: str = "ota_releases"  # APK 发布文件目录（相对 server 工作目录）
 
+    # ── 日志 ──
+    # 应用日志级别（DEBUG/INFO/WARNING/ERROR）；uvicorn 的访问日志级别另由
+    # systemd 单元决定（见 deploy/nginx 与 docs/RUNBOOK.md）
+    log_level: str = "INFO"
+
     # ── 对外地址 ──
     public_base_url: str = ""  # 对外基址（RFC 9457 问题 type 等绝对引用用）；留空则输出相对引用
 

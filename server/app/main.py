@@ -26,6 +26,7 @@ from app.core.protocol import JsonObject
 from .core import db
 from .core.config import settings
 from .core.errors import install_error_handlers
+from .core.logging import configure_logging
 from .core.security import assert_admin_token_configured
 from .core.version import APP_VERSION
 from .gateway.routes import router as gateway_router
@@ -47,6 +48,8 @@ from .modules.shadow.routes import router as shadow_router
 
 
 def create_app() -> FastAPI:
+    # 先装配日志：此后的初始化失败才有痕迹可查
+    configure_logging(settings.log_level)
     db.init_db()
     devices_repository.init_tables()
     doors_repository.init_tables()
