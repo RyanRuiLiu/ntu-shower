@@ -1,10 +1,14 @@
 package com.ryanliu.ntushower.features.automation
 
 import android.util.Log
+import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.service.A11yService
-import com.ryanliu.ntushower.service.UiChannel
+import com.ryanliu.ntushower.service.A11yUiChannel
+import com.ryanliu.ntushower.service.ShellUiChannel
 import com.ryanliu.ntushower.service.UiKey
+import com.ryanliu.ntushower.service.UiTreeCodec
 import com.ryanliu.ntushower.transport.OutcomeStatus
+import com.ryanliu.ntushower.transport.ReasonCodes
 import org.json.JSONObject
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
@@ -69,22 +73,71 @@ class CommandScheduler(
 
     private val automationQueue = SerialCommandQueue<Command>()
 
+    // 采集与自动化分开排队：图像采集不碰浴室 APP 的界面，一条慢截图不该把操作序列堵住。
+    // 服务端那边它们也是两个通道，允许并发。
+    private val captureQueue = SerialCommandQueue<Command>()
+
     fun enqueue(command: Command) {
         when (command) {
             // 图像采集资源独立，不占用自动化队列——否则一条慢截图会把
             // 浴室 APP 的操作序列堵住
-            is Command.Photo, is Command.Screen -> {
-                Log.i(TAG, "capture enqueued: ${command.id}")
-                captureExecutor.execute { onOutcome(captureImage(command)) }
-            }
+            is Command.Photo, is Command.Screen -> dispatch(command, captureQueue) { runCapture(it) }
 
             // 读节点树走自动化队列：它读的就是那份 UI 节点树，与 ui.touch / ui.key
             // 并行会读到操作到一半的界面。它和截图则毫无关系——早先归在采集队列是
             // 错的，那会让"看界面"和"读界面"互相排队，服务端并发取这两个时必有一个
             // 被拒（同通道互斥）
-            else -> {
+            else -> dispatch(command, automationQueue) { runAutomation(it) }
+        }
+    }
+
+    /**
+     * 按队列的裁决决定"立刻跑、排队、还是拒绝"。
+     *
+     * 排满时如实回报 `server.overloaded`：那时真的忙不过来。这类情况主要出现在
+     * **服务端多次超时之后**——它每次超时都释放锁放行下一条，而设备这边可能还在跑
+     * 上一条，于是排队数被超时次数推高。拒掉比继续堆着好：堆着的那些迟早也会超时。
+     */
+    private fun dispatch(command: Command, queue: SerialCommandQueue<Command>, run: (Command) -> Unit) {
+        when (val result = queue.enqueue(command)) {
+            is SerialCommandQueue.EnqueueResult.Run -> {
                 Log.i(TAG, "enqueued: ${command.id} (${command::class.java.simpleName})")
-                automationQueue.enqueue(command)?.let { runAutomation(it) }
+                run(result.item)
+            }
+
+            SerialCommandQueue.EnqueueResult.Queued -> Log.i(TAG, "queued: ${command.id}")
+
+            SerialCommandQueue.EnqueueResult.Rejected -> {
+                Log.w(TAG, "queue full, rejecting: ${command.id}")
+                onOutcome(
+                    CommandOutcome(
+                        command.id,
+                        OutcomeStatus.REJECTED,
+                        ReasonCodes.SERVER_OVERLOADED,
+                        "设备端待处理命令过多，请稍后再试",
+                    ),
+                )
+            }
+        }
+    }
+
+    /** 执行一条采集命令，结束后放行采集队列中的下一条。 */
+    private fun runCapture(command: Command) {
+        captureExecutor.execute {
+            try {
+                onOutcome(captureImage(command))
+            } catch (e: Throwable) {
+                Log.e(TAG, "capture crashed: ${e.message}", e)
+                onOutcome(
+                    CommandOutcome(
+                        command.id,
+                        OutcomeStatus.FAILED,
+                        ReasonCodes.DEVICE_INTERNAL_ERROR,
+                        "设备端内部错误",
+                    ),
+                )
+            } finally {
+                captureQueue.complete()?.let { runCapture(it) }
             }
         }
     }
@@ -101,7 +154,14 @@ class CommandScheduler(
                 }
             } catch (e: Throwable) {
                 Log.e(TAG, "command crashed: ${e.message}", e)
-                onOutcome(CommandOutcome(command.id, OutcomeStatus.FAILED, "device.internal_error", "设备端内部错误"))
+                onOutcome(
+                    CommandOutcome(
+                        command.id,
+                        OutcomeStatus.FAILED,
+                        ReasonCodes.DEVICE_INTERNAL_ERROR,
+                        "设备端内部错误",
+                    ),
+                )
             } finally {
                 automationQueue.complete()?.let { runAutomation(it) }
             }
@@ -119,7 +179,7 @@ class CommandScheduler(
         }
         // 会话流程完全由无障碍驱动浴室 APP 的界面，没有第二条通道
         val a11y = A11yService.instance
-            ?: return CommandOutcome(command.id, OutcomeStatus.FAILED, "device.a11y_unavailable", "无障碍服务不可用")
+            ?: return CommandOutcome(command.id, OutcomeStatus.FAILED, ReasonCodes.DEVICE_A11Y_UNAVAILABLE, "无障碍服务不可用")
         A11yService.automationInProgress = true
         try {
             val result = AutomationFlow.run(a11y, action, overlay)
@@ -134,13 +194,18 @@ class CommandScheduler(
     }
 
     /**
-     * 界面操作：触摸 / 滚动 / 按键 / 输入。
+     * 界面检视的手动操作：触摸 / 滑动 / 滚动 / 按键 / 输入 / 读树。
      *
-     * 不要求无障碍可用：无障碍不在时这些操作退到 root shell（见 [UiChannel]），
-     * 而那条通道整体失效时，界面操作正是远程唯一还能碰到设备的手段。
+     * **大部分不要求无障碍可用**——点击、滑动、滚动、按键都走 root shell 的
+     * `input` 命令（见 [ShellUiChannel]）。无障碍整体失效时（总开关被系统置 0
+     * 且拒绝写回，恢复办法见 `A11yGuard`），这几项照常工作，是那种局面下远程
+     * 唯一还能碰到设备界面的手段。
      *
-     * 同样置 `automationInProgress`——这些操作会改变界面，若与崩溃守护的
-     * 自动拉起并发，用户会看到界面被抢。
+     * 两个例外都跟无障碍绑定：**输入**（必须支持中文）与**读节点树**（没有第二条
+     * 通道，理由见 [UiTreeCodec]）。
+     *
+     * 同样置 `automationInProgress`——这些操作会改变界面，若与崩溃守护的自动拉起
+     * 并发，用户会看到界面被抢。
      */
     private fun executeUiAction(command: Command): CommandOutcome {
         val a11y = A11yService.instance
@@ -149,15 +214,15 @@ class CommandScheduler(
             return when (command) {
                 is Command.UiTouch -> {
                     val ok = if (command.toX != null && command.toY != null) {
-                        UiChannel.swipe(command.x, command.y, command.toX, command.toY, command.durationMs)
+                        ShellUiChannel.swipe(command.x, command.y, command.toX, command.toY, command.durationMs)
                     } else {
-                        UiChannel.tap(a11y, command.x, command.y)
+                        ShellUiChannel.tap(command.x, command.y)
                     }
                     outcome(command.id, ok, "ui.no_target_at_point", "该位置没有可点击的节点")
                 }
 
                 is Command.UiScroll -> {
-                    val ok = UiChannel.scroll(a11y, command.forward)
+                    val ok = ShellUiChannel.scroll(command.forward)
                     outcome(command.id, ok, "ui.no_scrollable_container", "界面上没有可滚动的容器")
                 }
 
@@ -166,20 +231,22 @@ class CommandScheduler(
                         ?: return CommandOutcome(
                             command.id,
                             OutcomeStatus.FAILED,
-                            "ui.unknown_key",
+                            ReasonCodes.UI_UNKNOWN_KEY,
                             "不支持的按键：${command.key}",
                         )
-                    outcome(command.id, UiChannel.key(a11y, key), "ui.key_rejected", "系统拒绝了该按键")
+                    outcome(command.id, ShellUiChannel.key(key), ReasonCodes.UI_KEY_REJECTED, "系统拒绝了该按键")
                 }
 
+                // 输入是唯一走无障碍的操作：它必须支持中文，而 shell 的 `input text`
+                // 在本 ROM 上按字节处理，非 ASCII 会被写坏（见 A11yUiChannel 的类注释）
                 is Command.UiInput -> {
-                    val ok = UiChannel.input(a11y, command.text)
-                    outcome(command.id, ok, "ui.no_editable_field", "没有可输入的控件，或文本非 ASCII 而无障碍不可用")
+                    val ok = a11y != null && A11yUiChannel.typeIntoFocus(a11y, command.text)
+                    outcome(command.id, ok, ReasonCodes.UI_NO_EDITABLE_FIELD, "没有可输入的控件，或无障碍服务不可用")
                 }
 
                 is Command.UiDump -> exportTree(command)
 
-                else -> CommandOutcome(command.id, OutcomeStatus.FAILED, "ui.unsupported_action", "不支持的操作")
+                else -> CommandOutcome(command.id, OutcomeStatus.FAILED, ReasonCodes.UI_UNSUPPORTED_ACTION, "不支持的操作")
             }
         } finally {
             A11yService.automationInProgress = false
@@ -214,11 +281,13 @@ class CommandScheduler(
     /**
      * 导出界面节点树，数据放在 `data.xml`——格式与 `uiautomator dump` 一致。
      *
-     * 节点树没有第二条通道（理由见 [UiChannel] 的类注释），无障碍不在时如实失败。
+     * 节点树没有第二条通道：shell 侧的 `uiautomator dump` 会经 `UiAutomation` 接管
+     * 系统无障碍会话，真机上出现过用它取几次节点后整机无障碍失效（因果未坐实，
+     * 但风险远大于便利）。无障碍不在时如实失败，不给一个更差的替代。
      */
     private fun exportTree(command: Command): CommandOutcome {
-        val tree = UiChannel.dump(A11yService.instance)
-            ?: return CommandOutcome(command.id, OutcomeStatus.FAILED, "ui.no_window", "无障碍服务不可用或未能读取窗口")
+        val tree = A11yService.instance?.let { UiTreeCodec.export(it, RuntimeConfig.uiDumpMaxNodes.toInt()) }
+            ?: return CommandOutcome(command.id, OutcomeStatus.FAILED, ReasonCodes.UI_NO_WINDOW, "无障碍服务不可用或未能读取窗口")
         return CommandOutcome(command.id, OutcomeStatus.OK, "", "", JSONObject().put("xml", tree))
     }
 

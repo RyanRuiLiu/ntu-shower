@@ -8,11 +8,14 @@ import org.junit.Test
 
 class SerialCommandQueueTest {
 
+    private fun run(result: SerialCommandQueue.EnqueueResult<String>): String =
+        (result as SerialCommandQueue.EnqueueResult.Run).item
+
     @Test
     fun `first enqueue runs immediately`() {
         val queue = SerialCommandQueue<String>()
 
-        assertEquals("a", queue.enqueue("a"))
+        assertEquals("a", run(queue.enqueue("a")))
         assertTrue(queue.isRunning())
     }
 
@@ -22,7 +25,7 @@ class SerialCommandQueueTest {
         queue.enqueue("a")
 
         // 浴室 App 的 UI 自动化必须串行：并发会让节点定位互相错位
-        assertNull(queue.enqueue("b"))
+        assertTrue(queue.enqueue("b") is SerialCommandQueue.EnqueueResult.Queued)
         assertEquals(1, queue.pendingCount())
     }
 
@@ -64,17 +67,57 @@ class SerialCommandQueueTest {
         queue.enqueue("a")
         queue.complete()
 
-        assertEquals("b", queue.enqueue("b"))
+        assertEquals("b", run(queue.enqueue("b")))
     }
 
     @Test
     fun `does not drop items enqueued while running`() {
-        val queue = SerialCommandQueue<Int>()
+        val queue = SerialCommandQueue<Int>(maxPending = 8)
         queue.enqueue(1)
         repeat(5) { queue.enqueue(it + 2) }
 
         assertEquals(5, queue.pendingCount())
         assertEquals(2, queue.complete())
         assertEquals(3, queue.complete())
+    }
+
+    @Test
+    fun `rejects beyond the pending limit`() {
+        // 上限挡住的是「服务端多次超时之后」的堆积：它每次超时都放行下一条，
+        // 而设备这边可能还在跑上一条。堆着的迟早也会超时，不如当场拒掉。
+        val queue = SerialCommandQueue<String>(maxPending = 2)
+        queue.enqueue("running")
+        queue.enqueue("waiting-1")
+        queue.enqueue("waiting-2")
+
+        assertTrue(queue.enqueue("overflow") is SerialCommandQueue.EnqueueResult.Rejected)
+        assertEquals(2, queue.pendingCount())
+    }
+
+    @Test
+    fun `a rejected item does not consume a slot`() {
+        val queue = SerialCommandQueue<String>(maxPending = 1)
+        queue.enqueue("running")
+        queue.enqueue("waiting")
+        queue.enqueue("overflow")
+
+        // 被拒的那条不该占位：complete 放行的仍然是先前排队的那一条
+        assertEquals("waiting", queue.complete())
+    }
+
+    @Test
+    fun `completing frees room for a new item`() {
+        val queue = SerialCommandQueue<String>(maxPending = 1)
+        queue.enqueue("running")
+        queue.enqueue("waiting")
+        queue.complete() // waiting 开始跑，等待位空出来
+
+        assertTrue(queue.enqueue("accepted") is SerialCommandQueue.EnqueueResult.Queued)
+    }
+
+    @Test
+    fun `default limit matches the server channel cap`() {
+        // 与服务端 CHANNEL_QUEUE_MAX 取同一个数：两边看法一致，排障时不必换算
+        assertEquals(4, SerialCommandQueue.DEFAULT_MAX_PENDING)
     }
 }
