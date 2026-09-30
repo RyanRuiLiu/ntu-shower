@@ -4,6 +4,7 @@ import android.util.Log
 import com.ryanliu.ntushower.service.A11yService
 import com.ryanliu.ntushower.service.UiChannel
 import com.ryanliu.ntushower.service.UiKey
+import com.ryanliu.ntushower.transport.OutcomeStatus
 import org.json.JSONObject
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
@@ -100,7 +101,7 @@ class CommandScheduler(
                 }
             } catch (e: Throwable) {
                 Log.e(TAG, "command crashed: ${e.message}", e)
-                onOutcome(CommandOutcome(command.id, "failed", "device.internal_error", "设备端内部错误"))
+                onOutcome(CommandOutcome(command.id, OutcomeStatus.FAILED, "device.internal_error", "设备端内部错误"))
             } finally {
                 automationQueue.complete()?.let { runAutomation(it) }
             }
@@ -118,15 +119,15 @@ class CommandScheduler(
         }
         // 会话流程完全由无障碍驱动浴室 APP 的界面，没有第二条通道
         val a11y = A11yService.instance
-            ?: return CommandOutcome(command.id, "failed", "device.a11y_unavailable", "无障碍服务不可用")
+            ?: return CommandOutcome(command.id, OutcomeStatus.FAILED, "device.a11y_unavailable", "无障碍服务不可用")
         A11yService.automationInProgress = true
         try {
             val result = AutomationFlow.run(a11y, action, overlay)
             if (result.error != null) {
-                return CommandOutcome(command.id, "failed", result.error.reasonCode, result.error.message)
+                return CommandOutcome(command.id, OutcomeStatus.FAILED, result.error.reasonCode, result.error.message)
             }
             onNeedsFinish(true)
-            return CommandOutcome(command.id, "ok", "", result.terminalMessage)
+            return CommandOutcome(command.id, OutcomeStatus.OK, "", result.terminalMessage)
         } finally {
             A11yService.automationInProgress = false
         }
@@ -164,7 +165,7 @@ class CommandScheduler(
                     val key = UiKey.parse(command.key)
                         ?: return CommandOutcome(
                             command.id,
-                            "failed",
+                            OutcomeStatus.FAILED,
                             "ui.unknown_key",
                             "不支持的按键：${command.key}",
                         )
@@ -178,15 +179,18 @@ class CommandScheduler(
 
                 is Command.UiDump -> exportTree(command)
 
-                else -> CommandOutcome(command.id, "failed", "ui.unsupported_action", "不支持的操作")
+                else -> CommandOutcome(command.id, OutcomeStatus.FAILED, "ui.unsupported_action", "不支持的操作")
             }
         } finally {
             A11yService.automationInProgress = false
         }
     }
 
-    private fun outcome(id: String, ok: Boolean, failCode: String, failMessage: String): CommandOutcome =
-        if (ok) CommandOutcome(id, "ok", "", "") else CommandOutcome(id, "failed", failCode, failMessage)
+    private fun outcome(id: String, ok: Boolean, failCode: String, failMessage: String): CommandOutcome = if (ok) {
+        CommandOutcome(id, OutcomeStatus.OK, "", "")
+    } else {
+        CommandOutcome(id, OutcomeStatus.FAILED, failCode, failMessage)
+    }
 
     private fun captureImage(command: Command): CommandOutcome {
         // photo=摄像头（Camera1）；screen=全屏（screenrecord+MediaCodec）
@@ -201,9 +205,9 @@ class CommandScheduler(
             "screen.capture_failed" to "截屏失败"
         }
         return if (imageBase64 != null) {
-            CommandOutcome(command.id, "ok", "", "", JSONObject().put("image_base64", imageBase64))
+            CommandOutcome(command.id, OutcomeStatus.OK, "", "", JSONObject().put("image_base64", imageBase64))
         } else {
-            CommandOutcome(command.id, "failed", failedCode, failedMessage)
+            CommandOutcome(command.id, OutcomeStatus.FAILED, failedCode, failedMessage)
         }
     }
 
@@ -214,8 +218,8 @@ class CommandScheduler(
      */
     private fun exportTree(command: Command): CommandOutcome {
         val tree = UiChannel.dump(A11yService.instance)
-            ?: return CommandOutcome(command.id, "failed", "ui.no_window", "无障碍服务不可用或未能读取窗口")
-        return CommandOutcome(command.id, "ok", "", "", JSONObject().put("xml", tree))
+            ?: return CommandOutcome(command.id, OutcomeStatus.FAILED, "ui.no_window", "无障碍服务不可用或未能读取窗口")
+        return CommandOutcome(command.id, OutcomeStatus.OK, "", "", JSONObject().put("xml", tree))
     }
 
     companion object {

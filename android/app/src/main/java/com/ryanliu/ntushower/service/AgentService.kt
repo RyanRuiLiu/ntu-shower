@@ -25,6 +25,7 @@ import com.ryanliu.ntushower.features.selfmanage.OtaUpdater
 import com.ryanliu.ntushower.receiver.WatchdogReceiver
 import com.ryanliu.ntushower.transport.Envelope
 import com.ryanliu.ntushower.transport.GatewayClient
+import com.ryanliu.ntushower.transport.OutcomeStatus
 import org.json.JSONObject
 import java.util.concurrent.Executors
 
@@ -169,7 +170,7 @@ class AgentService : Service() {
         if (Clock.isPast(payload.optString("deadline_ts", ""), DEADLINE_TOLERANCE_MS)) {
             Log.i(TAG, "command expired, not executed: $action ($commandId)")
             sendOutcome(
-                CommandOutcome(commandId, "rejected", "command.deadline_exceeded", "命令已过期，未执行"),
+                CommandOutcome(commandId, OutcomeStatus.REJECTED, "command.deadline_exceeded", "命令已过期，未执行"),
             )
             return
         }
@@ -190,7 +191,7 @@ class AgentService : Service() {
             return
         }
         sendOutcome(
-            CommandOutcome(commandId, "failed", "proto.unknown_action", "设备不认识这个操作：$action"),
+            CommandOutcome(commandId, OutcomeStatus.FAILED, "proto.unknown_action", "设备不认识这个操作：$action"),
         )
     }
 
