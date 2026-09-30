@@ -1,12 +1,27 @@
 """doors 模块测试：状态派生、事件流水、洗浴会话开合。"""
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
+from starlette.testclient import WebSocketTestSession
 
 from app.core.clock import rfc3339_after
 from app.main import create_app
 from app.modules.doors import repository, service
 from app.modules.doors.schemas import DoorState
+
+
+def _recv_until(ws: WebSocketTestSession, msg_type: str) -> dict:
+    """读到指定类型的那一帧再返回，中间的丢弃。
+
+    不按"下一帧就是它"断言：服务端在 `link.hello` 之后会立刻发一次探测 ping（为了尽快
+    建立时钟偏差），那是协议内的正常行为，测试对它该免疫。
+    """
+    while True:
+        msg = json.loads(ws.receive_text())
+        if msg.get("type") == msg_type:
+            return msg
 
 
 @pytest.fixture
@@ -167,7 +182,7 @@ def test_snapshot_via_websocket(client: TestClient) -> None:
     # 第一次连接：建档（未信任，此时设备收不到 ack）
     with client.websocket_connect("/gateway/device") as ws:
         ws.send_text(jsonlib.dumps(hello))
-        ack = jsonlib.loads(ws.receive_text())
+        ack = _recv_until(ws, "link.hello_ack")
         assert ack["payload"]["trusted"] is False
 
     # 后台信任
@@ -177,7 +192,7 @@ def test_snapshot_via_websocket(client: TestClient) -> None:
     # 重新连接：已信任，快照应收到 ack
     with client.websocket_connect("/gateway/device") as ws:
         ws.send_text(jsonlib.dumps(hello))
-        jsonlib.loads(ws.receive_text())  # hello_ack (trusted=true)
+        _recv_until(ws, "link.hello_ack")
         ws.send_text(
             jsonlib.dumps(
                 {
@@ -189,8 +204,7 @@ def test_snapshot_via_websocket(client: TestClient) -> None:
                 }
             )
         )
-        ack = jsonlib.loads(ws.receive_text())
-        assert ack["type"] == "door.snapshot_ack"
+        ack = _recv_until(ws, "door.snapshot_ack")
         assert ack["payload"]["snapshot_id"] == snapshot_id
 
 

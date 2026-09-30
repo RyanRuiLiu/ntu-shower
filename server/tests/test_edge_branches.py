@@ -2,17 +2,32 @@
 
 import asyncio
 import io
+import json
 import socket
 import time
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.testclient import WebSocketTestSession
 from starlette.websockets import WebSocketDisconnect
 
 from app.core import protocol, security
 from app.gateway import manager as manager_module
 
 OPS_HEADERS = {"X-Ops-Token": "test-token"}
+
+
+def _recv_until(ws: WebSocketTestSession, msg_type: str) -> dict:
+    """读到指定类型的那一帧再返回，中间的丢弃。
+
+    不按"下一帧就是它"来断言：服务端在 `link.hello` 之后会立刻发一次探测 ping
+    （为了尽快建立时钟偏差），那是协议内的正常行为。测试只关心自己触发的那一帧，
+    对无关帧该免疫——否则每加一条服务端主动消息，这些用例都要跟着改。
+    """
+    while True:
+        msg = json.loads(ws.receive_text())
+        if msg.get("type") == msg_type:
+            return msg
 
 
 class FakeGatewayWS:
@@ -217,7 +232,6 @@ def _frame(msg_type: str, payload: dict[str, object]) -> str:
 
 def test_gateway_ignores_business_frames_from_untrusted_device(client: TestClient) -> None:
     """未信任设备可保持连接，但业务帧被静默忽略——链路层仍工作。"""
-    import json
 
     with client.websocket_connect("/gateway/device") as ws:
         ws.send_text(
@@ -232,7 +246,7 @@ def test_gateway_ignores_business_frames_from_untrusted_device(client: TestClien
                 },
             )
         )
-        ack = json.loads(ws.receive_text())
+        ack = _recv_until(ws, "link.hello_ack")
         assert ack["payload"]["trusted"] is False
 
         # 业务帧：不产生任何回帧（未被信任）
@@ -241,13 +255,12 @@ def test_gateway_ignores_business_frames_from_untrusted_device(client: TestClien
 
         # 下一条回帧应当是 ping 的 pong，证明前面两帧确实被忽略
         ws.send_text(_frame("link.ping", {"sender_time": "2026-09-30T12:00:00.000Z"}))
-        pong = json.loads(ws.receive_text())
-        assert pong["type"] == "link.pong"
+        pong = _recv_until(ws, "link.pong")
+        assert pong["reply_to"]
 
 
 def test_gateway_handles_link_layer_frames(client: TestClient) -> None:
     """pong 驱动时钟校准、config.ack 回填挂起推送：均不产生回帧，也不抛异常。"""
-    import json
 
     with client.websocket_connect("/gateway/device") as ws:
         ws.send_text(
@@ -262,13 +275,13 @@ def test_gateway_handles_link_layer_frames(client: TestClient) -> None:
                 },
             )
         )
-        ws.receive_text()
+        _recv_until(ws, "link.hello_ack")
 
         ws.send_text(_frame("link.pong", {"sender_time": "2026-09-30T12:00:00.000Z"}))
         ws.send_text(_frame("config.ack", {"revision": 1}))
 
         ws.send_text(_frame("link.ping", {"sender_time": "2026-09-30T12:00:01.000Z"}))
-        assert json.loads(ws.receive_text())["type"] == "link.pong"
+        assert _recv_until(ws, "link.pong")["reply_to"]
 
     from app.core import device_clock
 

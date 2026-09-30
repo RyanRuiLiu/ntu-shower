@@ -11,7 +11,7 @@ from .schemas import DeviceRecord
 #: 读模型的列清单。列名只在此处出现一次，避免两条查询各写一遍后逐渐分叉。
 _DEVICE_COLUMNS = (
     "device_id, name, trusted, app_version, version_code, os_version, capabilities, "
-    "online, last_seen_at, last_ip, booted_at"
+    "online, last_seen_at, last_ip, booted_at, clock_skew_s"
 )
 
 
@@ -29,10 +29,30 @@ def init_tables() -> None:
             online       INTEGER NOT NULL DEFAULT 0,
             last_seen_at TEXT NOT NULL DEFAULT '',
             last_ip      TEXT NOT NULL DEFAULT '',
-            booted_at    TEXT NOT NULL DEFAULT ''
+            booted_at    TEXT NOT NULL DEFAULT '',
+            clock_skew_s REAL NOT NULL DEFAULT 0
         );
         """
     )
+
+
+def set_clock_skew(device_id: str, skew_s: float) -> None:
+    """记下设备时钟相对服务端的偏差（秒，正数表示设备快）。
+
+    存库而不只留在进程内存里：那台设备的墙上时钟可能一直不准（实测有一台快了 59 分
+    47 秒，且自动对时是关的），而校正全靠这个值。只在内存里的话，服务每次重启都会退回
+    0——变成"不校正"，于是设备上报的时间戳被原样写库，与用服务端时钟写的那些字段
+    混在一起，排序就乱了。
+    """
+    conn = get_conn()
+    conn.execute("UPDATE device SET clock_skew_s = ? WHERE device_id = ?", (skew_s, device_id))
+    conn.commit()
+
+
+def get_clock_skew(device_id: str) -> float:
+    """取上次记下的偏差；设备不在档案里时给 0。"""
+    row = get_conn().execute("SELECT clock_skew_s FROM device WHERE device_id = ?", (device_id,)).fetchone()
+    return float(row["clock_skew_s"]) if row is not None else 0.0
 
 
 def get(device_id: str) -> DeviceRecord | None:
@@ -130,6 +150,7 @@ def _as_device(row: Row) -> DeviceRecord:
         "last_seen_at": row["last_seen_at"],
         "last_ip": row["last_ip"],
         "booted_at": row["booted_at"],
+        "clock_skew_s": float(row["clock_skew_s"]),
     }
     return device
 

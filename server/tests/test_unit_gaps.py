@@ -115,8 +115,9 @@ def test_send_to_success_path() -> None:
 def test_update_skew_ema_converges_and_corrects() -> None:
     device_clock._ema.pop("dev-ema", None)
     base = 5.0
-    device_clock.update_skew("dev-ema", _rfc3339_after(base))
-    device_clock.update_skew("dev-ema", _rfc3339_after(base))
+    # 5 秒的观测远小于跳变阈值，走 EMA 而非整体替换
+    device_clock.update_skew("dev-ema", _rfc3339_after(base), 300.0)
+    device_clock.update_skew("dev-ema", _rfc3339_after(base), 300.0)
     assert 4.0 < device_clock.get_skew("dev-ema") < 6.0
 
     corrected = device_clock.correct_rfc3339(now_rfc3339(), "dev-ema")
