@@ -18,7 +18,8 @@
             "device_id",
             "app_version",
             "os_version",
-            "capabilities"
+            "capabilities",
+            "uptime_s"
           ],
           "properties": {
             "device_id": {
@@ -41,6 +42,11 @@
             "version_code": {
               "type": "integer",
               "minimum": 0
+            },
+            "uptime_s": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "设备**自开机以来**的秒数（含深睡）。服务端拿收到它的时刻减去它，得到开机时刻；设备自己的墙上时钟准不准都不影响这件事——设备没有 NTP。"
             }
           }
         }

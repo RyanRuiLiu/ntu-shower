@@ -23,7 +23,7 @@ GHOST_ID = "dev-ghost-1"
 def _trust_device() -> None:
     from app.modules.devices import repository as devices_repository
 
-    devices_repository.register(DEVICE_ID, "0.3.2", 9, "4.4.4", [], "127.0.0.1")
+    devices_repository.register(DEVICE_ID, "0.3.2", 9, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
     devices_repository.set_trusted(DEVICE_ID, True)
 
 
@@ -68,7 +68,7 @@ def test_debug_endpoints_reject_offline_device(client: TestClient) -> None:
     """已注册且已信任但不在线：409（不能把命令投进虚空）。"""
     from app.modules.devices import repository as devices_repository
 
-    devices_repository.register(GHOST_ID, "0.3.2", 9, "4.4.4", [], "127.0.0.1")
+    devices_repository.register(GHOST_ID, "0.3.2", 9, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
     devices_repository.set_trusted(GHOST_ID, True)
 
     assert client.post(f"/ops/devices/{GHOST_ID}/capture", headers=OPS_HEADERS).status_code == 409
@@ -232,7 +232,7 @@ def test_patch_device_updates_only_provided_fields(client: TestClient) -> None:
     """只改传了的字段：改名不应顺手把信任位抹掉。"""
     from app.modules.devices import repository as devices_repository
 
-    devices_repository.register(DEVICE_ID, "0.3.2", 9, "4.4.4", [], "127.0.0.1")
+    devices_repository.register(DEVICE_ID, "0.3.2", 9, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
 
     client.patch(f"/ops/devices/{DEVICE_ID}", headers=OPS_HEADERS, json={"trusted": True})
     renamed = client.patch(f"/ops/devices/{DEVICE_ID}", headers=OPS_HEADERS, json={"name": "二楼浴室"})
@@ -246,7 +246,7 @@ def test_patch_device_with_empty_body_is_a_noop(client: TestClient) -> None:
     """空请求体：什么都不改，返回当前档案而不是报错。"""
     from app.modules.devices import repository as devices_repository
 
-    devices_repository.register(DEVICE_ID, "0.3.2", 9, "4.4.4", [], "127.0.0.1")
+    devices_repository.register(DEVICE_ID, "0.3.2", 9, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
 
     r = client.patch(f"/ops/devices/{DEVICE_ID}", headers=OPS_HEADERS, json={})
 

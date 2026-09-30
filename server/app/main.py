@@ -66,9 +66,16 @@ class HealthStatus(TypedDict):
     version: str
 
 
-def create_app() -> FastAPI:
-    # 先装配日志：此后的初始化失败才有痕迹可查
-    configure_logging(settings.log_level)
+def init_schema() -> None:
+    """建全部表。
+
+    各领域仓储持有自己的表结构，这里是**唯一**的装配点：应用启动与测试夹具都调它。
+    这段原先内联在 `create_app` 里，于是不经过应用启动的用例（服务层的纯 asyncio 测试）
+    会连到默认路径那个库——而它的 schema 是旧的，报出来是"列不存在"而不是"表不存在"，
+    看着像代码错了，实则是那些用例根本没建表。
+
+    全部用 `CREATE TABLE IF NOT EXISTS`，重复调用没有副作用。
+    """
     db.init_db()
     devices_repository.init_tables()
     doors_repository.init_tables()
@@ -76,6 +83,12 @@ def create_app() -> FastAPI:
     access_repository.init_tables()
     ota_repository.init_tables()
     config_store.init_tables()
+
+
+def create_app() -> FastAPI:
+    # 先装配日志：此后的初始化失败才有痕迹可查
+    configure_logging(settings.log_level)
+    init_schema()
     Path(settings.ota_dir).mkdir(parents=True, exist_ok=True)
 
     @asynccontextmanager

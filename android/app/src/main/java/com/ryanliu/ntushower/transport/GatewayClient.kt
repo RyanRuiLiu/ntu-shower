@@ -6,6 +6,7 @@ import android.os.Looper
 import android.util.Log
 import com.ryanliu.ntushower.BuildConfig
 import com.ryanliu.ntushower.core.clock.Clock
+import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.identity.DeviceIdentity
 import com.ryanliu.ntushower.core.net.HttpClientFactory
@@ -107,6 +108,9 @@ class GatewayClient(context: Context, private val callback: Callback) {
                 .put("version_code", BuildConfig.VERSION_CODE)
                 .put("os_version", android.os.Build.VERSION.RELEASE)
                 .put("capabilities", JSONArray(SupportedActions.ALL.toList()))
+                // 自开机以来的秒数。服务端拿它反推开机时刻——本机没有 NTP，墙上时钟的
+                // 绝对值不可信；而这是个单调量，不受那个偏差影响。
+                .put("uptime_s", Uptime.nowMs() / 1000)
             webSocket.send(MessageCodec.encode("link.hello", hello))
             scheduleHandshakeTimeout()
         }

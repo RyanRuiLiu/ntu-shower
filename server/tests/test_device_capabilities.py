@@ -9,7 +9,7 @@ from app.modules.sessions import service as sessions_service
 
 
 def _register(client: TestClient, device_id: str, capabilities: list[str]) -> None:
-    devices_repository.register(device_id, "0.3.3", 10, "4.4.4", capabilities, "127.0.0.1")
+    devices_repository.register(device_id, "0.3.3", 10, "4.4.4", capabilities, "127.0.0.1", "2026-06-01T08:00:00.000Z")
     devices_repository.set_trusted(device_id, True)
 
 

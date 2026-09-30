@@ -10,7 +10,8 @@ from .schemas import DeviceRecord
 
 #: 读模型的列清单。列名只在此处出现一次，避免两条查询各写一遍后逐渐分叉。
 _DEVICE_COLUMNS = (
-    "device_id, name, trusted, app_version, version_code, os_version, capabilities, online, last_seen_at, last_ip"
+    "device_id, name, trusted, app_version, version_code, os_version, capabilities, "
+    "online, last_seen_at, last_ip, booted_at"
 )
 
 
@@ -27,7 +28,8 @@ def init_tables() -> None:
             capabilities TEXT NOT NULL DEFAULT '[]',
             online       INTEGER NOT NULL DEFAULT 0,
             last_seen_at TEXT NOT NULL DEFAULT '',
-            last_ip      TEXT NOT NULL DEFAULT ''
+            last_ip      TEXT NOT NULL DEFAULT '',
+            booted_at    TEXT NOT NULL DEFAULT ''
         );
         """
     )
@@ -50,14 +52,15 @@ def register(
     os_version: str,
     capabilities: list[str],
     ip: str,
+    booted_at: str,
 ) -> None:
-    """上线登记：只覆盖版本/能力/在线/时间，绝不触碰 name 与 trusted。"""
+    """上线登记：只覆盖版本/能力/在线/时间/开机时刻，绝不触碰 name 与 trusted。"""
     conn = get_conn()
     conn.execute(
         """
         INSERT INTO device (device_id, app_version, version_code, os_version,
-            capabilities, online, last_seen_at, last_ip)
-        VALUES (?,?,?,?,?,1,?,?)
+            capabilities, online, last_seen_at, last_ip, booted_at)
+        VALUES (?,?,?,?,?,1,?,?,?)
         ON CONFLICT(device_id) DO UPDATE SET
             app_version  = excluded.app_version,
             version_code = excluded.version_code,
@@ -65,9 +68,19 @@ def register(
             capabilities = excluded.capabilities,
             online       = 1,
             last_seen_at = excluded.last_seen_at,
-            last_ip      = excluded.last_ip
+            last_ip      = excluded.last_ip,
+            booted_at    = excluded.booted_at
         """,
-        (device_id, app_version, version_code, os_version, json.dumps(capabilities), now_rfc3339(), ip),
+        (
+            device_id,
+            app_version,
+            version_code,
+            os_version,
+            json.dumps(capabilities),
+            now_rfc3339(),
+            ip,
+            booted_at,
+        ),
     )
     conn.commit()
 
@@ -116,6 +129,7 @@ def _as_device(row: Row) -> DeviceRecord:
         "online": bool(row["online"]),
         "last_seen_at": row["last_seen_at"],
         "last_ip": row["last_ip"],
+        "booted_at": row["booted_at"],
     }
     return device
 

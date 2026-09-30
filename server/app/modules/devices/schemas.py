@@ -35,6 +35,12 @@ class DeviceRecord(TypedDict):
     online: bool
     last_seen_at: str
     last_ip: str
+    booted_at: str
+    """开机时刻（RFC 3339）。由设备上报的"已运行秒数"与服务端收到它的时刻反推而来。
+
+    存时刻而不是存那串秒数：秒数一离开它的采样瞬间就开始过期，而开机时刻是个不变的事实。
+    前端拿"现在减它"就能算出已运行多久，不必再让设备按周期上报。设备空着时为占位。
+    """
 
 
 class DevicePatchRequest(BaseModel):

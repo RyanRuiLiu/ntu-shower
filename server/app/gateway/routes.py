@@ -8,13 +8,14 @@
 """
 
 import asyncio
+import contextlib
 import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.concurrency import run_in_threadpool
 
 from ..core import events, outcomes, protocol, reason_codes
-from ..core.clock import now_rfc3339
+from ..core.clock import now_rfc3339, rfc3339_ago
 from ..core.device_clock import ping_payload, update_skew
 from ..core.protocol import JsonObject, as_int, list_of, payload_of, text_of
 from ..modules.config import store as config_store
@@ -28,12 +29,17 @@ logger = logging.getLogger("ntu-shower.gateway")
 
 router = APIRouter()
 
+#: 主动关闭连接时用的 WS 状态码。与设备端 `GatewayClient.CLOSE_GOING_AWAY` 同值。
+CLOSE_GOING_AWAY = 1001
+
 
 @router.websocket("/gateway/device")
 async def device_gateway(ws: WebSocket) -> None:
     await ws.accept()
     device_id: str | None = None
     ping_task: asyncio.Task[None] | None = None
+    #: 每次收到设备 pong 由 `_handle_frame` 置位；`_server_ping_loop` 用它判断链路是否还活着。
+    pong_seen = asyncio.Event()
     trusted = False
     try:
         hello = protocol.parse(await ws.receive_text())
@@ -50,6 +56,10 @@ async def device_gateway(ws: WebSocket) -> None:
         trusted = bool(row and row["trusted"])
         # 经 nginx 代理而来：真实设备 IP 在 X-Real-IP 头里
         ip = ws.headers.get("x-real-ip") or (ws.client.host if ws.client else "")
+        # 开机时刻由**服务端**的反推得出（此刻减去设备报的运行秒数），不采信设备的墙上
+        # 时钟——这台机器没有 NTP，它的绝对时间只能靠与我们的往返来校准，而运行时长是
+        # 个单调量，不受那个偏差影响。
+        booted_at = rfc3339_ago(as_int(hello_payload.get("uptime_s")))
         await run_in_threadpool(
             devices_service.register_device,
             device_id,
@@ -58,6 +68,7 @@ async def device_gateway(ws: WebSocket) -> None:
             text_of(hello_payload, "os_version"),
             list_of(hello_payload, "capabilities"),
             ip,
+            booted_at,
         )
         # 安装确认：设备以某 version_code 上线，即证明所有 ≤ 该版本的发布已装在它身上。
         # 必须早于 latest_for，否则本次 hello 仍会推送刚装过的版本——force 发布
@@ -87,7 +98,7 @@ async def device_gateway(ws: WebSocket) -> None:
         )
 
         events.publish("device_online", {"device_id": device_id, "trusted": trusted, "at": now_rfc3339()})
-        ping_task = asyncio.create_task(_server_ping_loop(ws, device_id))
+        ping_task = asyncio.create_task(_server_ping_loop(ws, device_id, pong_seen))
 
         while True:
             msg = protocol.parse(await ws.receive_text())
@@ -95,7 +106,7 @@ async def device_gateway(ws: WebSocket) -> None:
                 await ws.send_text(protocol.error(reason_codes.BAD_JSON.code, "收到的帧不是合法 JSON 对象"))
                 continue
             # 未知类型只回错不断开：这是协议的前向扩展点
-            await _handle_frame(ws, msg, device_id, trusted)
+            await _handle_frame(ws, msg, device_id, trusted, pong_seen)
     except WebSocketDisconnect:
         # 设备离线是常态（移动网络/重启），不作为异常处理
         pass
@@ -113,7 +124,13 @@ async def device_gateway(ws: WebSocket) -> None:
             events.publish("device_offline", {"device_id": device_id, "at": now_rfc3339()})
 
 
-async def _handle_frame(ws: WebSocket, msg: JsonObject, device_id: str, trusted: bool) -> None:
+async def _handle_frame(
+    ws: WebSocket,
+    msg: JsonObject,
+    device_id: str,
+    trusted: bool,
+    pong_seen: asyncio.Event,
+) -> None:
     """分发一帧入站报文。未信任设备只放行链路层消息，业务帧静默忽略。"""
     mtype = text_of(msg, "type")
     frame_id = text_of(msg, "id")
@@ -123,6 +140,7 @@ async def _handle_frame(ws: WebSocket, msg: JsonObject, device_id: str, trusted:
         await ws.send_text(protocol.envelope("link.pong", {"sender_time": now_rfc3339()}, reply_to=frame_id))
     elif mtype == "link.pong":
         update_skew(device_id, text_of(payload, "sender_time"))
+        pong_seen.set()
     elif mtype == "config.ack":
         sessions_service.resolve_config_ack(device_id, as_int(payload.get("revision")))
     elif mtype == "door.snapshot":
@@ -153,16 +171,34 @@ async def _handle_frame(ws: WebSocket, msg: JsonObject, device_id: str, trusted:
         await ws.send_text(protocol.error(reason_codes.UNKNOWN_TYPE.code, f"不认识的消息类型：{mtype}"))
 
 
-async def _server_ping_loop(ws: WebSocket, device_id: str) -> None:
-    """按设备有效配置的间隔向设备发服务器 ping，驱动时钟偏差测量。
+async def _server_ping_loop(ws: WebSocket, device_id: str, pong_seen: asyncio.Event) -> None:
+    """按设备有效配置的间隔向设备发服务器 ping，并据此判断链路是否还活着。
+
+    发 ping 原本只为驱动时钟偏差测量，但它同时是这条连接**唯一**的存活探针：TCP 半开时
+    （设备进了隧道、信号丢失、中间设备静默丢包）`receive_text` 不会抛错，服务端会一直
+    以为设备在线——界面上的"在线"也就是假的，要等到 TCP 自己超时，那可能是几十分钟后。
+
+    所以每轮发 ping 前清掉标记，最多等到下一个 ping 该发的时刻。没等到 pong 就主动断开，
+    让 finally 里的 `device_offline` 正常推出去。等待时长取 ping 间隔本身：设备处理 pong
+    是即时的（它的读循环独立于命令通道），一个完整间隔没有回应不是慢，是断了。
 
     连接关闭即正常退出；其他异常记录后退出——静默吞掉会让时钟校准无声失效。
     """
     while True:
         config = await run_in_threadpool(config_store.effective, device_id)
-        await asyncio.sleep(as_int(config.get("ping_interval_s"), default=60))
+        interval = as_int(config.get("ping_interval_s"), default=60)
+        # 先等满一个周期再发首个 ping：刚握手成功的连接不需要立刻验证存活
+        await asyncio.sleep(interval)
+        pong_seen.clear()
         try:
             await ws.send_text(ping_payload())
         except (WebSocketDisconnect, RuntimeError) as exc:
             logger.debug("server ping loop ended for %s: %s", device_id, exc)
+            return
+        try:
+            await asyncio.wait_for(pong_seen.wait(), timeout=interval)
+        except asyncio.TimeoutError:
+            logger.warning("device %s gave no pong within %ss, closing the link", device_id, interval)
+            with contextlib.suppress(RuntimeError):
+                await ws.close(code=CLOSE_GOING_AWAY)
             return

@@ -353,7 +353,7 @@ async function refreshTree() {
     const result = await api.dumpTree(deviceId)
     const xml = result.data?.xml
     if (!xml) {
-      report(result.terminal_message || '未读到界面结构', 'err')
+      report(result.terminal_message || '未能读取界面结构', 'err')
       return
     }
     currentXml = xml

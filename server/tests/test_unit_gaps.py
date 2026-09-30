@@ -157,7 +157,7 @@ def test_process_snapshot_skips_invalid_and_zero_door_no(client: TestClient) -> 
 
     from app.modules.devices import repository as devices_repository
 
-    devices_repository.register("dev-d", "0.2.4", 6, "4.4.4", [], "127.0.0.1")
+    devices_repository.register("dev-d", "0.2.4", 6, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
     result = doors_service.process_snapshot(
         "dev-d",
         {
@@ -173,7 +173,7 @@ def test_session_owner_change_closes_old_opens_new(client: TestClient) -> None:
     from app.modules.devices import repository as devices_repository
     from app.modules.doors import repository as doors_repository
 
-    devices_repository.register("dev-swap", "0.2.4", 6, "4.4.4", [], "127.0.0.1")
+    devices_repository.register("dev-swap", "0.2.4", 6, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
     doors = [
         {
             "door_no": 1,
@@ -273,7 +273,7 @@ def test_push_config_update_offline_and_ack_paths(monkeypatch: pytest.MonkeyPatc
     asyncio.run(flow())
 
 
-def test_command_offline_path_clears_device_pending(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_command_offline_path_clears_device_pending(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.gateway import manager as manager_module
 
     monkeypatch.setattr(manager_module.manager, "_connections", {})
@@ -293,7 +293,7 @@ def test_command_offline_path_clears_device_pending(monkeypatch: pytest.MonkeyPa
 def test_device_untrust_rename_and_exec_guards(client: TestClient) -> None:
     from app.modules.devices import repository as devices_repository
 
-    devices_repository.register("dev-mgmt", "0.2.4", 6, "4.4.4", [], "127.0.0.1")
+    devices_repository.register("dev-mgmt", "0.2.4", 6, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
     client.patch("/ops/devices/dev-mgmt", headers=_ops_token(client), json={"trusted": True})
     untrusted = client.patch("/ops/devices/dev-mgmt", headers=_ops_token(client), json={"trusted": False})
     assert untrusted.json()["trusted"] is False

@@ -189,6 +189,8 @@
   border-radius: var(--radius-sm);
   background: var(--elevated);
   box-shadow: 0 10px 28px rgb(0 0 0 / 45%);
+  /* 顶栏整体禁用了选中（防拖拽），但这里的字段**正是**要复制去搜日志的 */
+  user-select: text;
 }
 
 /* `hidden` 属性的默认 `display: none` 会被上面那条 `display: grid` 盖掉 */

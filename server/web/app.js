@@ -15,7 +15,7 @@
  * `mount` 在切入时调用，`unmount` 负责停掉自己起的轮询与监听。
  */
 import { api, getToken, setToken } from './core/api.js'
-import { fmtDateTime } from './core/clock.js'
+import { fmtDateTime, fmtServerTimeNow, fmtUptime } from './core/clock.js'
 import { $, esc, listen, PLACEHOLDER } from './core/dom.js'
 import { toast } from './core/toast.js'
 import {
@@ -23,8 +23,8 @@ import {
   emit,
   refreshDevices,
   selectDevice,
+  setDeviceOnline,
   setDoors,
-  setOnline,
   setStreaming,
   store,
   subscribe,
@@ -115,8 +115,8 @@ function renderDevicePicker() {
 /**
  * 设备信息面板的内容。
  *
- * 顺序即重要程度：先认身份（名称、ID），再看它能不能收命令（在线、信任），最后是
- * 排障要拿去搜日志的那几项（版本、系统、能力、最后上报、来源 IP）。
+ * 顺序即重要程度：先认身份（名称、ID），再看它能不能收命令（在线、信任、跑了多久），
+ * 最后是排障要拿去搜日志的那几项（版本、系统、能力、最后上报、来源 IP）。
  *
  * 面板里的每一行都会渲染，缺值给占位符——不按有没有值增减行数。行数忽多忽少会让人
  * 以为"这一项没有了"，而实际情况是"这一项没值"，两者要分得开。
@@ -131,15 +131,34 @@ function renderDeviceInfo() {
         ['信任', device.trusted ? '已信任' : '未信任'],
         ['应用版本', `${device.app_version}（版本号 ${device.version_code}）`],
         ['系统版本', device.os_version || PLACEHOLDER],
-        ['能力', `${(device.capabilities || []).length} 项`],
+        ['能力位', `${(device.capabilities || []).length} 项`],
+        ['已运行', fmtUptime(device.booted_at)],
         ['最后上报', fmtDateTime(device.last_seen_at)],
         ['来源 IP', device.last_ip || PLACEHOLDER],
       ]
     : [['设备', '未选择']]
 
   $('deviceInfo').innerHTML = rows
-    .map(([key, value]) => `<div class="kv"><span class="k">${esc(key)}</span><span class="v">${esc(value)}</span></div>`)
+    .map(([key, value]) => {
+      // "已运行"要每秒重算，标出来给 tickDeviceInfo 更新；其余几行是快照，渲染一次就够
+      const live = key === '已运行' ? ' data-uptime' : ''
+      return `<div class="kv"><span class="k">${esc(key)}</span><span class="v"${live}>${esc(value)}</span></div>`
+    })
     .join('')
+}
+
+/**
+ * 面板里那些"会自己变"的字段。
+ *
+ * 挂在顶栏原有的每秒定时器上，不另起一个：面板是点开扫一眼的东西，为它单独维护一个
+ * 定时器的生命周期（开时启动、关时停掉、视图切换时还不能漏）不划算。
+ */
+function tickDeviceInfo() {
+  const panel = $('deviceInfo')
+  if (panel.hidden) return
+  const cell = panel.querySelector('[data-uptime]')
+  const device = currentDevice()
+  if (cell && device) cell.textContent = fmtUptime(device.booted_at)
 }
 
 /** 开合设备信息面板。按钮的 `aria-expanded` 跟着走，读屏才知道它是收起的还是展开的。 */
@@ -195,7 +214,8 @@ function bindTopbar() {
 
   // 顶部显示服务端时间，便于与设备日志对齐
   setInterval(() => {
-    $('clock').textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false })
+    $('clock').textContent = fmtServerTimeNow()
+    tickDeviceInfo()
   }, 1000)
 }
 
@@ -226,11 +246,11 @@ function handle(message) {
       break
 
     case 'device_online':
-      setOnline(true)
+      setDeviceOnline(message.payload.device_id, true)
       break
 
     case 'device_offline':
-      setOnline(false)
+      setDeviceOnline(message.payload.device_id, false)
       break
 
     default:

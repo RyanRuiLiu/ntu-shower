@@ -59,7 +59,7 @@ def test_pick_candidate_requires_enabled_and_listed(client: TestClient) -> None:
     """否决条件：开关关闭、学号不在名单——任一不满足都不产生候选。"""
     from app.modules.devices import repository as devices_repository
 
-    devices_repository.register("dev-as-1", "0.2.5", 7, "4.4.4", [], "127.0.0.1")
+    devices_repository.register("dev-as-1", "0.2.5", 7, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
     devices_repository.set_trusted("dev-as-1", True)
     _seed_session("dev-as-1", 1, "99990052", minutes_ago=30)
 
@@ -90,7 +90,7 @@ def test_pick_candidate_rejects_session_below_threshold(client: TestClient) -> N
     """
     from app.modules.devices import repository as devices_repository
 
-    devices_repository.register("dev-as-short", "0.2.5", 7, "4.4.4", [], "127.0.0.1")
+    devices_repository.register("dev-as-short", "0.2.5", 7, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
     devices_repository.set_trusted("dev-as-short", True)
     _seed_session("dev-as-short", 1, "99990052", minutes_ago=5)  # 5 分钟 < 19 分钟阈值
 
@@ -107,7 +107,7 @@ def test_scan_once_settles_listed_timeout_session(client: TestClient, monkeypatc
     from app.modules.devices import repository as devices_repository
 
     device_id = "dev-as-2"
-    devices_repository.register(device_id, "0.2.5", 7, "4.4.4", [], "127.0.0.1")
+    devices_repository.register(device_id, "0.2.5", 7, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
     devices_repository.set_trusted(device_id, True)
 
     class FakeWS:
@@ -155,7 +155,7 @@ def test_duplicate_session_rejected(client: TestClient, ops_headers: dict[str, s
     from app.modules.devices import repository as devices_repository
 
     device_id = "dev-dup-1"
-    devices_repository.register(device_id, "0.2.5", 7, "4.4.4", [], "127.0.0.1")
+    devices_repository.register(device_id, "0.2.5", 7, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
     hello = json.dumps(
         {
             "v": 1,

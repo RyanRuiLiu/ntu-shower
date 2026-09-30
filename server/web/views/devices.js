@@ -42,14 +42,14 @@ function renderTable() {
         <td>
           <div class="btn-row">
             <button type="button" class="btn btn-ghost btn-sm" data-act="rename">改名</button>
-            <button type="button" class="btn btn-ghost btn-sm" data-act="trust">${device.trusted ? '取消信任' : '信任'}</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-act="trust">${device.trusted ? '撤销信任' : '授予信任'}</button>
           </div>
         </td>
       </tr>`,
     )
     .join('')
   $('deviceTable').innerHTML = `<table class="table"><thead><tr>
-      <th>设备</th><th>版本</th><th>系统</th><th>网关</th><th>信任</th><th>能力数</th><th>操作</th>
+      <th>设备</th><th>版本</th><th>系统</th><th>网关</th><th>信任</th><th>能力位</th><th>操作</th>
     </tr></thead><tbody>${rows}</tbody></table>`
 }
 
@@ -65,7 +65,7 @@ function renderCurrent() {
 
 async function rename(deviceId) {
   const device = store.devices.find((item) => item.device_id === deviceId)
-  const name = window.prompt('新名称', device?.name || '')
+  const name = window.prompt('请输入新名称', device?.name || '')
   if (!name) return
   try {
     await api.patchDevice(deviceId, { name })
@@ -100,7 +100,7 @@ async function runExec() {
     const output = result.data?.output ?? ''
     $('execOutput').textContent = output || outcomeText(result)
     $('execOutput').hidden = false
-    report('maintResult', result.status === 'ok' ? '完成' : outcomeText(result), result.status === 'ok' ? 'ok' : 'err')
+    report('maintResult', result.status === 'ok' ? '已完成' : outcomeText(result), result.status === 'ok' ? 'ok' : 'err')
   } catch (error) {
     report('maintResult', error.message, 'err')
   }
@@ -131,7 +131,7 @@ async function doUninstall() {
 async function bridgeStatus() {
   try {
     const status = await api.bridgeStatus(store.deviceId)
-    report('bridgeResult', `端口 ${status.port} · 世代 ${status.generation} · ${status.already_open ? '已开' : '未开'}`, 'info')
+    report('bridgeResult', `端口 ${status.port} · 世代 ${status.generation} · ${status.already_open ? '已开启' : '未开启'}`, 'info')
   } catch (error) {
     report('bridgeResult', error.message, 'err')
   }
