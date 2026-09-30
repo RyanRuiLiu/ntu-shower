@@ -7,6 +7,7 @@ package com.ryanliu.ntushower.features.automation
 import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.WindowManager
@@ -40,15 +41,25 @@ class CoverOverlay(context: Context) {
     }
     private var showing = false
 
-    /** 盖住屏幕。文案与样式取自 [RuntimeConfig]，改配置后下一次 show 生效。重复调用是空操作。 */
+    /**
+     * 盖住屏幕。文案与样式取自 [RuntimeConfig]，改配置后下一次 show 生效。重复调用是空操作。
+     *
+     * 主线程繁忙时 [MainThread.runAndWait] 会超时放弃，那时遮盖其实没盖上。**不因此中断流程**
+     * ——遮盖是给现场学生看的，自动化本身不依赖它；但必须留痕，否则「学生点到了界面」会被
+     * 当成灵异事件查。
+     */
     fun show() {
         if (showing) return
-        MainThread.runAndWait { addInternal() }
+        if (!MainThread.runAndWait { addInternal() }) {
+            Log.w(TAG, "overlay show timed out, screen left uncovered")
+        }
     }
 
     /** 撤掉遮盖层。没在显示时是空操作。 */
     fun hide() {
-        MainThread.runAndWait { removeInternal() }
+        if (!MainThread.runAndWait { removeInternal() }) {
+            Log.w(TAG, "overlay hide timed out")
+        }
     }
 
     private fun addInternal() {
@@ -122,5 +133,9 @@ class CoverOverlay(context: Context) {
             // showing 标志照常复位，下次 show 会重新添加
         }
         showing = false
+    }
+
+    companion object {
+        private const val TAG = "CoverOverlay"
     }
 }

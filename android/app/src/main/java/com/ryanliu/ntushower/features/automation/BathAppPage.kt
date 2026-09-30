@@ -231,8 +231,18 @@ object BathAppPage {
                 return
             }
             pending.set(false)
-            recompute()
-            A11yService.onPageRefreshed()
+            try {
+                recompute()
+            } catch (e: Exception) {
+                // 重算要读无障碍节点树，那是跨进程调用——节点在两次调用之间失效会抛。
+                // **线程必须活着**：它死了，页面状态就永远停在旧值上，所有等待者只能等满
+                // 超时，一次瞬态错误就变成永久失效。记下来，等下一个事件重试。
+                Log.w(TAG, "recompute failed: ${e.message}", e)
+            } finally {
+                // 放行等待者必须在 finally：重算失败时它们也得醒过来重新读状态，
+                // 否则会白等一整个超时。
+                A11yService.onPageRefreshed()
+            }
         }
     }
 
