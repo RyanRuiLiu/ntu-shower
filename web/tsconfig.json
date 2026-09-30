@@ -1,0 +1,34 @@
+{
+  "compilerOptions": {
+    /* 严格度与服务端（mypy --strict）、设备端（allWarningsAsErrors）对齐。
+       官方模板给的是 noImplicitAny:false + 仅 strictNullChecks，三端里最松，
+       与本项目"越严格越好"的原则冲突，故收紧。 */
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "forceConsistentCasingInFileNames": true,
+
+    /* 产物交给 Vite（Taro 的 compiler=vite），tsc 只做类型检查不产出 */
+    "noEmit": true,
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "allowJs": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "typeRoots": ["node_modules/@types"]
+  },
+  "include": ["./src", "./types", "./config", "./vitest.config.ts"]
+}

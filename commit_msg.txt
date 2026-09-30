@@ -1,0 +1,51 @@
+feat(web): 建立前端工程（Taro + React + Vite），依赖在契约内升到最新
+
+## 工程来源
+
+用官方 `taro init` 生成（Taro 4.3.0 默认模板 + React + TypeScript + Sass +
+Vite + pnpm + weapp/h5 双端），非自造脚手架。生成后清理了三处：
+
+- **删嵌套的 `.git/`**：子目录不该是独立仓库
+- **删 `.husky/` + `commitlint.config.mjs` + `prepare: husky`**：删掉 `.git` 后
+  husky 找不到仓库会让 `pnpm install` 直接失败；提交规范由主仓库统一管
+- **目录名 `we` → `web`**：交互问的"项目介绍"与 CLI 的目录参数被拼接后截出了 `we`
+
+## 依赖：契约内取最新
+
+"能新则新"在此约束下的正确形式是取每个 peer 允许的最大值：
+
+- Vite 4.2.0 → **4.5.14**（同时修掉 Windows 上必崩的 bug：4.2 的 tryNodeResolve
+  把 Rollup 虚拟模块 ID 的 `\0` 前缀当路径传给 fs.realpathSync，构建必失败）
+- @vitejs/plugin-react 4.3.0 → **5.2.0**（peer 为 vite ^4.2||^5||^6||^7||^8）
+- React/ReactDOM 18.0.0 → **18.3.1**（满足 react-reconciler@0.29 的 ^18.2.0）
+- TypeScript 5.4.5 → **5.9.3**、ESLint 8.57.0 → **8.57.1**
+- 新增测试栈：vitest 3.2.4 + @vitest/coverage-v8 + @testing-library/react 16.3.3 + jsdom
+  （vitest 5.0.3 要求 vite ^6.4 不可用；vitest 自带 Vite 5，与项目 Vite 4 由 pnpm 隔离）
+
+## 质量门
+
+前端不能是唯一没有门禁的部分（服务端 96%、设备端 98%）。加四个脚本：
+typecheck / lint / stylelint / test(+coverage)。
+
+**tsconfig 收紧**：官方模板给的是 `noImplicitAny: false` + 仅 strictNullChecks，
+三端里最松。改为 `strict: true` + `noUncheckedIndexedAccess` + `noImplicitOverride`
++ `noFallthroughCasesInSwitch`，并把 `moduleResolution` 从 `node` 改为 `bundler`
+（与 Vite 的 ESM 一致）、`module` 从 `commonjs` 改为 `ESNext`。
+
+## 两处必须修的官方模板问题
+
+- **`config/index.ts`**：`projectName` 仍是 `we`；解构的 `{ command, mode }` 未使用
+  （被 noUnusedLocals 抓到）；`miniCssExtractPluginOption` 是 **webpack 专用配置**，
+  在 Vite 编译器下无效；多处空对象属噪音，一并清理
+- **`vitest.config.ts` 不用 `@vitejs/plugin-react`**：其类型基于 rollup 4，而项目
+  Vite 4 带 rollup 3，两套 `Plugin` 类型无法赋值。JSX 由 vitest 内置的 esbuild 转换
+
+## 记录
+
+新增 ADR-0039：记录技术选型、**Vite 被锁在 4 的原因**（peer 链条 + issue #16994/#18639）、
+webpack5 比 Vite 更死的对比数据、以及四个复查触发条件——避免后来者看到 `vite ^4`
+以为是随手写的而试图升级。
+
+## 验证
+
+typecheck 通过（严格模式）· build:h5 12.5s · build:weapp 3.0s
