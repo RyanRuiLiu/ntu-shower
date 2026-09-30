@@ -77,28 +77,51 @@ class CommandScheduler(
     // 服务端那边它们也是两个通道，允许并发。
     private val captureQueue = SerialCommandQueue<Command>()
 
-    fun enqueue(command: Command) {
+    fun enqueue(command: Command, expireAtMs: Long) {
         when (command) {
             // 图像采集资源独立，不占用自动化队列——否则一条慢截图会把
             // 浴室 APP 的操作序列堵住
-            is Command.Photo, is Command.Screen -> dispatch(command, captureQueue) { runCapture(it) }
+            is Command.Photo, is Command.Screen -> dispatch(command, captureQueue, expireAtMs) { runCapture(it) }
 
             // 读节点树走自动化队列：它读的就是那份 UI 节点树，与 ui.touch / ui.key
             // 并行会读到操作到一半的界面。它和截图则毫无关系——早先归在采集队列是
             // 错的，那会让"看界面"和"读界面"互相排队，服务端并发取这两个时必有一个
             // 被拒（同通道互斥）
-            else -> dispatch(command, automationQueue) { runAutomation(it) }
+            else -> dispatch(command, automationQueue, expireAtMs) { runAutomation(it) }
         }
     }
 
     /**
      * 按队列的裁决决定"立刻跑、排队、还是拒绝"。
      *
-     * 排满时如实回报 `server.overloaded`：那时真的忙不过来。这类情况主要出现在
-     * **服务端多次超时之后**——它每次超时都释放锁放行下一条，而设备这边可能还在跑
-     * 上一条，于是排队数被超时次数推高。拒掉比继续堆着好：堆着的那些迟早也会超时。
+     * 两件事在这里合流：
+     *
+     * **过期**——[expireAtMs] 是本机单调时钟上的一个点，超过它就没必要再做了。服务端
+     * 那时已经不再等结果，而命令是有真实副作用的（分配会写浴室 App 的库、界面注入会
+     * 动到别人正在用的会话）。判在这里而不是收到命令的那一刻：排队等待正是要管的场景。
+     *
+     * **排满**——如实回报"过载"。这类情况主要出现在服务端多次超时之后：它每次超时都
+     * 释放锁放行下一条，而设备这边可能还在跑上一条，排队数于是被超时次数推高。拒掉比
+     * 继续堆着好，堆着的那些迟早也会超时。
      */
-    private fun dispatch(command: Command, queue: SerialCommandQueue<Command>, run: (Command) -> Unit) {
+    private fun dispatch(
+        command: Command,
+        queue: SerialCommandQueue<Command>,
+        expireAtMs: Long,
+        run: (Command) -> Unit,
+    ) {
+        if (expireAtMs > 0 && System.nanoTime() / 1_000_000 > expireAtMs) {
+            Log.w(TAG, "command expired before start, rejecting: ${command.id}")
+            onOutcome(
+                CommandOutcome(
+                    command.id,
+                    OutcomeStatus.REJECTED,
+                    ReasonCodes.COMMAND_DEADLINE_EXCEEDED,
+                    "命令已过期，未执行",
+                ),
+            )
+            return
+        }
         when (val result = queue.enqueue(command)) {
             is SerialCommandQueue.EnqueueResult.Run -> {
                 Log.i(TAG, "enqueued: ${command.id} (${command::class.java.simpleName})")

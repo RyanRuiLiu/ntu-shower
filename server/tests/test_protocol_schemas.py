@@ -66,7 +66,7 @@ SAMPLES: dict[str, dict] = {
     },
     "door.snapshot_ack": {"payload": {"snapshot_id": "11111111-1111-4111-8111-111111111111"}},
     "session.command": {
-        "payload": {"action": "session.assign", "params": {}, "deadline_ts": "2026-09-30T12:01:00.000Z"}
+        "payload": {"action": "session.assign", "params": {}, "timeout_ms": 30000}
     },
     "session.command_result": {"payload": {"status": "ok", "reason_code": "", "data": {}}},
     "config.update": {"payload": {"revision": 1, "config": {"heartbeat_interval_s": 30}}},

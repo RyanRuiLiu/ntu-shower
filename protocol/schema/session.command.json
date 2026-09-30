@@ -17,7 +17,7 @@
           "required": [
             "action",
             "params",
-            "deadline_ts"
+            "timeout_ms"
           ],
           "properties": {
             "action": {
@@ -27,8 +27,10 @@
             "params": {
               "type": "object"
             },
-            "deadline_ts": {
-              "$ref": "https://<public-domain>/schema/envelope.json#/$defs/rfc3339"
+            "timeout_ms": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "这条命令从发出起还有多少毫秒值得执行。**相对时长，不是绝对时刻**——设备没有 NTP，两边的墙上时钟可能差几秒甚至几分钟；下发绝对时刻会让「设备时钟走得快」这一件事直接导致所有命令被判为已过期，而那与命令本身还值不值得执行毫无关系。设备收到后按「从收到算起」判定，能挡住的主要是「排在自己队列里等太久」这种情形。"
             }
           }
         }
