@@ -260,7 +260,7 @@ def test_doors_api_exposes_last_used(client: TestClient) -> None:
     from app.modules.devices import repository as devices_repository
 
     device_id = "dev-last-used-4"
-    devices_repository.register(device_id, "0.3.19", 26, "4.4.4", [], "127.0.0.1")
+    devices_repository.register(device_id, "0.3.19", 26, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
     devices_repository.set_trusted(device_id, True)
 
     opened = rfc3339_after(-30)

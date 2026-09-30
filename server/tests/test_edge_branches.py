@@ -37,7 +37,7 @@ class DeadGatewayWS:
 def _register_trusted(device_id: str) -> None:
     from app.modules.devices import repository as devices_repository
 
-    devices_repository.register(device_id, "0.3.2", 9, "4.4.4", [], "127.0.0.1")
+    devices_repository.register(device_id, "0.3.2", 9, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
     devices_repository.set_trusted(device_id, True)
 
 

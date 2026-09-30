@@ -69,7 +69,7 @@ def test_list_doors_filtered_by_device(client: TestClient) -> None:
     from app.modules.devices import repository as devices_repository
     from app.modules.doors import service as doors_service
 
-    devices_repository.register("dev-doors-1", "0.2.4", 6, "4.4.4", [], "127.0.0.1")
+    devices_repository.register("dev-doors-1", "0.2.4", 6, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
     doors_service.process_snapshot(
         "dev-doors-1",
         {
@@ -109,7 +109,9 @@ def test_stream_pushes_door_update(client: TestClient) -> None:
 def test_shadow_user_and_ops_views(client: TestClient) -> None:
     from app.modules.devices import repository as devices_repository
 
-    devices_repository.register("dev-shadow-1", "0.2.4", 6, "4.4.4", ["session.assign"], "127.0.0.1")
+    devices_repository.register(
+        "dev-shadow-1", "0.2.4", 6, "4.4.4", ["session.assign"], "127.0.0.1", "2026-06-01T08:00:00.000Z"
+    )
     user_view = client.get("/api/v1/devices/dev-shadow-1/shadow")
     assert user_view.status_code == 200
     # 用户面直接返回 reported，不再多包一层 device_id（路径里已有，device 里也有）
@@ -211,7 +213,7 @@ def test_device_config_override_lifecycle(client: TestClient, monkeypatch: pytes
 def test_device_config_rejected_when_offline(client: TestClient) -> None:
     from app.modules.devices import repository as devices_repository
 
-    devices_repository.register("dev-cfg-off", "0.2.4", 6, "4.4.4", [], "127.0.0.1")
+    devices_repository.register("dev-cfg-off", "0.2.4", 6, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
     devices_repository.set_trusted("dev-cfg-off", True)
     r = client.put("/ops/devices/dev-cfg-off/config", headers=_ops_token(client), json={"config": {}})
     assert r.status_code == 409

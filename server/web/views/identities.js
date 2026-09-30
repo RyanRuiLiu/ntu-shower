@@ -108,8 +108,8 @@ export const identitiesView = {
         <div class="panel-head"><span class="panel-title">登记网页标识</span></div>
         <div class="panel-body">
           <div class="field">
-            <label for="inLabel">备注（给谁用的）</label>
-            <input id="inLabel" type="text" placeholder="例：运维值班">
+            <label for="inLabel">备注（用途）</label>
+            <input id="inLabel" type="text" placeholder="例如：运维值班">
           </div>
           <div class="field">
             <label>能力位</label>

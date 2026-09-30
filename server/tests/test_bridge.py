@@ -45,7 +45,7 @@ def test_adb_bridge_lifecycle(client: TestClient, monkeypatch: pytest.MonkeyPatc
     """完整生命周期：开启→世代/nonce→往返→审计→关闭语义。"""
     from app.modules.devices import repository as devices_repository
 
-    devices_repository.register(DEVICE_ID, "0.3.2", 9, "4.4.4", [], "127.0.0.1")
+    devices_repository.register(DEVICE_ID, "0.3.2", 9, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
     devices_repository.set_trusted(DEVICE_ID, True)
     fake_ws = FakeGatewayWS()
     monkeypatch.setattr(manager_module.manager, "_connections", {DEVICE_ID: fake_ws})

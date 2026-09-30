@@ -21,8 +21,9 @@ def register_device(
     os_version: str,
     capabilities: list[str],
     ip: str,
+    booted_at: str,
 ) -> None:
-    repository.register(device_id, app_version, version_code, os_version, capabilities, ip)
+    repository.register(device_id, app_version, version_code, os_version, capabilities, ip, booted_at)
 
 
 def set_device_offline(device_id: str) -> None:
