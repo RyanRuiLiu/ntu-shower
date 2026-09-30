@@ -21,7 +21,9 @@
 
 - 字段名一律 snake_case；
 - 消息类型：`<层>.<名>`，层 = `link`（链路）/ `door`（喷头）/ `session`（会话）/ `ota`（自更新）/ `config`（配置）/ `bridge`（ADB 桥，服务端→设备单向指令，设备侧桥接数据走独立二进制 WS /gateway/bridge）；
-- 错误码：点分命名空间，如 `auth.invalid_token`、`pair.rate_limited`、`proto.unknown_type`、`session.busy`；
+- 错误码：点分命名空间，**示例均取自实际实现**，如 `proto.hello_required`（首帧不是 link.hello）、
+  `proto.bad_json`（帧不是合法 JSON）、`proto.unknown_type`（未知消息类型）、
+  `proto.unknown_action`（未知命令动作）、`session.unsupported_by_device`（设备未声明该能力）；
 - link.error 帧结构：payload 为 `{ code, message, details? }`（扁平）——**code 是协议，message 不是**。
 
 ### 0.3 Schema 管理
@@ -32,7 +34,14 @@
 
 ### 0.4 设备端原则
 
-设备**无界面**、零配置：本地只存 `device_id`（自生成 UUID）与 `token`；域名来自构建配置（唯一锚点）；其余一切（心跳间隔、上报频率、OTA 策略）由服务端下发。
+设备**无界面**、零配置。本地不存任何业务配置：
+
+- **身份**来自系统 `ANDROID_ID`（不落文件、不混淆加密，见 §1）；
+- **域名**来自构建配置（`gradle.properties` 的 `serverDomain`，唯一构建期锚点）；
+- 其余一切（心跳间隔、上报去抖、OTA 策略、自动化节奏）由服务端经 `hello_ack.config`
+  与 `config.update` 下发；
+- 唯一例外是**发件箱**（`door_outbox.db`）：待确认的快照按序暂存于此，
+  ack 后删除，用于断网期间不丢数据。
 
 ## 1. 连接与认证（后台人工认领）
 
@@ -55,48 +64,66 @@ link.error        { code, message, details? }
 ## 2. 心跳与时钟（已确认）
 
 ```
-link.ping   双向发起，间隔来自 hello_ack.config（默认 30s），payload: { device_time | server_time }
-link.pong   原路回应相同结构
+link.ping   双向发起，payload: { sender_time }
+link.pong   原路回应相同结构（sender_time 为各自的发送时刻）
 ```
 
-服务端 90s 无心跳判离线；两端用 ping/pong 维护时钟偏差（EMA），所有入库时间统一校准到服务端时钟。
+两个间隔虽都叫"心跳"，但方向与用途不同，**不要混用**：
+
+| 配置键 | 默认 | 谁发起 | 用途 |
+|---|---|---|---|
+| `heartbeat_interval_s` | 30s | **设备**（`GatewayClient` 的定时器） | 向服务端表明存活 |
+| `server_ping_interval_s` | 60s | **服务端**（网关的 ping 循环） | 测量并维护时钟偏差（EMA） |
+
+**在线状态的判定依据是活动的 WebSocket 连接，不是心跳超时**：
+设备掉线时由连接断开触发 `set_device_offline`（网关 `finally` 块）。
+`device.online` 字段是**最后一次上报值**，与内存中的活动连接可能不一致——
+判断设备是否真在线，以日志里有无 `WebSocket /gateway/device [accepted]` 为准（见 RUNBOOK §4）。
 
 ## 3. 状态上报
 
 ```
 door.snapshot        （设备→服务端，全量）
-{ snapshot_id, source: "db_watch"|"scheduled",
-  doors: [ { door_no, status: "idle"|"in_use"|"unknown",
-             occupied_since: ts|null, bath_time_s, raw:{…} } ] }
+{ snapshot_id: uuid,
+  source: "db_watch" | "startup",
+  doors: [ { door_no, card_no, cert_no, acc_no,
+             open_time, in_time, close_time,
+             bath_time_s, status_raw } ] }
 
 door.snapshot_ack    （服务端→设备）{ snapshot_id }
 ```
 
-- 全量而非增量；状态为受控枚举，原始字段放 `raw`（扩展不改协议）；
-- 设备发件箱（SQLite）按序保存、ack 才删、未 ack 按序重发（指数退避）；服务端按 `snapshot_id` 去重；
-- 触发：浴室 App 数据库变化事件 + 低频定时全量（间隔来自 config），防状态漂移。
+- **设备端零派生**：字段与浴室 App 数据库 `t_doorlist` 的列一一对应，
+  `status_raw` 是原始整数（0/1/2/3），**状态派生在服务端完成**（见 `doors/service.derive_state`）；
+- 时间字段来自设备本地时区，设备端转成 UTC RFC 3339 后上报；空值表示该时刻尚未发生；
+- `source` 区分触发方式：`db_watch` = 浴室 App 写库引发的事件驱动采集，
+  `startup` = 设备启动时的首次全量；
+- 全量而非增量：新增字段按可选字段加，不改协议版本；
+- **发件箱保证不丢**：设备侧 SQLite 按序保存、ack 才删、未 ack 按序重发；
+  服务端按 `snapshot_id` 去重（ADR 与 schema 见 `protocol/schema/door.snapshot.json`）。
 
 ## 4. 命令与结果
-
-`session.command` 的 `action` 清单（正则约束见 schema）：
-`session.assign` / `session.settle` / `photo.capture`（摄像头）/ `screen.capture`（全屏截图，
-screenrecord+MediaCodec——设备 HWC 不支持 screencap，2026-09-30 对照实验确认）/ `debug.exec` /
-`app.restart` / `app.uninstall` / `bridge.open` / `bridge.close`。
-未知 action → `session.command_result` with `reason_code=proto.unknown_action`。
-ADB 桥接数据不走本消息通道（独立二进制 WS /gateway/bridge，见 ADR-0035）。
 
 ```
 session.command      （服务端→设备）{ action, params, deadline_ts }
 session.command_result（设备→服务端，reply_to）
 { status: "ok"|"failed"|"blocked"|"timeout",
-  reason_code: "session.no_balance"|…,   // 结构化子状态
-  data: {…} }
+  reason_code: "session.unsupported_by_device"|…,   // 结构化子状态
+  data: {…} }                                        // 按 action 而异
 ```
 
-- 已实现 action：`session.assign`、`session.settle`、`photo.capture`（结果含 base64 图）、
-  `screen.capture`（同上）、`debug.exec`、`app.restart`、`app.uninstall`；
-- 设备端命令路由为注册制：新功能 = 注册新 handler + 声明能力位；
-- 超时由服务端 `deadline_ts` 控制，设备过时拒绝执行并回 `timeout`。
+**`action` 清单**（正则约束见 schema）：`session.assign` / `session.settle` /
+`photo.capture`（摄像头）/ `screen.capture`（全屏截图，screenrecord+MediaCodec——
+设备 HWC 不支持 screencap，2026-09-30 对照实验确认）/ `debug.exec` /
+`app.restart` / `app.uninstall` / `bridge.open` / `bridge.close`。
+未知 action → `session.command_result` with `reason_code=proto.unknown_action`。
+ADB 桥接数据不走本消息通道（独立二进制 WS，见 ADR-0035）。
+
+- 设备端命令路由为注册制：新功能 = 注册 handler + 在 `SupportedActions` 声明能力位；
+- 服务端在下发前比对设备声明的 `capabilities`，空数组表示未声明（不拦截）；
+- 超时由服务端 `deadline_ts` 控制，设备过时拒绝执行并回 `timeout`；
+- **`data` 按 action 而异**：`photo.capture`/`screen.capture` 回 `image_base64`，
+  `debug.exec` 回 `output`。它是开放对象，客户端按 action 分支取字段。
 
 ## 5. 配置下发
 

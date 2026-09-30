@@ -10,6 +10,7 @@ from app.core.clock import rfc3339_after
 from app.core.config import settings
 from app.core.protocol import JsonObject
 from app.gateway.manager import manager
+from app.modules.devices import service as devices_service
 from app.modules.sessions import repository
 
 from .schemas import CommandOutcome, ConfigPushResult
@@ -62,8 +63,6 @@ def is_device_busy(device_id: str) -> bool:
 
 def _supported_actions(device_id: str) -> list[str]:
     """设备在 link.hello 中声明的能力集合（未声明或设备不存在时为空）。"""
-    from app.modules.devices import service as devices_service
-
     device = devices_service.get_device(device_id)
     if device is None:
         return []

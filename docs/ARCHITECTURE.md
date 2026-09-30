@@ -33,7 +33,7 @@
 ┌─────────────────┐   WSS /gateway/device   ┌─────────────────────────┐
 │  设备 APK        │◀═══════════════════════▶│  <public-domain> │
 │  (Android 4.4.4) │   HTTPS /api/v1/*       │  nginx 443 统一入口       │
-│  配对码激活       │   /ota /admin           │  ┌───────────────────┐  │
+│  ANDROID_ID 标识 │   /ota /admin           │  ┌───────────────────┐  │
 │  自更新/自管理    │                         │  │ FastAPI 单服务进程  │  │
 └─────────────────┘                          │  └───────────────────┘  │
                                              └─────────────────────────┘
@@ -59,24 +59,29 @@
 | 平面 | 路径 | 职责 |
 |---|---|---|
 | gateway | `/gateway/device` (WSS) | 设备长连接：认证/心跳/快照/命令/配置下发 |
-| modules.doors | `/api/v1/doors` + `/api/v1/stream` (WS) | 用户与前端：状态查询与实时推送（匿名只读） |
-| modules.sessions | `/api/v1/sessions`、`/api/v1/photos` | 已认证用户：分配/结算/拍照（写操作需 user 角色） |
-| modules.shadow | `/api/v1` 与 `/admin` 的 shadow 端点 | 设备影子（reported/desired/metadata） |
-| modules.auth | `/api/v1/auth/token`、`/admin/users` | 令牌签发与账户管理 |
-| modules.devices | `/admin/devices` | 管理面：设备档案/信任/改名 |
-| modules.config | `/admin/config`、`/admin/devices/{id}/config` | 管理面：全局默认 + 设备覆盖 |
+| modules.doors | `/api/v1/doors`、`/api/v1/stream` (WS) | 状态查询与实时推送（查看类，无需凭据） |
+| modules.sessions | `/api/v1/sessions/*`、`/api/v1/photos` | 分配/结算/拍照（需 `ops` / `photo` 能力）；`/admin/commands` 为命令审计查询 |
+| modules.shadow | `/api/v1/devices/{id}/shadow`、`/admin/...` | 设备影子（reported/desired/metadata） |
+| modules.access | `/api/v1/session`、`/api/v1/me`、`/admin/grants` | 小程序登录换身份、查询自身能力、授权名单维护 |
+| modules.devices | `/admin/devices` | 设备档案/信任/改名/远程执行/截图 |
+| modules.config | `/admin/config/*`、`/admin/devices/{id}/config` | 配置登记表、全局默认与设备覆盖 |
 | modules.ota | `/ota/*`、`/admin/releases` | 版本清单/下载 + 发布管理 |
-| admin 审计 | `/admin/commands` | 命令审计查询 |
+| modules.bridge | `/admin/devices/{id}/adb/*` | 真实 ADB 经 443 网关透传（零新端口，ADR-0035） |
 
-### 鉴权模型（core/security）
+### 鉴权模型（core/security + modules/access）
 
-| 角色 | 能力 | 凭证 |
+| 使用者 | 能力 | 凭证 |
 |---|---|---|
-| anonymous | 只读接口（doors/shadow/stream） | 无 |
-| user | + 操作设备（assign/settle/photo） | Bearer JWT（外部身份断言换取，provider 抽象：internal 已实现，wechat/app 预留） |
-| admin | 全功能（设备/配置/OTA/调试/审计/用户管理） | JWT role=admin 或 X-Admin-Token（运维通道） |
+| 未授权访问者 | 只读（doors / stream / shadow） | 无需凭据 |
+| 授权用户 | + 操作设备（assign / settle） | `X-Identity: <openid>`，需 `ops` 能力位 |
+| 授权用户（拍照） | + 拍照 / 截图 | 同上，需 `photo` 能力位 |
+| 管理员 | 全功能（设备 / 配置 / OTA / 调试 / 名单） | `X-Admin-Token` |
 
-账户无注册流程：管理员经 `/admin/users` 预置分配。
+- **无注册流程**：管理员经 `/admin/grants` 预置授权（小程序用户登记 openid，
+  网页用户签发一个标识），撤销即从名单删除。
+- 小程序身份：`wx.login` 的 code → 服务端换 openid → 直接作为标识返回，
+  不另发会话令牌（ADR-0037）。
+- 浴室账号密码**不落库**：随操作请求直传设备，由浴室系统验证。
 
 ### HTTP 错误响应
 

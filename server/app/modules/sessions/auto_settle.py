@@ -16,12 +16,9 @@ from app.core.protocol import JsonObject, as_int
 from app.gateway.manager import manager
 from app.modules.config import store as config_store
 from app.modules.doors import repository as doors_repository
+from app.modules.sessions import service as sessions_service
 
 logger = logging.getLogger("ntu-shower.sessions.auto_settle")
-
-# 未取到配置项时使用的阈值（秒）：与 config.DEFAULT_CONFIG 的
-# auto_settle_threshold_s 保持一致（19 分钟，沿用旧项目实测取值）
-DEFAULT_SETTLE_THRESHOLD_S = 1140
 
 _task: asyncio.Task[None] | None = None
 SCAN_INTERVAL_S = 30
@@ -40,10 +37,13 @@ def pick_auto_settle_candidate(config: JsonObject) -> tuple[str, str, str, int] 
 
     纯函数，便于单元测试。密码随候选一并取出：调用方无需再解析一次配置，
     也就不会因为重复解析而引入不可达的防御分支。
+
+    `config` 取自 `config_store.effective()`，它保证含登记表里的每一个键，
+    因此这里直接取值——缺键即 KeyError，好过用兜底阈值静默结算错人。
     """
     if not config.get("auto_settle_enabled"):
         return None
-    threshold_s = as_int(config.get("auto_settle_threshold_s"), default=DEFAULT_SETTLE_THRESHOLD_S)
+    threshold_s = as_int(config["auto_settle_threshold_s"])
     students = config.get("auto_settle_students")
     if not isinstance(students, dict):
         return None
@@ -60,8 +60,6 @@ def pick_auto_settle_candidate(config: JsonObject) -> tuple[str, str, str, int] 
 
 
 async def _settle(device_id: str, cert_no: str, password: str) -> bool:
-    from app.modules.sessions import service as sessions_service
-
     result = await sessions_service.send_command_and_wait(
         device_id,
         "session.settle",
