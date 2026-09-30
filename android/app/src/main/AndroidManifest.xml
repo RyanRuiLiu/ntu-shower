@@ -12,8 +12,13 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
 
-    <!-- 无界面应用：不注册任何 Activity，无桌面图标、无最近任务 -->
-    <application android:label="NTU Shower">
+    <!-- 无界面应用：不注册任何 Activity，无桌面图标、无最近任务。
+         android:name 不可省：装崩溃处理器与自拉起的逻辑都在 ShowerApp 里，而 Application
+         子类只有在这里声明才会被实例化——少了它，那套代码一行都不会执行，崩溃后既不落
+         crash.log 也不会自动回来。 -->
+    <application
+        android:name=".ShowerApp"
+        android:label="NTU Shower">
 
         <service
             android:name=".service.AgentService"
