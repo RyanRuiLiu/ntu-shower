@@ -14,7 +14,7 @@
 
 from fastapi import APIRouter, Depends
 
-from app.core import actions
+from app.core import actions, events
 from app.core.problems import DEVICE_NOT_FOUND, ApiProblemError
 from app.core.protocol import as_int
 from app.core.security import require_ops_token
@@ -61,12 +61,17 @@ def patch_device(device_id: str, req: DevicePatchRequest) -> DeviceRecord:
 
     只改传了的字段。改名与信任原本各有一个端点（外加一个 `/untrust`），
     但它们做的是同一件事——调整这台设备的档案。
+
+    改完推一条 `device.update`：改的那一端自己会刷新，这里管的是**其它**打开的页面——
+    设备下拉里的名字、列表里的信任徽标，不推的话它们要等下一次 30 秒轮询才对得上。
     """
     if req.name is not None:
         service.rename_device(device_id, req.name)
     if req.trusted is not None:
         service.set_trusted(device_id, req.trusted)
-    return _require_device(device_id)
+    record = _require_device(device_id)
+    events.publish(events.DEVICE_UPDATE, dict(record))
+    return record
 
 
 @ops_router.post("/devices/{device_id}/exec")

@@ -31,6 +31,7 @@ import sys
 from pathlib import Path
 
 from app.core.actions import ACTION_CHANNELS, ALL_ACTIONS
+from app.core.events import DEVICE_UPDATE, DOOR_UPDATE
 from app.core.outcomes import ALL as OUTCOME_STATUSES
 from app.core.reason_codes import REGISTRY as REASON_CODES
 from app.modules.config.spec import BOOL, CONFIG_SPECS, DEVICE, INT, TEXT, ConfigKind, ConfigSpec
@@ -279,6 +280,12 @@ def _javascript() -> str:
     lines.append("export const OUTCOME_LABELS = Object.freeze({")
     for item in OUTCOME_STATUSES:
         lines.append(f"  '{item.value}': '{item.label}',")
+    lines.append("})")
+    lines.append("")
+    lines.append("/** 推送事件类型。取值取自服务端的 core/events.py。 */")
+    lines.append("export const EVENT_TYPES = Object.freeze({")
+    lines.append(f"  DEVICE_UPDATE: '{DEVICE_UPDATE}',")
+    lines.append(f"  DOOR_UPDATE: '{DOOR_UPDATE}',")
     lines.append("})")
     lines.append("")
     return "\n".join(lines)
