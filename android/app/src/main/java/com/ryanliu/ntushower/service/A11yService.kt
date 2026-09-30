@@ -119,6 +119,10 @@ class A11yService : AccessibilityService() {
 
     override fun onDestroy() {
         instance = null
+        // 自动化完全依赖本服务，服务销毁时它不可能还在跑。不复位的话这个标志会停在 true，
+        // 而 BathAppGuard 据此不再拉起浴室 App——那正是界面能力的自举锚点，
+        // 一次服务重绑就会让设备从此不再自愈。
+        automationInProgress = false
         super.onDestroy()
     }
 
