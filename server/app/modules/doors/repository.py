@@ -1,4 +1,4 @@
-"""doors 三表 SQL 集中管理：door_live（现态）/ door_state_event（变化流水）/ usage_session（洗浴会话）。"""
+"""doors 三表 SQL 集中管理：door_live（现态）/ door_state_event（状态转换流水）/ usage_session（洗浴会话）。"""
 
 import json
 from sqlite3 import Row
@@ -49,8 +49,7 @@ def init_tables() -> None:
             started_at TEXT,
             ended_at   TEXT,
             duration_s INTEGER,
-            end_reason TEXT    NOT NULL DEFAULT '',
-            raw        TEXT    NOT NULL DEFAULT '{}'
+            end_reason TEXT    NOT NULL DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS idx_usage_session_card ON usage_session(card_no, started_at);
         CREATE INDEX IF NOT EXISTS idx_usage_session_door ON usage_session(device_id, door_no, started_at);
@@ -120,6 +119,12 @@ def upsert_door_live(device_id: str, door_no: int, state: str, door: JsonObject,
 def insert_event(
     occurred_at: str, device_id: str, door_no: int, from_state: str, to_state: str, detail: JsonObject
 ) -> None:
+    """记录一次状态转换。
+
+    当前没有读取方，但**不是**死代码：它是唯一记录全部八种状态转换的地方
+    （usage_session 只覆盖 free→bathing→free 这一条路径），报修次数、暂停次数、
+    停用时长这类统计只能由它回答。这类数据删了就回不来，因此先攒着。
+    """
     get_conn().execute(
         "INSERT INTO door_state_event (occurred_at, device_id, door_no, from_state, to_state, detail)"
         " VALUES (?,?,?,?,?,?)",
@@ -160,7 +165,7 @@ def close_session(session_id: int, ended_at: str, duration_s: int, end_reason: s
 _DOOR_LIST_SQL = """
     SELECT d.device_id, d.door_no, d.state, d.card_no, d.cert_no, d.bath_time_s,
            d.reported_at, dev.online AS device_online, dev.name AS device_name
-    FROM door_live d LEFT JOIN devices dev ON dev.device_id = d.device_id
+    FROM door_live d LEFT JOIN device dev ON dev.device_id = d.device_id
 """
 
 

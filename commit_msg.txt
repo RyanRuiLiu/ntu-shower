@@ -1,0 +1,42 @@
+refactor(server): 表名单数统一、删除死列，并保留状态转换流水
+
+## 表名单数统一
+
+`devices` 是十个表里唯一的复数（其余 access_grant / command_audit /
+device_config / door_live / door_state_event / global_config / ota_release /
+ota_release_install / usage_session 全是单数），改为 `device`。
+
+## 删除 usage_session.raw
+
+该列定义了却从未使用：open_session 的 INSERT 列表是
+(device_id, door_no, card_no, cert_no, started_at)，不含它；也没有任何读取路径，
+因此它永远是默认值 '{}'。属确凿的死列。
+
+## 保留 door_state_event（一度被我误删）
+
+我起初以"只写不读"为由删掉了这张表与 insert_event。这是错的，理由有两层：
+
+其一，数据源决定了它的不可替代。本软件的定位是寄生在浴室终端上——业务数据由
+那台设备上的原生浴室 APP 产生，我们只读它的 t_doorlist（唯一有价值的表），而
+那是**现态表**，会被后续写入覆盖。历史只能由我们观察积累。usage_session 只覆盖
+free→bathing→free 这一条路径，报修次数、暂停次数、停用时长这类统计只能由
+door_state_event 回答。
+
+其二，这类数据删了就回不来。统计功能是后续要做的，等做的时候再采已经晚了。
+"当前无人读取"不等于无用。
+
+已恢复，并在 insert_event 的 docstring 里写明它为何不是死代码，避免下次再被
+误删。
+
+## 命名审计结论
+
+- 表名：全部单数（本次修正）
+- 索引名：idx_<表>_<用途>，格式统一
+- 列名两处看似不一致但都有依据：open_time/in_time/close_time 沿用浴室 APP 的
+  列名（保持同名让映射一目了然）；bath_time_s 来自 APP、duration_s 是我们自己
+  算的，来源不同不该共用名字
+
+## 验证
+
+服务端 ruff / mypy --strict / 210 passed / 覆盖率 97.23%
+设备端 detekt + 114 单测 + 覆盖率门 全部通过
