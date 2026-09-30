@@ -284,7 +284,7 @@ class AgentService : Service() {
             "setprop service.adb.tcp.port ${AdbBridge.LOCAL_ADB_PORT}; " +
                 "stop adbd; start adbd",
         )
-        Log.i(TAG, "adbd tcp: success=${adb.success}")
+        Log.i(TAG, "adbd tcp: exit=${adb.exitCode}")
         adbBridge = AdbBridge(
             BuildConfig.SERVER_DOMAIN,
             DeviceIdentity.deviceId(this),

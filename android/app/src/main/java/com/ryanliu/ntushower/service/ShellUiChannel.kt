@@ -103,8 +103,9 @@ object ShellUiChannel {
 
     private fun run(command: String, label: String): Boolean {
         val result = RootShell.control.exec(command)
-        if (!result.success) Log.w(TAG, "$label failed: ${result.output.take(120)}")
-        return result.success
+        val ok = result.exitCode == 0
+        if (!ok) Log.w(TAG, "$label failed: ${result.output.take(120)}")
+        return ok
     }
 
     private fun isPositive(value: Int): Boolean = value > 0 && DURATION.matches(value.toString())
