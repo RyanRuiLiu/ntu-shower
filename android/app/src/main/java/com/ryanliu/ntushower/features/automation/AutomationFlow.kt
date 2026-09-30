@@ -9,9 +9,6 @@ import com.ryanliu.ntushower.service.A11yService
 /** 流程失败：reason_code 结构化错误码 + 人读描述。 */
 data class FlowError(val reasonCode: String, val message: String)
 
-/** 流程成功结果：终端页面文本（浴室服务器的响应提示）。 */
-data class FlowResult(val terminalMessage: String)
-
 /**
  * 分配/结算共用流程模板（8 步，真机验证过的顺序）：
  *
@@ -32,10 +29,10 @@ object AutomationFlow {
         fun perform(a11y: A11yService): FlowError?
     }
 
-    fun run(a11y: A11yService, action: Action, overlay: CoverOverlay): Result {
+    fun run(a11y: A11yService, action: Action, overlay: CoverOverlay): FlowOutcome {
         // 1 回首页
         if (!BathAppNavigator.navigateToHome(a11y, RuntimeConfig.homeBudgetMs)) {
-            return Result(error = FlowError("automation.navigate_failed", "无法回到首页"))
+            return FlowOutcome(error = FlowError("automation.navigate_failed", "无法回到首页"))
         }
         // 2 遮盖层（可经配置关闭；文案取运行时配置）
         if (RuntimeConfig.overlayEnabled) overlay.show(RuntimeConfig.overlayMessage)
@@ -43,29 +40,29 @@ object AutomationFlow {
             // 3 命令动作
             action.perform(a11y)?.let {
                 overlay.hide()
-                return Result(error = it)
+                return FlowOutcome(error = it)
             }
 
             // 4 等待验证页
             if (!BathAppNavigator.waitForPage(a11y, PageState.ID_VERIFY, RuntimeConfig.idVerifyWaitMs)) {
                 overlay.hide()
-                return Result(error = FlowError("automation.verify_page_timeout", "无法进入验证页面"))
+                return FlowOutcome(error = FlowError("automation.verify_page_timeout", "无法进入验证页面"))
             }
 
             // 5 输入账号密码（凭证由命令参数下发）
             if (!BathAppNavigator.inputCredentialsAndConfirm(a11y, action.certNo, action.password)) {
                 overlay.hide()
-                return Result(error = FlowError("automation.input_failed", "输入账号密码失败"))
+                return FlowOutcome(error = FlowError("automation.input_failed", "输入账号密码失败"))
             }
 
             // 6 等待浴室服务器响应（终点页：HOME 成功 / HINT·VF_RESULT 拒绝）
             val terminal = awaitTerminal(a11y)
             if (!terminal.reached) {
                 overlay.hide()
-                return Result(error = FlowError("automation.response_timeout", terminal.message))
+                return FlowOutcome(error = FlowError("automation.response_timeout", terminal.message))
             }
 
-            return Result(terminalMessage = terminal.message)
+            return FlowOutcome(terminalMessage = terminal.message)
         } catch (e: Exception) {
             try {
                 overlay.hide()
@@ -119,7 +116,12 @@ object AutomationFlow {
         return Terminal(false, "服务器响应超时")
     }
 
-    data class Result(val error: FlowError? = null, val terminalMessage: String = "")
+    /**
+     * 流程结果。
+     *
+     * 不叫 Result：`kotlin.Result` 是内置类型，同名会在导入场景下互相遮蔽。
+     */
+    data class FlowOutcome(val error: FlowError? = null, val terminalMessage: String = "")
 
     private const val TAG = "AutomationFlow"
 }
