@@ -215,5 +215,5 @@ def _require_device(device_id: str) -> DeviceRecord:
     """
     device = service.get_device(device_id)
     if device is None:
-        raise ApiProblemError(DEVICE_NOT_FOUND, f"device {device_id}")
+        raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {device_id}")
     return device

@@ -69,7 +69,7 @@ def manifest(device_id: str, version_code: int) -> OtaManifest:
 def download(version: ReleaseVersion) -> FileResponse:
     path = service.release_path(version)
     if not path.is_file():
-        raise ApiProblemError(RELEASE_NOT_FOUND, version)
+        raise ApiProblemError(RELEASE_NOT_FOUND, f"版本 {version}")
     return FileResponse(
         path,
         media_type="application/vnd.android.package-archive",
@@ -108,7 +108,7 @@ async def upload_release(
     data = await file.read()
     if len(data) > settings.max_ota_bytes:
         logger.warning("release rejected, too large: version=%s size=%d", version, len(data))
-        raise ApiProblemError(RELEASE_TOO_LARGE, f"limit {settings.max_ota_bytes} bytes")
+        raise ApiProblemError(RELEASE_TOO_LARGE, f"上限 {settings.max_ota_bytes} 字节")
     sha256 = service.store_release(version, data)
     repository.insert_release(version, version_code, sha256, mandatory, force, target)
     notified = await service.notify_target_devices(version, version_code, mandatory, target)
