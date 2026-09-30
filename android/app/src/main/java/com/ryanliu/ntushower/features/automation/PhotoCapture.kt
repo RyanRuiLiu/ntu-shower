@@ -13,6 +13,7 @@ import android.graphics.YuvImage
 import android.hardware.Camera
 import android.util.Base64
 import android.util.Log
+import com.ryanliu.ntushower.core.clock.Uptime
 import java.io.ByteArrayOutputStream
 
 /**
@@ -60,8 +61,8 @@ object PhotoCapture {
                 camera1.stopPreview()
             }
             camera.startPreview()
-            val deadline = System.currentTimeMillis() + PREVIEW_TIMEOUT_MS
-            while (captured == null && System.currentTimeMillis() < deadline) {
+            val deadline = Uptime.nowMs() + PREVIEW_TIMEOUT_MS
+            while (captured == null && Uptime.nowMs() < deadline) {
                 Thread.sleep(POLL_INTERVAL_MS)
             }
             camera.stopPreview()

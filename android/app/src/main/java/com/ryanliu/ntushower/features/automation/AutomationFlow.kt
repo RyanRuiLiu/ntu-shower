@@ -1,6 +1,7 @@
 package com.ryanliu.ntushower.features.automation
 
 import android.util.Log
+import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.shell.RootShell
 import com.ryanliu.ntushower.service.A11yService
@@ -144,11 +145,11 @@ object AutomationFlow {
      * 拉回前台走 [BathAppNavigator.ensureForeground]（含关系统面板），不是裸的热切前台。
      */
     private fun awaitTerminal(a11y: A11yService): Terminal {
-        val start = System.currentTimeMillis()
+        val start = Uptime.nowMs()
         var leftForeground = false
         var rebuiltAfterLeave = false
         var unknownRounds = 0
-        while (System.currentTimeMillis() - start < RuntimeConfig.serverResponseTimeoutMs) {
+        while (Uptime.nowMs() - start < RuntimeConfig.serverResponseTimeoutMs) {
             val mark = A11yService.pageChangeMark()
             val inForeground = A11yService.bathAppInForeground
             if (!inForeground) leftForeground = true
