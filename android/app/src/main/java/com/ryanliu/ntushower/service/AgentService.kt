@@ -383,9 +383,6 @@ class AgentService : Service() {
     companion object {
         private const val TAG = "AgentService"
 
-        /** 判定命令过期时的容差，见 [isExpired]。 */
-        private const val DEADLINE_TOLERANCE_MS = 2_000L
-
         /** 首次 OTA 检查的延迟：覆盖安装后尽快对齐版本，之后按配置间隔。 */
         private const val FIRST_OTA_CHECK_DELAY_S = 30L
 

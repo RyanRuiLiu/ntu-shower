@@ -241,12 +241,12 @@ class CommandScheduler(
                     } else {
                         ShellUiChannel.tap(command.x, command.y)
                     }
-                    outcome(command.id, ok, "ui.no_target_at_point", "该位置没有可点击的节点")
+                    outcome(command.id, ok, ReasonCodes.UI_NO_TARGET_AT_POINT, "该位置没有可点击的节点")
                 }
 
                 is Command.UiScroll -> {
                     val ok = ShellUiChannel.scroll(command.forward)
-                    outcome(command.id, ok, "ui.no_scrollable_container", "界面上没有可滚动的容器")
+                    outcome(command.id, ok, ReasonCodes.UI_NO_SCROLLABLE_CONTAINER, "界面上没有可滚动的容器")
                 }
 
                 is Command.UiKey -> {
@@ -290,9 +290,9 @@ class CommandScheduler(
             com.ryanliu.ntushower.features.remote.ScreenCapture.captureJpegBase64()
         }
         val (failedCode, failedMessage) = if (command is Command.Photo) {
-            "camera.capture_failed" to "拍照失败"
+            ReasonCodes.CAMERA_CAPTURE_FAILED to "拍照失败"
         } else {
-            "screen.capture_failed" to "截屏失败"
+            ReasonCodes.SCREEN_CAPTURE_FAILED to "截屏失败"
         }
         return if (imageBase64 != null) {
             CommandOutcome(command.id, OutcomeStatus.OK, "", "", JSONObject().put("image_base64", imageBase64))
