@@ -24,6 +24,12 @@ import java.util.concurrent.TimeoutException
  *
  * 超时是必须的：`readLine()` 在命令不返回时会永久阻塞，而这里是串行的——一条
  * 挂住的命令（等输入、卡在内核）会冻结本通道的全部调用，进而拖死它的使用者。
+ *
+ * ## 但超时只让我们不再等它，不会让它停
+ *
+ * 真机上因此留下过 99% CPU 的孤儿：超时后 `process.destroy()` 只掀掉 Java 直接启动的那
+ * 一层，真正在跑的 `sh` 被 init 收养、继续跑完。取舍与做法见 [wrap] 与
+ * [terminateRunningCommand]。
  */
 class ShellChannel(private val name: String) {
 
@@ -120,15 +126,11 @@ class ShellChannel(private val name: String) {
         }
         val stamp = System.nanoTime()
         val marker = "__DONE_${stamp}_${UUID.randomUUID().toString().take(8)}__"
+        val pidFile = "/data/local/tmp/ntushower-$name-$stamp.pid"
         return try {
-            stdin!!.writeBytes("$command\n")
-            // 退出码与标记由同一次 echo 输出，两者必然同行。$? 必须紧贴着命令取（再晚一步
-            // 就被中间任何一条命令覆盖），而把它贴在标记上之后，"读到标记"与"拿到退出码"
-            // 就是同一件事了——分两行写过一版，真机上被 head -c 打穿过：那条命令的输出没有
-            // 结尾换行，标记粘在内容后面，退出码那一行跟着错位，整条命令的成败就读不出来了。
-            stdin!!.writeBytes("echo $marker\$?\n")
+            stdin!!.writeBytes(wrap(command, marker, pidFile))
             stdin!!.flush()
-            when (val captured = readUntil(marker, timeoutMs)) {
+            when (val captured = readUntil(marker, timeoutMs, pidFile)) {
                 null -> Result("命令超过 ${timeoutMs}ms 未返回", timedOut = true)
                 else -> Result(captured.output, captured.exitCode)
             }
@@ -142,10 +144,11 @@ class ShellChannel(private val name: String) {
     /**
      * 读到标记为止；超时或读取异常返回 null。
      *
-     * 超时路径必须销毁进程：读线程正阻塞在 readLine 上，只有关闭管道才能让它退出
-     * （否则每次超时都泄漏一个阻塞线程）。
+     * 超时路径做两件事，缺一不可：**终止那条命令**（[terminateRunningCommand]）——我们
+     * "不再等它"不等于"它停了"；**销毁进程**——读线程正阻塞在 readLine 上，只有关闭管道
+     * 才能让它退出（否则每次超时都泄漏一个阻塞线程）。
      */
-    private fun readUntil(marker: String, timeoutMs: Long): ShellOutput.Captured? {
+    private fun readUntil(marker: String, timeoutMs: Long, pidFile: String): ShellOutput.Captured? {
         val reader = stdout ?: return null
         val task = FutureTask {
             ShellOutput.collect(reader.lineSequence(), marker, maxOutputBytes)
@@ -157,7 +160,8 @@ class ShellChannel(private val name: String) {
         return try {
             task.get(timeoutMs, TimeUnit.MILLISECONDS)
         } catch (e: TimeoutException) {
-            Log.w(TAG, "[$name] command timed out after ${timeoutMs}ms, recycling shell")
+            Log.w(TAG, "[$name] command timed out after ${timeoutMs}ms, terminating it and recycling shell")
+            terminateRunningCommand(pidFile)
             resetShell()
             null
         } catch (e: Exception) {
@@ -165,6 +169,41 @@ class ShellChannel(private val name: String) {
             resetShell()
             null
         }
+    }
+
+    /**
+     * 把一条命令包成可终止的形式。
+     *
+     * 不包的话，超时之后那条命令**仍在设备上跑**：[resetShell] 的 `process.destroy()`
+     * 只作用于 Java 直接启动的那个进程，而设备上的真实进程链是 `su → su → su → sh`
+     * （真机 `ps` 实测），它只掀掉最上面一层，执行命令的 `sh` 被 init 收养后继续跑完。
+     * 真机上留下过一个 99% CPU 的孤儿，而那次请求早已回报超时。
+     *
+     * 包一层是为了拿到那条命令的 pid：命令放进子 shell 后台跑，pid 落到本次命令专属的
+     * 文件里，超时后由 [terminateRunningCommand] 据它终止。
+     *
+     * `< /dev/null` 不是可选项：后台任务默认继承常驻 shell 的 stdin，一条读 stdin 的命令
+     * 会把**后续命令**从管道里吃掉，之后每条都得等满超时。
+     *
+     * 退出码与标记由同一次 echo 输出，两者必然同行。`$?` 必须紧贴着它要反映的那条命令
+     * （这里中间多了一步 `rm`，所以先存进 `__ntu_rc`），而贴在标记上之后，"读到标记"与
+     * "拿到退出码"就是同一件事了——分两行写过一版，真机上被 `head -c` 打穿过：那条命令
+     * 的输出没有结尾换行，标记粘在内容后面，退出码那一行跟着错位，成败就读不出来了。
+     */
+    private fun wrap(command: String, marker: String, pidFile: String): String =
+        "( $command ) < /dev/null & __ntu=\$!; echo \$__ntu > $pidFile; " +
+            "wait \$__ntu; __ntu_rc=\$?; rm -f $pidFile; echo $marker\$__ntu_rc\n"
+
+    /**
+     * 终止那次超时的命令。
+     *
+     * 走 [RootShell.execDetached]：此刻本通道已经不可信，只能用一条不经过它的独立进程。
+     *
+     * 依据的是**本次命令专属**的 pid 文件，读不到就什么都不做——命令还没走到写 pid 那一步
+     * 时，杀掉上一条命令残留的 pid 比不杀更糟。
+     */
+    private fun terminateRunningCommand(pidFile: String) {
+        RootShell.execDetached("kill -9 \$(cat $pidFile 2>/dev/null) 2>/dev/null; rm -f $pidFile")
     }
 
     /** 销毁本通道的进程。下次 exec 会重新拉起。 */
