@@ -21,15 +21,24 @@
 cd server && ruff check . && ruff format --check . && mypy app --strict && pytest -q --cov=app
 
 # ② 本地：打包（务必排除运行时数据与本地配置）
+#
+# `--exclude=.env` 是必须的，不是可选的清理项：生产的 `.env` 是 systemd 的
+# EnvironmentFile，装着 OPS_TOKEN 与数据库路径。本地那份是 `.env.example` 抄来的占位值
+# （`OPS_TOKEN=change-me`），一旦随包上去就会覆盖生产配置，而服务启动自检会因此
+# 拒绝启动——2026-10-01 实际发生过一次，表现是 systemd 反复重启、healthz 无响应。
+# 排除只匹配 `.env` 这个整名，`.env.example` 照常随包发布。
 tar czf server_deploy.tar.gz -C server \
-    --exclude=.venv --exclude=data --exclude=ota_releases \
+    --exclude=.venv --exclude=data --exclude=ota_releases --exclude=.env \
     --exclude=__pycache__ --exclude=.pytest_cache --exclude=.mypy_cache \
     --exclude=.ruff_cache --exclude=.coverage --exclude='*.pyc' .
 scp server_deploy.tar.gz <deploy-host>:/tmp/
 
 # ③ 服务器：备份现状（回滚点）
+#
+# 含 `.env`：它是 systemd 的 EnvironmentFile，装着 OPS_TOKEN 与数据库路径，而它不在仓库里
+# （gitignore），丢了就只能靠记忆重建。备份落在服务器本地 /tmp，不往外传。
 ssh <deploy-host> 'cd /opt/ntu-shower/server && tar czf /tmp/ntu-shower-backup-$(date +%s).tar.gz \
-    app tests pyproject.toml requirements.txt requirements-dev.txt web'
+    app tests pyproject.toml requirements.txt requirements-dev.txt web .env'
 
 # ④ 服务器：预检——用生产解释器验证新代码能导入
 #    这一步不可省：本地解释器版本可能与生产不同，只有在生产解释器上导入才作数
