@@ -15,7 +15,7 @@
  * `mount` 在切入时调用，`unmount` 负责停掉自己起的轮询与监听。
  */
 import { api, getToken, setToken } from './core/api.js'
-import { fmtDateTime, fmtServerTimeNow, fmtUptime } from './core/clock.js'
+import { fmtDateTime, fmtDuration, fmtServerTimeNow, fmtUptime } from './core/clock.js'
 import { EVENT_TYPES } from './core/contract.js'
 import { $, esc, listen, PLACEHOLDER } from './core/dom.js'
 import { toast } from './core/toast.js'
@@ -122,6 +122,22 @@ function renderDevicePicker() {
  * 面板里的每一行都会渲染，缺值给占位符——不按有没有值增减行数。行数忽多忽少会让人
  * 以为"这一项没有了"，而实际情况是"这一项没值"，两者要分得开。
  */
+/**
+ * 设备时钟偏差的说明文案。
+ *
+ * 存的是"服务端时刻减设备时刻"，所以**负值表示设备快**——那个符号方向反直觉，界面上
+ * 必须把它翻成一句能直接读的话，而不是把数字摊出来。
+ *
+ * 秒级以内算已对齐：校正本身的目标就是这个量级（设备 date 只精确到秒，加上传输延迟，
+ * 实测残差约 0.6 秒）。
+ */
+function skewText(seconds) {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds)) return PLACEHOLDER
+  if (Math.abs(seconds) < 1) return '已对齐'
+  const magnitude = fmtDuration(Math.abs(seconds))
+  return seconds < 0 ? `快 ${magnitude}` : `慢 ${magnitude}`
+}
+
 function renderDeviceInfo() {
   const device = currentDevice()
   const rows = device
@@ -134,6 +150,7 @@ function renderDeviceInfo() {
         ['系统版本', device.os_version || PLACEHOLDER],
         ['能力位', `${(device.capabilities || []).length} 项`],
         ['已运行', fmtUptime(device.booted_at)],
+        ['时钟偏差', skewText(device.clock_skew_s)],
         ['最后上报', fmtDateTime(device.last_seen_at)],
         ['来源 IP', device.last_ip || PLACEHOLDER],
       ]
