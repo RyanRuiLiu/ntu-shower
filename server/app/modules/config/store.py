@@ -20,28 +20,10 @@
 import json
 from typing import NoReturn
 
-from typing_extensions import TypedDict
-
 from app.core.db import get_conn
 
+from .schemas import ConfigSpecView, ConfigValues
 from .spec import CONFIG_SPECS, SPECS_BY_KEY, ConfigKind, ConfigScope, defaults
-
-#: 配置值的类型。
-ConfigValues = dict[str, int | bool | str | dict[str, str]]
-
-
-class ConfigSpecView(TypedDict):
-    """配置登记表的对外形状（`GET /admin/config/spec` 的条目）。"""
-
-    key: str
-    kind: str
-    scope: str
-    default: int | bool | str | dict[str, str]
-    title: str
-    description: str
-    minimum: int | None
-    maximum: int | None
-    unit: str
 
 
 class InvalidConfigError(ValueError):
@@ -228,8 +210,8 @@ def describe() -> list[ConfigSpecView]:
     return [
         {
             "key": spec.key,
-            "kind": spec.kind.value,
-            "scope": spec.scope.value,
+            "kind": spec.kind,
+            "scope": spec.scope,
             "default": spec.default,
             "title": spec.title,
             "description": spec.description,

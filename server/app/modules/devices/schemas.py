@@ -25,3 +25,23 @@ class DeviceRecord(TypedDict):
     online: bool
     last_seen_at: str
     last_ip: str
+
+
+class DeviceTrustResult(TypedDict):
+    """信任位变更结果。
+
+    `found` 为假表示库里没有这台设备的档案——信任只能在已有档案上操作，
+    设备必须先连过一次才会建档。
+    """
+
+    device_id: str
+    trusted: bool
+    found: bool
+
+
+class DeviceRenameResult(TypedDict):
+    """改名结果。"""
+
+    device_id: str
+    name: str
+    found: bool
