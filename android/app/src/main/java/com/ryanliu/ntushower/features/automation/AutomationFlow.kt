@@ -91,6 +91,7 @@ object AutomationFlow {
     private fun awaitTerminal(a11y: A11yService): Terminal {
         val start = System.currentTimeMillis()
         var relaunched = false
+        var unknownRounds = 0
         while (System.currentTimeMillis() - start < RuntimeConfig.serverResponseTimeoutMs) {
             val snapshot = BathAppNavigator.detectPage()
             when (snapshot.state) {
@@ -108,6 +109,17 @@ object AutomationFlow {
                         A11yService.awaitPageChange(RuntimeConfig.pollIntervalMs)
                         continue
                     }
+                    // 这三类页面不会自己变成 HOME：预约页要人点，UNKNOWN 多半是启动闪屏或
+                    // 渲染到一半的树。宽限几轮让闪屏过去，仍认不出来就判失败并把设备收拾回首页
+                    // ——空等到超时只会让浴室 App 一直停在陌生页面上给现场学生看。
+                    //
+                    // **不能回首页后继续等**：下一轮读到的 HOME 会被上面的分支当成正常终态，
+                    // 于是一次失败被记成成功。主动导航出去的结果只有我们自己知道。
+                    unknownRounds++
+                    if (unknownRounds >= UNKNOWN_ROUNDS_BEFORE_FAIL) {
+                        BathAppNavigator.navigateToHome(a11y, RuntimeConfig.homeBudgetMs)
+                        return Terminal(false, "落在无法识别的页面")
+                    }
                 }
             }
             A11yService.awaitPageChange(RuntimeConfig.pollIntervalMs)
@@ -124,4 +136,12 @@ object AutomationFlow {
     data class FlowOutcome(val error: FlowError? = null, val terminalMessage: String = "")
 
     private const val TAG = "AutomationFlow"
+
+    /**
+     * 认出「无法识别的页面」前的宽限轮数。
+     *
+     * 浴室 App 启动时的闪屏、以及渲染到一半的树都会判成 `UNKNOWN`，立刻失败会误伤正常
+     * 流程。5 轮 × 200ms 的轮询间隔 = 1 秒，够闪屏过去。
+     */
+    private const val UNKNOWN_ROUNDS_BEFORE_FAIL = 5
 }

@@ -4,6 +4,7 @@
 
 package com.ryanliu.ntushower.features.automation
 
+import android.content.Intent
 import android.graphics.Rect
 import android.view.accessibility.AccessibilityNodeInfo
 import com.ryanliu.ntushower.core.config.AppConfig
@@ -46,6 +47,9 @@ object BathAppNavigator {
     private const val RID_ET_ID_PWD = "com.datalook.bath:id/et_id_pwd"
     private const val RID_TVB_ID_OK = "com.datalook.bath:id/tvb_id_ok"
     private const val RID_TV_NOWDATE = "com.datalook.bath:id/tv_nowdate"
+
+    /** 通知栏与最近任务面板的表面：它们压在最上层，热切前台拗不过，必须先关掉。 */
+    private const val SYSTEM_UI_PACKAGE = "com.android.systemui"
 
     private data class PageInfo(
         var hasHome: Boolean = false,
@@ -140,6 +144,18 @@ object BathAppNavigator {
         return false
     }
 
+    /**
+     * 确保浴室 App 在前台。
+     *
+     * **SystemUI 要单独处理**：学生拉下通知栏或按了最近任务键时，前台包名是
+     * `com.android.systemui`。这时直接 `launchBathApp`（走 `REORDER_TO_FRONT`）只会把
+     * 浴室 App 的任务热切到前台，**通知栏窗口仍压在最上层**——于是自动化全程正常跑完，
+     * 屏幕却始终是通知栏，全屏遮盖层也盖不住它（那是系统窗口，不归我们的图层管）。
+     * 现场学生看到的不是「网络异常」提示图，而是一张没划上去的通知栏。
+     *
+     * `ACTION_CLOSE_SYSTEM_DIALOGS` 是 API 19 上不需要 root 的关闭手段。关掉之后要等
+     * 一拍再拉起：广播是异步的，紧接着热切前台会把还没收起的面板又留在那里。
+     */
     private fun ensureForeground(a11y: A11yService) {
         val root = a11y.rootInActiveWindow
         if (root == null) {
@@ -150,6 +166,10 @@ object BathAppNavigator {
             root.packageName?.toString() ?: ""
         } finally {
             root.recycle()
+        }
+        if (pkg == SYSTEM_UI_PACKAGE) {
+            a11y.sendBroadcast(Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS))
+            A11yService.awaitPageChange(RuntimeConfig.pollIntervalMs)
         }
         if (pkg != AppConfig.BATH_APP_PACKAGE) {
             a11y.launchBathApp()
@@ -260,31 +280,51 @@ object BathAppNavigator {
     /** 点击结算按钮。 */
     fun clickSettleButton(a11y: A11yService): Boolean = clickInActiveWindow(a11y, RID_TV_BUTTON_NOCARD_STRIKE)
 
-    /** 验证页输入账号密码并确认。 */
+    /**
+     * 验证页输入账号密码并确认。
+     *
+     * 凭证是**经剪贴板**粘贴进去的（API 19 没有 `ACTION_SET_TEXT`），所以从写进剪贴板
+     * 那一刻起，任何一条失败路径都必须负责清掉它——`clearClipboard` 挂在这个方法唯一的
+     * 出口上，而不是挂在成功分支里。Android 4.4 的剪贴板任何应用可读，而这台设备就挂在
+     * 公共浴室的墙上。
+     */
     fun inputCredentialsAndConfirm(a11y: A11yService, certNo: String, password: String): Boolean {
         val root = a11y.rootInActiveWindow ?: return false
         try {
-            val idField = findNode(root, RID_ET_ID_CODE) ?: return false
-            try {
-                if (!a11y.performSetText(idField, certNo)) return false
-            } finally {
-                idField.recycle()
-            }
-            val pwdField = findNode(root, RID_ET_ID_PWD) ?: return false
-            try {
-                if (!a11y.performSetText(pwdField, password)) return false
-            } finally {
-                pwdField.recycle()
-            }
-            val ok = findNode(root, RID_TVB_ID_OK) ?: return false
             return try {
-                a11y.performClick(ok)
+                fillCredentials(a11y, root, certNo, password)
             } finally {
-                ok.recycle()
                 a11y.clearClipboard()
             }
         } finally {
             root.recycle()
+        }
+    }
+
+    /** 逐个字段写入并点确认。任一环节失败即返回 false，由调用方负责收尾。 */
+    private fun fillCredentials(
+        a11y: A11yService,
+        root: AccessibilityNodeInfo,
+        certNo: String,
+        password: String,
+    ): Boolean {
+        val idField = findNode(root, RID_ET_ID_CODE) ?: return false
+        try {
+            if (!a11y.performSetText(idField, certNo)) return false
+        } finally {
+            idField.recycle()
+        }
+        val pwdField = findNode(root, RID_ET_ID_PWD) ?: return false
+        try {
+            if (!a11y.performSetText(pwdField, password)) return false
+        } finally {
+            pwdField.recycle()
+        }
+        val ok = findNode(root, RID_TVB_ID_OK) ?: return false
+        return try {
+            a11y.performClick(ok)
+        } finally {
+            ok.recycle()
         }
     }
 
