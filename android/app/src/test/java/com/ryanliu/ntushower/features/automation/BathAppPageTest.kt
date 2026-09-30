@@ -1,6 +1,8 @@
 package com.ryanliu.ntushower.features.automation
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** 判定规则认的那几个资源 ID。见 [BathAppPageTest] 里为什么不写成引用。 */
@@ -114,9 +116,9 @@ class BathAppPageTest {
 
     @Test
     fun `home settles in a single query`() {
-        // 这条盯的是性能，不是正确性。首页挂着跑马灯与时钟，界面每秒产生 16 次内容变化、
-        // 每次变化都走一遍判定——多问一句就是每秒多 16 次跨进程调用。改成按 ID 查之前，
-        // 逐层下钻单个页面 52 个节点、单次识别 41.6ms、常驻 0.68 个核。
+        // 这条盯的是性能，不是正确性。首页挂着跑马灯与 7 个计时文本，界面每秒产生五十来条
+        // 内容变化——多问一句就是每次识别多一次查表。改成按 ID 查之前，逐层下钻单个页面
+        // 52 个节点、单次识别 41.6ms、常驻 0.68 个核。
         val probe = FakeProbe(mapOf(RID_HOME to ""))
         assertEquals(PageState.HOME, PageRules.decide(probe).state)
         assertEquals(listOf(RID_HOME), probe.asked)
@@ -129,5 +131,59 @@ class BathAppPageTest {
         val probe = FakeProbe()
         assertEquals(PageState.UNKNOWN, PageRules.decide(probe).state)
         assertEquals(6, probe.asked.size)
+    }
+}
+
+/**
+ * 事件筛选。
+ *
+ * 判据来自真机分布（见 [PageEventRules] 的表格），所以这几条盯的是分类两侧都不能错：把该算的
+ * 筛掉，状态会永远停在旧值上而界面看不出异常；把不该算的放进来，每秒五十来条事件会把重算
+ * 线程占满。
+ */
+class PageEventRulesTest {
+
+    private fun event(className: String, changeTypes: Int) = ContentEvent(className, "", changeTypes)
+
+    @Test
+    fun `plain text from a text view is not worth recomputing`() {
+        // 首页 7 个计时文本与跑马灯：稳态每个窗口 168 条，changed 恒为 0
+        assertFalse(PageEventRules.mayChangePage(event("android.widget.TextView", 2)))
+    }
+
+    @Test
+    fun `subtree changes from the sprinkler grid are not worth recomputing`() {
+        // 喷头列表项的状态刷新：每个窗口 44 条，同样一次都没让状态变过
+        assertFalse(PageEventRules.mayChangePage(event("android.widget.GridView", 1)))
+    }
+
+    @Test
+    fun `the events a real page switch produces are all kept`() {
+        // 实测：首页切到预约页那个窗口里只有这三类在动，而 changed=2
+        assertTrue(PageEventRules.mayChangePage(event("android.widget.LinearLayout", 0)))
+        assertTrue(PageEventRules.mayChangePage(event("android.widget.LinearLayout", 1)))
+        assertTrue(PageEventRules.mayChangePage(event("android.widget.TextView", 0)))
+    }
+
+    @Test
+    fun `neither dimension decides it alone`() {
+        // GridView 也会在真实切换里报子树，TextView 也会在真实切换里报未指定；
+        // 两个维度必须同时对上才免算
+        assertTrue(PageEventRules.mayChangePage(event("android.widget.GridView", 0)))
+        assertTrue(PageEventRules.mayChangePage(event("android.widget.TextView", 1)))
+        assertTrue(PageEventRules.mayChangePage(event("android.widget.LinearLayout", 2)))
+    }
+
+    @Test
+    fun `subclasses are covered by the suffix match`() {
+        assertFalse(PageEventRules.mayChangePage(event("com.datalook.bath.MarqueeTextView", 2)))
+        assertFalse(PageEventRules.mayChangePage(event("com.datalook.bath.InnerGridView", 1)))
+    }
+
+    @Test
+    fun `an unclassified event is always kept`() {
+        // 类名读不出来时必须照算：这类事件没被量到过，筛掉它等于赌它无关
+        assertTrue(PageEventRules.mayChangePage(event("", 0)))
+        assertTrue(PageEventRules.mayChangePage(event("", 2)))
     }
 }
