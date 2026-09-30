@@ -7,6 +7,7 @@ import android.util.Log
 import com.ryanliu.ntushower.core.clock.Clock
 import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.config.RuntimeConfig
+import com.ryanliu.ntushower.core.storage.AgentDatabase
 import com.ryanliu.ntushower.transport.GatewayClient
 import org.json.JSONArray
 import org.json.JSONException
@@ -25,21 +26,7 @@ class DoorSnapshotSender(context: Context) {
     /** 发件箱里最旧的一条待确认快照。 */
     private data class OutboxRow(val id: Long, val snapshotId: String, val payload: String)
 
-    private val db: SQLiteDatabase =
-        context.openOrCreateDatabase(AppConfig.OUTBOX_DB_FILE, Context.MODE_PRIVATE, null).also {
-            // 表名与库同名（库里只有这一张表）；字段命名与服务端一致——主键叫 `id`
-            // 不叫 `seq`，时间字段带 `_at` 后缀。
-            //
-            // `created_at` 不是可有可无的：排查"快照积压了多久"只能靠它，而积压时长
-            // 决定了是网络问题还是服务端没回 ack。
-            it.execSQL(
-                "CREATE TABLE IF NOT EXISTS ${AppConfig.OUTBOX_TABLE} (" +
-                    "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
-                    "snapshot_id TEXT NOT NULL UNIQUE, " +
-                    "payload TEXT NOT NULL, " +
-                    "created_at TEXT NOT NULL)",
-            )
-        }
+    private val db: SQLiteDatabase = AgentDatabase.get(context)
 
     /**
      * 上一次上报的门状态指纹；`null` 表示"还没有指纹"。

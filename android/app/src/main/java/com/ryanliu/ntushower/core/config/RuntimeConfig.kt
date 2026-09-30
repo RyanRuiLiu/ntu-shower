@@ -87,6 +87,16 @@ object RuntimeConfig {
     @Volatile var automationTraceEnabled = ConfigDefaults.AUTOMATION_TRACE_ENABLED
         private set
 
+    /**
+     * 命令去重窗口：记住多少条已执行命令的结果。
+     *
+     * 默认值来自 [ConfigDefaults]（上游是服务端登记表），那边刻意给得比够用大得多——窗口越小
+     * 越可能把重复发来的命令当成新命令再执行一次，而分配与结算是真的再操作一次硬件。
+     * 见 [com.ryanliu.ntushower.features.automation.CommandResultCache]。
+     */
+    @Volatile var commandDedupMaxCount = ConfigDefaults.COMMAND_DEDUP_MAX_COUNT
+        private set
+
     @Volatile var serverResponseTimeoutMs = ConfigDefaults.BATH_RESPONSE_TIMEOUT_MS
         private set
 
@@ -155,6 +165,7 @@ object RuntimeConfig {
         overlayTextColor = ConfigDefaults.OVERLAY_TEXT_COLOR
         overlayMarginLeftDp = ConfigDefaults.OVERLAY_MARGIN_LEFT_DP.toInt()
         automationTraceEnabled = ConfigDefaults.AUTOMATION_TRACE_ENABLED
+        commandDedupMaxCount = ConfigDefaults.COMMAND_DEDUP_MAX_COUNT
         serverResponseTimeoutMs = ConfigDefaults.BATH_RESPONSE_TIMEOUT_MS
         idVerifyWaitMs = ConfigDefaults.CERT_VERIFY_WAIT_MS
         homeBudgetMs = ConfigDefaults.HOME_TIMEOUT_MS
@@ -197,6 +208,10 @@ object RuntimeConfig {
             { c -> overlayMarginLeftDp = atLeastOne(c.optInt("overlay_margin_left_dp", overlayMarginLeftDp)) },
         "automation_trace_enabled" to
             { c -> automationTraceEnabled = c.optBoolean("automation_trace_enabled", automationTraceEnabled) },
+        "command_dedup_max_count" to
+            { c ->
+                commandDedupMaxCount = atLeastOne(c.optLong("command_dedup_max_count", commandDedupMaxCount))
+            },
         "bath_response_timeout_ms" to
             { c ->
                 serverResponseTimeoutMs = atLeastOne(c.optLong("bath_response_timeout_ms", serverResponseTimeoutMs))

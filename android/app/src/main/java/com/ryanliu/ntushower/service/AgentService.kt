@@ -8,6 +8,7 @@ import android.os.IBinder
 import android.os.SystemClock
 import android.util.Log
 import com.ryanliu.ntushower.BuildConfig
+import com.ryanliu.ntushower.core.config.ConfigCache
 import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.identity.DeviceIdentity
 import com.ryanliu.ntushower.core.net.HttpClientFactory
@@ -69,7 +70,7 @@ class AgentService : Service() {
     private var monitor: DoorMonitor? = null
 
     /** 已处理命令的结果缓存（幂等接收者，见 CommandResultCache）。 */
-    private val recentOutcomes = CommandResultCache(MAX_REMEMBERED_COMMANDS)
+    private val recentOutcomes = CommandResultCache(RuntimeConfig.commandDedupMaxCount.toInt())
     private var adbBridge: AdbBridge? = null
 
     @Volatile private var trusted = false
@@ -82,10 +83,11 @@ class AgentService : Service() {
         // 是它仅剩的恢复机会——只在首次初始化时核对，这种情况下一次都不会执行。
         worker.execute { A11yGuard.ensureAvailable() }
 
-        // 首次配置到达之前也要有个上限兜着：默认值就是登记表里的默认值
-        RootShell.command.maxOutputBytes = RuntimeConfig.deviceExecMaxOutputBytes.toInt()
-
         if (!::client.isInitialized) {
+            // 先用上次落盘的那份配置：设备重启后要过 DNS、TLS 与首帧往返才拿得到新配置，
+            // 中间那几秒（网络不通时则是一直）该用上次的值，而不是编译进 APK 的默认值。
+            // 没有缓存（首次安装、或读不出来）时保持默认值，随后被 hello_ack 覆盖。
+            ConfigCache.load(this)?.let { RuntimeConfig.apply(it) }
             sender = DoorSnapshotSender(this)
             overlay = CoverOverlay(this)
             scheduler = CommandScheduler(overlay, onOutcome = { outcome -> sendOutcome(outcome) })
@@ -103,6 +105,8 @@ class AgentService : Service() {
             scheduleOtaCheck()
             Log.i(TAG, "service started")
         }
+        // 每次拉起都同步一次：看门狗 tick 也走这里，组件可能已被系统回收过
+        syncConfigDependents()
         return START_STICKY
     }
 
@@ -110,6 +114,10 @@ class AgentService : Service() {
         override fun onConnected(trusted: Boolean, config: JSONObject, upgrade: JSONObject?) {
             this@AgentService.trusted = trusted
             Log.i(TAG, "gateway connected, trusted=$trusted")
+            // hello_ack 里的配置已经由 GatewayClient 写进 RuntimeConfig，这里做两件事：
+            // 落到依赖配置的组件上，以及存一份供下次启动直接用。
+            ConfigCache.save(this@AgentService, config)
+            syncConfigDependents()
             if (trusted) {
                 worker.execute {
                     // 服务端的门现态可能已经被清空重建（开发期"删了重建"是常规操作），
@@ -222,18 +230,30 @@ class AgentService : Service() {
         )
     }
 
+    /**
+     * 把 [RuntimeConfig] 的当前值同步到依赖配置的组件上。
+     *
+     * 三个入口都要调：启动时（此刻是登记表的默认值）、[onConnected]（hello_ack 带来的首份
+     * 配置）、[applyConfig]（后续变更）。漏掉中间那个，服务端配置过的值就要等它碰巧再推一次
+     * 变更才生效——而它可能整轮运行都不推。
+     */
+    private fun syncConfigDependents() {
+        // 输出上限要在命令下发之前同步到通道上，之后设就晚了：读超了的部分已经在内存里
+        RootShell.command.maxOutputBytes = RuntimeConfig.deviceExecMaxOutputBytes.toInt()
+        recentOutcomes.setCapacity(RuntimeConfig.commandDedupMaxCount.toInt())
+    }
+
     private fun applyConfig(envelope: Envelope) {
         val config = envelope.payload.optJSONObject("config") ?: JSONObject()
         val revision = envelope.payload.optInt("revision", 0)
-        // 配置统一入口：全部键回写 RuntimeConfig，随后刷新依赖配置的组件
+        // 配置统一入口：全部键回写 RuntimeConfig，随后刷新依赖配置的组件并存一份给下次启动
         RuntimeConfig.apply(config)
-        // 输出上限要在命令下发之前同步到通道上，之后设就晚了：
-        // 读超了的部分已经在内存里
-        RootShell.command.maxOutputBytes = RuntimeConfig.deviceExecMaxOutputBytes.toInt()
+        ConfigCache.save(this, config)
+        syncConfigDependents()
         client.refreshHeartbeat()
         scheduleOtaCheck()
         // 看门狗间隔变更：重建监视器与看门狗
-        restartWatchdogAlarm()
+        startWatchdog()
         monitor?.stopWatching()
         monitor = DoorMonitor {
             if (trusted) {
@@ -334,14 +354,10 @@ class AgentService : Service() {
         client.send("session.command_result", payload, replyTo = outcome.commandId)
     }
 
-    private fun restartWatchdogAlarm() {
-        val alarm = getSystemService(ALARM_SERVICE) as AlarmManager
-        alarm.cancel(PendingIntent.getBroadcast(this, 0, Intent(this, WatchdogReceiver::class.java), 0))
-        startWatchdog()
-    }
-
     /**
-     * 看门狗：按配置间隔拉活服务（对存活服务为幂等 onStartCommand）。
+     * 看门狗：按配置间隔拉活服务（对存活服务为幂等 onStartCommand）。配置变更后再调一次即可
+     * ——[AlarmManager.setRepeating] 对同一个 `PendingIntent` 会先撤掉旧闹钟再排新的，
+     * 不需要另外 cancel 一遍。
      *
      * 走 [AlarmManager.ELAPSED_REALTIME_WAKEUP]：间隔的语义是"距上次 tick 过了这么久"，
      * 而不是"到了某个墙上时刻"。目标设备没有 NTP，系统时间会被运维改动、掉电重启后
@@ -385,8 +401,5 @@ class AgentService : Service() {
 
         /** 首次 OTA 检查的延迟：覆盖安装后尽快对齐版本，之后按配置间隔。 */
         private const val FIRST_OTA_CHECK_DELAY_S = 30L
-
-        /** 幂等去重窗口：只记最近若干条命令结果，不随运行时长增长。 */
-        private const val MAX_REMEMBERED_COMMANDS = 64
     }
 }

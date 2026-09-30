@@ -12,9 +12,10 @@ import java.util.Collections
  * 命中缓存时调用方重发上次结果，而不是重新执行——服务端可能正是因为没收到结果
  * 才重发，静默忽略会让它一直等到超时。
  *
- * 有界：只保留最近若干条，不随运行时长增长。
+ * 有界：只保留最近若干条，不随运行时长增长。上限是**配置项**（`command_dedup_max_count`），
+ * 见 [setCapacity]。
  */
-class CommandResultCache(capacity: Int) {
+class CommandResultCache(private var capacity: Int) {
 
     init {
         require(capacity > 0) { "capacity must be positive" }
@@ -27,6 +28,24 @@ class CommandResultCache(capacity: Int) {
                 size > capacity
         },
     )
+
+    /**
+     * 按新的配置值调整窗口。
+     *
+     * 上限是配置项、可以在运行中变小，而 [LinkedHashMap.removeEldestEntry] 只在写入时被调用
+     * ——不主动裁一次的话，"窗口已经调小"要等到下一次写入才成立，中间那段时间里它仍是旧值。
+     */
+    fun setCapacity(value: Int) {
+        require(value > 0) { "capacity must be positive" }
+        capacity = value
+        synchronized(outcomes) {
+            while (outcomes.size > capacity) {
+                val eldest = outcomes.keys.firstOrNull()
+                if (eldest == null) break
+                outcomes.remove(eldest)
+            }
+        }
+    }
 
     /** 取该命令上次的结果；从未处理过则返回 null。 */
     fun recall(commandId: String): CommandOutcome? = outcomes[commandId]
