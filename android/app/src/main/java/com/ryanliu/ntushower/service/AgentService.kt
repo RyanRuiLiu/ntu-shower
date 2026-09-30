@@ -303,6 +303,12 @@ class AgentService : Service() {
     }
 
     override fun onDestroy() {
+        // 先停掉一切会继续调度工作的东西，再拆连接：
+        // 只断连接不关线程池，会让定时任务与服务线程在 Service 销毁后继续存活
+        otaCheckFuture?.cancel(false)
+        otaScheduler.shutdownNow()
+        worker.shutdownNow()
+        closeAdbBridge("service destroyed")
         client.disconnect()
         monitor?.stopWatching()
         RootShell.destroy()
@@ -311,6 +317,8 @@ class AgentService : Service() {
 
     companion object {
         private const val TAG = "AgentService"
+
+        /** 首次 OTA 检查的延迟：覆盖安装后尽快对齐版本，之后按配置间隔。 */
         private const val FIRST_OTA_CHECK_DELAY_S = 30L
     }
 }

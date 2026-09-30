@@ -9,16 +9,13 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.config.RuntimeConfig
+import com.ryanliu.ntushower.core.threading.MainThread
 import com.ryanliu.ntushower.features.automation.BathAppGuard
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 
 /**
  * 无障碍服务实体：UI 操作原语与页面事件流。
@@ -29,8 +26,6 @@ import java.util.concurrent.TimeUnit
  * - 浴室 App 崩溃守护：退出到桌面 30s 内 ≥3 次进入 10 分钟冷却期，冷却期内不自动拉起
  */
 class A11yService : AccessibilityService() {
-
-    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -103,31 +98,24 @@ class A11yService : AccessibilityService() {
 
     /**
      * 向节点输入文本：主线程写剪贴板 → 聚焦 → ACTION_PASTE。
-     * 4.4 上 ClipboardManager 构造需主线程 Looper，故经 Handler.post + CountDownLatch 同步。
+     * 4.4 上 ClipboardManager 构造需主线程 Looper，故经 MainThread 投递并同步等待。
      */
     fun performSetText(node: AccessibilityNodeInfo, text: String): Boolean {
-        val latch = CountDownLatch(1)
         var clipboardOk = false
-        mainHandler.post {
+        // 主线程若被长时间占用，这里必须能放弃：无限等待会让调用方线程永久卡死
+        val done = MainThread.runAndWait {
             try {
                 val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
                 if (clipboard != null) {
-                    clipboard.setPrimaryClip(ClipData.newPlainText("ntushower", text))
+                    clipboard.setPrimaryClip(ClipData.newPlainText(CLIPBOARD_LABEL, text))
                     clipboardOk = true
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "set clipboard failed: ${e.message}")
             }
-            latch.countDown()
         }
-        try {
-            // 主线程若被长时间占用，这里必须能放弃：无限等待会让调用方线程永久卡死
-            if (!latch.await(CLIPBOARD_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
-                Log.w(TAG, "set clipboard timed out")
-                return false
-            }
-        } catch (e: InterruptedException) {
-            Thread.currentThread().interrupt()
+        if (!done) {
+            Log.w(TAG, "set clipboard timed out")
             return false
         }
         if (!clipboardOk) return false
@@ -137,11 +125,13 @@ class A11yService : AccessibilityService() {
 
     /** 输入完成后清空剪贴板，防止账密残留（异步）。 */
     fun clearClipboard() {
-        mainHandler.post {
+        MainThread.post {
             try {
                 (getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager)
                     ?.setPrimaryClip(ClipData.newPlainText("", ""))
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+                // 清理失败无后续依赖：下次输入会重新写入剪贴板
+            }
         }
     }
 
@@ -168,8 +158,8 @@ class A11yService : AccessibilityService() {
     companion object {
         private const val TAG = "A11yService"
 
-        /** 等待主线程写剪贴板的上限。 */
-        private const val CLIPBOARD_TIMEOUT_MS = 3_000L
+        /** 剪贴板条目标签。 */
+        private const val CLIPBOARD_LABEL = "ntushower"
 
         @Volatile
         var instance: A11yService? = null
