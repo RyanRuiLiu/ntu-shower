@@ -3,6 +3,8 @@ package com.ryanliu.ntushower.service
 import com.ryanliu.ntushower.BuildConfig
 import com.ryanliu.ntushower.core.shell.RootShell
 import com.ryanliu.ntushower.features.automation.CommandOutcome
+import com.ryanliu.ntushower.transport.OutcomeStatus
+import com.ryanliu.ntushower.transport.ReasonCodes
 import com.ryanliu.ntushower.transport.SupportedActions
 import org.json.JSONObject
 
@@ -40,14 +42,14 @@ object DeviceMaintenance {
     fun handle(action: String, params: JSONObject, commandId: String, onOutcome: (CommandOutcome) -> Unit): Boolean {
         when (action) {
             SupportedActions.DEVICE_RESTART -> {
-                onOutcome(CommandOutcome(commandId, "ok", "", ""))
+                onOutcome(CommandOutcome(commandId, OutcomeStatus.OK, "", ""))
                 restartAgent()
             }
 
             SupportedActions.DEVICE_EXEC -> onOutcome(execShell(params, commandId))
 
             SupportedActions.DEVICE_UNINSTALL -> {
-                onOutcome(CommandOutcome(commandId, "ok", "", ""))
+                onOutcome(CommandOutcome(commandId, OutcomeStatus.OK, "", ""))
                 uninstallAgent()
             }
 
@@ -90,16 +92,16 @@ object DeviceMaintenance {
         // - exitCode 非 0：跑完了、失败了，重试大概还是失败
         // - exitCode 读不到：命令确实跑完了（输出被截断时会这样），按成功算
         val status = when {
-            result.timedOut -> "timeout"
-            result.success -> "ok"
-            else -> "failed"
+            result.timedOut -> OutcomeStatus.TIMEOUT
+            result.success -> OutcomeStatus.OK
+            else -> OutcomeStatus.FAILED
         }
         val reasonCode = when {
-            result.timedOut -> "command.deadline_exceeded"
+            result.timedOut -> ReasonCodes.COMMAND_DEADLINE_EXCEEDED
             result.success -> ""
-            else -> "device.exec_failed"
+            else -> ReasonCodes.DEVICE_EXEC_FAILED
         }
-        val message = if (status == "ok") "" else result.output
+        val message = if (status == OutcomeStatus.OK) "" else result.output
 
         return CommandOutcome(
             commandId,

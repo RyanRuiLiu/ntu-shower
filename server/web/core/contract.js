@@ -33,3 +33,11 @@ export const CHANNELS = Object.freeze({
   'bridge.open': 'maintenance',
   'bridge.close': 'maintenance',
 })
+
+/** 命令结果状态 → 中文名。取值与中文都取自服务端的 core/outcomes.py。 */
+export const OUTCOME_LABELS = Object.freeze({
+  'ok': '成功',
+  'failed': '失败',
+  'timeout': '超时',
+  'rejected': '被拒',
+})

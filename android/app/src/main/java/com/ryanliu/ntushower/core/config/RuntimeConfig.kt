@@ -35,72 +35,83 @@ object RuntimeConfig {
     private fun atLeastOne(value: Int): Int = value.coerceAtLeast(MIN_POSITIVE.toInt())
 
     // ── 通信时序 ──
-    @Volatile var heartbeatIntervalS = 30
+    @Volatile var heartbeatIntervalS = ConfigDefaults.HEARTBEAT_INTERVAL_S.toInt()
         private set
 
-    @Volatile var reconnectBaseMs = 5000L
+    @Volatile var reconnectBaseMs = ConfigDefaults.RECONNECT_BASE_MS
         private set
 
-    @Volatile var reconnectMaxMs = 60000L
+    @Volatile var reconnectMaxMs = ConfigDefaults.RECONNECT_MAX_MS
         private set
 
-    @Volatile var watchdogIntervalS = 60L
+    @Volatile var watchdogIntervalS = ConfigDefaults.WATCHDOG_INTERVAL_S
         private set
 
     // ── doors 采集 ──
-    @Volatile var reportDebounceMs = 1000L
+    @Volatile var reportDebounceMs = ConfigDefaults.DOOR_REPORT_DEBOUNCE_MS
         private set
 
     // ── 自动化 ──
-    @Volatile var overlayEnabled = true
+    @Volatile var overlayEnabled = ConfigDefaults.OVERLAY_ENABLED
         private set
 
-    @Volatile var overlayMessage = "自动操作中…"
+    @Volatile var overlayMessage = ConfigDefaults.OVERLAY_MESSAGE
         private set
 
-    @Volatile var serverResponseTimeoutMs = 10_000L
+    // 遮罩的文字样式。默认值取自旧项目：目标设备是 1366x768 的横屏终端，字号小了在
+    // 一米外看不清；文字被推到 600dp 处，正好落在提示图右侧的空白区里。
+    @Volatile var overlayTextSizeSp = ConfigDefaults.OVERLAY_TEXT_SIZE_SP.toInt()
         private set
 
-    @Volatile var idVerifyWaitMs = 5_000L
+    @Volatile var overlayTextColor = ConfigDefaults.OVERLAY_TEXT_COLOR
         private set
 
-    @Volatile var homeBudgetMs = 10_000L
+    @Volatile var overlayMarginLeftDp = ConfigDefaults.OVERLAY_MARGIN_LEFT_DP.toInt()
         private set
 
-    @Volatile var pollIntervalMs = 200L
+    @Volatile var serverResponseTimeoutMs = ConfigDefaults.BATH_RESPONSE_TIMEOUT_MS
         private set
 
-    @Volatile var uiClickDelayMs = 200L
+    @Volatile var idVerifyWaitMs = ConfigDefaults.CERT_VERIFY_WAIT_MS
+        private set
+
+    @Volatile var homeBudgetMs = ConfigDefaults.HOME_TIMEOUT_MS
+        private set
+
+    @Volatile var pollIntervalMs = ConfigDefaults.UI_POLL_INTERVAL_MS
+        private set
+
+    @Volatile var uiClickDelayMs = ConfigDefaults.UI_CLICK_DELAY_MS
         private set
 
     // 界面节点树单次导出的节点上限。超出即截断——上限同时决定回传体积，
     // 因此按实测的协议帧容量调整，而不是写死在代码里。
-    @Volatile var uiDumpMaxNodes = 2_000L
+    @Volatile var uiDumpMaxNodes = ConfigDefaults.UI_DUMP_MAX_NODES
         private set
 
     // 滑动手势从按下到抬起的时长；过短会被识别成快速抛掷而非拖动。
-    @Volatile var uiSwipeDurationMs = 300L
+    @Volatile var uiSwipeDurationMs = ConfigDefaults.UI_SWIPE_DURATION_MS
         private set
 
     // device.exec 单次回传的最大字节数，超出即截断。
-    @Volatile var deviceExecMaxOutputBytes = 32_768L
+    @Volatile var deviceExecMaxOutputBytes = ConfigDefaults.DEVICE_EXEC_MAX_OUTPUT_BYTES
         private set
 
     // ── OTA ──
-    @Volatile var otaCheckIntervalS = 3600
+    @Volatile var otaCheckIntervalS = ConfigDefaults.OTA_CHECK_INTERVAL_S.toInt()
         private set
 
     // ── 浴室 App 崩溃守护 ──
-    @Volatile var bathGuardEnabled = true
+    @Volatile var bathGuardEnabled = ConfigDefaults.BATH_APP_GUARD_ENABLED
         private set
 
-    @Volatile var bathExitWindowMs = 30_000L
+    @Volatile var bathExitWindowMs = ConfigDefaults.BATH_APP_EXIT_WINDOW_MS
         private set
 
-    @Volatile var bathExitMaxCount = 3
+    @Volatile var bathExitMaxCount = ConfigDefaults.BATH_APP_EXIT_MAX_COUNT.toInt()
         private set
 
-    @Volatile var bathExitCooldownMs = 600_000L
+    @Volatile var bathExitCooldownMs = ConfigDefaults.BATH_APP_EXIT_COOLDOWN_MS
         private set
 
     /**
@@ -121,6 +132,11 @@ object RuntimeConfig {
             { c -> reportDebounceMs = c.optLong("door_report_debounce_ms", reportDebounceMs) },
         "overlay_enabled" to { c -> overlayEnabled = c.optBoolean("overlay_enabled", overlayEnabled) },
         "overlay_message" to { c -> overlayMessage = c.optString("overlay_message", overlayMessage) },
+        "overlay_text_size_sp" to
+            { c -> overlayTextSizeSp = atLeastOne(c.optInt("overlay_text_size_sp", overlayTextSizeSp)) },
+        "overlay_text_color" to { c -> overlayTextColor = c.optString("overlay_text_color", overlayTextColor) },
+        "overlay_margin_left_dp" to
+            { c -> overlayMarginLeftDp = atLeastOne(c.optInt("overlay_margin_left_dp", overlayMarginLeftDp)) },
         "bath_response_timeout_ms" to
             { c ->
                 serverResponseTimeoutMs = atLeastOne(c.optLong("bath_response_timeout_ms", serverResponseTimeoutMs))
