@@ -16,6 +16,10 @@ from app.core.clock import now_rfc3339
 
 PROTOCOL_VERSION = 1
 
+# 协议负载的形状：设备报文是外部 JSON 输入，逐字段建模会与 protocol/schema 重复。
+# 用别名而不是裸 Any——既表达"这是 JSON 边界"的意图，也满足签名不得出现 Any 的规则。
+JsonObject = dict[str, Any]
+
 
 def envelope(msg_type: str, payload: dict[str, Any], reply_to: str | None = None, frame_id: str | None = None) -> str:
     """组装出站信封（JSON 文本帧）。
@@ -40,10 +44,42 @@ def error(code: str, message: str, reply_to: str | None = None) -> str:
     return envelope("link.error", {"code": code, "message": message}, reply_to)
 
 
-def parse(raw: str) -> dict[str, Any] | None:
+def parse(raw: str) -> JsonObject | None:
     """解析入站帧；非 JSON 对象返回 None（调用方回 proto.bad_json）。"""
     try:
         msg = json.loads(raw)
-    except Exception:
+    except ValueError:
         return None
     return msg if isinstance(msg, dict) else None
+
+
+def payload_of(frame: JsonObject) -> JsonObject:
+    """取信封的 payload；形状非法时返回空对象。
+
+    设备报文是外部输入，字段形状不可假定——取值一律经由本模块的辅助函数，
+    避免在各处重复写 isinstance 判断。
+    """
+    payload = frame.get("payload")
+    return payload if isinstance(payload, dict) else {}
+
+
+def text_of(frame: JsonObject, key: str) -> str:
+    """取字符串字段；缺失或类型不符时返回空串。"""
+    value = frame.get(key)
+    return value if isinstance(value, str) else ""
+
+
+def list_of(frame: JsonObject, key: str) -> list[Any]:
+    """取列表字段；缺失或类型不符时返回空列表。"""
+    value = frame.get(key)
+    return value if isinstance(value, list) else []
+
+
+def as_int(value: object, default: int = 0) -> int:
+    """把外部 JSON 标量安全转为 int；类型不符或不可转换时取默认值。"""
+    if isinstance(value, (int, float, str)):
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return default
+    return default

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ntu-shower.iseekdream.com/schema/bridge.close.json",
+  "title": "Server request to close the device ADB bridge tunnel",
+  "allOf": [
+    {
+      "$ref": "https://ntu-shower.iseekdream.com/schema/envelope.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "bridge.close"
+        },
+        "payload": {
+          "description": "无条件关闭：设备收到即回收 adbd TCP 与桥接连接，无附加参数",
+          "type": "object"
+        }
+      }
+    }
+  ]
+}

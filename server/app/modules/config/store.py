@@ -9,8 +9,11 @@ import json
 
 from app.core.db import get_conn
 
+# 远程配置的取值类型：标量，或 auto_settle_students 这样的 学号→密码 映射
+ConfigValue = int | bool | str | dict[str, str]
+
 # 默认值沿用旧项目真机验证过的取值
-DEFAULT_CONFIG: dict[str, object] = {
+DEFAULT_CONFIG: dict[str, ConfigValue] = {
     # 通信时序
     "heartbeat_interval_s": 30,
     "server_ping_interval_s": 60,
@@ -67,60 +70,61 @@ def init_tables() -> None:
         get_conn().commit()
 
 
-def _merge(over: dict) -> dict:
+def _merge(over: dict[str, ConfigValue]) -> dict[str, ConfigValue]:
+    """把覆盖项合到默认值上；未知键被丢弃（客户端只能改已登记的键）。"""
     merged = dict(DEFAULT_CONFIG)
-    for k, v in over.items():
-        if k in CONFIG_KEYS:
-            merged[k] = v
+    for key, value in over.items():
+        if key in CONFIG_KEYS:
+            merged[key] = value
     return merged
 
 
-def get_global() -> tuple[int, dict]:
+def get_global() -> tuple[int, dict[str, ConfigValue]]:
     row = get_conn().execute("SELECT revision, config FROM global_config WHERE id = 1").fetchone()
-    return (row["revision"], json.loads(row["config"]))
+    return (int(row["revision"]), dict(json.loads(row["config"])))
 
 
-def put_global(config: dict) -> tuple[int, dict]:
-    rev, old = get_global()
+def put_global(config: dict[str, ConfigValue]) -> tuple[int, dict[str, ConfigValue]]:
+    revision, _previous = get_global()
     merged = _merge(config)
-    new_rev = rev + 1
+    new_revision = revision + 1
     get_conn().execute(
         "UPDATE global_config SET revision = ?, config = ? WHERE id = 1",
-        (new_rev, json.dumps(merged)),
+        (new_revision, json.dumps(merged)),
     )
     get_conn().commit()
-    return new_rev, merged
+    return new_revision, merged
 
 
-def get_device_override(device_id: str) -> tuple[int, dict] | None:
+def get_device_override(device_id: str) -> tuple[int, dict[str, ConfigValue]] | None:
     row = get_conn().execute("SELECT revision, config FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
-    return (row["revision"], json.loads(row["config"])) if row else None
+    return (int(row["revision"]), dict(json.loads(row["config"]))) if row else None
 
 
-def put_device_override(device_id: str, config: dict) -> tuple[int, dict]:
+def put_device_override(device_id: str, config: dict[str, ConfigValue]) -> tuple[int, dict[str, ConfigValue]]:
     existing = get_device_override(device_id)
     merged = _merge(config)
-    new_rev = (existing[0] if existing else 0) + 1
+    new_revision = (existing[0] if existing else 0) + 1
     get_conn().execute(
         "INSERT OR REPLACE INTO device_config (device_id, revision, config) VALUES (?,?,?)",
-        (device_id, new_rev, json.dumps(merged)),
+        (device_id, new_revision, json.dumps(merged)),
     )
     get_conn().commit()
-    return new_rev, merged
+    return new_revision, merged
 
 
 def delete_device_override(device_id: str) -> bool:
-    cur = get_conn().execute("DELETE FROM device_config WHERE device_id = ?", (device_id,))
+    cursor = get_conn().execute("DELETE FROM device_config WHERE device_id = ?", (device_id,))
     get_conn().commit()
-    return cur.rowcount > 0
+    return cursor.rowcount > 0
 
 
-def effective(device_id: str) -> dict:
+def effective(device_id: str) -> dict[str, ConfigValue]:
     """合并后的有效配置 = 全局默认 ← 设备覆盖。"""
-    _, global_cfg = get_global()
+    _, global_config = get_global()
     override = get_device_override(device_id)
     if override is None:
-        return global_cfg
-    merged = dict(global_cfg)
+        return global_config
+    merged = dict(global_config)
     merged.update(override[1])
     return merged

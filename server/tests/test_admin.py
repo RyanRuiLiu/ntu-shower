@@ -32,7 +32,7 @@ def _hello(device_id: str) -> str:
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def client(fresh_db):
     from fastapi.testclient import TestClient
 

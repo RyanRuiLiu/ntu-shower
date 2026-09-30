@@ -1,11 +1,48 @@
-"""统一时间：服务端对外输出的时间一律为 UTC RFC 3339 毫秒精度。"""
+"""统一时间：服务端对外输出的时间一律为 UTC RFC 3339 毫秒精度。
 
-from datetime import datetime, timezone
+本模块是时间的唯一来源——其余模块禁止自行拼接或解析时间字符串，
+格式化、解析、偏移计算一律经由此处（docs/STANDARDS.md §1）。
+
+RFC 3339 profile：UTC 用 "Z" 后缀（RFC 3339 §5.6），毫秒精度足以
+表达本系统的时序分辨率（设备心跳、命令截止、快照时间）。
+"""
+
+from datetime import datetime, timedelta, timezone
+
+_MILLIS = "milliseconds"
+
+
+def format_rfc3339(moment: datetime) -> str:
+    """把 datetime 规范化为 RFC 3339 UTC 毫秒字符串（Z 后缀）。"""
+    return moment.astimezone(timezone.utc).isoformat(timespec=_MILLIS).replace("+00:00", "Z")
 
 
 def now_rfc3339() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    """当前时刻的 RFC 3339 字符串。"""
+    return format_rfc3339(datetime.now(timezone.utc))
 
 
 def now_epoch_s() -> int:
+    """当前时刻的 Unix 秒。"""
     return int(datetime.now(timezone.utc).timestamp())
+
+
+def rfc3339_after(seconds: float) -> str:
+    """当前时刻 + seconds 的 RFC 3339 字符串（命令截止时刻等）。"""
+    return format_rfc3339(datetime.now(timezone.utc) + timedelta(seconds=seconds))
+
+
+def parse_rfc3339(text: object) -> datetime | None:
+    """解析 RFC 3339 字符串；非字符串、空值或格式非法一律返回 None。
+
+    入参声明为 object 而非 str：设备上报的时间字段是未验证的 JSON 值，
+    类型错误必须在这一层被吸收，而不是抛到调用栈上。
+
+    Python 3.10 的 fromisoformat 尚不识别 "Z" 后缀，故先替换为显式偏移。
+    """
+    if not isinstance(text, str) or not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
