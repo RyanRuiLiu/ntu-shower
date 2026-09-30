@@ -31,7 +31,7 @@ def init_tables() -> None:
     )
 
 
-def insert(version: str, version_code: int, sha256: str, mandatory: bool, force: bool, target: str) -> None:
+def insert_release(version: str, version_code: int, sha256: str, mandatory: bool, force: bool, target: str) -> None:
     get_conn().execute(
         "INSERT OR REPLACE INTO ota_release"
         " (version, version_code, sha256, mandatory, force, target, created_at)"

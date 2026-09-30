@@ -32,7 +32,6 @@ from .gateway.routes import router as gateway_router
 from .modules.bridge.routes import admin_router as bridge_admin_router
 from .modules.bridge.routes import router as bridge_router
 from .modules.config.routes import admin_router as config_admin_router
-from .modules.config.routes import router as config_router
 from .modules.devices import repository as devices_repository
 from .modules.devices.routes import admin_router as devices_admin_router
 from .modules.doors import repository as doors_repository
@@ -78,7 +77,6 @@ def create_app() -> FastAPI:
     app.include_router(shadow_router)
     app.include_router(shadow_admin_router)
     app.include_router(devices_admin_router)
-    app.include_router(config_router)
     app.include_router(config_admin_router)
     app.include_router(ota_router)
     app.include_router(ota_admin_router)

@@ -1,6 +1,14 @@
 """HTTP 错误响应：对齐 RFC 9457 Problem Details（application/problem+json）。
 
-type 成员是标识"问题类型"的 URI 引用（RFC 9457 §3.1）。
+## 两个成员的职责划分
+
+- `type`：问题类型的 URI 引用，取自 `core.problems` 登记表（RFC 9457 §3.1 要求
+  不同问题有不同 type）。客户端据此分支，不解析文案；
+- `title`：该类型的稳定简述；`detail`：本次请求的具体信息，允许变化。
+
+未登记的问题（框架抛的 404/405 等）退回按状态码生成 type——这类问题没有
+可分支的语义，客户端本就不该依赖其文案。
+
 生产环境经 PUBLIC_BASE_URL 注入正式域名前缀；未配置时输出相对引用，
 相对引用按 RFC 3986 相对于请求 URI 解析。任何情况下都不硬编码域名
 （docs/STANDARDS.md §7 禁止硬编码环境值）。
@@ -14,19 +22,20 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .config import settings
+from .problems import ApiProblemError, Problem
 
 PROBLEM_MEDIA_TYPE = "application/problem+json"
 PROBLEM_TYPE_PATH = "/problems/"
 
 
-def _problem(status: int, title: str, detail: str) -> JSONResponse:
+def _problem(problem: Problem, detail: str) -> JSONResponse:
     base = settings.public_base_url.rstrip("/")
     return JSONResponse(
-        status_code=status,
+        status_code=problem.status,
         content={
-            "type": f"{base}{PROBLEM_TYPE_PATH}{status}",
-            "title": title,
-            "status": status,
+            "type": f"{base}{PROBLEM_TYPE_PATH}{problem.code}",
+            "title": problem.title,
+            "status": problem.status,
             "detail": detail,
         },
         media_type=PROBLEM_MEDIA_TYPE,
@@ -36,19 +45,26 @@ def _problem(status: int, title: str, detail: str) -> JSONResponse:
 def install_error_handlers(app: FastAPI) -> None:
     """装配统一的 problem+json 错误响应（覆盖框架默认的 {"detail": ...}）。"""
 
+    @app.exception_handler(ApiProblemError)
+    async def api_problem(_request: Request, exc: ApiProblemError) -> JSONResponse:
+        return _problem(exc.problem, exc.detail)
+
     @app.exception_handler(StarletteHTTPException)
     async def http_exception(_request: Request, exc: StarletteHTTPException) -> JSONResponse:
         detail = exc.detail if isinstance(exc.detail, str) else "request failed"
-        return _problem(exc.status_code, _title_for(exc.status_code), detail)
+        return _problem(_unregistered(exc.status_code), detail)
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception(_request: Request, exc: RequestValidationError) -> JSONResponse:
         detail = "; ".join(f"{'.'.join(str(loc) for loc in error['loc'])}: {error['msg']}" for error in exc.errors())
-        return _problem(422, "validation failed", detail)
+        return _problem(Problem("validation-failed", 422, "Validation failed"), detail)
 
 
-def _title_for(status: int) -> str:
+def _unregistered(status: int) -> Problem:
+    """框架/第三方抛出的问题：按状态码生成 type，无可分支语义。"""
     try:
-        return HTTPStatus(status).phrase
+        title = HTTPStatus(status).phrase
     except ValueError:
-        return "error"
+        title = "error"
+    code = f"http-{status}"
+    return Problem(code, status, title)

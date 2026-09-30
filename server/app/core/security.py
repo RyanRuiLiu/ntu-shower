@@ -7,9 +7,10 @@
 
 import secrets
 
-from fastapi import Header, HTTPException
+from fastapi import Header
 
 from .config import settings
+from .problems import ADMIN_UNAUTHORIZED, ApiProblemError
 
 # .env 模板中的占位值：沿用它们等同于没有鉴权，启动自检必须拒绝
 PLACEHOLDER_TOKENS = frozenset({"change-me", ""})
@@ -41,4 +42,4 @@ def require_admin(x_admin_token: str | None = Header(default=None, alias="X-Admi
     响应耗时泄漏令牌前缀，属时序侧信道（OWASP ASVS V2.2）。
     """
     if x_admin_token is None or not secrets.compare_digest(x_admin_token, settings.admin_token):
-        raise HTTPException(status_code=401, detail="admin authentication required")
+        raise ApiProblemError(ADMIN_UNAUTHORIZED)

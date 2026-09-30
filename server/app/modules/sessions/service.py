@@ -86,7 +86,7 @@ async def send_command_and_wait(
     """
     command_id = str(uuid.uuid4())
     if device_id in _device_pending:
-        repository.insert(command_id, device_id, action)
+        repository.insert_command(command_id, device_id, action)
         repository.finish(command_id, "rejected", "device.busy", "")
         return {
             "status": "rejected",
@@ -109,7 +109,7 @@ async def send_command_and_wait(
         },
         frame_id=command_id,
     )
-    repository.insert(command_id, device_id, action)
+    repository.insert_command(command_id, device_id, action)
     sent = await manager.send_to(device_id, envelope)
     if not sent:
         _device_pending.pop(device_id, None)

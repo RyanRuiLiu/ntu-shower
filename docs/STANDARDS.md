@@ -27,6 +27,7 @@
 | 数据库表 | 单数 snake_case，领域前缀避免歧义 | `door_live`、`usage_session`、`ota_release`、`device_config` |
 | 数据库字段 | snake_case；时间字段统一 `_at` 后缀 | `reported_at`、`applied_at`、`last_seen_at` |
 | 时间字段的**取值格式** | 一律 RFC 3339 UTC 毫秒（`core/clock.py` 是唯一来源） | `2026-09-30T12:00:00.000Z` |
+| 时间字段的**命名** | 领域表用 `_at` 后缀；**协议映射表**（`door_live`）保留协议字段名 | `reported_at` / `open_time` |
 | 单位后缀 | 秒 `_S`、毫秒 `_MS`、字节无后缀、比例无后缀 | `ASSIGN_TIMEOUT_S`、`reconnect_base_ms`、`PENDING_MAX` |
 | 协议消息类型 | `<层>.<动作>`，应答加 `_ack` / `_result` 后缀 | `link.hello` / `link.hello_ack`、`door.snapshot` / `door.snapshot_ack` |
 | 命令动作名 | `<域>.<动作>`，与服务端 action 字面量一致 | `session.assign`、`screen.capture` |
@@ -41,7 +42,8 @@
 
 | 标准 | 执行机制 |
 |---|---|
-| RFC 9457 Problem Details（`application/problem+json`） | `core/errors.py` 统一装配 + 测试覆盖 |
+| RFC 9457 Problem Details（`application/problem+json`） | `core/errors.py` 统一装配；问题类型登记于 `core/problems.py` |
+| 问题类型（`type`）标识**问题种类**而非状态码 | 每个问题在 `core/problems.py` 登记稳定 code；测试断言 `type` 后缀，不解析 `detail` 文案 |
 | OpenAPI 3.1 | FastAPI 自动生成，`/docs` 可视 |
 | JSON Schema draft 2020-12 覆盖**全部**协议消息 | `protocol/schema/` + `tests/test_protocol_schemas.py`（含"无多余 schema"反向断言） |
 | 跨端动作名一致（服务端下发 ↔ 设备端识别） | `tests/test_admin_debug.py` 逐条锁定 |
