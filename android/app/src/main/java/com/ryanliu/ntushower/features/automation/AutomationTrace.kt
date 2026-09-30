@@ -30,6 +30,17 @@ object AutomationTrace {
     private const val MAX_BYTES = 256 * 1024L
 
     /**
+     * 页面重算统计的落盘间隔（次）。
+     *
+     * 重算每秒发生十几次（浴室 App 首页的跑马灯与时钟驱动的），逐条落盘就是每秒开关十几次
+     * 文件——记录本身成了被测对象，量出来的数也就不作数了。攒够这些次落一行，拿到的是同样
+     * 几个数（事件有多密、每次多久、几次真的换了页），写盘量降两个数量级。
+     */
+    private const val REFRESH_FLUSH_EVERY = 50
+
+    private val refreshWindow = RefreshWindow(REFRESH_FLUSH_EVERY)
+
+    /**
      * 开始记录一轮流程；开关关闭时返回 null。
      *
      * 调用方拿到 null 就什么都不用做，各标记点写成 `trace?.mark(...)` 即可——不要为了
@@ -63,15 +74,14 @@ object AutomationTrace {
     /**
      * 记一次页面状态重算。
      *
-     * 这条记录要回答两个问题：**界面事件来得有多密**（行与行的时间差就是事件间隔），
-     * 以及**每次重算要花多久**（遍历那棵树的真实代价）。两个数一起决定"事件驱动、
-     * 不节流"这个选择是不是站得住。
-     *
-     * 只在开关打开时写，否则每秒一两行会持续堆积。
+     * 这条记录要回答三个问题：**界面事件来得有多密**（`span/n` 就是事件间隔）、**每次重算
+     * 要花多久**（`avg` 与 `max`）、以及**这么多次里有几次真的换了页**（`changed`）。前两个
+     * 决定事件驱动这套选择的代价，第三个决定"不做节流"站不站得住。
      */
-    fun recordRefresh(costMs: Long, state: String) {
+    fun recordRefresh(costMs: Long, state: String, changed: Boolean) {
         if (!RuntimeConfig.automationTraceEnabled) return
-        append("page $state cost=${costMs}ms")
+        val line = refreshWindow.add(costMs, state, changed, System.nanoTime() / 1_000_000) ?: return
+        append(line)
     }
 
     private fun append(line: String) {
@@ -86,5 +96,40 @@ object AutomationTrace {
         } catch (_: Exception) {
             // 记录是"顺便"的，失败了不该影响主流程
         }
+    }
+}
+
+/**
+ * 页面重算的滑动统计：攒够一批落一行。
+ *
+ * 为什么不逐条记流水，见 [AutomationTrace] 里 `REFRESH_FLUSH_EVERY` 的说明。这里只留能回答
+ * 问题的几个数——总数、跨度、均值、峰值、真换页的次数、以及最后停在哪一页。
+ */
+internal class RefreshWindow(private val flushEvery: Int) {
+
+    private var count = 0
+    private var changedCount = 0
+    private var totalMs = 0L
+    private var maxMs = 0L
+    private var openedAtMs = 0L
+    private var lastState = ""
+
+    /** 记一次重算；攒够一批时返回要落的行，否则返回 null。 */
+    @Synchronized
+    fun add(costMs: Long, state: String, changed: Boolean, nowMs: Long): String? {
+        if (count == 0) openedAtMs = nowMs
+        count++
+        if (changed) changedCount++
+        totalMs += costMs
+        if (costMs > maxMs) maxMs = costMs
+        lastState = state
+        if (count < flushEvery) return null
+        val line = "refresh n=$count span=${nowMs - openedAtMs}ms avg=${totalMs / count}ms " +
+            "max=${maxMs}ms changed=$changedCount last=$lastState"
+        count = 0
+        changedCount = 0
+        totalMs = 0
+        maxMs = 0
+        return line
     }
 }

@@ -104,11 +104,15 @@ class OtaUpdater(
      *
      * 代价是**拿不到安装结果**：成败写进日志，升级是否生效由服务端核对设备重连时
      * 上报的版本号判断（`link.hello` 带版本），那比脚本的返回值更接近事实。
+     *
+     * 末尾把 APK 删掉：它是下载产物，装完就没有用了。留在盘上会让每次升级都多攒一个
+     * 文件——真机上跑了一个下午就攒了三十个、二十八兆。失败也没关系，重试本来就要重下。
      */
     private fun installDetached(apk: File) {
         val log = File(AppConfig.WORK_DIR, INSTALL_LOG_NAME).absolutePath
         RootShell.execDetached(
-            "echo OTA_START > $log; pm install -r ${apk.absolutePath} >> $log 2>&1; echo OTA_END >> $log",
+            "echo OTA_START > $log; pm install -r ${apk.absolutePath} >> $log 2>&1; " +
+                "echo OTA_END >> $log; rm -f ${apk.absolutePath}",
         )
     }
 
