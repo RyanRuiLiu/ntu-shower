@@ -9,7 +9,7 @@
  * 查看类接口不需要身份，所以这里不发令牌也不影响别人看状态。
  */
 import { api } from '../core/api.js'
-import { $, disposer, esc, listen } from '../core/dom.js'
+import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
 import { toast } from '../core/toast.js'
 
 /** 能力位的取值由服务端定义（`access/identity.py`），这里只负责展示与勾选。 */
@@ -50,7 +50,7 @@ function render(list) {
         <td><code>${esc(item.identity)}</code></td>
         <td>${esc(KIND_LABEL[item.kind] || item.kind)}</td>
         <td>${capabilityBadges(item.capabilities)}</td>
-        <td>${esc(item.label || '—')}</td>
+        <td>${esc(item.label || PLACEHOLDER)}</td>
         <td><button type="button" class="btn btn-danger btn-sm" data-act="revoke">撤销</button></td>
       </tr>`,
     )

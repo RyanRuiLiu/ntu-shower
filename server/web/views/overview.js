@@ -21,7 +21,7 @@
 import { api } from '../core/api.js'
 import { serverNowMs } from '../core/clock.js'
 import { DOOR_STATES } from '../core/contract.js'
-import { $, disposer, esc, listen } from '../core/dom.js'
+import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
 import { outcomeText, problemText } from '../core/outcome.js'
 import { store, subscribe } from '../core/store.js'
 
@@ -73,25 +73,25 @@ function fmtDuration(seconds) {
   return minutes > 0 ? `${minutes}m${String(rest).padStart(2, '0')}s` : `${rest}s`
 }
 
-/** RFC 3339 → `HH:MM:SS`。 */
+/** RFC 3339 → `HH:MM:SS`；缺值给占位符。 */
 function fmtTime(value) {
-  if (!value) return ''
+  if (!value) return PLACEHOLDER
   const at = new Date(value)
-  if (Number.isNaN(at.getTime())) return ''
+  if (Number.isNaN(at.getTime())) return PLACEHOLDER
   const pad = (n) => String(n).padStart(2, '0')
   return `${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`
 }
 
 /**
- * RFC 3339 → `MM-DD HH:MM`。
+ * RFC 3339 → `MM-DD HH:MM`；缺值给占位符。
  *
  * 喷头卡片上的时间有两种粒度：进行中的会话问的是"今天几点"，`HH:MM:SS` 够用；而"上次
  * 使用"可能发生在几天前，只给时分看不出是哪天，给完整年份又会把宽度挤掉。
  */
 function fmtDateTime(value) {
-  if (!value) return ''
+  if (!value) return PLACEHOLDER
   const at = new Date(value)
-  if (Number.isNaN(at.getTime())) return ''
+  if (Number.isNaN(at.getTime())) return PLACEHOLDER
   const pad = (n) => String(n).padStart(2, '0')
   return `${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`
 }
@@ -186,12 +186,15 @@ function durationOf(door, field) {
   return ''
 }
 
-/** 一个喷头从没被真正使用过时，头部右侧显示的文案。 */
-const LAST_USED_NEVER = '从未使用'
-
-/** 头部右侧那一格的文字：上次真正使用（开过阀）的时刻。 */
+/**
+ * 头部右侧那一格的文字：上次真正使用（开过阀）的时刻。
+ *
+ * 没使用过就显示占位符，**不写"从未使用"**：那句话是从 `last_used_at` 为空推断出来的，
+ * 而它与"这台设备刚接入、还没上报过"是同一份数据；断言"从未"是把我们读不出来的事
+ * 说成一个事实。
+ */
 function lastUsedText(door) {
-  return fmtDateTime(door.last_used_at) || LAST_USED_NEVER
+  return fmtDateTime(door.last_used_at)
 }
 
 function fieldValue(door, field) {
@@ -219,8 +222,8 @@ function renderDoors(doors) {
       current.set(door.door_no, door.state)
       const changed = previousStates.has(door.door_no) && previousStates.get(door.door_no) !== door.state
       const fields = DOOR_FIELDS[door.state] || []
-      // 学号只在占用中显示：喷头空闲时设备已把它清零，那一行只会是 `--`
-      const certLine = OCCUPIED.has(door.state) ? `<div class="door-cert mono">${esc(door.cert_no || '--')}</div>` : ''
+      // 学号只在占用中显示：喷头空闲时设备已把它清零，那一行只会是占位符
+      const certLine = OCCUPIED.has(door.state) ? `<div class="door-cert mono">${esc(door.cert_no || PLACEHOLDER)}</div>` : ''
       const grid = fields.length
         ? `<div class="door-grid">${fields.map((f) => doorCell(door, f)).join('')}</div>`
         : ''
