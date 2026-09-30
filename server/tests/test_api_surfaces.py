@@ -102,15 +102,21 @@ def test_stream_pushes_door_update(client: TestClient) -> None:
 def test_shadow_user_and_admin_views(client: TestClient) -> None:
     from app.modules.devices import repository as devices_repository
 
-    devices_repository.register("dev-shadow-1", "0.2.4", 6, "4.4.4", [], "127.0.0.1")
+    devices_repository.register("dev-shadow-1", "0.2.4", 6, "4.4.4", ["session.assign"], "127.0.0.1")
     user_view = client.get("/api/v1/devices/dev-shadow-1/shadow")
     assert user_view.status_code == 200
-    assert user_view.json()["reported"]["device"]["app_version"] == "0.2.4"
+    # 用户面直接返回 reported，不再多包一层 device_id（路径里已有，device 里也有）
+    reported = user_view.json()
+    assert set(reported) == {"device", "doors"}
+    assert reported["device"]["app_version"] == "0.2.4"
+    assert reported["device"]["capabilities"] == ["session.assign"]
 
     admin_view = client.get("/admin/devices/dev-shadow-1/shadow", headers=_admin(client))
     assert admin_view.status_code == 200
     doc = admin_view.json()
     assert set(doc) == {"reported", "desired", "metadata"}
+    # 两处的 reported 必须是同一形状，否则客户端要为它们各写一套解析
+    assert doc["reported"] == reported
     assert doc["desired"]["config"]["heartbeat_interval_s"] == 30
 
     assert client.get("/api/v1/devices/dev-none/shadow").status_code == 404

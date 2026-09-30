@@ -9,7 +9,6 @@ cert_no/password 是浴室系统的业务凭证：随操作参数直传设备，
 """
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.core.problems import DEVICE_BUSY, DOOR_NOT_FREE, DUPLICATE_SESSION, NO_OCCUPIED_DOOR, ApiProblemError
@@ -21,30 +20,13 @@ from app.modules.devices.dependencies import require_trusted_online_device
 from app.modules.doors import repository as doors_repository
 from app.modules.doors import service as doors_service
 from app.modules.sessions import repository
-from app.modules.sessions.service import CommandOutcome
+from app.modules.sessions.schemas import AssignRequest, CommandOutcome, PhotoRequest, SettleRequest
 
 from . import service
 
 router = APIRouter(prefix="/api/v1", tags=["sessions"])
 
 admin_router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)], tags=["sessions-admin"])
-
-
-class AssignRequest(BaseModel):
-    device_id: str = Field(min_length=8)
-    door_no: int = Field(ge=1)
-    cert_no: str = Field(min_length=1)
-    password: str = Field(min_length=1)
-
-
-class SettleRequest(BaseModel):
-    device_id: str = Field(min_length=8)
-    cert_no: str = Field(min_length=1)
-    password: str = Field(min_length=1)
-
-
-class PhotoRequest(BaseModel):
-    device_id: str = Field(min_length=8)
 
 
 def _door_state(device_id: str, door_no: int) -> str | None:

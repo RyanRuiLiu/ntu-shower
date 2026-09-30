@@ -6,6 +6,7 @@ from typing import cast
 
 from app.core.db import get_conn
 from app.core.protocol import JsonObject
+from app.modules.doors.schemas import DoorDetail, DoorView
 
 
 def init_tables() -> None:
@@ -163,13 +164,70 @@ _DOOR_LIST_SQL = """
 """
 
 
-def list_doors_with_device(device_id: str | None = None) -> list[JsonObject]:
+def list_doors_with_device(device_id: str | None = None) -> list[DoorView]:
     """喷头现态列表（联设备在线状态与名称）；不指定设备时返回全部设备。"""
     if device_id:
         rows = get_conn().execute(_DOOR_LIST_SQL + " WHERE d.device_id = ? ORDER BY d.door_no", (device_id,)).fetchall()
     else:
         rows = get_conn().execute(_DOOR_LIST_SQL + " ORDER BY d.device_id, d.door_no").fetchall()
-    return [dict(r) for r in rows]
+    return [_as_door_view(row) for row in rows]
+
+
+def list_door_details(device_id: str) -> list[DoorDetail]:
+    """该设备全部喷头的**完整**现态（door_live 的全列）。
+
+    与 `list_doors_with_device` 的区别在用途：那个是面向多设备的列表视图，只取
+    展示必需列；这里供影子文档回答"这台设备现在到底怎么样了"。
+    """
+    rows = (
+        get_conn()
+        .execute(
+            "SELECT door_no, state, card_no, cert_no, acc_no, open_time, in_time,"
+            " close_time, bath_time_s, status_raw, reported_at"
+            " FROM door_live WHERE device_id = ? ORDER BY door_no",
+            (device_id,),
+        )
+        .fetchall()
+    )
+    return [_as_door_detail(row) for row in rows]
+
+
+def _as_door_detail(row: Row) -> DoorDetail:
+    detail: DoorDetail = {
+        "door_no": row["door_no"],
+        "state": row["state"],
+        "card_no": row["card_no"],
+        "cert_no": row["cert_no"],
+        "acc_no": row["acc_no"],
+        "open_time": row["open_time"],
+        "in_time": row["in_time"],
+        "close_time": row["close_time"],
+        "bath_time_s": row["bath_time_s"],
+        "status_raw": row["status_raw"],
+        "reported_at": row["reported_at"],
+    }
+    return detail
+
+
+def _as_door_view(row: Row) -> DoorView:
+    """把行转成 DoorView 形状。
+
+    SQLite 用 0/1 存布尔，直接透出会让字段的实际类型与声明不符（devices 模块
+    一直在做这个转换，本模块此前漏了）。LEFT JOIN 无匹配时为 NULL，保持 NULL
+    而不是折成 False——"设备记录不存在"与"设备离线"不是一回事。
+    """
+    view: DoorView = {
+        "device_id": row["device_id"],
+        "door_no": row["door_no"],
+        "state": row["state"],
+        "card_no": row["card_no"],
+        "cert_no": row["cert_no"],
+        "bath_time_s": row["bath_time_s"],
+        "reported_at": row["reported_at"],
+        "device_online": None if row["device_online"] is None else bool(row["device_online"]),
+        "device_name": row["device_name"],
+    }
+    return view
 
 
 def get_active_by_cert(device_id: str, cert_no: str) -> Row | None:

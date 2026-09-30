@@ -9,10 +9,11 @@ from pydantic import BaseModel, Field
 from app.core.protocol import JsonObject
 from app.core.security import require_admin
 from app.modules.sessions import service as sessions_service
-from app.modules.sessions.service import CommandOutcome
+from app.modules.sessions.schemas import CommandOutcome
 
 from . import service
 from .dependencies import require_trusted_online_device
+from .schemas import DeviceRecord
 
 admin_router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)], tags=["devices-admin"])
 
@@ -30,7 +31,7 @@ class DeviceExecRequest(BaseModel):
 
 
 @admin_router.get("/devices")
-def list_devices() -> list[JsonObject]:
+def list_devices() -> list[DeviceRecord]:
     return service.list_devices()
 
 

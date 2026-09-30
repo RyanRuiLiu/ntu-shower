@@ -1,0 +1,38 @@
+refactor(server): 契约集中到 schemas 层，用户面端点全部显式化
+
+## 问题
+
+同一类契约散在两处：请求模型写在 routes.py，响应模型（CommandOutcome）却写在
+service.py。用户面 7 个端点里有 6 个返回无类型的 JsonObject，OpenAPI 里就是
+`object`——前端拿不到字段名与类型，只能手抄一遍，小程序和 H5 还要各抄一次。
+
+## 改动
+
+- 每个受影响模块新增 schemas.py，请求与响应模型集中一处；requests 用 Pydantic
+  承担校验，responses 用 TypedDict（零开销，FastAPI 同样生成 schema）
+- 用户面 7 个端点全部显式化：DoorView / CommandOutcome / CapabilityList /
+  GrantedIdentity / ShadowReported / DeviceShadow
+- 跨模块复用而非重列字段：影子文档的 reported 直接用 DeviceRecord 与 DoorDetail
+
+## 连带修正的不一致
+
+- devices.repository：get 与 list_all 各写一遍的字段转换与列清单，收敛为
+  _as_device + _DEVICE_COLUMNS
+- shadow.service：自己写了两条 SELECT，与 devices/doors 领域重复，其中设备那份
+  还少取 capabilities 与 last_ip，导致影子文档看不全设备能力
+- doors.repository：list_doors_with_device 未把 SQLite 的 0/1 转成布尔，导致
+  device_online 的实际类型与声明不符（devices 模块一直在转）
+- doors 的门读模型按用途拆成两个：DoorView（多设备列表视图，只取展示必需列）
+  与 DoorDetail（单设备完整现态，含 acc_no/open_time 等）
+- 用户面影子的响应去掉冗余外层 device_id：路径里已有、reported.device 里也有
+
+## 保留的一处容错
+
+devices 的 capabilities 解析容错在改动中一度被我删除，但它是既有的输入健壮性
+保护（有两个测试专门覆盖），不是"兼容旧版本"的兼容代码，已恢复并收紧类型。
+
+## 验证
+
+ruff / mypy --strict 全通过；188 passed；覆盖率 96.95%；
+OpenAPI 审计：用户面 7/7 端点为显式 schema，其余 18 个开放式集中在管理面与
+OTA 设备面（待配置元数据化定形后再做）。

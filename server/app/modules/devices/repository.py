@@ -1,9 +1,18 @@
 """设备注册表：设备档案（身份/信任/版本/在线状态）的持久化与查询。"""
 
 import json
+from sqlite3 import Row
 
+from app.core.clock import now_rfc3339
 from app.core.db import get_conn
-from app.core.protocol import JsonObject
+
+from .schemas import DeviceRecord
+
+#: 读模型的列清单。列名只在此处出现一次，避免两条查询各写一遍后逐渐分叉。
+_DEVICE_COLUMNS = (
+    "device_id, name, trusted, app_version, version_code, os_version,"
+    " capabilities, online, last_seen_at, last_ip"
+)
 
 
 def init_tables() -> None:
@@ -25,42 +34,14 @@ def init_tables() -> None:
     )
 
 
-def get(device_id: str) -> JsonObject | None:
-    row = (
-        get_conn()
-        .execute(
-            "SELECT device_id, name, trusted, app_version, version_code, os_version,"
-            " capabilities, online, last_seen_at, last_ip FROM devices WHERE device_id = ?",
-            (device_id,),
-        )
-        .fetchone()
-    )
-    if row is None:
-        return None
-    device = dict(row)
-    device["trusted"] = bool(device["trusted"])
-    device["online"] = bool(device["online"])
-    device["capabilities"] = _load_json(device["capabilities"])
-    return device
+def get(device_id: str) -> DeviceRecord | None:
+    row = get_conn().execute(f"SELECT {_DEVICE_COLUMNS} FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+    return _as_device(row) if row is not None else None
 
 
-def list_all() -> list[JsonObject]:
-    rows = (
-        get_conn()
-        .execute(
-            "SELECT device_id, name, trusted, app_version, version_code, os_version, capabilities,"
-            " online, last_seen_at, last_ip FROM devices ORDER BY last_seen_at DESC"
-        )
-        .fetchall()
-    )
-    devices = []
-    for row in rows:
-        device = dict(row)
-        device["trusted"] = bool(device["trusted"])
-        device["online"] = bool(device["online"])
-        device["capabilities"] = _load_json(device["capabilities"])
-        devices.append(device)
-    return devices
+def list_all() -> list[DeviceRecord]:
+    rows = get_conn().execute(f"SELECT {_DEVICE_COLUMNS} FROM devices ORDER BY last_seen_at DESC").fetchall()
+    return [_as_device(row) for row in rows]
 
 
 def register(
@@ -68,12 +49,10 @@ def register(
     app_version: str,
     version_code: int,
     os_version: str,
-    capabilities: list[object],
+    capabilities: list[str],
     ip: str,
 ) -> None:
     """上线登记：只覆盖版本/能力/在线/时间，绝不触碰 name 与 trusted。"""
-    from app.core.clock import now_rfc3339
-
     conn = get_conn()
     conn.execute(
         """
@@ -95,8 +74,6 @@ def register(
 
 
 def set_offline(device_id: str) -> None:
-    from app.core.clock import now_rfc3339
-
     conn = get_conn()
     conn.execute(
         "UPDATE devices SET online = 0, last_seen_at = ? WHERE device_id = ?",
@@ -123,10 +100,38 @@ def set_trusted(device_id: str, trusted: bool) -> bool:
     return cur.rowcount > 0
 
 
-def _load_json(raw: str) -> list[object]:
-    """解析 capabilities 列；内容损坏时视为空能力集（不让脏数据拖垮注册）。"""
+def _as_device(row: Row) -> DeviceRecord:
+    """把行转成 DeviceRecord。
+
+    SQLite 以 0/1 存布尔、以 JSON 文本存数组，转换集中在此：`get` 与 `list_all`
+    此前各写一遍，改一处就会漏另一处。
+    """
+    device: DeviceRecord = {
+        "device_id": row["device_id"],
+        "name": row["name"],
+        "trusted": bool(row["trusted"]),
+        "app_version": row["app_version"],
+        "version_code": row["version_code"],
+        "os_version": row["os_version"],
+        "capabilities": _load_capabilities(row["capabilities"]),
+        "online": bool(row["online"]),
+        "last_seen_at": row["last_seen_at"],
+        "last_ip": row["last_ip"],
+    }
+    return device
+
+
+def _load_capabilities(raw: str) -> list[str]:
+    """解析 capabilities 列；内容损坏或不是数组时视为空能力集。
+
+    这是输入健壮性而非兼容代码：该列的内容源自设备上报，写库前虽经 json.dumps，
+    但库被手工改动后若在此抛错，会让整台设备的注册流程整体失败；空能力集只会
+    让能力校验按"未声明"处理（见 sessions 的能力预检）。
+    """
     try:
         value = json.loads(raw)
     except json.JSONDecodeError:
         return []
-    return value if isinstance(value, list) else []
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value]
