@@ -47,10 +47,16 @@ def test_error_frame_is_flat_payload() -> None:
 
 
 def test_unregistered_status_gets_a_generated_problem_type() -> None:
-    """框架抛出的未登记状态码：按状态码生成 type，标题取自标准短语。"""
-    assert errors._unregistered(599).title == "error"
-    assert errors._unregistered(404).title == "Not Found"
+    """框架抛出的未登记状态码：按状态码生成 type，文案统一为可展示的中文。
+
+    不按状态码维护中文短语——那只是复刻 HTTP 标准表，而这些问题的使用者
+    视角没有区别（都是"请求本身打错了"）。状态码本身在 status 成员里。
+    """
     assert errors._unregistered(404).code == "http-404"
+    assert errors._unregistered(599).code == "http-599"
+    assert errors._unregistered(404).status == 404
+    assert errors._unregistered(404).title == "请求失败"
+    assert errors._unregistered(599).title == "请求失败"
 
 
 # ── 安全原语 ──

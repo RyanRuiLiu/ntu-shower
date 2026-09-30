@@ -1,6 +1,6 @@
 # 0039. 前端技术栈：Taro + React + Vite，接受 Vite 4 约束
 
-* 状态：accepted
+* 状态：superseded（**前端工程已删除**，见文末。服务端契约为任何前端保留）
 * 日期：2026-09-30
 
 ## 背景与问题
@@ -82,7 +82,24 @@ Vite 官方政策是「只保最近一个主版本，更早的仅在安全问题
 3. 需要 Taro 不支持的端（支付宝小程序、RN 等）→ 那时再评估框架选型
 4. Vite 4 的某项限制确实挡住需求 → 目前无此情况
 
+## 后续：前端工程已删除
+
+技术选型本身未走到需要推翻的一步，但**工程最终被移除**——投入产出不成比例：
+跨端框架的接入成本（Vite 版本约束、组件库与测试环境的摩擦、两端构建差异）
+相对于本项目所需的两个页面而言过高。用户端沿用既有的零构建静态页即可。
+
+**这次尝试的产出没有浪费**，以下改进独立于前端而保留：
+
+* **`DoorState` 枚举**（`server/app/modules/doors/schemas.py`）：把喷头状态从裸字符串
+  变成受约束的类型，让 OpenAPI 能生成联合类型。这是**契约质量的提升**，
+  任何客户端都受益
+* **`Problem.title` 中文**（`server/app/core/problems.py`）：服务端直接返回可展示的
+  文案，不再需要客户端做一层翻译
+* **`docs/CONTENT.md`**：设备端与服务端的术语统一
+
+因此本条记录保留：它解释了「服务端为何有这些面向客户端的设施」，
+也避免将来重新评估时再踩一遍 Vite 版本约束与组件库接入的坑。
+
 ## 相关
 
-- `web/package.json` · `web/vitest.config.ts` · `web/tsconfig.json`
-- docs/STANDARDS.md §1（工具链） · docs/ARCHITECTURE.md
+- `docs/CONTENT.md` · `server/app/modules/doors/schemas.py` · `server/app/core/problems.py`
