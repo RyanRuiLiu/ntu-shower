@@ -13,6 +13,7 @@
  * 下架是紧急止损：发出去才发现有问题时，用它终止后续设备继续安装。
  */
 import { api } from '../core/api.js'
+import { fmtFullDateTime } from '../core/clock.js'
 import { $, disposer, esc, listen } from '../core/dom.js'
 import { store } from '../core/store.js'
 import { toast } from '../core/toast.js'
@@ -37,7 +38,7 @@ function render(list) {
         <td>${item.force ? '<span class="badge badge-amber">强制</span>' : ''}${item.mandatory ? '<span class="badge badge-blue">必需</span>' : ''}</td>
         <td>${esc(item.target)}</td>
         <td class="mono muted" title="${esc(item.sha256)}">${esc(item.sha256.slice(0, 12))}…</td>
-        <td class="mono">${esc(new Date(item.created_at).toLocaleString('zh-CN', { hour12: false }))}</td>
+        <td class="mono">${esc(fmtFullDateTime(item.created_at))}</td>
         <td>
           <div class="btn-row">
             <button type="button" class="btn btn-ghost btn-sm" data-act="rearm">重推</button>
@@ -48,7 +49,7 @@ function render(list) {
     )
     .join('')
   $('releaseTable').innerHTML = `<table class="table"><thead><tr>
-      <th>版本</th><th>版本号</th><th>标记</th><th>目标</th><th>摘要</th><th>发布时间</th><th>操作</th>
+      <th>版本名</th><th>版本号</th><th>标记</th><th>目标</th><th>摘要</th><th>发布时间</th><th>操作</th>
     </tr></thead><tbody>${rows}</tbody></table>`
 }
 
@@ -65,7 +66,7 @@ async function upload() {
   const version = $('inVersion').value.trim()
   const versionCode = Number($('inVersionCode').value)
   if (!file || !version || !Number.isFinite(versionCode)) {
-    report('releaseResult', '需要 APK 文件、版本号与版本号数值', 'err')
+    report('releaseResult', '请选择 APK 文件，并填写版本名与版本号', 'err')
     return
   }
   const form = new FormData()
@@ -108,11 +109,11 @@ export const releasesView = {
         <div class="panel-body">
           <div class="grid grid-3">
             <div class="field">
-              <label for="inVersion">版本号（形如 0.3.16）</label>
+              <label for="inVersion">版本名（形如 0.3.16）</label>
               <input id="inVersion" type="text" placeholder="0.3.16">
             </div>
             <div class="field">
-              <label for="inVersionCode">版本号数值（必须递增）</label>
+              <label for="inVersionCode">版本号（整数，必须递增）</label>
               <input id="inVersionCode" type="number" min="1" placeholder="23">
             </div>
             <div class="field">
@@ -121,8 +122,8 @@ export const releasesView = {
             </div>
           </div>
           <div class="field">
-            <label for="inTarget">目标（留空为全部设备，或填设备 id）</label>
-            <input id="inTarget" type="text" placeholder="留空 = 全部">
+            <label for="inTarget">目标（留空为全部设备，或填设备 ID）</label>
+            <input id="inTarget" type="text" placeholder="留空表示全部">
           </div>
           <label class="field-row" style="margin-bottom:12px">
             <input id="inForce" type="checkbox">

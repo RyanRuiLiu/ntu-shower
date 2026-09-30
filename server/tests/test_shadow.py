@@ -28,7 +28,7 @@ def test_get_reported_unknown_device(shadow_db: ModuleType) -> None:
 
 def test_get_reported_merges_device_and_doors(shadow_db: ModuleType) -> None:
 
-    devices_repository.register("dev-s1", "0.2.3", 5, "4.4.4", [], "127.0.0.1")
+    devices_repository.register("dev-s1", "0.2.3", 5, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
     doors_service.process_snapshot(
         "dev-s1",
         {
@@ -56,7 +56,7 @@ def test_get_reported_merges_device_and_doors(shadow_db: ModuleType) -> None:
 
 def test_get_shadow_desired_reflects_override(shadow_db: ModuleType) -> None:
 
-    devices_repository.register("dev-s2", "0.2.3", 5, "4.4.4", [], "127.0.0.1")
+    devices_repository.register("dev-s2", "0.2.3", 5, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
     config_store.put_device_overrides("dev-s2", {"heartbeat_interval_s": 10})
     shadow = shadow_service.get_shadow("dev-s2")
     assert shadow["desired"]["config"]["heartbeat_interval_s"] == 10

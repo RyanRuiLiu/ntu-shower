@@ -19,7 +19,7 @@
  * 凭证与分配时间。
  */
 import { api } from '../core/api.js'
-import { fmtDateTime, fmtTime, serverNowMs } from '../core/clock.js'
+import { elapsedSince, fmtDateTime, fmtDuration, fmtTime } from '../core/clock.js'
 import { DOOR_STATES } from '../core/contract.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
 import { outcomeText, problemText } from '../core/outcome.js'
@@ -59,26 +59,6 @@ const KPI = [
   { key: 'bathing', label: '淋浴中', tone: 'tone-amber' },
   { key: 'paused', label: '已暂停', tone: 'tone-orange' },
 ]
-
-/**
- * 秒 → `2m30s` / `45s`，与小程序 `formatDuration` 一致。
- *
- * 零值给 `0s` 而不是占位符：这个函数只在需要显示时长时被调用，一个刚分配的门
- * 确实是"0 秒"，写成 `--` 会让它看起来像缺数据。
- */
-function fmtDuration(seconds) {
-  const total = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0
-  const minutes = Math.floor(total / 60)
-  const rest = total % 60
-  return minutes > 0 ? `${minutes}m${String(rest).padStart(2, '0')}s` : `${rest}s`
-}
-
-/** 从某时刻到服务端此刻的秒数。 */
-function elapsedSince(from) {
-  if (!from) return 0
-  const at = new Date(from).getTime()
-  return Number.isNaN(at) ? 0 : Math.max(0, (serverNowMs() - at) / 1000)
-}
 
 /** 上一次渲染时各喷头的状态，用于判断"这个喷头刚变了"。 */
 let previousStates = new Map()
@@ -277,7 +257,7 @@ function credentials() {
   const certNo = $('inSid').value.trim()
   const password = $('inPwd').value
   if (!certNo || !password) {
-    report('resAction', '需要学号与密码', 'err')
+    report('resAction', '请填写学号与密码', 'err')
     return null
   }
   return { cert_no: certNo, password }
@@ -367,11 +347,11 @@ export const overviewView = {
           <div class="act-title">分配 / 结算</div>
           <div class="fld">
             <label for="inDoor">喷头编号（仅分配时需要）</label>
-            <input id="inDoor" type="number" min="1" placeholder="例：1">
+            <input id="inDoor" type="number" min="1" placeholder="例如：1">
           </div>
           <div class="fld">
             <label for="inSid">学号</label>
-            <input id="inSid" type="text" placeholder="例：2530110052">
+            <input id="inSid" type="text" placeholder="例如：2530110052">
           </div>
           <div class="fld">
             <label for="inPwd">密码</label>

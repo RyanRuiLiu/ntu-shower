@@ -38,12 +38,26 @@
     <span id="deviceText">设备离线</span>
   </div>
 
+  <!--
+    右半部分分两组，中间用一条竖线隔开：
+
+    - 左组是**关于被控设备**的：设备的身份、版本、地址。
+    - 右组是**关于本页与服务端之间那条链路**的：实时通道通不通、访问令牌、服务端时钟。
+
+    两组的失效含义完全不同——设备离线说明那台机器有问题，实时断开说明要么网络要么服务端
+    有问题。混在一起看，排障时第一步就得先分辨"我现在看到的是哪一类故障"。
+  -->
   <div class="bar-right">
-    <span class="badge badge-red" id="streamChip">断开</span>
-    <button type="button" class="btn btn-ghost btn-sm" id="btnDeviceInfo" aria-expanded="false">设备信息</button>
-    <button type="button" class="btn btn-ghost btn-sm" id="btnToken">令牌</button>
-    <span id="clock" class="bar-mono">--:--:--</span>
-    <div class="info-panel" id="deviceInfo" hidden></div>
+    <div class="bar-group">
+      <button type="button" class="btn btn-ghost btn-sm" id="btnDeviceInfo" aria-expanded="false">设备信息</button>
+      <div class="info-panel" id="deviceInfo" hidden></div>
+    </div>
+
+    <div class="bar-group">
+      <span class="badge badge-red" id="streamChip">断开</span>
+      <button type="button" class="btn btn-ghost btn-sm" id="btnToken">令牌</button>
+      <span id="clock" class="bar-mono">--:--:--</span>
+    </div>
   </div>
 </div>
 

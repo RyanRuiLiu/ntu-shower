@@ -11,6 +11,7 @@
  * 搜，翻译成中文反而搜不到。
  */
 import { api } from '../core/api.js'
+import { fmtFullDateTime } from '../core/clock.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
 import { statusBadgeClass, statusLabel } from '../core/outcome.js'
 import { store, subscribe } from '../core/store.js'
@@ -41,7 +42,7 @@ function render(rows) {
       .map(
         (row) => `
       <tr>
-        <td class="mono">${esc(new Date(row.created_at).toLocaleString('zh-CN', { hour12: false }))}</td>
+        <td class="mono">${esc(fmtFullDateTime(row.created_at))}</td>
         <td class="mono">${esc(row.device_id)}</td>
         <td class="mono">${esc(row.action)}</td>
         <td>${statusBadge(row.status)}</td>

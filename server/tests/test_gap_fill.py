@@ -38,7 +38,7 @@ def _hello(device_id: str) -> str:
 def _connect_trusted(client: TestClient, device_id: str) -> WebSocketTestSession:
     from app.modules.devices import repository as devices_repository
 
-    devices_repository.register(device_id, "0.2.5", 7, "4.4.4", [], "127.0.0.1")
+    devices_repository.register(device_id, "0.2.5", 7, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
     with client.websocket_connect("/gateway/device") as ws:
         ws.send_text(_hello(device_id))
         while json.loads(ws.receive_text()).get("type") != "link.hello_ack":
@@ -61,7 +61,7 @@ def test_bridge_close_with_active_session(client: TestClient, monkeypatch: pytes
     from app.modules.devices import repository as devices_repository
 
     device_id = "dev-bridge-close"
-    devices_repository.register(device_id, "0.2.5", 7, "4.4.4", [], "127.0.0.1")
+    devices_repository.register(device_id, "0.2.5", 7, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
     devices_repository.set_trusted(device_id, True)
     monkeypatch.setattr(manager_module.manager, "_connections", {device_id: FakeGatewayWS()})
 
@@ -93,7 +93,7 @@ def test_auto_settle_scan_offline_device(client: TestClient, monkeypatch: pytest
 
     from app.modules.devices import repository as devices_repository
 
-    devices_repository.register("dev-as-off", "0.2.5", 7, "4.4.4", [], "127.0.0.1")
+    devices_repository.register("dev-as-off", "0.2.5", 7, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
     started = (
         (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat(timespec="milliseconds").replace("+00:00", "Z")
     )
@@ -143,7 +143,7 @@ def test_devices_repository_capabilities_non_list(client: TestClient) -> None:
     """capabilities 存成非数组时读为空列表。"""
     from app.modules.devices import repository as devices_repository
 
-    devices_repository.register("dev-bad-cap", "0.2.5", 7, "4.4.4", {"not": "a list"}, "x")
+    devices_repository.register("dev-bad-cap", "0.2.5", 7, "4.4.4", {"not": "a list"}, "x", "2026-06-01T08:00:00.000Z")
     device = devices_repository.get("dev-bad-cap")
     assert device["capabilities"] == []
 
@@ -152,7 +152,7 @@ def test_devices_service_offline_marks_row(client: TestClient) -> None:
     from app.modules.devices import repository as devices_repository
     from app.modules.devices import service as devices_service
 
-    devices_repository.register("dev-off-2", "0.2.5", 7, "4.4.4", [], "127.0.0.1")
+    devices_repository.register("dev-off-2", "0.2.5", 7, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
     devices_service.set_device_offline("dev-off-2")
     assert devices_repository.get("dev-off-2")["online"] is False
 
@@ -168,7 +168,7 @@ def test_devices_repository_capabilities_corrupt_json(client: TestClient) -> Non
     from app.core.db import get_conn
     from app.modules.devices import repository as devices_repository
 
-    devices_repository.register("dev-corrupt", "0.2.5", 7, "4.4.4", [], "127.0.0.1")
+    devices_repository.register("dev-corrupt", "0.2.5", 7, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
     get_conn().execute("UPDATE device SET capabilities = '{broken' WHERE device_id = 'dev-corrupt'")
     get_conn().commit()
     assert devices_repository.get("dev-corrupt")["capabilities"] == []

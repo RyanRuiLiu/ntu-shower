@@ -44,6 +44,7 @@ SAMPLES: dict[str, dict] = {
             "app_version": "0.2.4",
             "os_version": "4.4.4",
             "capabilities": ["session.assign"],
+            "uptime_s": 45176,
         }
     },
     "link.hello_ack": {

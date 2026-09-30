@@ -26,7 +26,7 @@ def _setup(monkeypatch: pytest.MonkeyPatch, device_id: str) -> FakeWS:
     return ws
 
 
-def test_send_command_and_wait_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_send_command_and_wait_ok(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
     device_id = "dev-x"
     ws = _setup(monkeypatch, device_id)
 
@@ -46,7 +46,7 @@ def test_send_command_and_wait_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result["terminal_message"] == "已分配"
 
 
-def test_send_command_offline(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_send_command_offline(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
     _setup(monkeypatch, "dev-x")
     monkeypatch.setattr(manager_module.manager, "_connections", {})  # 设备不在线
 
@@ -62,7 +62,7 @@ def test_send_command_offline(monkeypatch: pytest.MonkeyPatch) -> None:
     }
 
 
-def test_send_command_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_send_command_timeout(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
     _setup(monkeypatch, "dev-x")  # 在线但不回报
 
     async def flow() -> dict:

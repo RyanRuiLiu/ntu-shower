@@ -82,6 +82,23 @@ export function setOnline(online) {
   emit('online', online)
 }
 
+/**
+ * 收到网关的上下线通知。
+ *
+ * **两处都要改**：`store.online`（当前设备，供顶栏那盏灯）与 `store.devices` 里对应
+ * 那台的 `online` 字段（供设备下拉里的"（在线）"）。只改前者，下拉项就会与紧挨着它的
+ * 那盏灯互相矛盾——清单是每 30 秒拉一次，两处各说各话最长能持续半分钟，而看的人没有
+ * 任何线索能判断该信哪一个。
+ */
+export function setDeviceOnline(deviceId, online) {
+  const device = store.devices.find((item) => item.device_id === deviceId)
+  if (device && device.online !== online) {
+    device.online = online
+    emit('devices', store.devices)
+  }
+  if (deviceId === store.deviceId) setOnline(online)
+}
+
 export function setStreaming(streaming) {
   if (store.streaming === streaming) return
   store.streaming = streaming

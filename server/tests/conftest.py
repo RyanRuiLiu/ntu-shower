@@ -30,6 +30,14 @@ def _reset_process_singletons() -> Iterator[None]:
 
 @pytest.fixture
 def fresh_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+    """换到独立临时库，并**建好全部表**。
+
+    建表不能省：不建的话，没经过 `create_app` 的用例（服务层的纯 asyncio 测试）会连到
+    默认路径 `data/ntu-shower.db`——那是开发库，schema 停留在某个旧版本。症状是
+    "no such column"，看着像代码写错了，实则是测试没建表。
+    """
+    from app.main import init_schema
+
     db_module.close_all_connections()
     path = str(tmp_path / "test.db")
     monkeypatch.setattr(config_module.settings, "db_path", path)
@@ -41,6 +49,7 @@ def fresh_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     monkeypatch.setattr(config_module.settings, "assign_timeout_s", 0.3)
     monkeypatch.setattr(config_module.settings, "settle_timeout_s", 0.3)
     monkeypatch.setattr(config_module.settings, "photo_timeout_s", 0.3)
+    init_schema()
     yield path
     db_module.close_all_connections()
 
