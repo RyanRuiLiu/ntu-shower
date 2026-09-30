@@ -84,12 +84,31 @@ object DeviceMaintenance {
         // 走 command 通道（独占一条常驻 shell）：命令内容由调用方给、不可预期，
         // 与界面操作共用控制通道会让一条慢命令把界面注入一起堵住
         val result = RootShell.command.exec(params.optString("command", ""), EXEC_TIMEOUT_MS)
+
+        // 三种去向分开，别都归到 failed：
+        // - timedOut：超过时限，**不知道成没成**，客户端据此可以决定是否重试
+        // - exitCode 非 0：跑完了、失败了，重试大概还是失败
+        // - exitCode 读不到：命令确实跑完了（输出被截断时会这样），按成功算
+        val status = when {
+            result.timedOut -> "timeout"
+            result.success -> "ok"
+            else -> "failed"
+        }
+        val reasonCode = when {
+            result.timedOut -> "command.deadline_exceeded"
+            result.success -> ""
+            else -> "device.exec_failed"
+        }
+        val message = if (status == "ok") "" else result.output
+
         return CommandOutcome(
             commandId,
-            if (result.success) "ok" else "failed",
-            "",
-            terminalMessage = "",
-            data = JSONObject().put("output", result.output),
+            status,
+            reasonCode,
+            terminalMessage = message,
+            data = JSONObject()
+                .put("output", result.output)
+                .put("exit_code", result.exitCode ?: JSONObject.NULL),
         )
     }
 
