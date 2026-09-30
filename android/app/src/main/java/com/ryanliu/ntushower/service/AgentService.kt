@@ -7,6 +7,7 @@ import android.content.Intent
 import android.os.IBinder
 import android.util.Log
 import com.ryanliu.ntushower.BuildConfig
+import com.ryanliu.ntushower.core.clock.Clock
 import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.identity.DeviceIdentity
 import com.ryanliu.ntushower.core.net.HttpClientFactory
@@ -156,6 +157,23 @@ class AgentService : Service() {
         val payload = envelope.payload
         val action = payload.optString("action", "")
         val params = payload.optJSONObject("params") ?: JSONObject()
+
+        // 过期命令直接拒绝，一步都不执行。
+        //
+        // 服务端按 deadline_ts 计时：超时后它清掉挂起项、把这条记为超时，此时已经不再
+        // 等结果了。设备若照常执行，做出来的操作没有任何人接收——而它是有真实副作用的
+        // （分配会写浴室 App 的库、界面注入会动到别人正在用的会话）。
+        //
+        // 用 rejected 而不是 failed：这条命令**没有产生任何副作用**，服务端据此可以
+        // 安全重试，而 failed 意味着可能已经改了一半。
+        if (Clock.isPast(payload.optString("deadline_ts", ""), DEADLINE_TOLERANCE_MS)) {
+            Log.i(TAG, "command expired, not executed: $action ($commandId)")
+            sendOutcome(
+                CommandOutcome(commandId, "rejected", "command.deadline_exceeded", "命令已过期，未执行"),
+            )
+            return
+        }
+
         Log.i(TAG, "command: $action ($commandId)")
         // 按类别分发。三类互斥，顺序无副作用。
         //
@@ -172,7 +190,7 @@ class AgentService : Service() {
             return
         }
         sendOutcome(
-            CommandOutcome(commandId, "failed", "proto.unknown_action", "unknown action: $action"),
+            CommandOutcome(commandId, "failed", "proto.unknown_action", "设备不认识这个操作：$action"),
         )
     }
 
@@ -318,6 +336,9 @@ class AgentService : Service() {
 
     companion object {
         private const val TAG = "AgentService"
+
+        /** 判定命令过期时的容差，见 [isExpired]。 */
+        private const val DEADLINE_TOLERANCE_MS = 2_000L
 
         /** 首次 OTA 检查的延迟：覆盖安装后尽快对齐版本，之后按配置间隔。 */
         private const val FIRST_OTA_CHECK_DELAY_S = 30L

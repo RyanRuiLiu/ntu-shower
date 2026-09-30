@@ -40,7 +40,22 @@ class ShellChannel(private val name: String) {
     @Volatile
     var maxOutputBytes: Int = Int.MAX_VALUE
 
-    data class Result(val success: Boolean, val output: String)
+    /**
+     * 一次 shell 调用的结果。
+     *
+     * `success` 与 `exitCode` 是两件事：前者说"命令跑完了、标记行读到了"，后者才是
+     * 命令自己的成败。调用方要判断命令是否真的成功，看 `exitCode`。
+     *
+     * `timedOut` 从 `success=false` 里单独拎出来，是为了让上层能回报协议的 `timeout`
+     * 状态而不是笼统的 `failed`——它俩对客户端的意义不同：超时表示"不知道成没成"，
+     * 失败表示"有结论，结论是没成"。
+     */
+    data class Result(
+        val success: Boolean,
+        val output: String,
+        val exitCode: Int? = null,
+        val timedOut: Boolean = false,
+    )
 
     private var process: Process? = null
     private var stdin: DataOutputStream? = null
@@ -79,20 +94,51 @@ class ShellChannel(private val name: String) {
         if (!ensureShell()) {
             return Result(false, "root shell unavailable")
         }
-        val marker = "__DONE_${System.nanoTime()}_${UUID.randomUUID().toString().take(8)}__"
+        val stamp = System.nanoTime()
+        val marker = "__DONE_${stamp}_${UUID.randomUUID().toString().take(8)}__"
+        val codeMarker = "__CODE_${stamp}__"
         return try {
             stdin!!.writeBytes("$command\n")
+            // 退出码必须紧贴着命令取：再晚一步，$? 就被中间任何一条命令覆盖了
+            stdin!!.writeBytes("echo $codeMarker\$?\n")
             stdin!!.writeBytes("echo $marker\n")
             stdin!!.flush()
             when (val output = readUntil(marker, timeoutMs)) {
-                null -> Result(false, "command timed out after ${timeoutMs}ms")
-                else -> Result(true, output)
+                null -> Result(false, "命令超过 ${timeoutMs}ms 未返回", timedOut = true)
+
+                else -> {
+                    val (text, code) = splitExitCode(output, codeMarker)
+                    // 读不到退出码时按成功算：命令确实跑完了，而"没拿到码"不等于"命令失败"。
+                    // 输出被截断时就会这样（码那一行在最末尾，会被裁掉）。
+                    Result(code == null || code == 0, text, code)
+                }
             }
         } catch (e: Exception) {
             // 管道断裂：销毁进程，下次调用重新拉起
             resetShell()
             Result(false, e.message ?: "shell broken")
         }
+    }
+
+    /**
+     * 从输出里摘出退出码，返回（去掉那一行的输出, 退出码）。
+     *
+     * 退出码由紧跟命令的一行 `echo` 打印，因此必然落在输出的末尾；但命令自己的输出
+     * 也可能恰好含同样前缀，所以**从后往前**找第一处匹配，而不是从头找。
+     *
+     * 找不到时返回 null 而不是 0：调用方据此区分"退出码是 0"与"根本没读到退出码"。
+     */
+    private fun splitExitCode(output: String, codeMarker: String): Pair<String, Int?> {
+        val lines = output.lines()
+        for (index in lines.indices.reversed()) {
+            val line = lines[index].trim()
+            if (line.startsWith(codeMarker)) {
+                val code = line.removePrefix(codeMarker).trim().toIntOrNull()
+                val text = lines.filterIndexed { i, _ -> i != index }.joinToString("\n").trimEnd()
+                return text to code
+            }
+        }
+        return output to null
     }
 
     /**
