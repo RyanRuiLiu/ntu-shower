@@ -1,8 +1,10 @@
 package com.ryanliu.ntushower.features.automation
 
+import com.ryanliu.ntushower.service.DeviceMaintenance
 import com.ryanliu.ntushower.transport.SupportedActions
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -129,6 +131,34 @@ class CommandFactoryTest {
         queued.forEach { action ->
             assertTrue("工厂未处理 $action", create(action) != null)
         }
+    }
+
+    @Test
+    fun `every action has a handler on the device`() {
+        // 上一个测试只查「工厂认不认」，而这五个走的是绕开工厂的独立路径。
+        // 这里把它们也钉住：任何一个漏掉，设备收到它都会回 proto.unknown_action——
+        // 那说明能力集合（设备对服务端的自我声明）已经和实现脱节了。
+        val maintenance = setOf(
+            SupportedActions.DEVICE_EXEC,
+            SupportedActions.DEVICE_RESTART,
+            SupportedActions.DEVICE_UNINSTALL,
+        )
+        maintenance.forEach { action ->
+            assertTrue("$action 没有维护类处理器", DeviceMaintenance.handles(action))
+        }
+
+        // bridge.open / bridge.close 是独立的信封类型，由 AgentService 直接分支处理，
+        // 不进命令分发；服务端发出即返回，不等答复。
+        val bridge = setOf(SupportedActions.BRIDGE_OPEN, SupportedActions.BRIDGE_CLOSE)
+        bridge.forEach { action ->
+            assertFalse("$action 不该被当成维护命令", DeviceMaintenance.handles(action))
+            assertNull("$action 不该入队", create(action))
+        }
+
+        // 三条路径合起来必须覆盖全部能力，一个不漏。
+        // filter 出来的是 List，要转回 Set 才能与 ALL 比内容
+        val queued = SupportedActions.ALL.filter { create(it) != null }.toSet()
+        assertEquals(SupportedActions.ALL, queued + maintenance + bridge)
     }
 
     private companion object {
