@@ -21,11 +21,12 @@ NTU 浴室系统二代：寄生代理设备端（Android 4.4.4 老中控）+ 单
 ## 运行模型
 
 - 唯一入口：`https://<public-domain>`（443 统一入口，单张通配符证书，nginx 路径分流）
-- 设备身份：`device_id = ANDROID_ID`，后台人工点"信任"后通信（见 docs/PROTOCOL.md §1）
-- 访问控制：查看类接口无需凭据；操作类需 `X-Identity` 标识 + 能力位（`ops` 分配结算 / `photo` 拍照）；
-  管理员用 `X-Admin-Token`（ADR-0037）。**无注册流程**，管理员经 `/admin/grants` 预置授权
+- 设备身份：`device_id = ANDROID_ID`，后台人工点"信任"后通信（见 protocol/schema/）
+- 访问控制：**按接口面分档，不设角色**。查看类接口无需凭据；操作类需 `X-Identity` 标识
+  + 能力位（`ops` 分配结算 / `photo` 拍照）；管理面用 `X-Ops-Token`（docs/DECISIONS.md）。
+  **无注册流程**，授权经 `/ops/identities` 预置
 - 配置：设备运行参数全部由服务端远程下发，键的类型与范围登记在 `config/spec.py`，设备零本地配置
-- 远程调试：`debug.exec`（root shell）、`screen.capture`（全屏截图）、ADB 桥（零新端口，见 ADR-0035）
+- 远程调试：`device.exec`（root shell）、`screen.capture`（全屏截图）、调试通道（零新端口，见 docs/DECISIONS.md）
 
 ## 快速开始
 
@@ -33,7 +34,7 @@ NTU 浴室系统二代：寄生代理设备端（Android 4.4.4 老中控）+ 单
 # 服务端
 cd server
 python -m venv .venv && .venv/Scripts/pip install -r requirements-dev.txt
-cp .env.example .env          # 必须修改 ADMIN_TOKEN，占位值会被启动自检拒绝
+cp .env.example .env          # 必须修改 OPS_TOKEN，占位值会被启动自检拒绝
 .venv/Scripts/uvicorn app.main:app --reload --port 8000
 
 # 设备端（构建需先复制 android/gradle.properties.example，并向密钥保管方索取签名口令）
@@ -56,7 +57,7 @@ cd android
 ./gradlew detekt :app:lintDebug :app:testDebugUnitTest :app:jacocoUnitTestCoverageVerification
 ```
 
-标准与约束（含豁免清单及其理由）见 [docs/STANDARDS.md](docs/STANDARDS.md)。
-协议变更必须三处同步：`protocol/schema/`、`docs/PROTOCOL.md`、双端实现。
+标准与约束（含豁免清单及其理由）见 [AGENTS.md](AGENTS.md)。
+协议变更必须三处同步：`protocol/schema/`、`protocol/schema/`、双端实现。
 
 **AI 协作者先读 [AGENTS.md](AGENTS.md)**——那里有一屏能读完的入口、门禁与硬约束。

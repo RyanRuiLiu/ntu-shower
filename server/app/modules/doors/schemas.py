@@ -1,7 +1,13 @@
 """喷头领域的 API 契约。
 
-`DoorView` 同时承载"门现态"与"所属设备"两项信息：列表接口要联设备表才能告诉
-前端"这扇门属于哪台设备、那台设备是否在线"，拆成两个模型只会让前端自己拼。
+**只有一个门视图模型**（[DoorView]）。
+
+早先按接口面分过三份（一个藏起学号与时间给查看类接口用、一个不联设备给影子文档用、
+一个联设备且全字段给管理面用）。后果是同一扇门在不同接口里字段不同——前端要写两套
+渲染，排障时还得先想"我看的是哪一份"。
+
+**权限管的是能不能调这个接口，不是返回什么内容。** 所以现在统一：任何返回喷头数据的
+接口给的都是一套字段。
 """
 
 from enum import Enum
@@ -38,46 +44,30 @@ class DoorState(str, Enum):
     """报修：设备标记为待维修。"""
 
     DISABLED = "disabled"
-    """禁用：设备标记为停用。"""
+    """禁用：设备标记为停用（原系统的"疫情管控"，对偶数号喷头生效）。"""
 
 
 #: 占用中的状态（有人）。用于会话维护与自动结算判断。
+#
+# 与旧系统 `t_doorlist` 里 `openTime <> ''` 的语义等价。
 OCCUPIED_STATES = frozenset({DoorState.WAITING, DoorState.BATHING, DoorState.PAUSED})
 
 
 class DoorView(TypedDict):
-    """一扇喷头的现态（联所属设备的在线状态与名称）。
+    """一扇喷头的现态：`door_live` 全列 + 所属设备 + 上次使用。
 
-    字段对应 repository.list_doors_with_device 的 SELECT 列表，改 SQL 时同步改此处。
+    `device_online` / `device_name` 可空：查询用的是 LEFT JOIN，若门现态存在而设备
+    记录不在（理论上不会——门现态正是设备上报的），二者为 NULL。可空是对查询形状的
+    诚实描述，不是预期会发生的情况。
 
-    `device_online` / `device_name` 可空：查询用的是 LEFT JOIN，若门现态存在而
-    设备记录不在（理论上不会——门现态正是设备上报的），二者为 NULL。可空是
-    对查询形状的诚实描述，不是预期会发生的情况。
-
-    隐私提示：`card_no` 与 `cert_no` 是占用者的凭证（学号），面向普通用户的
-    查看接口不应返回它们。
+    `last_used_*` 只在门**没有进行中的会话**时才有展示意义：占用中的门牌显示的是这
+    一次的分配与开阀时间，再挂一行"上次"是噪声。判据是**开过阀**（`opened_at` 非空）
+    而不是洗了多久——分配后直接结算那种从没出过水的不算，而开了阀立刻关的要算。
     """
 
     device_id: str
     door_no: int
     state: DoorState
-    card_no: int
-    cert_no: str
-    bath_time_s: int
-    reported_at: str
-    device_online: bool | None
-    device_name: str | None
-
-
-class DoorDetail(TypedDict):
-    """一扇喷头的**完整**现态（door_live 的全列）。
-
-    与 `DoorView` 的区别在用途：那个要联设备表、一次返回多台设备的门，只取展示
-    必需列；这个供影子文档回答"这台设备现在到底怎么样了"，因此把全列都给出。
-    """
-
-    door_no: int
-    state: str
     card_no: int
     cert_no: str
     acc_no: str
@@ -87,3 +77,14 @@ class DoorDetail(TypedDict):
     bath_time_s: int
     status_raw: int
     reported_at: str
+    device_online: bool | None
+    device_name: str | None
+
+    last_used_at: str
+    """上次开阀时刻（RFC 3339）。从未被真正使用过时为空串。"""
+
+    last_used_s: int
+    """那次会话的出水秒数；从未被真正使用过时为 0。"""
+
+    last_used_cert: str
+    """那次是谁用的（学号）。从未被真正使用过时为空串。"""

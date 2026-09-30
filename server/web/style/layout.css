@@ -1,0 +1,189 @@
+/* 布局：顶栏、导航、视图容器、面板、分区。
+ *
+ * 页面骨架只有这一种：顶栏（导航 + 设备选择 + 状态）→ 视图容器 → 视图内部用面板分区。
+ */
+
+/* ── 顶栏 ───────────────────────────────────────────────── */
+
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: var(--bar-height);
+  padding: 0 var(--sp-4);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+}
+
+/* ── 导航 ───────────────────────────────────────────────── */
+
+.bar-nav {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+}
+
+.bar-nav-item {
+  flex: none;
+  padding: 3px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--dim);
+  font: 600 var(--fs-small) var(--font-ui);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--transition), background var(--transition);
+}
+
+.bar-nav-item:hover {
+  color: var(--text);
+  background: var(--elevated);
+}
+
+.bar-nav-item[aria-current='page'] {
+  color: var(--accent);
+  background: var(--elevated);
+  border-color: var(--border);
+}
+
+/* ── 设备选择：多设备下每个视图都要能切 ───────────────────── */
+
+.device-picker {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding-left: var(--sp-3);
+  border-left: 1px solid var(--border);
+}
+
+.device-picker select {
+  padding: 3px 8px;
+  font-size: var(--fs-small);
+}
+
+/* ── 顶栏右侧 ───────────────────────────────────────────── */
+
+.bar-status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-small);
+}
+
+.bar-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.bar-dot.on {
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+}
+
+.bar-dot.off {
+  background: var(--red);
+}
+
+.bar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-left: auto;
+  font-size: var(--fs-small);
+  color: var(--dim);
+}
+
+.bar-mono {
+  font-family: var(--font-mono);
+}
+
+/* ── 视图容器 ───────────────────────────────────────────── */
+
+.view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-4);
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+/* ── 面板：视图内的分区单位 ─────────────────────────────── */
+
+.panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--elevated);
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-title {
+  font-size: var(--fs-small);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.panel-note {
+  font-size: var(--fs-chip);
+  color: var(--muted);
+}
+
+.panel-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;
+}
+
+.panel-body {
+  padding: var(--sp-3);
+}
+
+.panel-body.flush {
+  padding: 0;
+}
+
+/* ── 网格：面板内并排两块 ───────────────────────────────── */
+
+.grid {
+  display: grid;
+  gap: var(--sp-4);
+}
+
+.grid-2 {
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+}
+
+.grid-3 {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+/* 主区 + 侧栏：界面检视这类"左边看、右边操作"的布局 */
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 420px;
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+@media (width <= 1200px) {
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

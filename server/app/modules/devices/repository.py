@@ -10,8 +10,7 @@ from .schemas import DeviceRecord
 
 #: 读模型的列清单。列名只在此处出现一次，避免两条查询各写一遍后逐渐分叉。
 _DEVICE_COLUMNS = (
-    "device_id, name, trusted, app_version, version_code, os_version,"
-    " capabilities, online, last_seen_at, last_ip"
+    "device_id, name, trusted, app_version, version_code, os_version, capabilities, online, last_seen_at, last_ip"
 )
 
 
@@ -124,7 +123,7 @@ def _as_device(row: Row) -> DeviceRecord:
 def _load_capabilities(raw: str) -> list[str]:
     """解析 capabilities 列；内容损坏或不是数组时视为空能力集。
 
-    这是输入健壮性而非兼容代码：该列的内容源自设备上报，写库前虽经 json.dumps，
+    这是输入健壮性：该列的内容源自设备上报，写库前虽经 json.dumps，
     但库被手工改动后若在此抛错，会让整台设备的注册流程整体失败；空能力集只会
     让能力校验按"未声明"处理（见 sessions 的能力预检）。
     """

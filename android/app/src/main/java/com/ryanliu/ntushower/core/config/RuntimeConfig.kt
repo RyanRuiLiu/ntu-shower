@@ -25,7 +25,7 @@ object RuntimeConfig {
      * 时长与计数的下限：0 会让定时任务立即重复触发。
      *
      * 只对"间隔/超时/窗口/计数"这类键使用。`ui_click_delay_ms` 与
-     * `report_debounce_ms` 的 0 是有意义的取值（不等待、不合并），服务端的
+     * `door_report_debounce_ms` 的 0 是有意义的取值（不等待、不合并），服务端的
      * 范围下界也是 0，不加钳制。
      */
     private const val MIN_POSITIVE = 1L
@@ -73,6 +73,19 @@ object RuntimeConfig {
     @Volatile var uiClickDelayMs = 200L
         private set
 
+    // 界面节点树单次导出的节点上限。超出即截断——上限同时决定回传体积，
+    // 因此按实测的协议帧容量调整，而不是写死在代码里。
+    @Volatile var uiDumpMaxNodes = 2_000L
+        private set
+
+    // 滑动手势从按下到抬起的时长；过短会被识别成快速抛掷而非拖动。
+    @Volatile var uiSwipeDurationMs = 300L
+        private set
+
+    // device.exec 单次回传的最大字节数，超出即截断。
+    @Volatile var deviceExecMaxOutputBytes = 32_768L
+        private set
+
     // ── OTA ──
     @Volatile var otaCheckIntervalS = 3600
         private set
@@ -93,7 +106,7 @@ object RuntimeConfig {
     /**
      * 键 → 应用函数映射表：新增配置键只需加一行（复杂度不随键数增长）。
      *
-     * 每个时长与计数取值都经 atLeastOne 兜底：见类注释的"取值下限"。
+     * 每个时长与计数取值都经 atLeastOne 取下限：见类注释的"取值下限"。
      */
     private val appliers: Map<String, (JSONObject) -> Unit> = mapOf(
         "heartbeat_interval_s" to
@@ -104,32 +117,41 @@ object RuntimeConfig {
             { c -> reconnectMaxMs = atLeastOne(c.optLong("reconnect_max_ms", reconnectMaxMs)) },
         "watchdog_interval_s" to
             { c -> watchdogIntervalS = atLeastOne(c.optLong("watchdog_interval_s", watchdogIntervalS)) },
-        "report_debounce_ms" to
-            { c -> reportDebounceMs = c.optLong("report_debounce_ms", reportDebounceMs) },
+        "door_report_debounce_ms" to
+            { c -> reportDebounceMs = c.optLong("door_report_debounce_ms", reportDebounceMs) },
         "overlay_enabled" to { c -> overlayEnabled = c.optBoolean("overlay_enabled", overlayEnabled) },
         "overlay_message" to { c -> overlayMessage = c.optString("overlay_message", overlayMessage) },
-        "server_response_timeout_ms" to
+        "bath_response_timeout_ms" to
             { c ->
-                serverResponseTimeoutMs = atLeastOne(c.optLong("server_response_timeout_ms", serverResponseTimeoutMs))
+                serverResponseTimeoutMs = atLeastOne(c.optLong("bath_response_timeout_ms", serverResponseTimeoutMs))
             },
-        "id_verify_wait_ms" to
-            { c -> idVerifyWaitMs = atLeastOne(c.optLong("id_verify_wait_ms", idVerifyWaitMs)) },
-        "home_budget_ms" to
-            { c -> homeBudgetMs = atLeastOne(c.optLong("home_budget_ms", homeBudgetMs)) },
-        "poll_interval_ms" to
-            { c -> pollIntervalMs = atLeastOne(c.optLong("poll_interval_ms", pollIntervalMs)) },
+        "cert_verify_wait_ms" to
+            { c -> idVerifyWaitMs = atLeastOne(c.optLong("cert_verify_wait_ms", idVerifyWaitMs)) },
+        "home_timeout_ms" to
+            { c -> homeBudgetMs = atLeastOne(c.optLong("home_timeout_ms", homeBudgetMs)) },
+        "ui_poll_interval_ms" to
+            { c -> pollIntervalMs = atLeastOne(c.optLong("ui_poll_interval_ms", pollIntervalMs)) },
         "ui_click_delay_ms" to
             { c -> uiClickDelayMs = c.optLong("ui_click_delay_ms", uiClickDelayMs) },
+        "ui_dump_max_nodes" to
+            { c -> uiDumpMaxNodes = atLeastOne(c.optLong("ui_dump_max_nodes", uiDumpMaxNodes)) },
+        "ui_swipe_duration_ms" to
+            { c -> uiSwipeDurationMs = atLeastOne(c.optLong("ui_swipe_duration_ms", uiSwipeDurationMs)) },
+        "device_exec_max_output_bytes" to
+            { c ->
+                deviceExecMaxOutputBytes =
+                    atLeastOne(c.optLong("device_exec_max_output_bytes", deviceExecMaxOutputBytes))
+            },
         "ota_check_interval_s" to
             { c -> otaCheckIntervalS = atLeastOne(c.optInt("ota_check_interval_s", otaCheckIntervalS)) },
-        "bath_guard_enabled" to
-            { c -> bathGuardEnabled = c.optBoolean("bath_guard_enabled", bathGuardEnabled) },
-        "bath_exit_window_ms" to
-            { c -> bathExitWindowMs = atLeastOne(c.optLong("bath_exit_window_ms", bathExitWindowMs)) },
-        "bath_exit_max_count" to
-            { c -> bathExitMaxCount = atLeastOne(c.optInt("bath_exit_max_count", bathExitMaxCount)) },
-        "bath_exit_cooldown_ms" to
-            { c -> bathExitCooldownMs = atLeastOne(c.optLong("bath_exit_cooldown_ms", bathExitCooldownMs)) },
+        "bath_app_guard_enabled" to
+            { c -> bathGuardEnabled = c.optBoolean("bath_app_guard_enabled", bathGuardEnabled) },
+        "bath_app_exit_window_ms" to
+            { c -> bathExitWindowMs = atLeastOne(c.optLong("bath_app_exit_window_ms", bathExitWindowMs)) },
+        "bath_app_exit_max_count" to
+            { c -> bathExitMaxCount = atLeastOne(c.optInt("bath_app_exit_max_count", bathExitMaxCount)) },
+        "bath_app_exit_cooldown_ms" to
+            { c -> bathExitCooldownMs = atLeastOne(c.optLong("bath_app_exit_cooldown_ms", bathExitCooldownMs)) },
     )
 
     /** 应用下发的配置；未知键忽略（服务端可能比设备端新，新增键由后续版本消化）。 */

@@ -21,7 +21,7 @@ def get_reported(device_id: str) -> ShadowReported | None:
     device = devices_repository.get(device_id)
     if device is None:
         return None
-    return {"device": device, "doors": doors_repository.list_door_details(device_id)}
+    return {"device": device, "doors": doors_repository.list_doors(device_id)}
 
 
 def get_shadow(device_id: str) -> DeviceShadow | None:

@@ -20,7 +20,6 @@ from fastapi import WebSocket
 from app.core.config import settings
 
 BRIDGE_BUFFER_SIZE = 65536
-BRIDGE_IDLE_TIMEOUT_S = 300  # 秒：adb 会话空闲上限（5 分钟，长于任何 adb 交互间隔）
 PENDING_MAX = 1024 * 1024  # 对端未就绪时的有界缓冲
 
 
@@ -31,6 +30,9 @@ class AdbBridge:
     device_id: str
     port: int
     generation: int = 0
+    #: 打开时刻（事件循环时间）。**绝对寿命**据此计算——空闲超时管不到"一直有流量"
+    #: 的情况，而调试通道不该无限期开着。
+    opened_at: float = 0.0
     device_ws: WebSocket | None = None
     tcp_writer: asyncio.StreamWriter | None = None
     tcp_reader: asyncio.StreamReader | None = None
@@ -86,27 +88,35 @@ class BridgeRegistry:
     """全局唯一注册表。"""
 
     def __init__(self) -> None:
-        self.pending: dict[str, tuple[int, str]] = {}  # device_id -> (generation, nonce)
+        # device_id → (generation, nonce, 下发时刻)；带时刻是为了让"设备一直不连"
+        # 的待配对状态能过期，而不是永久挂在那里
+        self.pending: dict[str, tuple[int, str, float]] = {}
         self.active: dict[str, AdbBridge] = {}  # device_id -> 桥接
         self.ports: dict[str, int] = {}  # device_id -> 本地端口
         self._generation_by_device: dict[str, int] = {}
 
-    def open_session(self, device_id: str) -> tuple[int, int, str]:
-        """开一个新会话世代：世代严格递增（同设备跨会话可比较）、端口稳定、nonce 一次性。"""
+    def open_session(self, device_id: str, now: float) -> tuple[int, int, str]:
+        """开一个新会话世代：世代严格递增（同设备跨会话可比较）、端口稳定、nonce 一次性。
+
+        端口按设备稳定分配且**不回收**：同一台设备每次拿到同一个端口，运维的
+        `adb connect` 脚本因此可以写死。设备数量有限，这点分配量不值一提。
+        """
         base_port = settings.bridge_base_port
         port = self.ports.setdefault(device_id, base_port + len(self.ports))
         generation = self._generation_by_device.get(device_id, 0) + 1
         self._generation_by_device[device_id] = generation
         nonce = uuid.uuid4().hex
-        self.pending[device_id] = (generation, nonce)
+        self.pending[device_id] = (generation, nonce, now)
         return generation, port, nonce
 
-    def consume_nonce(self, device_id: str, nonce: str) -> int | None:
-        """校验并消费 nonce，返回其世代；无效返回 None。"""
+    def consume_nonce(self, device_id: str, nonce: str, now: float, timeout_s: float) -> int | None:
+        """校验并消费 nonce，返回其世代；无效或已过期返回 None。"""
         entry = self.pending.get(device_id)
         if entry is None or entry[1] != nonce:
             return None
         del self.pending[device_id]
+        if now - entry[2] > timeout_s:
+            return None
         return entry[0]
 
     def remove(self, device_id: str) -> None:

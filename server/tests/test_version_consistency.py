@@ -1,6 +1,6 @@
 """版本号一致性：服务端入口、pyproject、设备端构建脚本三处必须相同。
 
-依据 docs/STANDARDS.md §5：APK versionName 与服务端发布记录一致（OTA 强制）。
+依据 AGENTS.md：APK versionName 与服务端发布记录一致（OTA 强制）。
 把这条约定变成可判红的测试，避免"改一处忘另一处"。
 """
 

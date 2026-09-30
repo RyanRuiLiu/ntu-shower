@@ -1,0 +1,124 @@
+/* 基础元素：重置、排版、表单控件、滚动条。
+ *
+ * 只放"每个页面都要有"的东西。与具体能力域相关的样式去 components.css。
+ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: var(--fs-body);
+  background: var(--bg);
+  color: var(--text);
+  overflow-y: auto;
+}
+
+/* 顶栏是 sticky 的，锚点跳转要避开它 */
+[id] {
+  scroll-margin-top: calc(var(--bar-height) + var(--sp-2));
+}
+
+h1,
+h2,
+h3 {
+  font-size: var(--fs-title);
+  font-weight: 600;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* ── 表单 ───────────────────────────────────────────────── */
+
+input,
+select,
+textarea {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font: var(--fs-body) var(--font-ui);
+  transition: border-color var(--transition);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+}
+
+textarea {
+  font-family: var(--font-mono);
+  resize: vertical;
+}
+
+select {
+  cursor: pointer;
+}
+
+label {
+  font-size: var(--fs-small);
+  color: var(--dim);
+}
+
+/* ── 滚动条：与暗色主题一致 ─────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+/* ── 通用小工具 ─────────────────────────────────────────── */
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.dim {
+  color: var(--dim);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.empty {
+  padding: var(--sp-5);
+  color: var(--muted);
+  font-size: var(--fs-small);
+  text-align: center;
+}
+
+[hidden] {
+  display: none !important;
+}

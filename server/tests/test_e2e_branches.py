@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.testclient import WebSocketTestSession
 
+from app.core import actions
 from app.core import config as config_module
 from app.gateway import manager as manager_module
 from app.modules.ota import repository as ota_repository
@@ -39,15 +40,15 @@ def _recv_until(ws: WebSocketTestSession, msg_type: str) -> dict:
             return msg
 
 
-def _admin(client: TestClient) -> dict:
-    return {"X-Admin-Token": "test-token"}
+def _ops_token(client: TestClient) -> dict:
+    return {"X-Ops-Token": "test-token"}
 
 
 def _connect_trusted(client: TestClient, device_id: str) -> WebSocketTestSession:
     with client.websocket_connect("/gateway/device") as ws:
         ws.send_text(_hello(device_id))
         _recv_until(ws, "link.hello_ack")
-    client.post(f"/admin/devices/{device_id}/trust", headers=_admin(client))
+    client.patch(f"/ops/devices/{device_id}", headers=_ops_token(client), json={"trusted": True})
     ws = client.websocket_connect("/gateway/device").__enter__()
     ws.send_text(_hello(device_id))
     _recv_until(ws, "link.hello_ack")
@@ -103,13 +104,13 @@ def test_command_round_trip_success_path(
         outcome: dict = {}
 
         def call() -> None:
-            outcome["r"] = client.post("/api/v1/photos", json={"device_id": device_id}, headers=ops_headers)
+            outcome["r"] = client.post("/api/v1/sessions/photo", json={"device_id": device_id}, headers=ops_headers)
 
         thread = threading.Thread(target=call)
         thread.start()
 
         command = _recv_until(ws, "session.command")
-        assert command["payload"]["action"] == "photo.capture"
+        assert command["payload"]["action"] == actions.CAMERA_CAPTURE
         ws.send_text(
             json.dumps(
                 {
@@ -133,7 +134,7 @@ def test_command_round_trip_success_path(
         assert body["status"] == "ok"
         assert body["terminal_message"] == "已拍照"
 
-        audit = client.get("/admin/commands", headers=_admin(client), params={"device_id": device_id}).json()
+        audit = client.get("/ops/commands", headers=_ops_token(client), params={"device_id": device_id}).json()
         assert audit[0]["status"] == "ok"
     finally:
         ws.__exit__(None, None, None)
@@ -183,7 +184,7 @@ def test_api_routes_win_over_the_web_mount(client: TestClient) -> None:
 
     # 各 API 前缀仍由路由处理，未被静态文件抢走
     assert client.get("/api/v1/doors").status_code == 200
-    assert client.get("/admin/devices").status_code == 401  # 无令牌 → 401 而非 404
+    assert client.get("/ops/devices").status_code == 401  # 无令牌 → 401 而非 404
     assert client.get("/ota/releases").status_code == 200
 
 
@@ -319,14 +320,8 @@ def test_assign_roundtrip_and_busy_rejection(client: TestClient, ops_headers: di
         command = _recv_until(ws, "session.command")
         assert command["payload"]["action"] == "session.assign"
 
-        # 在途期间第二条 assign：服务端拒绝（device.busy），不排队
-        busy = client.post(
-            "/api/v1/sessions/assign",
-            json={"device_id": device_id, "door_no": 2, "cert_no": "S8", "password": "P"},
-            headers=ops_headers,
-        )
-        assert busy.status_code == 409
-        assert busy.json()["type"].endswith("/problems/device-busy")
+        # 在途期间的第二条 assign 会在同通道上排队（不拒绝），排队语义与队列上限
+        # 由 test_api_surfaces.py 的两个用例覆盖；这里只验证第一条的完整往返。
 
         ws.send_text(
             json.dumps(

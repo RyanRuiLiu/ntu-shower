@@ -1,4 +1,13 @@
-"""授权服务：登录换取身份、解析请求标识、管理员签发网页标识。"""
+"""授权服务：换取标识、登记标识、解析请求标识。
+
+## 一个概念一套函数
+
+名单里的东西是**标识**（identity），两种来源（微信 openid / 我们签发）只是
+`kind` 不同。因此登记只有一个入口 `put_identity`，而不是
+`authorize_openid` 与 `issue_web_identity` 两个几乎相同的函数。
+
+所有返回标识的函数都返回同一个 `IdentityRecord`，形状与名单一致。
+"""
 
 import logging
 import secrets
@@ -7,7 +16,7 @@ from app.core.wechat import WeChatNotConfiguredError, code_to_openid
 
 from . import repository
 from .identity import IdentityKind
-from .schemas import GrantedIdentity, GrantRecord, IssuedWebIdentity
+from .schemas import IdentityRecord
 
 logger = logging.getLogger("ntu-shower.access")
 
@@ -15,13 +24,38 @@ logger = logging.getLogger("ntu-shower.access")
 WEB_IDENTITY_BYTES = 32
 
 
-def login_with_wx_code(code: str) -> GrantedIdentity | None:
+def put_identity(
+    kind: IdentityKind,
+    capabilities: list[str],
+    label: str = "",
+    openid: str = "",
+) -> IdentityRecord:
+    """登记一个标识并授予能力。
+
+    - `kind=OPENID`：用微信给的 `openid` 作标识（登记，随后该用户可登录）
+    - `kind=WEB`：服务端签发一个不可枚举的标识（网页拿不到 openid，
+      标识本身就是它的身份）
+
+    两种来源写进同一张表、出现在同一份名单，一眼能看到"这个标识是谁在用"。
+    """
+    identity = openid if kind is IdentityKind.OPENID else secrets.token_urlsafe(WEB_IDENTITY_BYTES)
+    record = repository.put_identity(identity, kind, capabilities, label)
+    logger.info(
+        "identity put: kind=%s identity=%s capabilities=%s",
+        kind.value,
+        _mask_identity(identity),
+        ",".join(capabilities),
+    )
+    return record
+
+
+def login_with_wx_code(code: str) -> IdentityRecord | None:
     """小程序登录：用 wx.login 的 code 换取身份。
 
     返回 openid 本身作为标识，**不另发令牌**：openid 由微信签发、稳定不变，
     再包一层只是徒增过期与重登的处理。客户端存下它，之后每次请求带上。
 
-    未授权用户返回 None——"换不到 openid"与"不在名单里"对外不区分，
+    未授权返回 None——"换不到 openid"与"不在名单里"对外不区分，
     以免泄漏谁在名单中。
     """
     try:
@@ -32,51 +66,28 @@ def login_with_wx_code(code: str) -> GrantedIdentity | None:
     if openid is None:
         return None
 
-    granted = repository.find_grant(openid)
-    if granted is None:
+    record = repository.find_identity(openid)
+    if record is None:
         logger.info("login rejected, not granted: openid=%s", _mask_identity(openid))
-        return None
-    return {"identity": openid, "capabilities": granted["capabilities"]}
+    return record
 
 
-def resolve_identity(identity: str) -> GrantRecord | None:
-    """解析请求携带的标识，返回其授权信息；未授权返回 None。"""
-    return repository.find_grant(identity)
-
-
-def issue_web_identity(label: str, capabilities: list[str]) -> IssuedWebIdentity:
-    """为网页端签发一个标识并登记授权。
-
-    网页拿不到 openid，因此标识本身就是它的身份：登记后与小程序用户出现在
-    同一份名单里，管理员一眼能看到"这个标识是给谁用的"。
-    """
-    identity = secrets.token_urlsafe(WEB_IDENTITY_BYTES)
-    repository.put_grant(identity, IdentityKind.WEB, capabilities, label)
-    logger.info("web identity issued: label=%s capabilities=%s", label, ",".join(capabilities))
-    return {"identity": identity, "label": label, "capabilities": capabilities}
-
-
-def authorize_openid(openid: str, capabilities: list[str], label: str = "") -> GrantedIdentity:
-    """登记一个小程序用户的授权（管理员操作）。
-
-    返回该身份**当前**的能力集，形状与登录一致：这正是管理员想确认的事——
-    "他现在能用这些了"。名单视图（含入库时间）走 list_grants。
-    """
-    repository.put_grant(openid, IdentityKind.OPENID, capabilities, label)
-    logger.info("openid authorized: openid=%s capabilities=%s", _mask_identity(openid), ",".join(capabilities))
-    return {"identity": openid, "capabilities": capabilities}
+def resolve_identity(identity: str) -> IdentityRecord | None:
+    """解析请求携带的标识，返回其记录；未授权返回 None。"""
+    return repository.find_identity(identity)
 
 
 def revoke_identity(identity: str) -> bool:
     """撤销授权；该标识立即失去全部能力。"""
-    removed = repository.delete_grant(identity)
+    removed = repository.delete_identity(identity)
     if removed:
         logger.info("identity revoked: identity=%s", _mask_identity(identity))
     return removed
 
 
-def list_grants() -> list[GrantRecord]:
-    return repository.list_grants()
+def list_identities() -> list[IdentityRecord]:
+    """名单。"""
+    return repository.list_identities()
 
 
 def _mask_identity(identity: str) -> str:

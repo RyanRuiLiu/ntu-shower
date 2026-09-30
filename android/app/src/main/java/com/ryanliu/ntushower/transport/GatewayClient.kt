@@ -21,7 +21,7 @@ import org.json.JSONObject
 /**
  * 设备网关客户端：WSS 长连接（/gateway/device）。
  *
- * 链路行为（对应 docs/PROTOCOL.md）：
+ * 链路行为（对应 protocol/schema/）：
  * - 连接成功后首帧发 link.hello；
  * - hello_ack 带回配置（心跳间隔等）与 trusted 标志；
  * - 按配置间隔发 link.ping；服务端 ping → pong（时钟偏差测量）；

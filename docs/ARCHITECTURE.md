@@ -8,7 +8,7 @@
 |---|---|---|
 | `com.ryanliu.ntushower` | 本项目 | 主力 agent |
 | `com.ntu.remoteshower.showeragent` | 旧系统 | **保底**，暂不卸载 |
-| `com.ntu.remoteshower.adbtunnel` | 旧系统 | 旧系统的 ADB 方案（本项目改用 443 网关透传，ADR-0035） |
+| `com.ntu.remoteshower.adbtunnel` | 旧系统 | 旧系统的 ADB 方案（本项目改用 443 网关透传，docs/DECISIONS.md） |
 | `com.datalook.bath` | 浴室 App | 被控对象，不可动 |
 
 **退出条件**：新项目具备完全自主能力后，**由人手动卸载**旧组件。
@@ -33,14 +33,14 @@
 ┌─────────────────┐   WSS /gateway/device   ┌─────────────────────────┐
 │  设备 APK        │◀═══════════════════════▶│  <public-domain> │
 │  (Android 4.4.4) │   HTTPS /api/v1/*       │  nginx 443 统一入口       │
-│  ANDROID_ID 标识 │   /ota /admin           │  ┌───────────────────┐  │
+│  ANDROID_ID 标识 │   /ota /ops           │  ┌───────────────────┐  │
 │  自更新/自管理    │                         │  │ FastAPI 单服务进程  │  │
 └─────────────────┘                          │  └───────────────────┘  │
                                              └─────────────────────────┘
 ```
 
 前端是 `server/web/` 下的零构建静态文件，由本进程挂在根路径
-（`/api`、`/admin`、`/docs` 的路由注册在前，不会被静态文件抢走）。
+（`/api`、`/ops`、`/docs` 的路由注册在前，不会被静态文件抢走）。
 用户面接口无需凭据即可查询状态，操作类需 `X-Identity` 标识 + 能力位。
 
 ## 已定稿的传输层事实（2026-09 真机实测）
@@ -62,29 +62,31 @@
 
 | 平面 | 路径 | 职责 |
 |---|---|---|
-| gateway | `/gateway/device` (WSS) | 设备长连接：认证/心跳/快照/命令/配置下发 |
-| modules.doors | `/api/v1/doors`、`/api/v1/stream` (WS) | 状态查询与实时推送（查看类，无需凭据） |
-| modules.sessions | `/api/v1/sessions/*`、`/api/v1/photos` | 分配/结算/拍照（需 `ops` / `photo` 能力）；`/admin/commands` 为命令审计查询 |
-| modules.shadow | `/api/v1/devices/{id}/shadow`、`/admin/...` | 设备影子（reported/desired/metadata） |
-| modules.access | `/api/v1/session`、`/api/v1/me`、`/admin/grants` | 小程序登录换身份、查询自身能力、授权名单维护 |
-| modules.devices | `/admin/devices` | 设备档案/信任/改名/远程执行/截图 |
-| modules.config | `/admin/config/*`、`/admin/devices/{id}/config` | 配置登记表、全局默认与设备覆盖 |
-| modules.ota | `/ota/*`、`/admin/releases` | 版本清单/下载 + 发布管理 |
-| modules.bridge | `/admin/devices/{id}/adb/*` | 真实 ADB 经 443 网关透传（零新端口，ADR-0035） |
+| gateway | `/gateway/device`、`/gateway/bridge`（均 WSS） | 设备长连接；调试通道隧道 |
+| modules.doors | `/api/v1/doors`、`/ops/doors`、`/api/v1/stream`（WS） | 喷头现态与实时推送。两个查询端点**同源同形**，只是后者多一道令牌校验 |
+| modules.sessions | `/api/v1/sessions/*`、`/ops/sessions/*`、`/ops/commands` | 分配 / 结算 / 拍照；命令审计查询 |
+| modules.shadow | `/api/v1/devices/{id}/shadow`、`/ops/devices/{id}/shadow` | 设备影子（reported / desired / metadata） |
+| modules.access | `/api/v1/identity`、`/ops/identities` | 小程序用 code 换身份、查询自身能力；授权名单维护 |
+| modules.devices | `/ops/devices` | 设备档案 / 信任 / 改名 / 远程执行 / 截图 |
+| modules.config | `/ops/config`、`/ops/devices/{id}/config` | 配置登记表、全局默认与设备覆盖 |
+| modules.ota | `/ota/*`、`/ops/releases` | 版本清单 / 下载 + 发布管理 |
+| modules.bridge | `/ops/devices/{id}/bridge/*` | 调试通道经 443 透传（零新端口，docs/DECISIONS.md） |
 
 ### 鉴权模型（core/security + modules/access）
 
-| 使用者 | 能力 | 凭证 |
-|---|---|---|
-| 未授权访问者 | 只读（doors / stream / shadow） | 无需凭据 |
-| 授权用户 | + 操作设备（assign / settle） | `X-Identity: <openid>`，需 `ops` 能力位 |
-| 授权用户（拍照） | + 拍照 / 截图 | 同上，需 `photo` 能力位 |
-| 管理员 | 全功能（设备 / 配置 / OTA / 调试 / 名单） | `X-Admin-Token` |
+**按接口面分三档，不设角色。** 不同的人拿到的是不同的**接口请求权限**——权限本身就是
+能力位，没有"这个人是什么角色"这一层，也就不存在"按角色下发不同内容"。
 
-- **无注册流程**：管理员经 `/admin/grants` 预置授权（小程序用户登记 openid，
+| 接口面 | 能做什么 | 凭证 |
+|---|---|---|
+| 查看类 | 读喷头现态、阴影、实时推送 | 无需凭据 |
+| 用户操作类 | 分配 / 结算（需 `ops`）、拍照（需 `photo`） | `X-Identity` + 能力位 |
+| 管理面 | 设备 / 配置 / OTA / 调试 / 名单 | `X-Ops-Token` |
+
+- **无注册流程**：授权经 `/ops/identities` 预置（小程序用户登记 openid，
   网页用户签发一个标识），撤销即从名单删除。
 - 小程序身份：`wx.login` 的 code → 服务端换 openid → 直接作为标识返回，
-  不另发会话令牌（ADR-0037）。
+  不另发会话令牌（docs/DECISIONS.md）。
 - 浴室账号密码**不落库**：随操作请求直传设备，由浴室系统验证。
 
 ### HTTP 错误响应
@@ -100,7 +102,7 @@ com.ryanliu.ntushower
 ├── transport/  协议编解码（MessageCodec 单一来源）、网关客户端（连接/认证/心跳/重连）
 ├── features/   doors 采集上报 / automation A11y 自动化（含遮盖层）/ selfmanage 自更新与无障碍启用
 ├── service/    AgentService 主服务 / A11yService 无障碍实体
-├── receiver/   覆盖安装自启（MY_PACKAGE_REPLACED）与开机广播（标准 ROM 兼容）
+├── receiver/   覆盖安装自启（MY_PACKAGE_REPLACED）与开机广播（标准 ROM 路径）
 └── ShowerApp   崩溃捕获
 ```
 

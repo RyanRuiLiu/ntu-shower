@@ -1,0 +1,218 @@
+/* 组件：按钮、字段、结果区、徽标、表格、日志、门牌、KPI、节点树。
+ *
+ * 命名一律用 `.块` 与 `.块-元素`，状态用 `.is-*` 或语义化后缀。七个视图共用这一份，
+ * 视图里不得再自造按钮或表格样式。
+ */
+
+/* ── 按钮 ───────────────────────────────────────────────── */
+
+.btn {
+  padding: 6px 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-on);
+  font: 600 var(--fs-body) var(--font-ui);
+  cursor: pointer;
+  transition: opacity var(--transition);
+}
+
+.btn:hover {
+  opacity: 0.85;
+}
+
+.btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.btn-ghost {
+  background: var(--elevated);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.btn-ghost:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  opacity: 1;
+}
+
+.btn-danger {
+  background: var(--red-bg);
+  color: var(--red);
+  border-color: var(--red);
+}
+
+.btn-danger:hover {
+  background: var(--red);
+  color: #fff;
+  opacity: 1;
+}
+
+.btn-sm {
+  padding: 3px 10px;
+  font-size: var(--fs-chip);
+  font-weight: 500;
+}
+
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+/* ── 字段 ───────────────────────────────────────────────── */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-3);
+}
+
+.field-row {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.field-row input,
+.field-row select {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── 结果区：每个能出错的操作都要有一块 ─────────────────── */
+
+.result {
+  min-height: 18px;
+  margin-top: var(--sp-2);
+  font-size: var(--fs-small);
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.result.ok {
+  color: var(--green);
+}
+
+.result.err {
+  color: var(--red);
+}
+
+.result.info {
+  color: var(--dim);
+}
+
+/* ── 徽标 ───────────────────────────────────────────────── */
+
+.badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--elevated);
+  font: var(--fs-chip) var(--font-mono);
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.badge-green {
+  color: var(--green);
+  border-color: var(--green);
+  background: var(--green-bg);
+}
+
+.badge-red {
+  color: var(--red);
+  border-color: var(--red);
+  background: var(--red-bg);
+}
+
+.badge-amber {
+  color: var(--amber);
+  border-color: var(--amber);
+  background: var(--amber-bg);
+}
+
+.badge-blue {
+  color: var(--blue);
+  border-color: var(--blue);
+  background: var(--blue-bg);
+}
+
+/* ── 表格：设备、身份、发布、审计都用它 ─────────────────── */
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-small);
+}
+
+.table th {
+  padding: var(--sp-2) var(--sp-3);
+  text-align: left;
+  font-weight: 600;
+  color: var(--dim);
+  background: var(--elevated);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.table td {
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.table tr:last-child td {
+  border-bottom: none;
+}
+
+.table tbody tr:hover {
+  background: var(--elevated);
+}
+
+.table code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-chip);
+  color: var(--dim);
+}
+
+/* ── 代码块：命令输出、配置 JSON ────────────────────────── */
+
+.code {
+  max-height: 320px;
+  overflow: auto;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font: var(--fs-small) var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ── 浮层提示 ───────────────────────────────────────────── */
+
+.toast {
+  position: fixed;
+  bottom: var(--sp-5);
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  padding: var(--sp-2) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--elevated);
+  color: var(--text);
+  font-size: var(--fs-small);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition), transform var(--transition);
+}
+
+.toast.is-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}

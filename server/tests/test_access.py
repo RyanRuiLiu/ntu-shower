@@ -13,7 +13,7 @@ from app.core import wechat
 from app.modules.access import repository, service
 from app.modules.access.identity import IdentityKind
 
-ADMIN = {"X-Admin-Token": "test-token"}
+OPS_HEADERS = {"X-Ops-Token": "test-token"}
 
 
 def _stub_openid(monkeypatch: pytest.MonkeyPatch, openid: str | None) -> None:
@@ -27,9 +27,9 @@ def _stub_openid(monkeypatch: pytest.MonkeyPatch, openid: str | None) -> None:
 
 def _grant(client: TestClient, openid: str, capabilities: list[str], label: str = "某人") -> None:
     r = client.post(
-        "/admin/grants",
-        headers=ADMIN,
-        json={"openid": openid, "capabilities": capabilities, "label": label},
+        "/ops/identities",
+        headers=OPS_HEADERS,
+        json={"kind": "openid", "openid": openid, "capabilities": capabilities, "label": label},
     )
     assert r.status_code == 200
 
@@ -42,17 +42,22 @@ def test_login_returns_identity_and_capabilities(client: TestClient, monkeypatch
     _stub_openid(monkeypatch, "openid-abcdefgh")
     _grant(client, "openid-abcdefgh", ["ops"])
 
-    r = client.post("/api/v1/session", json={"code": "wx-code"})
+    r = client.post("/api/v1/identity", json={"code": "wx-code"})
 
     assert r.status_code == 200
-    assert r.json() == {"identity": "openid-abcdefgh", "capabilities": ["ops"]}
+    body = r.json()
+    # 登录返回与名单完全一致的记录形状（一个资源一个模型），
+    # 而不是只含 identity+capabilities 的子集
+    assert body["identity"] == "openid-abcdefgh"
+    assert body["kind"] == "openid"
+    assert body["capabilities"] == ["ops"]
 
 
 def test_login_rejected_when_not_granted(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """不在名单里的用户登录失败——"不在名单"与"换不到 openid"对外不区分。"""
     _stub_openid(monkeypatch, "openid-outsider")
 
-    r = client.post("/api/v1/session", json={"code": "wx-code"})
+    r = client.post("/api/v1/identity", json={"code": "wx-code"})
 
     assert r.status_code == 401
     assert r.json()["type"].endswith("/problems/login-rejected")
@@ -61,7 +66,7 @@ def test_login_rejected_when_not_granted(client: TestClient, monkeypatch: pytest
 def test_login_rejected_when_wechat_unavailable(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     _stub_openid(monkeypatch, None)
 
-    r = client.post("/api/v1/session", json={"code": "wx-code"})
+    r = client.post("/api/v1/identity", json={"code": "wx-code"})
 
     assert r.status_code == 401
 
@@ -74,7 +79,7 @@ def test_login_rejected_when_wechat_not_configured(client: TestClient, monkeypat
 
     monkeypatch.setattr(service, "code_to_openid", not_configured)
 
-    r = client.post("/api/v1/session", json={"code": "wx-code"})
+    r = client.post("/api/v1/identity", json={"code": "wx-code"})
 
     assert r.status_code == 401
     assert r.json()["type"].endswith("/problems/login-rejected")
@@ -82,7 +87,7 @@ def test_login_rejected_when_wechat_not_configured(client: TestClient, monkeypat
 
 def test_login_requires_code(client: TestClient) -> None:
     # 空 code 是参数错误，不是认证失败
-    assert client.post("/api/v1/session", json={"code": ""}).status_code == 422
+    assert client.post("/api/v1/identity", json={"code": ""}).status_code == 422
 
 
 # ── 标识解析 ──
@@ -107,7 +112,7 @@ def test_grant_is_idempotent_and_updates_capabilities(client: TestClient) -> Non
     _grant(client, "openid-update001", ["photo"])
 
     assert service.resolve_identity("openid-update001")["capabilities"] == ["photo"]
-    assert len(service.list_grants()) == 1
+    assert len(service.list_identities()) == 1
 
 
 def test_revoke_removes_identity(client: TestClient) -> None:
@@ -128,7 +133,7 @@ def test_short_identity_is_fully_masked_in_logs(client: TestClient) -> None:
 
 
 def test_missing_identity_header_is_unauthenticated(client: TestClient) -> None:
-    r = client.get("/api/v1/me")
+    r = client.get("/api/v1/identity")
 
     assert r.status_code == 401
     assert r.json()["type"].endswith("/problems/unauthenticated")
@@ -136,7 +141,7 @@ def test_missing_identity_header_is_unauthenticated(client: TestClient) -> None:
 
 def test_me_returns_all_capabilities(client: TestClient, ops_headers: dict[str, str]) -> None:
     """一次返回全部能力，前端据此决定按钮显隐，不必按能力逐个试探。"""
-    r = client.get("/api/v1/me", headers=ops_headers)
+    r = client.get("/api/v1/identity", headers=ops_headers)
 
     assert r.status_code == 200
     assert sorted(r.json()["capabilities"]) == ["ops", "photo"]
@@ -144,7 +149,7 @@ def test_me_returns_all_capabilities(client: TestClient, ops_headers: dict[str, 
 
 def test_capability_denied_when_missing(client: TestClient) -> None:
     """有身份但缺该能力：403 且 type 可区分于"没身份"。"""
-    repository.put_grant("photo-only-user", IdentityKind.WEB, ["photo"], "只拍照")
+    repository.put_identity("photo-only-user", IdentityKind.WEB, ["photo"], "只拍照")
 
     r = client.post(
         "/api/v1/sessions/assign",
@@ -159,17 +164,17 @@ def test_capability_denied_when_missing(client: TestClient) -> None:
 # ── 管理面 ──
 
 
-def test_admin_endpoints_require_admin_token(client: TestClient) -> None:
+def test_ops_endpoints_require_ops_token(client: TestClient) -> None:
     """授权名单只能由运维通道改动，普通身份不得触碰。"""
-    assert client.get("/admin/grants").status_code == 401
-    assert client.get("/admin/grants", headers={"X-Admin-Token": "wrong"}).status_code == 401
+    assert client.get("/ops/identities").status_code == 401
+    assert client.get("/ops/identities", headers={"X-Ops-Token": "wrong"}).status_code == 401
 
 
 def test_unknown_capability_name_is_rejected(client: TestClient) -> None:
     r = client.post(
-        "/admin/grants",
-        headers=ADMIN,
-        json={"openid": "openid-abcdefgh", "capabilities": ["ops", "delete-everything"]},
+        "/ops/identities",
+        headers=OPS_HEADERS,
+        json={"kind": "openid", "openid": "openid-abcdefgh", "capabilities": ["ops", "delete-everything"]},
     )
 
     assert r.status_code == 422
@@ -178,31 +183,35 @@ def test_unknown_capability_name_is_rejected(client: TestClient) -> None:
 
 def test_empty_capability_list_is_rejected(client: TestClient) -> None:
     # 一个能力都不给，与"未授权"没有区别
-    r = client.post("/admin/grants", headers=ADMIN, json={"openid": "openid-abcdefgh", "capabilities": []})
+    r = client.post("/ops/identities", headers=OPS_HEADERS, json={"openid": "openid-abcdefgh", "capabilities": []})
 
     assert r.status_code == 422
 
 
 def test_web_identity_can_be_issued_and_used(client: TestClient) -> None:
-    """网页拿不到 openid：管理员签发标识，该标识随即可用。"""
+    """网页拿不到 openid：我方签发标识，该标识随即可用。"""
     r = client.post(
-        "/admin/grants/web-identity",
-        headers=ADMIN,
-        json={"label": "给张三的网页入口", "capabilities": ["ops"]},
+        "/ops/identities",
+        headers=OPS_HEADERS,
+        json={"kind": "web", "label": "给张三的网页入口", "capabilities": ["ops"]},
     )
 
     assert r.status_code == 200
     identity = r.json()["identity"]
     assert service.resolve_identity(identity)["label"] == "给张三的网页入口"
-    assert client.get("/api/v1/me", headers={"X-Identity": identity}).status_code == 200
+    assert client.get("/api/v1/identity", headers={"X-Identity": identity}).status_code == 200
 
 
 def test_grants_list_shows_both_kinds(client: TestClient) -> None:
-    """名单里同时能看到小程序用户与网页标识，管理员才分得清谁是谁。"""
+    """名单里同时能看到小程序用户与网页标识，才分得清谁是谁。"""
     _grant(client, "openid-list000001", ["ops"])
-    client.post("/admin/grants/web-identity", headers=ADMIN, json={"label": "网页入口", "capabilities": ["photo"]})
+    client.post(
+        "/ops/identities",
+        headers=OPS_HEADERS,
+        json={"kind": "web", "label": "网页入口", "capabilities": ["photo"]},
+    )
 
-    kinds = {item["kind"] for item in client.get("/admin/grants", headers=ADMIN).json()}
+    kinds = {item["kind"] for item in client.get("/ops/identities", headers=OPS_HEADERS).json()}
 
     assert kinds == {"openid", "web"}
 
@@ -210,8 +219,8 @@ def test_grants_list_shows_both_kinds(client: TestClient) -> None:
 def test_delete_grant_idempotent_from_api(client: TestClient) -> None:
     _grant(client, "openid-del0000001", ["ops"])
 
-    assert client.delete("/admin/grants/openid-del0000001", headers=ADMIN).status_code == 204
-    assert client.delete("/admin/grants/openid-del0000001", headers=ADMIN).status_code == 204
+    assert client.delete("/ops/identities/openid-del0000001", headers=OPS_HEADERS).status_code == 204
+    assert client.delete("/ops/identities/openid-del0000001", headers=OPS_HEADERS).status_code == 204
 
 
 # ── 微信客户端 ──

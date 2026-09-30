@@ -1,7 +1,7 @@
 """统一时间：服务端对外输出的时间一律为 UTC RFC 3339 毫秒精度。
 
 本模块是时间的唯一来源——其余模块禁止自行拼接或解析时间字符串，
-格式化、解析、偏移计算一律经由此处（docs/STANDARDS.md §1）。
+格式化、解析、偏移计算一律经由此处（AGENTS.md）。
 
 RFC 3339 profile：UTC 用 "Z" 后缀（RFC 3339 §5.6），毫秒精度足以
 表达本系统的时序分辨率（设备心跳、命令截止、快照时间）。
@@ -46,3 +46,16 @@ def parse_rfc3339(text: object) -> datetime | None:
         return datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def seconds_between(start: object, end: object) -> int:
+    """两个 RFC 3339 时刻之间的整秒数；任一端无法解析时返回 0。
+
+    结果恒为非负。设备时钟与服务端之间即便做过偏差校正，仍可能算出负值，而
+    "时长为负"没有意义，调用方也不该为它单独写分支——在这一层收口。
+    """
+    first = parse_rfc3339(start)
+    second = parse_rfc3339(end)
+    if first is None or second is None:
+        return 0
+    return max(0, int((second - first).total_seconds()))

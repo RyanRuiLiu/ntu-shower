@@ -1,0 +1,712 @@
+/* 界面检视样式。
+ *
+ * 布局、尺寸、层级全部照 `ntu-remote-shower/apps/bridge-server/src/viewer.html`：
+ * 顶部工具条 + 快捷键提示条，下面左右分栏；右列自上而下是节点树、属性面板、输入栏。
+ * 这是一套排障时用顺了的密集工具布局，这里不重新设计。
+ *
+ * 两处必然的差异：
+ *
+ * 1. 色值改引 `tokens.css`。旧版 viewer 自定义过一组 GitHub 色，与本项目统一后的
+ *    令牌不一致，照搬会变成两套配色并存。
+ * 2. 本视图要嵌在顶栏之下，所以 `#view-inspector` 自己撑满剩余高度；旧版是整页
+ *    独占（`html,body{height:100%}`）。
+ */
+
+/* ── 视图外壳 ───────────────────────────────────────────── */
+
+/* 高度链必须一路撑到底：中间断一节，右列面板会被内容顶开、画面区随之塌掉。
+   这是工具型布局与卡片式布局最大的区别——它靠 flex 分配空间，不靠内容撑高 */
+#view-inspector {
+  height: calc(100vh - var(--bar-height));
+  max-width: none;
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+
+/* ── 工具条 ─────────────────────────────────────────────── */
+
+.tb {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.tb button {
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--elevated);
+  color: var(--dim);
+  font: var(--fs-chip) var(--font-ui);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.tb button:hover {
+  color: var(--text);
+  border-color: var(--muted);
+  background: var(--bg);
+}
+
+.tb button:active {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.tb button.primary {
+  color: var(--green);
+  border-color: var(--green);
+}
+
+.tb button.primary:hover {
+  background: var(--green-bg);
+}
+
+.tb button.danger {
+  color: var(--red);
+  border-color: var(--red);
+}
+
+.tb button.danger:hover {
+  background: var(--red-bg);
+}
+
+/* 方向键那组连成一个整体 */
+.tb .grp {
+  display: flex;
+  gap: 2px;
+}
+
+.tb .sep {
+  width: 1px;
+  height: 22px;
+  margin: 0 4px;
+  background: var(--border);
+}
+
+.tb-right {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;
+}
+
+.tb-status {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--elevated);
+  font: 600 var(--fs-chip) var(--font-ui);
+  color: var(--dim);
+}
+
+.tb-status.is-ok {
+  border-color: var(--green);
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.tb-status.is-err {
+  border-color: var(--red);
+  background: var(--red-bg);
+  color: var(--red);
+}
+
+/* ── 主体：左画面 / 右树 ────────────────────────────────── */
+
+.stage {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.screen-panel {
+  position: relative;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+/* `object-fit: contain` 配合两个 max-* 保证画面按原始比例落在面板里，
+   既不裁切也不拉伸——坐标换算依赖显示尺寸与原始尺寸的线性关系 */
+.screen-panel img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  user-select: none;
+}
+
+.screen-panel.is-loading {
+  background: linear-gradient(90deg, #111 25%, #1a1a1a 50%, #111 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* 贴着图片的包装层：覆盖层与它同尺寸，高亮框才不会偏 */
+.screen-frame {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.highlight {
+  position: absolute;
+  border: 2px solid var(--orange);
+  border-radius: 2px;
+  background: var(--orange-bg);
+}
+
+.crosshair {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--transition);
+}
+
+/* 拖动时画方向箭头：不画出来就不知道这一下会从哪儿滑到哪儿 */
+.swipe-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+}
+
+/* 长按指示：一圈进度 + 实时秒数。走满一圈表示到了长按的界线，颜色随之变橙 */
+.press-ring {
+  position: absolute;
+  z-index: 7;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.press-ring circle {
+  fill: none;
+  stroke: var(--dim);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+
+.press-ring.is-held circle {
+  stroke: var(--orange);
+}
+
+.press-label {
+  position: absolute;
+  z-index: 8;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgb(0 0 0 / 85%);
+  color: var(--dim);
+  font: var(--fs-chip) var(--font-mono);
+  pointer-events: none;
+  transform: translate(-50%, -180%);
+}
+
+.press-label.is-held {
+  border-color: var(--orange);
+  color: var(--orange);
+}
+
+.crosshair.is-on {
+  opacity: 1;
+}
+
+.crosshair line {
+  stroke: rgb(255 255 255 / 25%);
+  stroke-width: 1;
+  stroke-dasharray: 4, 4;
+}
+
+/* 光标处的设备坐标：点击之前先看清会点到哪里 */
+.coord-tip {
+  position: absolute;
+  z-index: 12;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgb(0 0 0 / 85%);
+  color: var(--text);
+  font: var(--fs-chip) var(--font-mono);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* 点击反馈 */
+.ripple {
+  position: absolute;
+  margin: -11px 0 0 -11px;
+  width: 22px;
+  height: 22px;
+  border: 2px solid rgb(255 255 255 / 60%);
+  border-radius: 50%;
+  animation: ripple 0.5s ease-out forwards;
+}
+
+@keyframes ripple {
+  from {
+    transform: scale(0.4);
+    opacity: 1;
+  }
+
+  to {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+/* ── 右列 ───────────────────────────────────────────────── */
+
+.tree-panel {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  width: 440px;
+  min-width: 320px;
+  overflow: hidden;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  resize: horizontal;
+}
+
+@media (width <= 1100px) {
+  .tree-panel {
+    border-top: 1px solid var(--border);
+    border-left: none;
+  }
+}
+
+.panel-header {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--dim);
+  font-size: var(--fs-chip);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.panel-header .count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.panel-header .actions {
+  display: flex;
+  gap: 2px;
+}
+
+.panel-header .actions button {
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted);
+  font: 10px var(--font-mono);
+  cursor: pointer;
+}
+
+.panel-header .actions button:hover {
+  color: var(--text);
+  border-color: var(--muted);
+}
+
+.tree-search {
+  flex-shrink: 0;
+  width: calc(100% - 16px);
+  margin: 6px 8px 0;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  font: var(--fs-chip) var(--font-mono);
+}
+
+.breadcrumb {
+  flex-shrink: 0;
+  min-height: 22px;
+  padding: 4px 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid var(--border);
+  font: 10px / 14px var(--font-mono);
+  color: var(--muted);
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+
+.breadcrumb span {
+  flex-shrink: 0;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.breadcrumb span:hover {
+  color: var(--accent);
+}
+
+.breadcrumb .sep {
+  margin: 0 3px;
+  color: var(--muted);
+  cursor: default;
+}
+
+.tree-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  font: var(--fs-chip) var(--font-mono);
+}
+
+.tree-content .empty {
+  padding: 24px;
+  font-size: var(--fs-small);
+  text-align: center;
+}
+
+/* 每个节点左侧一道 2px 竖线标出能力：可点绿、长按橙、可输入蓝、可滚紫。
+   扫一眼就知道哪些能操作，不必逐个点开属性看 */
+.node {
+  display: flex;
+  align-items: flex-start;
+  min-height: 18px;
+  padding: 2px 6px;
+  border-left: 2px solid transparent;
+  line-height: 1.35;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.node:nth-child(even) {
+  background: var(--row-alt);
+}
+
+.node:hover {
+  background: var(--accent-bg);
+}
+
+.node.is-clickable {
+  border-left-color: var(--green);
+}
+
+.node.is-long-clickable {
+  border-left-color: var(--orange);
+}
+
+.node.is-editable {
+  border-left-color: var(--blue);
+}
+
+.node.is-scrollable {
+  border-left-color: var(--purple);
+}
+
+.node.is-selected,
+.node.is-selected:nth-child(even) {
+  background: var(--accent-bg-strong);
+  border-left-color: var(--accent);
+}
+
+.node.is-dim {
+  opacity: 0.4;
+}
+
+.node.is-hit,
+.node.is-hit:nth-child(even) {
+  background: var(--amber-bg);
+}
+
+.node-toggle {
+  width: 14px;
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 10px;
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.node-toggle:hover {
+  color: var(--text);
+}
+
+.node-label {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+.node-class {
+  color: var(--accent);
+}
+
+.node-text {
+  color: var(--text);
+}
+
+.node-id {
+  color: var(--dim);
+}
+
+.node-tag {
+  display: inline-block;
+  margin-left: 3px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.node-tag.int {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.node-tag.long {
+  background: var(--orange-bg);
+  color: var(--orange);
+}
+
+.node-tag.edit {
+  background: var(--blue-bg);
+  color: var(--blue);
+}
+
+.node-tag.scroll {
+  background: var(--purple-bg);
+  color: var(--purple);
+}
+
+/* ── 属性面板 ───────────────────────────────────────────── */
+
+.prop-panel {
+  flex-shrink: 0;
+  max-height: 280px;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  background: var(--elevated);
+}
+
+.prop-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--elevated);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.prop-section {
+  padding: 6px 12px;
+}
+
+.prop-section + .prop-section {
+  border-top: 1px solid var(--row-alt);
+}
+
+.prop-section-title {
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.prop-row {
+  display: flex;
+  padding: 2px 0;
+  font-size: var(--fs-chip);
+  line-height: 17px;
+}
+
+.prop-key {
+  width: 54px;
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.prop-val {
+  overflow-wrap: anywhere;
+  color: var(--dim);
+  font: 10px var(--font-mono);
+}
+
+.prop-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 4px 0;
+}
+
+.prop-tag {
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--gray-bg);
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.prop-tag.on {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.prop-tap {
+  width: 100%;
+  padding: 5px;
+  border: 1px solid var(--green);
+  border-radius: var(--radius-sm);
+  background: var(--green-bg);
+  color: var(--green);
+  font: 600 var(--fs-chip) var(--font-ui);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.prop-tap:disabled {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.prop-tap:not(:disabled):hover {
+  background: var(--green);
+  color: #fff;
+}
+
+/* ── 输入栏：在右列底部，与旧版一致 ─────────────────────── */
+
+.input-bar {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+
+.input-bar input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  font: var(--fs-small) var(--font-ui);
+  border-radius: var(--radius-sm);
+}
+
+.input-bar button {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--elevated);
+  color: var(--dim);
+  font: var(--fs-chip) var(--font-ui);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.input-bar button:hover {
+  color: var(--text);
+  border-color: var(--muted);
+}
+
+/* ── 右键菜单 ───────────────────────────────────────────── */
+
+.ctx-menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 170px;
+  padding: 4px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--elevated);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
+}
+
+.ctx-menu .item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 6px 14px;
+  color: var(--dim);
+  font-size: var(--fs-small);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.ctx-menu .item:hover {
+  background: var(--accent-bg-strong);
+  color: var(--text);
+}
+
+.ctx-menu .item .shortcut {
+  margin-left: auto;
+  color: var(--muted);
+  font: 10px var(--font-mono);
+}
+
+.ctx-menu .divider {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
+}
+
+/* ── 滚动条：旧版这里比别处细 ───────────────────────────── */
+
+.tree-content::-webkit-scrollbar,
+.prop-panel::-webkit-scrollbar {
+  width: 5px;
+}
+
+.tree-content::-webkit-scrollbar-thumb,
+.prop-panel::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}

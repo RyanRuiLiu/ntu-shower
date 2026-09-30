@@ -12,7 +12,7 @@ import com.ryanliu.ntushower.service.AgentService
  *   OTA 与手动重装均已真机验证）；
  * - BOOT_COMPLETED：标准 ROM 的开机自启路径。注意：目标设备 DS83X 的定制 ROM
  *   实测不投递开机广播（旧项目同结论），该设备上开机拉起由无障碍重绑锚点承担
- *   （见 A11yService 自举）；保留本分支以兼容标准 ROM。
+ *   （见 A11yService 自举）；标准 ROM 走这条路径。
  *
  * 多路径并发拉起无冲突：AgentService.onStartCommand 有一次性初始化守卫。
  */
