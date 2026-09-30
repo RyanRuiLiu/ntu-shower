@@ -76,8 +76,32 @@ class DoorSnapshotSender(context: Context) {
             SQLiteDatabase.CONFLICT_REPLACE,
         )
         Log.i(TAG, "snapshot $snapshotId enqueued (${doors.size} doors)")
+        trimOutbox()
         flush(gateway)
     }
+
+    /**
+     * 把发件箱压在 [OUTBOX_MAX_ROWS] 行以内，超出丢最旧的。
+     *
+     * 断网期间每有一次门状态变化就多一行，而只有收到 ack 才会删——离线几天就能攒到几万行、
+     * 几十兆，把设备磁盘吃光，那时 OTA 与这个发件箱会一起失效。丢最旧的而不是拒绝新的：
+     * 越新的快照越接近当前实情，而服务端的现态本来就由最后一条快照决定。
+     */
+    private fun trimOutbox() {
+        val total = countRows()
+        if (total <= OUTBOX_MAX_ROWS) return
+        val excess = total - OUTBOX_MAX_ROWS
+        db.execSQL(
+            "DELETE FROM ${AppConfig.OUTBOX_TABLE} WHERE id IN " +
+                "(SELECT id FROM ${AppConfig.OUTBOX_TABLE} ORDER BY id ASC LIMIT ?)",
+            arrayOf<Any>(excess),
+        )
+        Log.w(TAG, "outbox trimmed: dropped $excess oldest rows")
+    }
+
+    private fun countRows(): Int = db
+        .rawQuery("SELECT COUNT(*) FROM ${AppConfig.OUTBOX_TABLE}", null)
+        .use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
 
     /**
      * 忘掉内容指纹，让下一次采集无条件入队。
@@ -135,5 +159,15 @@ class DoorSnapshotSender(context: Context) {
 
     companion object {
         private const val TAG = "DoorSnapshotSender"
+
+        /**
+         * 发件箱的行数上限。
+         *
+         * 只有收到 ack 才会删行，所以断网期间它单调增长。按门状态变化的实际频率估——高峰
+         * 一分钟一次、空闲时几小时一次——一万行在最坏情况下也能兜住好几天，占盘十几兆，
+         * 相对设备上过半的空闲空间是个零头。代价是丢掉最旧的几条，那几段历史补不回来，
+         * 但比"盘满之后连新的也上报不了"轻。
+         */
+        private const val OUTBOX_MAX_ROWS = 10_000
     }
 }
