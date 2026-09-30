@@ -191,7 +191,7 @@ async def adb_open(device_id: str) -> BridgeOpened:
         command_audit.finish(
             audit_id, outcomes.TIMEOUT.value, reason_codes.DEVICE_OFFLINE.code, reason_codes.DEVICE_OFFLINE.message
         )
-        raise ApiProblemError(DEVICE_OFFLINE, f"device {device_id} has no active connection")
+        raise ApiProblemError(DEVICE_OFFLINE, f"设备 {device_id} 没有活跃连接")
     command_audit.finish(audit_id, outcomes.OK.value, "", f"port {port} gen {generation}")
 
     bridge = AdbBridge(device_id, port, generation, opened_at=loop.time())
@@ -226,7 +226,7 @@ async def adb_open(device_id: str) -> BridgeOpened:
         registry.remove(device_id)
         command_audit.finish(audit_id, outcomes.FAILED.value, "port.bind_failed", str(last_error))
         logger.warning("bridge listen failed: device=%s port=%d error=%s", device_id, port, last_error)
-        raise ApiProblemError(PORT_UNAVAILABLE, f"port {port}: {last_error}")
+        raise ApiProblemError(PORT_UNAVAILABLE, f"端口 {port} 被占用：{last_error}")
     bridge.server = server
     logger.info("bridge opened: device=%s port=%d generation=%d", device_id, port, generation)
     # 只返回结构化字段：连接指引属于文档职责（见 docs/RUNBOOK.md §4）

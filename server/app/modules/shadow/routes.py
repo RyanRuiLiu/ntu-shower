@@ -22,7 +22,7 @@ def get_device_shadow(device_id: str) -> ShadowReported:
     """用户面影子：reported 视图（设备档案 + 喷头现态）。"""
     reported = service.get_reported(device_id)
     if reported is None:
-        raise ApiProblemError(DEVICE_NOT_FOUND, device_id)
+        raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {device_id}")
     return reported
 
 
@@ -31,5 +31,5 @@ def get_full_shadow(device_id: str) -> DeviceShadow:
     """管理面影子：reported + desired + metadata 完整文档。"""
     shadow = service.get_shadow(device_id)
     if shadow is None:
-        raise ApiProblemError(DEVICE_NOT_FOUND, device_id)
+        raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {device_id}")
     return shadow
