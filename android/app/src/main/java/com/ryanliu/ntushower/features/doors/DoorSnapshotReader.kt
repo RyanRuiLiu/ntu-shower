@@ -21,7 +21,7 @@ object DoorSnapshotReader {
         // 共用通道会让它被无关命令拖住，而用户正看着门状态挑喷头
         val result = RootShell.data.exec("echo '$SQL' | sqlite3 -separator '|' ${AppConfig.BATH_DB_PATH}")
         val elapsed = SystemClock.elapsedRealtime() - startedAt
-        if (!result.success) {
+        if (result.exitCode != 0) {
             Log.w(TAG, "read failed (${elapsed}ms)")
             return emptyList()
         }

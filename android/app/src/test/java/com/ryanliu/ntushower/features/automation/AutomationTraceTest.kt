@@ -1,5 +1,7 @@
 package com.ryanliu.ntushower.features.automation
 
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -30,8 +32,8 @@ class AutomationTraceTest {
 
     @Test
     fun `recordRefresh is a no-op while disabled`() {
-        // 每秒一两行会持续堆积，开关关着时不该有任何副作用
-        AutomationTrace.recordRefresh(costMs = 12, state = "HOME")
+        // 界面每秒产生十几次重算，开关关着时不该有任何副作用
+        AutomationTrace.recordRefresh(costMs = 12, state = "HOME", changed = false)
     }
 
     @Test
@@ -50,5 +52,46 @@ class AutomationTraceTest {
         val label = trace.javaClass.getDeclaredField("label")
         label.isAccessible = true
         assertTrue((label.get(trace) as String).startsWith("assign"))
+    }
+}
+
+/**
+ * 重算统计的攒批逻辑。
+ *
+ * 它决定落盘那行里几个数对不对，而按这些数做的是"要不要再优化"的判断——数错了比不记更糟，
+ * 因为结论会跟现实对不上，还看不出来。
+ */
+class RefreshWindowTest {
+
+    @Test
+    fun `nothing comes out before the batch is full`() {
+        val window = RefreshWindow(flushEvery = 3)
+        assertNull(window.add(costMs = 1, state = "HOME", changed = false, nowMs = 0))
+        assertNull(window.add(costMs = 2, state = "HOME", changed = false, nowMs = 10))
+    }
+
+    @Test
+    fun `a full batch reports count span average peak and changes`() {
+        val window = RefreshWindow(flushEvery = 3)
+        window.add(costMs = 4, state = "HOME", changed = false, nowMs = 1_000)
+        window.add(costMs = 6, state = "HINT", changed = true, nowMs = 1_100)
+        val line = window.add(costMs = 20, state = "HOME", changed = false, nowMs = 1_300)
+        assertEquals("refresh n=3 span=300ms avg=10ms max=20ms changed=1 last=HOME", line)
+    }
+
+    @Test
+    fun `the window restarts after every batch`() {
+        // 不重启的话第二行就是累计值：跨度越拉越长、均值越来越平，趋势全被抹掉
+        val window = RefreshWindow(flushEvery = 2)
+        window.add(costMs = 2, state = "HOME", changed = false, nowMs = 0)
+        assertEquals(
+            "refresh n=2 span=10ms avg=2ms max=2ms changed=0 last=HOME",
+            window.add(costMs = 2, state = "HOME", changed = false, nowMs = 10),
+        )
+        window.add(costMs = 4, state = "HOME", changed = false, nowMs = 100)
+        assertEquals(
+            "refresh n=2 span=10ms avg=4ms max=4ms changed=0 last=HOME",
+            window.add(costMs = 4, state = "HOME", changed = false, nowMs = 110),
+        )
     }
 }

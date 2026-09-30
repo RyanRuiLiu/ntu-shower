@@ -110,26 +110,24 @@ object DeviceMaintenance {
     /**
      * 执行一条 root shell 命令，输出放在 `data.output`。
      *
-     * 用一次性独立进程：命令内容由调用方给、**不可预期**，走常驻通道会占住它的
-     * 串行锁直到超时，把门状态上报与界面注入一起堵住。
+     * 走 `command` 独占通道：命令内容由调用方给、**不可预期**，与界面操作共用控制通道
+     * 会让一条慢命令把界面注入一起堵住。
      */
     private fun execShell(params: JSONObject, commandId: String): CommandOutcome {
-        // 走 command 通道（独占一条常驻 shell）：命令内容由调用方给、不可预期，
-        // 与界面操作共用控制通道会让一条慢命令把界面注入一起堵住
         val result = RootShell.command.exec(params.optString("command", ""), EXEC_TIMEOUT_MS)
 
         // 三种去向分开，别都归到 failed：
         // - timedOut：超过时限，**不知道成没成**，客户端据此可以决定是否重试
         // - exitCode 非 0：跑完了、失败了，重试大概还是失败
-        // - exitCode 读不到：命令确实跑完了（输出被截断时会这样），按成功算
+        // - exitCode 为 0：跑完了、成了
         val status = when {
             result.timedOut -> OutcomeStatus.TIMEOUT
-            result.success -> OutcomeStatus.OK
+            result.exitCode == 0 -> OutcomeStatus.OK
             else -> OutcomeStatus.FAILED
         }
         val reasonCode = when {
             result.timedOut -> ReasonCodes.COMMAND_DEADLINE_EXCEEDED
-            result.success -> ""
+            result.exitCode == 0 -> ""
             else -> ReasonCodes.DEVICE_EXEC_FAILED
         }
         val message = if (status == OutcomeStatus.OK) "" else result.output
@@ -141,7 +139,7 @@ object DeviceMaintenance {
             terminalMessage = message,
             data = JSONObject()
                 .put("output", result.output)
-                .put("exit_code", result.exitCode ?: JSONObject.NULL),
+                .put("exit_code", result.exitCode),
         )
     }
 
