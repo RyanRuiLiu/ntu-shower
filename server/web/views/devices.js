@@ -10,7 +10,7 @@
  * 与普通操作区分开（危险按钮），并且各自要一次确认——误点的代价是跑一趟现场。
  */
 import { api } from '../core/api.js'
-import { $, disposer, esc, listen } from '../core/dom.js'
+import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
 import { outcomeText } from '../core/outcome.js'
 import { refreshDevices, store, subscribe } from '../core/store.js'
 import { toast } from '../core/toast.js'
@@ -31,7 +31,7 @@ function renderTable() {
       (device) => `
       <tr data-id="${esc(device.device_id)}">
         <td>
-          <div>${esc(device.name || '未命名')}</div>
+          <div>${esc(device.name || PLACEHOLDER)}</div>
           <code>${esc(device.device_id)}</code>
         </td>
         <td class="mono">${esc(device.app_version)} <span class="muted">(${esc(device.version_code)})</span></td>

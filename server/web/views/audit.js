@@ -11,7 +11,7 @@
  * 搜，翻译成中文反而搜不到。
  */
 import { api } from '../core/api.js'
-import { $, disposer, esc, listen } from '../core/dom.js'
+import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
 import { statusBadgeClass, statusLabel } from '../core/outcome.js'
 import { store, subscribe } from '../core/store.js'
 
@@ -26,7 +26,7 @@ function report(text, kind) {
 }
 
 function duration(row) {
-  if (!row.finished_at || !row.created_at) return '—'
+  if (!row.finished_at || !row.created_at) return PLACEHOLDER
   return `${new Date(row.finished_at) - new Date(row.created_at)} ms`
 }
 
@@ -45,7 +45,7 @@ function render(rows) {
         <td class="mono">${esc(row.device_id)}</td>
         <td class="mono">${esc(row.action)}</td>
         <td>${statusBadge(row.status)}</td>
-        <td class="muted">${esc(row.reason_code || '—')}</td>
+        <td class="muted">${esc(row.reason_code || PLACEHOLDER)}</td>
         <td class="mono">${esc(duration(row))}</td>
         <td class="muted mono" title="${esc(row.command_id)}">${esc(row.command_id.slice(0, 8))}</td>
       </tr>`,
