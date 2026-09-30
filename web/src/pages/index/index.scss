@@ -59,12 +59,14 @@
   color: $color-ink-soft;
 }
 
-// 门牌墙网格：窄缝像瓷砖缝，一屏尽量放下所有门牌。
+// 门牌墙网格：窄缝像瓷砖缝。
 // 用 auto-fill 而非固定列数——设备门数不同（本机 7，别的可能更多），
 // 固定列数会在门数变化时留下空位。
+// 最小宽度用大写 PX（Taro 约定：不按 designWidth 换算）。这里要的是真实屏幕
+// 像素——写成小写 px 会被当成 750 设计稿的 96，实际渲染约 50px，一屏挤下 6~7 个门牌。
 .wall {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(96PX, 1fr));
   gap: $space-sm;
 }
 

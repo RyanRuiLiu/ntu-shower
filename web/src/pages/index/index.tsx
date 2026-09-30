@@ -17,7 +17,7 @@ export default function Index() {
     <View className='page'>
       <View className='page__head'>
         <Text className='page__title'>喷头状态</Text>
-        {doors.length > 0 && <Text className='page__count'>{doors.length} 个位</Text>}
+        {doors.length > 0 && <Text className='page__count'>{doors.length} 个喷头</Text>}
       </View>
 
       {loading && <Text className='page__hint'>正在获取…</Text>}

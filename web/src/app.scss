@@ -1,3 +1,4 @@
+@use 'sass:map';
 @use './styles/tokens' as *;
 
 // ── 基础 ─────────────────────────────────────────────────
@@ -15,18 +16,19 @@ page {
 }
 
 // ── 门牌 ─────────────────────────────────────────────────
+// 竖向矩形（高度 $door-height），整块着色——状态靠**色块面积**传达，
+// 几米外就要能分辨，因此底色与文字色同时承载状态，而不是一条细边框。
 
 .door {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: $space-md $space-sm;
+  height: $door-height;
   border-radius: $radius;
-  background: $color-surface;
 
-  // 瓷砖靠明度与窄缝区分，不靠阴影——阴影会让它看起来浮在墙上
-  border-bottom: 3px solid $color-seam;
+  // 底边压深一档，给方形一个落地的感觉（像瓷砖贴在墙上，不是浮着）
+  border-bottom: 3px solid rgb(0 0 0 / 8%);
   transition: transform 120ms ease-out;
 
   // 按压反馈：只在这个真实交互时才有动效，不做入场动画
@@ -51,17 +53,15 @@ page {
   letter-spacing: 0.05em;
 }
 
-// 状态色由 token 的 map 生成，新增状态时只改 _tokens.scss 一处。
+// 状态色由 token 的两组 map 生成，新增状态只改 _tokens.scss 一处。
 // 颜色只在这里出现，TS 侧只负责给出 `door--<state>` 这个类名。
-@each $state, $color in $state-colors {
+// 用 map.get 而非全局的 map-get：后者已弃用，将在 Dart Sass 3.0 移除。
+@each $state, $color in $state-ink {
   .door--#{$state} {
-    border-bottom-color: $color;
+    background: map.get($state-surface, $state);
 
+    .door__no,
     .door__state {
-      color: $color;
-    }
-
-    .door__no {
       color: $color;
     }
   }
