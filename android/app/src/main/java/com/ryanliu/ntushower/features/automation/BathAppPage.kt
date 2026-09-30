@@ -82,8 +82,8 @@ internal interface PageProbe {
  * 经在了，所以稳态下（首页命中即返回）虽然只问一句，代价也只付一次遍历。
  *
  * 这个"只走一遍"是这套识别唯一能压的变量：浴室 App 首页挂着跑马灯（`tvMarqueeViewHint`）
- * 与时钟（`tv_time`），界面每秒产生十几次内容变化——两次实测分别是 16.4/s 与 15.7/s——每次
- * 变化都要重算一遍。
+ * 与 7 个计时文本（`tv_time`，每个喷头一个），界面每秒产生五十来条内容变化。其中与页面判定
+ * 无关的绝大部分由 [PageEventRules] 挡在门外，剩下的每次都要重算一遍。
  *
  * 单次识别的耗时构成由 [AutomationTrace] 记录（`avg` 是总耗时，`qavg` 是取特征那一段）：
  * 总耗时里含着"取活动窗口根节点"这笔与树大小无关的开销，两段分开才看得出该继续砍哪一段
@@ -111,6 +111,60 @@ internal object PageRules {
 }
 
 /**
+ * 事件筛选：决定一次内容变化值不值得重算。
+ *
+ * ## 判据是量出来的
+ *
+ * 真机跑出来的分布（`automation.log` 的 `ev` 行，每行是一个重算窗口内各来源的条数）：
+ *
+ * | 事件 | 稳态 | 页面切换时 |
+ * |---|---|---|
+ * | `TextView` + 纯文本 | 168 条/窗口 | 只在噪声里 |
+ * | `GridView` + 子树 | 44 条/窗口 | 只在噪声里 |
+ * | `LinearLayout` + 未指定 | 0 | 5 条 |
+ * | `LinearLayout` + 子树 | 0 | 2 条 |
+ * | `TextView` + 未指定 | 0 | 1 条 |
+ *
+ * 稳态那两类撑着全部分母（每秒五十来条），而它们**一次都没让页面状态变过**——`changed` 在
+ * 几十个窗口里恒为 0。来源就是首页那 7 个计时文本与一条跑马灯，每个每秒重设文本。切换页面
+ * 那三类只在真实切换的窗口里出现，与稳态两类完全不重叠。
+ *
+ * ## 为什么要类名和变化类型两个维度
+ *
+ * 只看变化类型不够：`GridView` 报的同样是子树变化，但它自身的存在与否由首页决定，它变的是
+ * 列表项。只看类名也不够：`TextView` 既报纯文本（计时、跑马灯），也在页面结构变化时报未指定。
+ *
+ * ## 保守的那一侧
+ *
+ * 判据只写"哪些**不**值得算"，其余一律算。反过来（列出值得算的）一旦漏掉某种没量到的事件，
+ * 状态就会永远停在旧值上，而这种错误看不出来——界面照常工作，只是状态是陈的。这里的例外
+ * 只有两类，真漏了也只是多算几次。
+ */
+internal object PageEventRules {
+
+    /** `AccessibilityEvent.CONTENT_CHANGE_TYPE_TEXT`。 */
+    private const val TEXT_ONLY = 2
+
+    /** `AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE`。 */
+    private const val SUBTREE = 1
+
+    private const val TEXT_VIEW = "TextView"
+    private const val GRID_VIEW = "GridView"
+
+    /**
+     * 这次事件是否可能改变页面状态。
+     *
+     * 变更类型按**整体相等**判断，不按位包含：只有"纯粹是文本变化"才免算，任何组合
+     * （子树加文本）都算。类名用后缀匹配，于是 `TextView` 的子类也一并覆盖。
+     */
+    fun mayChangePage(event: ContentEvent): Boolean {
+        if (event.contentChangeTypes == TEXT_ONLY && event.className.endsWith(TEXT_VIEW)) return false
+        if (event.contentChangeTypes == SUBTREE && event.className.endsWith(GRID_VIEW)) return false
+        return true
+    }
+}
+
+/**
  * 页面状态的**唯一来源**：事件驱动地维护当前状态，并通知关心它的人。
  *
  * ## 为什么不是"每次问就重新算"
@@ -122,11 +176,15 @@ internal object PageRules {
  * 改成推模型：无障碍事件到达时重算一次，状态**真的变了**才通知订阅者。消费方读
  * [snapshot] 是纯内存读，随时拿到的是当前状态，而不是"上次轮询时的状态"。
  *
- * ## 节流
+ * ## 哪些事件不值得算
  *
- * 不做。事件的密度由浴室 App 的动画决定（实测 16 次/秒），不是由我们决定的；把单次代价
- * 压到一次查询之后，这些事件合起来也远低于一个核的百分之几。真要再省就得丢事件，而被丢
- * 掉的那一个恰恰可能就是最后一次变化——状态会永远停在旧值上，代价远大于那点 CPU。
+ * 事件密度由浴室 App 的界面决定，不由我们决定：首页挂着 7 个计时文本与一条跑马灯，实测每秒
+ * 产生五十来条内容变化。但其中 95% 以上**一次都不会改变页面状态**——几十个统计窗口里
+ * `changed` 恒为 0。
+ *
+ * 这部分按事件本身的特征筛掉，判据与实测分布见 [PageEventRules]。**不是按时间节流**：那是
+ * 另一种东西，它会把一个恰好落在窗口内的变化推迟到窗口结束，而真的变化一到就该立刻重算。
+ * 这里筛掉的是"确定与页面判定无关"的事件，没有等待窗口这回事。
  *
  * ## 线程
  *
@@ -172,11 +230,16 @@ object BathAppPage {
      * 由无障碍服务的事件回调调用（主线程），所以这里只允许做原子操作与一次入队——[event]
      * 的统计同样受这条约束，它只是往一张内存表里加个计数。
      *
-     * 记事件与是否重算**分开**：被合并掉的那些事件不触发重算，但它们同样是噪声的一部分，
-     * 统计里少了它们，比例就会算错。
+     * 不值得算的事件（判据见 [PageEventRules]）**只进统计、不入队**：这正是它省下来的那部分。
+     * 统计不能一起省——被筛掉的条数本身就是"筛掉了多少"这个答案。
+     *
+     * [event] 为 null 表示这是主动请求（自动化流程动手前先要一份当前状态），一律照算。
      */
     internal fun refresh(event: ContentEvent? = null) {
-        event?.let { AutomationTrace.recordEvent(it) }
+        if (event != null) {
+            AutomationTrace.recordEvent(event)
+            if (!PageEventRules.mayChangePage(event)) return
+        }
         if (pending.getAndSet(true)) return
         signal.offer(Unit)
     }
