@@ -90,6 +90,31 @@ class RuntimeConfigTest {
         assertEquals(600000L, RuntimeConfig.bathExitCooldownMs)
     }
 
+    @Test
+    fun supportedKeysMatchesServerKeySet() {
+        // 键集合是与服务端 DEFAULT_CONFIG 对账的单一来源：数量变化必须是有意的
+        assertEquals(17, RuntimeConfig.supportedKeys.size)
+    }
+
+    @Test
+    fun apply_acceptsAnyJsonTypeForEveryKey() {
+        // 服务端下发的值类型异常时（字符串写数字等）只能回退默认值，不得抛异常
+        RuntimeConfig.supportedKeys.forEach { key ->
+            listOf(true, 42, "text", 3.5).forEach { value ->
+                RuntimeConfig.apply(JSONObject().put(key, value))
+            }
+        }
+        assertEquals(17, RuntimeConfig.supportedKeys.size)
+    }
+
+    @Test
+    fun apply_doesNotDisturbUnrelatedKeys() {
+        RuntimeConfig.apply(JSONObject().put("heartbeat_interval_s", 45))
+
+        assertEquals(10000L, RuntimeConfig.serverResponseTimeoutMs)
+        assertEquals(3, RuntimeConfig.bathExitMaxCount)
+    }
+
     private companion object {
         // 全键默认值：保证任意测试执行顺序下 resetDefaults 都真实复位
         val DEFAULTS = JSONObject(

@@ -89,15 +89,7 @@ object RootShell {
      */
     private fun readUntil(marker: String, timeoutMs: Long): String? {
         val reader = stdout ?: return null
-        val task = FutureTask {
-            val output = StringBuilder()
-            var line = reader.readLine()
-            while (line != null && line != marker) {
-                output.append(line).append('\n')
-                line = reader.readLine()
-            }
-            output.toString().trim()
-        }
+        val task = FutureTask { ShellOutput.collect(reader.lineSequence().iterator(), marker) }
         Thread(task, "root-shell-read").apply {
             isDaemon = true
             start()

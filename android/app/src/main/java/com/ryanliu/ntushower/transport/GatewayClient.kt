@@ -9,6 +9,7 @@ import com.ryanliu.ntushower.core.clock.Clock
 import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.identity.DeviceIdentity
 import com.ryanliu.ntushower.core.net.HttpClientFactory
+import com.ryanliu.ntushower.core.net.ReconnectBackoff
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -164,8 +165,9 @@ class GatewayClient(context: Context, private val callback: Callback) {
         if (reconnectScheduled || connected) return
         reconnectScheduled = true
         reconnectAttempt++
-        val delay = minOf(
-            RuntimeConfig.reconnectBaseMs shl minOf(reconnectAttempt - 1, 4),
+        val delay = ReconnectBackoff.delayMs(
+            reconnectAttempt,
+            RuntimeConfig.reconnectBaseMs,
             RuntimeConfig.reconnectMaxMs,
         )
         Log.i(TAG, "reconnect in ${delay}ms (attempt=$reconnectAttempt)")
