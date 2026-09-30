@@ -1,3 +1,7 @@
+// 设备 ROM 冻结在 Android 4.4（API 19）：AccessibilityNodeInfo.recycle 在新版 SDK 中废弃，
+// 但在 19 上不回收会造成节点泄漏。
+@file:Suppress("DEPRECATION")
+
 package com.ryanliu.ntushower.service
 
 import android.accessibilityservice.AccessibilityService
