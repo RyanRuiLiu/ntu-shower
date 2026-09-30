@@ -1,6 +1,7 @@
 # 0021. 远程配置 14 项全集中下发
 
-* 状态：accepted
+* 状态：superseded（键集与存储方式被 [0038](0038-config-registry-and-diff-storage.md) 取代；
+  "经 hello_ack 与 config.update 下发合并后的有效配置、未知键设备忽略"仍然有效）
 * 日期：2026-09-30
 
 ## 背景与问题

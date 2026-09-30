@@ -1,0 +1,61 @@
+docs: 通读重写文档、补 AI 入口，并修正代码中与标准不符的两处
+
+## 为什么是重写而不是检索
+
+此前我用关键词检索判断文档是否过期（搜 DEFAULT_CONFIG、匿名、14 个键），
+只找到字面匹配，漏掉了大量语义过期——例如 ARCHITECTURE 整节描述的是已删除的
+auth 模块与 JWT 角色，但不含我搜的任何词。本轮改为逐份通读、逐段判断。
+
+## 新增 AGENTS.md
+
+一屏读完的 AI 协作者入口：读哪三份文档、门禁命令、硬约束、当前状态。
+这是此前提出的目标（"文档越多 AI 越不愿读"）一直没做的事。
+
+## 新增两份 ADR，并标注被取代的
+
+- 0037 用户面访问控制：身份标识 + 能力位（取代 0034 的"用户面操作接口匿名"）
+- 0038 远程配置：登记表 + 只存差异（取代 0021 的"14 项固定键集 + 合并快照"）
+- DECISIONS.md 新增"已取代的决策"表，标明照它写代码会出错
+
+## 通读后修正的过期内容
+
+ARCHITECTURE：
+- 服务端平面列出 `modules.auth`（该模块已删除），且缺 access/bridge
+- 鉴权模型整节是 JWT + role + `/admin/users`（端点已不存在）
+- 系统全景图写"配对码激活"（实际是 ANDROID_ID + 人工信任）
+
+PROTOCOL：
+- §0.4 说设备存"自生成 UUID 与 token"，与 §1 的 ANDROID_ID 自相矛盾，
+  且 grep 确认代码里没有任何 token
+- §3 状态上报字段全错：写的是 `status: "idle"|"in_use"` 与 `raw`，
+  实际是扁平的 `status_raw: int`（派生在服务端），`source` 是 startup 不是 scheduled
+- §2 写"服务端 90s 无心跳判离线"——代码里没有这个逻辑，
+  离线由 WebSocket 断开触发（网关 finally 块）
+- §0.2 举的错误码 4 个里 3 个不存在（auth.invalid_token / pair.rate_limited /
+  session.busy），改用实际实现的
+- §4 重复列举了两次已实现 action
+
+RUNBOOK：
+- §3 的"恢复演练（建议每季度一次）"违反本册自订的"只写验证过的步骤"。
+  **本轮实际执行了一次**：备份还原到临时位置，integrity_check 返回 ok、
+  全部表可读，结果与脚本记入文档
+- §5 把 `app.restart` 说成"管理面命令"，实际它是设备命令、无 HTTP 端点
+- 部署命令的 ruff format 范围与 CI 统一
+
+README：模块清单缺 access、ADR 数 36→38、鉴权描述整段重写、补 AGENTS.md 指引
+
+## 代码中与标准不符的两处
+
+STANDARDS §2 禁止函数体内导入（除真实循环依赖并注明原因），实际有两处：
+- sessions/service.py 导入 devices.service
+- sessions/auto_settle.py 导入 sessions.service
+逐一验证均无循环依赖，已移到模块顶部。
+
+auto_settle 的 DEFAULT_SETTLE_THRESHOLD_S 与配置登记表的默认值重复，
+且它作为 as_int 的 default 永不生效（effective() 保证含全部键）。已删除，
+改为直接取值——缺键即 KeyError，好过用兜底阈值静默结算错人。
+
+## 验证
+
+服务端 ruff / mypy --strict / 210 passed / 覆盖率 97.23%
+恢复演练：备份 integrity_check = ok，全部表可读
