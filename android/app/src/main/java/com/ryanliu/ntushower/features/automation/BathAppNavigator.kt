@@ -70,7 +70,7 @@ object BathAppNavigator {
     }
 
     /**
-     * 确保浴室 App 在前台。
+     * 确保浴室 App 在前台，并且没有系统面板压在它上面。
      *
      * **SystemUI 要单独处理**：学生拉下通知栏或按了最近任务键时，前台包名是
      * `com.android.systemui`。这时直接 `launchBathApp`（走 `REORDER_TO_FRONT`）只会把
@@ -80,8 +80,11 @@ object BathAppNavigator {
      *
      * `ACTION_CLOSE_SYSTEM_DIALOGS` 是 API 19 上不需要 root 的关闭手段。关掉之后要等
      * 一拍再拉起：广播是异步的，紧接着热切前台会把还没收起的面板又留在那里。
+     *
+     * 这不是"看见弹窗就找确定键点一下"那类试探：关面板与拉前台都是系统给出的确定动作，
+     * 而认不出的页面一律走失败回报，不去猜它是什么、更不去点它上面的任何东西。
      */
-    private fun ensureForeground(a11y: A11yService) {
+    fun ensureForeground(a11y: A11yService) {
         val root = a11y.rootInActiveWindow
         if (root == null) {
             a11y.launchBathApp()
@@ -116,7 +119,13 @@ object BathAppNavigator {
 
     // ── 等待 ──
 
-    /** 等待页面到达指定状态；期间检测到浴室 App 离开前台自动重拉一次。 */
+    /**
+     * 等待页面到达指定状态；期间检测到浴室 App 离开前台就把它拉回来。
+     *
+     * 拉回来走 [ensureForeground] 而不是裸的 `launchBathApp`：离开前台的常见起因是学生拉下了
+     * 通知栏或进了最近任务，那时前台是 SystemUI——热切前台拗不过压在最上面的系统面板，只有
+     * 先把面板关掉才回得来。
+     */
     fun waitForPage(a11y: A11yService, target: PageState, timeoutMs: Long): Boolean {
         val start = System.currentTimeMillis()
         var relaunched = false
@@ -124,7 +133,7 @@ object BathAppNavigator {
             val mark = A11yService.pageChangeMark()
             if (BathAppPage.snapshot().state == target) return true
             if (!relaunched && !A11yService.bathAppInForeground) {
-                a11y.launchBathApp()
+                ensureForeground(a11y)
                 relaunched = true
                 A11yService.awaitPageChangeAfter(mark, RuntimeConfig.pollIntervalMs)
                 continue
