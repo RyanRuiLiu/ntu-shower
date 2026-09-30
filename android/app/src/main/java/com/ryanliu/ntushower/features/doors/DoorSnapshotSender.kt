@@ -33,7 +33,12 @@ class DoorSnapshotSender(context: Context) {
 
     @Volatile private var lastHash = 0
 
-    /** 采集并入队；连接可用时立即尝试发送。 */
+    /**
+     * 采集并入队；有变化才会入队，入队后立即尝试发送。
+     *
+     * 注意：门状态无变化时本方法直接返回（去重），因此**不能**把它当作重传入口——
+     * 断网期间积压的快照与门状态是否变化无关，重连时必须直接调 [flush]。
+     */
     fun captureAndEnqueue(gateway: GatewayClient) {
         val doors = DoorSnapshotReader.readAll()
         if (doors.isEmpty()) return
@@ -58,7 +63,7 @@ class DoorSnapshotSender(context: Context) {
         flush(gateway)
     }
 
-    /** 按序发送最旧的一条未确认快照（等待 ack 后再发下一条）。 */
+    /** 按序发送最旧的一条未确认快照（等待 ack 后再发下一条）。幂等，可随时调用。 */
     fun flush(gateway: GatewayClient) {
         val oldest = db.query("outbox", null, null, null, null, null, "seq ASC", "1").use { c ->
             if (c.moveToFirst()) {
