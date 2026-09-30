@@ -126,7 +126,7 @@ object BathAppNavigator {
      * 起因是学生拉下了通知栏或进了最近任务，那时前台是 SystemUI——热切前台拗不过压在最上面
      * 的系统面板，只有先把面板关掉才回得来。
      *
-     * **不限制恢复次数**：反复拉面板的场面这套流程该扛住，而它本来就有总超时兜底；[ensureForeground]
+     * **不限制恢复次数**：反复拉面板的场面这套流程该扛住，而它本来就有总超时收口；[ensureForeground]
      * 在浴室 App 已在前台时什么都不做，重试不会空转。
      */
     fun waitForPage(a11y: A11yService, target: PageState, timeoutMs: Long): Boolean {
