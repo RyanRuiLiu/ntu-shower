@@ -24,8 +24,21 @@
 
 .bar-nav {
   display: flex;
-  gap: 2px;
+  align-items: center;
+  gap: 10px;
   overflow-x: auto;
+}
+
+/* 组内相邻、组间留白并由 .bar-nav-group + .bar-nav-group 画分隔线 */
+.bar-nav-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.bar-nav-group + .bar-nav-group {
+  padding-left: 10px;
+  border-left: 1px solid var(--border);
 }
 
 .bar-nav-item {
