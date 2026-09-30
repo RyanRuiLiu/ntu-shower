@@ -84,6 +84,20 @@ object AutomationTrace {
         append(line)
     }
 
+    /**
+     * 记一次按 ID 查询所花的时间（毫秒）。
+     *
+     * 一段识别的耗时里，"取活动窗口的根节点"和"按 ID 查询"是两笔来历完全不同的开销：
+     * 前者是系统在活动窗口上做一次快照，与树有多大无关；后者在系统侧遍历并**构建**命中
+     * 节点的列表，随命中数增长。只记总耗时的话，看到 53ms 也无从判断该砍哪一段。
+     *
+     * 只累加在内存里，攒够一批才随 [recordRefresh] 一起落盘，所以调用频率高不要紧。
+     */
+    fun recordQueryTime(ms: Long) {
+        if (!RuntimeConfig.automationTraceEnabled) return
+        refreshWindow.addQuery(ms)
+    }
+
     private fun append(line: String) {
         // 整段包在 try 里：记录跑在自动化流程的关键路径上，它自己把流程搞挂就本末倒置了。
         // 写文件会失败（路径不可写、存储满），日志调用在单测里也会失败。
@@ -103,7 +117,8 @@ object AutomationTrace {
  * 页面重算的滑动统计：攒够一批落一行。
  *
  * 为什么不逐条记流水，见 [AutomationTrace] 里 `REFRESH_FLUSH_EVERY` 的说明。这里只留能回答
- * 问题的几个数——总数、跨度、均值、峰值、真换页的次数、以及最后停在哪一页。
+ * 问题的几个数——总数、跨度、均值、峰值、查询那一段的均值与峰值、真换页的次数、以及最后
+ * 停在哪一页。
  */
 internal class RefreshWindow(private val flushEvery: Int) {
 
@@ -111,8 +126,17 @@ internal class RefreshWindow(private val flushEvery: Int) {
     private var changedCount = 0
     private var totalMs = 0L
     private var maxMs = 0L
+    private var queryTotalMs = 0L
+    private var queryMaxMs = 0L
     private var openedAtMs = 0L
     private var lastState = ""
+
+    /** 累加一次按 ID 查询的耗时；由 [AutomationTrace.recordQueryTime] 转发。 */
+    @Synchronized
+    fun addQuery(ms: Long) {
+        queryTotalMs += ms
+        if (ms > queryMaxMs) queryMaxMs = ms
+    }
 
     /** 记一次重算；攒够一批时返回要落的行，否则返回 null。 */
     @Synchronized
@@ -125,11 +149,14 @@ internal class RefreshWindow(private val flushEvery: Int) {
         lastState = state
         if (count < flushEvery) return null
         val line = "refresh n=$count span=${nowMs - openedAtMs}ms avg=${totalMs / count}ms " +
-            "max=${maxMs}ms changed=$changedCount last=$lastState"
+            "max=${maxMs}ms qavg=${queryTotalMs / count}ms qmax=${queryMaxMs}ms " +
+            "changed=$changedCount last=$lastState"
         count = 0
         changedCount = 0
         totalMs = 0
         maxMs = 0
+        queryTotalMs = 0
+        queryMaxMs = 0
         return line
     }
 }

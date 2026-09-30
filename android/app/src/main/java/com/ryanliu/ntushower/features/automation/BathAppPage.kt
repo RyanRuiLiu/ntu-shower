@@ -52,12 +52,16 @@ internal interface PageProbe {
  *
  * **判定顺序即优先级**。首页排在最前，一是因为它是稳定态、其余特征可能只是页面切换过程
  * 中的残留；二是因为查询是懒的——命中即返回，后面的控件根本不查，于是稳态下每次识别只
- * 花一次查询。这个"只查一次"不是顺手写成的，是应对下面这组实测数字的唯一手段：
+ * 花一次查询。
  *
- * 浴室 App 首页挂着跑马灯（`tvMarqueeViewHint`）与时钟（`tv_time`），它们让界面**每秒产生
- * 16 次**内容变化事件；而按层下钻取特征要跨进程取 52 个节点，单次 41.6ms——合起来常驻
- * 吃掉 0.68 个核，比 agent 其余全部开销还大一个量级。按 ID 查是让系统在服务侧一次遍历
- * 完成，稳态下一次调用即可。
+ * 这个"只查一次"不是顺手写成的，它是这套识别唯一能压的变量：浴室 App 首页挂着跑马灯
+ * （`tvMarqueeViewHint`）与时钟（`tv_time`），界面每秒产生十几次内容变化——两次实测分别
+ * 是 16.4/s 与 15.7/s——每次变化都要走一遍判定。而按层下钻要跨进程取 52 个节点，每多问
+ * 一句就是每秒多十几次调用。
+ *
+ * 单次识别的耗时构成由 [AutomationTrace] 记录（`avg` 是总耗时，`qavg` 是查询那一段）：
+ * 总耗时里还含着"取活动窗口根节点"这笔与树大小无关的开销，两段分开才看得出该继续砍哪
+ * 一段——只看总耗时会得出错误的结论。
  */
 internal object PageRules {
 
@@ -150,28 +154,36 @@ object BathAppPage {
  * 探针的真实现：把"按 ID 找控件"交给系统侧完成。
  *
  * 为什么不用逐层 `getChild` 下钻：整棵树 52 个节点，而首页那盏跑马灯让它每秒产生十几次变
- * 化——按层下钻就是每秒几百次跨进程调用，实测单次识别 41.6ms、常驻 0.68 个核。按 ID 查
- * 是一次调用换一次系统侧遍历，稳态下（首页命中即返回）总共只花一次。
+ * 化——按层下钻就是每秒几百次跨进程调用，每一条都是一次 IPC。按 ID 查是一次调用换一次系统
+ * 侧遍历，稳态下（首页命中即返回）总共只花一次。
+ *
+ * 每次查询的耗时单独报给 [AutomationTrace]：一段识别的总耗时里，"取活动窗口的根节点"与
+ * "按 ID 查询"是两笔来历不同的开销，只记总数就看不出该砍哪一段。
  */
 private class A11yProbe(private val root: AccessibilityNodeInfo) : PageProbe {
 
     override fun find(resId: String): PageElement? {
-        val found = try {
-            root.findAccessibilityNodeInfosByViewId(resId)
-        } catch (e: RuntimeException) {
-            // 查询途中页面切换会让节点失效并抛出来。认不出状态就报 UNKNOWN，调用方那边有
-            // 「连续几次认不出才算失败」的宽限，不会被这一下打断流程。
-            Log.w(TAG, "find $resId failed: ${e.message}")
-            return null
-        }
-        if (found == null || found.isEmpty()) return null
-        // 同一个 ID 可能有多个控件，判定只认第一个；剩下的当场回收，否则就是节点泄漏
-        val head = found[0]
-        for (index in 1 until found.size) found[index].recycle()
+        val startedAt = System.nanoTime()
         try {
-            return PageElement(head.text?.toString() ?: "")
+            val found = try {
+                root.findAccessibilityNodeInfosByViewId(resId)
+            } catch (e: RuntimeException) {
+                // 查询途中页面切换会让节点失效并抛出来。认不出状态就报 UNKNOWN，调用方那边有
+                // 「连续几次认不出才算失败」的宽限，不会被这一下打断流程。
+                Log.w(TAG, "find $resId failed: ${e.message}")
+                return null
+            }
+            if (found == null || found.isEmpty()) return null
+            // 同一个 ID 可能有多个控件，判定只认第一个；剩下的当场回收，否则就是节点泄漏
+            val head = found[0]
+            for (index in 1 until found.size) found[index].recycle()
+            try {
+                return PageElement(head.text?.toString() ?: "")
+            } finally {
+                head.recycle()
+            }
         } finally {
-            head.recycle()
+            AutomationTrace.recordQueryTime((System.nanoTime() - startedAt) / 1_000_000)
         }
     }
 }
