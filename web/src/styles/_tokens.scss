@@ -3,8 +3,8 @@
 // 取自浴室的真实材质：瓷砖、水、不锈钢。刻意避开常见的生成式设计套路
 // （暖米色底 + 陶土色、近黑底 + 酸绿、发丝线报纸版式、统一圆角卡片套件）。
 
-// 关键决策：**只有"空闲"用强色**。用户站在浴室门口，几秒内要找的就是它；
-// 使用中与故障对他都是"不能用"。颜色承担全部状态信息，文字补充细节。
+// 关键决策：**状态用色块面积表达**，不是细边框或小圆点。用户站在浴室门口，
+// 几米外就要分辨哪扇门能用——颜色必须占满门牌，而不是一条 3px 的线。
 
 // ── 颜色 ─────────────────────────────────────────────────
 
@@ -20,16 +20,28 @@ $color-ink-soft: #4a6670;
 /// 空闲：唯一强色，只给"可用"
 $color-free: #1b8a9c;
 
+/// 空闲的门牌底色（同色系浅调，保证门号在浅底上仍可读）
+$color-free-soft: #d7edf0;
+
 /// 占用（waiting / bathing / paused）：有人，但不是故障
 $color-busy: #b8791f;
+
+/// 占用的门牌底色
+$color-busy-soft: #f5e6cd;
 
 /// 不可用（repair / disabled）：坏了，需报修
 $color-fault: #9c3b32;
 
-/// 过渡态与未上报（selected / unknown）
+/// 不可用的门牌底色
+$color-fault-soft: #f0dcd9;
+
+/// 过渡态与未上报（selected）
 $color-muted: #8399a1;
 
-/// 卡片底：比页面底色略亮，靠明度区分而非阴影
+/// 过渡态的门牌底色
+$color-muted-soft: #e4eaec;
+
+/// 卡片底：设备在线但状态未知时用
 $color-surface: #fff;
 
 /// 缝：瓷砖之间的窄缝
@@ -46,8 +58,8 @@ $space-lg: 24px;
 // ── 字号 ─────────────────────────────────────────────────
 // 数字是主角：门号用最大的字号 + 最重的字重
 
-$font-door-no: 40px;
-$font-door-state: 14px;
+$font-door-no: 44px;
+$font-door-state: 13px;
 $font-title: 20px;
 $font-label: 13px;
 $weight-door-no: 700;
@@ -58,12 +70,18 @@ $weight-normal: 500;
 
 $radius: 2px;
 
-// ── 状态 → 颜色 的映射 ────────────────────────────────────
-// 服务端的 DoorState 有 7 个值，这里收敛为 4 个色组。
-// 新增状态时若忘记登记，Sass 会在编译期报错（map.get 返回 null 触发断言），
-// 而不是静默渲染成透明。
+/// 门牌高度。竖向矩形——真实的浴室隔间是竖的。
+/// 用大写 PX：Taro 的 pxtransform 会按 designWidth(750) 换算小写 px，
+/// 而这里要的是真实屏幕像素，否则 116 会被缩成约 60，门牌重新变扁。
+$door-height: 116PX;
 
-$state-colors: (
+// ── 状态 → 颜色 的映射 ────────────────────────────────────
+// 服务端的 DoorState 有 7 个值，收敛为 4 个色组：**前景（字）+ 底色**。
+// 两组 map 必须同时登记，新增状态时 Sass 在编译期就会因取不到值而报错，
+// 不会静默渲染成透明。
+
+/// 文字与强调色
+$state-ink: (
   'free': $color-free,
   'waiting': $color-busy,
   'bathing': $color-busy,
@@ -71,4 +89,15 @@ $state-colors: (
   'selected': $color-muted,
   'repair': $color-fault,
   'disabled': $color-fault,
+);
+
+/// 门牌底色（色块面积的主要来源）
+$state-surface: (
+  'free': $color-free-soft,
+  'waiting': $color-busy-soft,
+  'bathing': $color-busy-soft,
+  'paused': $color-busy-soft,
+  'selected': $color-muted-soft,
+  'repair': $color-fault-soft,
+  'disabled': $color-fault-soft,
 );

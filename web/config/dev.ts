@@ -14,8 +14,10 @@ export default {
      */
     devServer: {
       proxy: {
-        '/api': {
-          target: 'http://127.0.0.1:8001',
+        // 必须精确到 /api/v1：用 '/api' 会把源码路径（src/api/client.ts 在
+        // 模块图里暴露为 /api/client.ts）也代理到服务端，导致 404 且页面白屏。
+        '^/api/v1': {
+          target: process.env.TARO_APP_API_TARGET ?? 'http://127.0.0.1:8001',
           changeOrigin: true,
         },
       },
