@@ -395,6 +395,8 @@ def test_ota_manifest_and_download_flow(client: TestClient) -> None:
     manifest = client.get("/ota/manifest", params={"device_id": "dev-ota-1", "version_code": 6}).json()
     assert manifest["up_to_date"] is False
     assert manifest["version"] == "0.2.5"
+    # 大小取自文件本身，设备按它限制下载字节数
+    assert manifest["size"] == len(b"apk-bytes")
 
     assert client.get("/ota/download/0.2.5").content == b"apk-bytes"
     assert client.get("/ota/download/9.9.9").status_code == 404  # 格式合法但未发布
@@ -402,6 +404,25 @@ def test_ota_manifest_and_download_flow(client: TestClient) -> None:
 
     releases = client.get("/ota/releases").json()
     assert any(r["version"] == "0.2.5" for r in releases)
+
+
+def test_ota_manifest_without_release_file_reports_up_to_date(client: TestClient) -> None:
+    """库里有记录、文件却不在：当作没有更新。
+
+    给设备一个下不动的地址没有意义——它那边会在下载时失败，而失败的原因与服务端实情
+    对不上（记录明明在）。不写这一条，手工清理过发布目录之后就只能靠设备侧的报错反推。
+    """
+    from app.modules.ota import repository as ota_repository
+    from app.modules.ota import service as ota_service
+
+    # 版本号取一个别处没用过的：其它用例会经真实上传写出 0.3.0 的文件，共用的话这条
+    # 就依赖执行顺序了。删一次是前置条件，与 insert_release 同类，不是对实现的迁就。
+    version = "1.2.3"
+    ota_service.release_path(version).unlink(missing_ok=True)
+    ota_repository.insert_release(version, 8, "b" * 64, False, False, "dev-ota-2")
+
+    manifest = client.get("/ota/manifest", params={"device_id": "dev-ota-2", "version_code": 6}).json()
+    assert manifest == {"up_to_date": True}
 
 
 def test_ota_upload_rejects_oversize(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -11,6 +11,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import java.io.File
+import java.io.InputStream
 import java.net.URLEncoder
 import java.security.MessageDigest
 
@@ -78,11 +79,12 @@ class OtaUpdater(
         }
         val url = "https://${BuildConfig.SERVER_DOMAIN}${manifest.getString("url")}"
         val expectedSha256 = manifest.getString("sha256")
+        val expectedSize = manifest.getLong("size")
 
         onProgress(version, "downloading", "")
         val dir = File(AppConfig.WORK_DIR).apply { mkdirs() }
         val target = File(dir, "update-$version.apk")
-        download(url, target)
+        download(url, target, expectedSize)
 
         onProgress(version, "verifying", "")
         val actualSha256 = sha256Of(target)
@@ -116,16 +118,53 @@ class OtaUpdater(
         )
     }
 
-    private fun download(url: String, target: File) {
-        val request = Request.Builder().url(url).build()
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw IllegalStateException("download http ${response.code()}")
+    /**
+     * 下载 APK，字节数由 `expectedSize` 卡死。
+     *
+     * 无上限地 `copyTo` 会把"服务端给了个巨大的东西"直接变成"设备磁盘写满"，那时 OTA 与门
+     * 状态发件箱一起失效，而现场没有任何人能看到原因。按服务端报的大小收，多一个字节就中止
+     * ——那说明这条链路上来的不是那个包。
+     *
+     * sha256 校验的是"内容对不对"，在下载之后；这里管的是"别先把盘写满"。
+     */
+    private fun download(url: String, target: File, expectedSize: Long) {
+        try {
+            val request = Request.Builder().url(url).build()
+            client.newCall(request).execute().use { response ->
+                // HTTP 非成功与响应体为空归为同一条失败：设备端对两者的处置相同（这一轮放弃、
+                // 下轮重来），而状态码留在消息里够定位用
+                val body = response.body()
+                if (!response.isSuccessful || body == null) {
+                    throw IllegalStateException("download failed: http ${response.code()}")
+                }
+                copyExactly(body.byteStream(), target, expectedSize)
             }
-            val body = response.body() ?: throw IllegalStateException("download body empty")
-            target.outputStream().use { out ->
-                body.byteStream().copyTo(out)
+        } catch (e: Exception) {
+            // 半个文件没用而空间是实打实占着的：下次重试本来就要重下，留着只是垃圾
+            target.delete()
+            throw e
+        }
+    }
+
+    /**
+     * 读干输入流并写进文件，长度必须与声明一致。
+     *
+     * 超了就中止：多出来的字节说明链路上来的不是那个包。少了也报错。返回时文件长度一定
+     * 等于 `expectedSize`。
+     */
+    private fun copyExactly(input: InputStream, target: File, expectedSize: Long) {
+        var written = 0L
+        target.outputStream().use { out ->
+            val buf = ByteArray(64 * 1024)
+            var n: Int
+            while (input.read(buf).also { n = it } >= 0) {
+                written += n
+                if (written > expectedSize) throw IllegalStateException("download longer than declared")
+                out.write(buf, 0, n)
             }
+        }
+        if (written != expectedSize) {
+            throw IllegalStateException("download truncated: $written != $expectedSize")
         }
     }
 
