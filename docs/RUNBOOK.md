@@ -215,12 +215,37 @@ curl -X POST -H "X-Ops-Token: $TOKEN" http://127.0.0.1:8001/ops/devices/<id>/bri
 
 ## 5. 日常任务
 
+### 发布新 APK
+
+版本号在**三处**，发布前必须一起改——`test_version_consistency.py` 会在门禁里拦住不一致，
+但知道要改哪三处能省一轮往返：
+
+| 位置 | 字段 |
+|---|---|
+| `android/app/build.gradle.kts` | `versionCode`（递增整数）与 `versionName` |
+| `server/app/core/version.py` | `APP_VERSION` |
+| `server/pyproject.toml` | `[project] version` |
+
+改完跑一遍门禁（版本一致性是其中一项），再构建、再发布：
+
+```bash
+cd android && ./gradlew detekt :app:testDebugUnitTest :app:jacocoUnitTestCoverageVerification assembleRelease
+curl -X POST https://ntu-shower.iseekdream.com/ops/releases \
+  -H "X-Ops-Token: $OPS_TOKEN" \
+  -F "version=0.3.35" -F "version_code=42" -F "target=all" \
+  -F "file=@app/build/outputs/apk/release/app-release.apk"
+```
+
+响应里的 `notified_devices` 非空即表示在线设备已收到通知。设备会自行下载安装并重连，
+无需人工介入——实测约 10 秒完成。
+
+### 其他
+
 | 任务 | 命令 |
 |---|---|
 | 服务状态 | `systemctl status ntu-shower` |
 | 实时日志 | `journalctl -u ntu-shower -f` |
 | 备份列表 | `ls -lh /opt/ntu-shower-backup/` |
-| 发布新 APK | 管理面 `POST /ops/releases`（表单：version / version_code / mandatory / force / target / file） |
 | 抓设备画面 | `POST /ops/devices/<id>/capture`（返回 `data.image_base64`） |
 | 远程执行 shell | `POST /ops/devices/<id>/exec`，body `{"command": "..."}` |
 | 重启设备端程序 | `POST /ops/devices/<id>/restart` |
