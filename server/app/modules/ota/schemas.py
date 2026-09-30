@@ -24,6 +24,9 @@ class OtaManifest(TypedDict, total=False):
     """设备轮询更新的应答。
 
     `up_to_date` 恒存在；为假时其余字段才有意义。
+
+    `size` 供设备限制下载字节数——它按这个值收，多一个字节就中止，不让来路不明的
+    东西继续往盘上写。
     """
 
     up_to_date: bool
@@ -31,6 +34,7 @@ class OtaManifest(TypedDict, total=False):
     version_code: int
     url: str
     sha256: str
+    size: int
     mandatory: bool
     force: bool
 

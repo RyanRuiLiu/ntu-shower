@@ -45,12 +45,21 @@ def manifest(device_id: str, version_code: int) -> OtaManifest:
     rel = repository.latest_for(device_id, version_code)
     if rel is None:
         return {"up_to_date": True}
+    path = service.release_path(rel["version"])
+    if not path.is_file():
+        # 库里有记录、文件却不在（手工清理过目录之类）：当作没有更新，而不是给设备一个
+        # 下不动的地址——它那边会在下载时失败，而失败的原因与服务端实情对不上。
+        logger.warning("release file missing: version=%s", rel["version"])
+        return {"up_to_date": True}
     return {
         "up_to_date": False,
         "version": rel["version"],
         "version_code": rel["version_code"],
         "url": f"/ota/download/{rel['version']}",
         "sha256": rel["sha256"],
+        # 大小现取文件的，不在库里再存一列：那个数字是文件的属性，存一份就多一处可能对不上的
+        # 副本——手工替换过 APK 之后，库里那份就是错的，而错的方向是"设备收下了别的包"。
+        "size": path.stat().st_size,
         "mandatory": bool(rel["mandatory"]),
         "force": bool(rel["force"]),
     }
