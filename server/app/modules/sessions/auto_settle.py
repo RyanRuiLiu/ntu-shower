@@ -11,6 +11,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
+from app.core import actions
 from app.core.clock import parse_rfc3339
 from app.core.protocol import JsonObject, as_int
 from app.gateway.manager import manager
@@ -24,9 +25,13 @@ _task: asyncio.Task[None] | None = None
 SCAN_INTERVAL_S = 30
 
 
-def _duration_s(started_at: str) -> int:
-    """会话已持续秒数；时间不可解析时返回 0（不参与自动结算）。"""
-    moment = parse_rfc3339(started_at)
+def _duration_s(assigned_at: str) -> int:
+    """会话从分配到现在的秒数；时间不可解析时返回 0（不参与自动结算）。
+
+    以**分配时刻**起算而不是开阀时刻：占用是从刷卡入门那刻开始的，旧系统释放喷头的
+    第一个条件（`maxinspacetime`，入门后 5 分钟未开水）也是从这一刻算。
+    """
+    moment = parse_rfc3339(assigned_at)
     if moment is None:
         return 0
     return int((datetime.now(timezone.utc) - moment).total_seconds())
@@ -52,7 +57,7 @@ def pick_auto_settle_candidate(config: JsonObject) -> tuple[str, str, str, int] 
         cert_no = str(session["cert_no"] or "")
         if cert_no not in students:
             continue
-        duration = _duration_s(str(session["started_at"] or ""))
+        duration = _duration_s(str(session["assigned_at"] or ""))
         if duration < threshold_s:
             continue
         return str(session["device_id"]), cert_no, str(students[cert_no]), duration
@@ -62,7 +67,7 @@ def pick_auto_settle_candidate(config: JsonObject) -> tuple[str, str, str, int] 
 async def _settle(device_id: str, cert_no: str, password: str) -> bool:
     result = await sessions_service.send_command_and_wait(
         device_id,
-        "session.settle",
+        actions.SESSION_SETTLE,
         {"cert_no": cert_no, "password": password},
         timeout_s=60.0,
     )

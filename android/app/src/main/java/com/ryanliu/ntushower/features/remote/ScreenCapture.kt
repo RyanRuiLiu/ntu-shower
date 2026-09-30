@@ -41,7 +41,7 @@ object ScreenCapture {
     fun captureJpegBase64(): String? {
         val videoPath = "/sdcard/sc_video_${System.currentTimeMillis()}.mp4"
         return try {
-            RootShell.exec(
+            RootShell.control.exec(
                 "/system/bin/screenrecord --time-limit $SCREENRECORD_TIME_LIMIT_S " +
                     "--bit-rate $SCREENRECORD_BITRATE " +
                     "$videoPath 2>&1; chmod 666 $videoPath",

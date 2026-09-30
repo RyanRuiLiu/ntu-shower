@@ -19,7 +19,7 @@ from starlette.websockets import WebSocketDisconnect
 from app.core.config import settings
 from app.gateway import manager as manager_module
 
-ADMIN_HEADERS = {"X-Admin-Token": "test-token"}
+OPS_HEADERS = {"X-Ops-Token": "test-token"}
 DEVICE_ID = "dev-adb-1"
 
 
@@ -38,7 +38,7 @@ class FakeGatewayWS:
 
 
 def _status(client: TestClient) -> dict[str, Any]:
-    return dict(client.get(f"/admin/devices/{DEVICE_ID}/adb/status", headers=ADMIN_HEADERS).json())
+    return dict(client.get(f"/ops/devices/{DEVICE_ID}/bridge/status", headers=OPS_HEADERS).json())
 
 
 def test_adb_bridge_lifecycle(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -51,10 +51,10 @@ def test_adb_bridge_lifecycle(client: TestClient, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(manager_module.manager, "_connections", {DEVICE_ID: fake_ws})
 
     # ── 不存在/未信任的设备：管理面拒绝 ──
-    assert client.post("/admin/devices/dev-nobody/adb/open", headers=ADMIN_HEADERS).status_code == 404
+    assert client.post("/ops/devices/dev-nobody/bridge/open", headers=OPS_HEADERS).status_code == 404
 
     # ── 开启：分配端口 + 下发一次性 nonce ──
-    body = client.post(f"/admin/devices/{DEVICE_ID}/adb/open", headers=ADMIN_HEADERS).json()
+    body = client.post(f"/ops/devices/{DEVICE_ID}/bridge/open", headers=OPS_HEADERS).json()
     assert body["port"] == settings.bridge_base_port
     nonce = fake_ws.last_payload()["nonce"]
     assert nonce
@@ -88,11 +88,12 @@ def test_adb_bridge_lifecycle(client: TestClient, monkeypatch: pytest.MonkeyPatc
     # 设备 WS 断开 → 整桥回收
     assert _status(client)["open"] is False
 
-    # ── 审计留痕：adb.open 与 adb.session_end 全落 command_audit ──
-    audit = client.get("/admin/commands", headers=ADMIN_HEADERS, params={"device_id": DEVICE_ID}).json()
-    actions = {row["action"] for row in audit}
-    assert {"adb.open", "adb.session_end"} <= actions
-    opened = [row for row in audit if row["action"] == "adb.open"]
+    # ── 审计留痕：开桥与桥会话结束全落 command_audit ──
+    audit = client.get("/ops/commands", headers=OPS_HEADERS, params={"device_id": DEVICE_ID}).json()
+    recorded = {row["action"] for row in audit}
+    # 审计里的动作名与设备命令动作名同一套（bridge.*），不混用 adb.*
+    assert {"bridge.open", "bridge.session_end"} <= recorded
+    opened = [row for row in audit if row["action"] == "bridge.open"]
     assert any(row["status"] == "ok" and "port" in (row["terminal_message"] or "") for row in opened)
 
 

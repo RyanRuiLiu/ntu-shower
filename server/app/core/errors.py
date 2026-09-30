@@ -11,9 +11,8 @@
 
 生产环境经 PUBLIC_BASE_URL 注入正式域名前缀；未配置时输出相对引用，
 相对引用按 RFC 3986 相对于请求 URI 解析。任何情况下都不硬编码域名
-（docs/STANDARDS.md §7 禁止硬编码环境值）。
+（AGENTS.md 禁止硬编码环境值）。
 """
-
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError

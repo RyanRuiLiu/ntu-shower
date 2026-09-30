@@ -13,8 +13,8 @@ from app.modules.bridge.manager import AdbBridge
 from app.modules.sessions import auto_settle
 
 
-def _admin(client: TestClient) -> dict:
-    return {"X-Admin-Token": "test-token"}
+def _ops_token(client: TestClient) -> dict:
+    return {"X-Ops-Token": "test-token"}
 
 
 def _hello(device_id: str) -> str:
@@ -43,7 +43,7 @@ def _connect_trusted(client: TestClient, device_id: str) -> WebSocketTestSession
         ws.send_text(_hello(device_id))
         while json.loads(ws.receive_text()).get("type") != "link.hello_ack":
             pass
-    client.post(f"/admin/devices/{device_id}/trust", headers=_admin(client))
+    client.patch(f"/ops/devices/{device_id}", headers=_ops_token(client), json={"trusted": True})
     ws = client.websocket_connect("/gateway/device").__enter__()
     ws.send_text(_hello(device_id))
     while json.loads(ws.receive_text()).get("type") != "link.hello_ack":
@@ -65,10 +65,10 @@ def test_bridge_close_with_active_session(client: TestClient, monkeypatch: pytes
     devices_repository.set_trusted(device_id, True)
     monkeypatch.setattr(manager_module.manager, "_connections", {device_id: FakeGatewayWS()})
 
-    client.post(f"/admin/devices/{device_id}/adb/open", headers=_admin(client))
+    client.post(f"/ops/devices/{device_id}/bridge/open", headers=_ops_token(client))
     # 设备 WS 未连接的桥也能被管理面关闭（回收监听）
-    assert client.post(f"/admin/devices/{device_id}/adb/close", headers=_admin(client)).json()["closed"] is True
-    assert client.post(f"/admin/devices/{device_id}/adb/close", headers=_admin(client)).json()["closed"] is False
+    assert client.post(f"/ops/devices/{device_id}/bridge/close", headers=_ops_token(client)).json()["closed"] is True
+    assert client.post(f"/ops/devices/{device_id}/bridge/close", headers=_ops_token(client)).json()["closed"] is False
 
 
 def test_bridge_manager_units() -> None:
@@ -140,7 +140,7 @@ def test_validation_error_problem_json(client: TestClient, ops_headers: dict[str
 
 
 def test_devices_repository_capabilities_non_list(client: TestClient) -> None:
-    """capabilities 存成非数组时读取降级为空列表（防御坏数据）。"""
+    """capabilities 存成非数组时读为空列表（防御坏数据）。"""
     from app.modules.devices import repository as devices_repository
 
     devices_repository.register("dev-bad-cap", "0.2.5", 7, "4.4.4", {"not": "a list"}, "x")
@@ -164,7 +164,7 @@ def test_is_trusted_unknown_device_false(client: TestClient) -> None:
 
 
 def test_devices_repository_capabilities_corrupt_json(client: TestClient) -> None:
-    """capabilities 列被写入非法 JSON 时读取安全降级为空列表。"""
+    """capabilities 列被写入非法 JSON 时读为空列表。"""
     from app.core.db import get_conn
     from app.modules.devices import repository as devices_repository
 

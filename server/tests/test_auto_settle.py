@@ -17,8 +17,8 @@ from app.modules.sessions import auto_settle
 SETTLE_THRESHOLD_S = 1140  # 19 分钟：与 DEFAULT_CONFIG.auto_settle_threshold_s 对齐
 
 
-def _admin(client: TestClient) -> dict:
-    return {"X-Admin-Token": "test-token"}
+def _ops_token(client: TestClient) -> dict:
+    return {"X-Ops-Token": "test-token"}
 
 
 def _seed_session(device_id: str, door_no: int, cert_no: str, minutes_ago: int) -> None:
@@ -48,9 +48,10 @@ def _seed_session(device_id: str, door_no: int, cert_no: str, minutes_ago: int) 
             ],
         },
     )
-    # process_snapshot 以 now 为会话起点，这里直接回填 started_at 以模拟超时占用
+    # process_snapshot 会以"收到时刻"作为会话起点，而这里要模拟的是"很久以前就开始的
+    # 占用"。所以先把刚落下的那条结掉，再按指定的入门时刻重新开一条。
     row = doors_repository.get_open_session(device_id, door_no)
-    doors_repository.close_session(row["id"], now_rfc3339(), minutes_ago * 60, "seed")
+    doors_repository.close_session(row["id"], now_rfc3339())
     doors_repository.open_session(device_id, door_no, 900 + door_no, cert_no, started)
 
 
@@ -174,7 +175,7 @@ def test_duplicate_session_rejected(client: TestClient, ops_headers: dict[str, s
         ws.send_text(hello)
         while json.loads(ws.receive_text()).get("type") != "link.hello_ack":
             pass
-    client.post(f"/admin/devices/{device_id}/trust", headers=_admin(client))
+    client.patch(f"/ops/devices/{device_id}", headers=_ops_token(client), json={"trusted": True})
     # 信任后重连（与 _connect_trusted 相同的两次连接模式）
     ws = client.websocket_connect("/gateway/device").__enter__()
     ws.send_text(hello)

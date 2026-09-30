@@ -4,7 +4,7 @@ package com.ryanliu.ntushower.features.automation
  * 浴室 App 崩溃守护（纯逻辑，可单测）：
  * 浴室 App 退出到桌面的事件流经此决策——是否拉起、是否进入冷却。
  *
- * 对齐旧系统真机验证过的语义（ADR-0024 参数化后移植）：
+ * 对齐旧系统真机验证过的语义（docs/DECISIONS.md 参数化后移植）：
  * - [windowMs] 内退出达 [maxCount] 次 → 进入 [cooldownMs] 冷却期，冷却期内不拉起；
  * - 浴室 App 回到前台即解除冷却；
  * - 自动化执行期间不拉起（由调用方判断 automationInProgress）。

@@ -11,15 +11,15 @@ import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.identity.DeviceIdentity
 import com.ryanliu.ntushower.core.net.HttpClientFactory
 import com.ryanliu.ntushower.core.shell.RootShell
+import com.ryanliu.ntushower.features.automation.CommandFactory
 import com.ryanliu.ntushower.features.automation.CommandOutcome
 import com.ryanliu.ntushower.features.automation.CommandResultCache
 import com.ryanliu.ntushower.features.automation.CommandScheduler
-import com.ryanliu.ntushower.features.automation.CommandScheduler.Command
 import com.ryanliu.ntushower.features.automation.CoverOverlay
 import com.ryanliu.ntushower.features.doors.DoorMonitor
 import com.ryanliu.ntushower.features.doors.DoorSnapshotSender
 import com.ryanliu.ntushower.features.remote.AdbBridge
-import com.ryanliu.ntushower.features.selfmanage.A11yEnabler
+import com.ryanliu.ntushower.features.selfmanage.A11yGuard
 import com.ryanliu.ntushower.features.selfmanage.OtaUpdater
 import com.ryanliu.ntushower.receiver.WatchdogReceiver
 import com.ryanliu.ntushower.transport.Envelope
@@ -39,6 +39,15 @@ class AgentService : Service() {
 
     private val worker = Executors.newSingleThreadExecutor()
     private val otaScheduler = Executors.newSingleThreadScheduledExecutor()
+
+    /**
+     * 维护命令执行器。
+     *
+     * 独立于 [worker]：`device.exec` 会阻塞到命令结束（上限 25 秒），塞进 [worker]
+     * 会连带把门状态采集与上报停掉同样久；塞进主线程更糟——心跳、看门狗广播、
+     * 无障碍事件都在那儿排队（见 [dispatchCommand]）。
+     */
+    private val maintenanceExecutor = Executors.newSingleThreadExecutor()
     private var otaCheckFuture: java.util.concurrent.ScheduledFuture<*>? = null
     private var otaUpdater: OtaUpdater? = null
     private lateinit var client: GatewayClient
@@ -56,8 +65,15 @@ class AgentService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // 每次拉起都核对无障碍链路：看门狗周期（watchdog_interval_s，默认 60 秒）就是
+        // 巡检周期。总开关被系统置 0 时本服务会失去无障碍这个自举锚点，看门狗的拉起
+        // 是它仅剩的恢复机会——只在首次初始化时核对，这种情况下一次都不会执行。
+        worker.execute { A11yGuard.ensureAvailable() }
+
+        // 首次配置到达之前也要有个上限兜着：默认值就是登记表里的默认值
+        RootShell.command.maxOutputBytes = RuntimeConfig.deviceExecMaxOutputBytes.toInt()
+
         if (!::client.isInitialized) {
-            worker.execute { A11yEnabler.ensureEnabled() } // 幂等：root 启用无障碍（append 语义）
             sender = DoorSnapshotSender(this)
             overlay = CoverOverlay(this)
             scheduler = CommandScheduler(overlay, onOutcome = { outcome -> sendOutcome(outcome) })
@@ -111,9 +127,13 @@ class AgentService : Service() {
 
                 "config.update" -> applyConfig(envelope)
 
-                "bridge.open" -> openAdbBridge(envelope)
+                // 调试桥也要离开主线程：openAdbBridge 里的 setprop / stop adbd / start adbd
+                // 是同步 shell 调用，closeAdbBridge 的关闭回调里还藏着一条——两条都会把
+                // 主线程压住，连带排队心跳与无障碍事件。它们同属维护类，走同一个执行器，
+                // 也就与 device.restart/uninstall 天然互斥（调试桥开着时重启设备本就危险）。
+                "bridge.open" -> maintenanceExecutor.execute { openAdbBridge(envelope) }
 
-                "bridge.close" -> closeAdbBridge("server requested")
+                "bridge.close" -> maintenanceExecutor.execute { closeAdbBridge("server requested") }
 
                 "ota.upgrade_available" -> {
                     // 实时推送：立即触发一次检查（自动化期间 OtaUpdater 自行推迟）
@@ -137,64 +157,23 @@ class AgentService : Service() {
         val action = payload.optString("action", "")
         val params = payload.optJSONObject("params") ?: JSONObject()
         Log.i(TAG, "command: $action ($commandId)")
-        when (action) {
-            "session.assign" -> scheduler.enqueue(
-                Command.Assign(
-                    id = commandId,
-                    doorNo = params.optInt("door_no"),
-                    certNo = params.optString("cert_no"),
-                    password = params.optString("password"),
-                ),
-            )
-
-            "session.settle" -> scheduler.enqueue(
-                Command.Settle(
-                    id = commandId,
-                    certNo = params.optString("cert_no"),
-                    password = params.optString("password"),
-                ),
-            )
-
-            "photo.capture" -> scheduler.enqueue(Command.Photo(id = commandId))
-
-            "screen.capture" -> scheduler.enqueue(Command.Screen(id = commandId))
-
-            "app.restart" -> {
-                val appId = BuildConfig.APPLICATION_ID
-                sendOutcome(CommandOutcome(commandId, "ok", "", ""))
-                // 分离 root 进程延迟执行：命令回报先送达，随后本进程被强制停止并拉起
-                RootShell.exec(
-                    "(sleep 2; am force-stop $appId; sleep 2; " +
-                        "am startservice -n $appId/.service.AgentService) >/dev/null 2>&1 &",
-                )
-            }
-
-            "debug.exec" -> {
-                val command = params.optString("command", "")
-                val result = RootShell.exec(command)
-                sendOutcome(
-                    CommandOutcome(
-                        commandId,
-                        if (result.success) "ok" else "failed",
-                        "",
-                        terminalMessage = "",
-                        data = JSONObject().put("output", result.output),
-                    ),
-                )
-            }
-
-            "app.uninstall" -> {
-                val appId = BuildConfig.APPLICATION_ID
-                sendOutcome(CommandOutcome(commandId, "ok", "", ""))
-                RootShell.exec(
-                    "(sleep 2; pm uninstall $appId) >/dev/null 2>&1 &",
-                )
-            }
-
-            else -> sendOutcome(
-                CommandOutcome(commandId, "failed", "proto.unknown_action", "unknown action: $action"),
-            )
+        // 按类别分发。三类互斥，顺序无副作用。
+        //
+        // 维护类必须挪出主线程：[dispatchCommand] 由 GatewayClient 投递到 main looper
+        // （`handler.post { callback.onMessage(env) }`），而 execShell 会一直阻塞到命令
+        // 结束。那段时间里心跳、看门狗广播、无障碍事件全部排队，设备在服务端看来像
+        // 掉线——一条 `sleep 20` 的远程命令就能造成这个效果。
+        CommandFactory.create(action, params, commandId)?.let {
+            scheduler.enqueue(it)
+            return
         }
+        if (DeviceMaintenance.handles(action)) {
+            maintenanceExecutor.execute { DeviceMaintenance.handle(action, params, commandId, ::sendOutcome) }
+            return
+        }
+        sendOutcome(
+            CommandOutcome(commandId, "failed", "proto.unknown_action", "unknown action: $action"),
+        )
     }
 
     private fun applyConfig(envelope: Envelope) {
@@ -202,6 +181,9 @@ class AgentService : Service() {
         val revision = envelope.payload.optInt("revision", 0)
         // 配置统一入口：全部键回写 RuntimeConfig，随后刷新依赖配置的组件
         RuntimeConfig.apply(config)
+        // 输出上限要在命令下发之前同步到通道上，之后设就晚了：
+        // 读超了的部分已经在内存里
+        RootShell.command.maxOutputBytes = RuntimeConfig.deviceExecMaxOutputBytes.toInt()
         client.refreshHeartbeat()
         scheduleOtaCheck()
         // 看门狗间隔变更：重建监视器与看门狗
@@ -256,7 +238,7 @@ class AgentService : Service() {
             Log.w(TAG, "bridge.open missing nonce")
             return
         }
-        val adb = RootShell.exec(
+        val adb = RootShell.control.exec(
             "setprop service.adb.tcp.port ${AdbBridge.LOCAL_ADB_PORT}; " +
                 "stop adbd; start adbd",
         )
@@ -269,7 +251,7 @@ class AgentService : Service() {
         ) { reason ->
             Log.i(TAG, "adb bridge closed: $reason")
             adbBridge = null
-            RootShell.exec(
+            RootShell.control.exec(
                 "setprop service.adb.tcp.port -1; stop adbd; start adbd",
             )
         }.also { it.start() }
@@ -326,6 +308,7 @@ class AgentService : Service() {
         otaCheckFuture?.cancel(false)
         otaScheduler.shutdownNow()
         worker.shutdownNow()
+        maintenanceExecutor.shutdownNow()
         closeAdbBridge("service destroyed")
         client.disconnect()
         monitor?.stopWatching()

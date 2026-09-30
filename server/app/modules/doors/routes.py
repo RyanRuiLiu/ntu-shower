@@ -1,21 +1,34 @@
-"""用户 API（v1）：喷头现态查询与实时推送（只读，匿名可访问）。"""
+"""喷头现态查询与实时推送。
+
+两个列表端点并存的原因只有一个：小程序已经在用 `/api/v1/doors`，不能动它。
+**它们返回完全一样的字段**——权限管的是能不能调这个接口，不是返回什么内容。
+"""
 
 import asyncio
 import contextlib
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
 from app.core import events
+from app.core.security import require_ops_token
 from app.modules.doors import repository
 
 from .schemas import DoorView
 
 router = APIRouter(prefix="/api/v1", tags=["doors"])
 
+ops_router = APIRouter(prefix="/ops", dependencies=[Depends(require_ops_token)], tags=["doors-ops"])
+
 
 @router.get("/doors")
 def list_doors(device_id: str | None = None) -> list[DoorView]:
-    return repository.list_doors_with_device(device_id)
+    return repository.list_doors(device_id)
+
+
+@ops_router.get("/doors")
+def list_doors_ops(device_id: str | None = None) -> list[DoorView]:
+    """与 `/api/v1/doors` 同源同形，仅多一道 `X-Ops-Token` 校验。"""
+    return repository.list_doors(device_id)
 
 
 @router.websocket("/stream")

@@ -29,7 +29,7 @@ class ConnectionManager:
     async def send_to(self, device_id: str, data: str) -> bool:
         """向指定设备的活动连接发送文本帧；连接不存在或已断开返回 False。
 
-        调用方据返回值降级（例如把命令标为 device.offline），因此这里不抛异常。
+        调用方据返回值决策（例如把命令标为 device.offline），因此这里不抛异常。
         """
         ws = self._connections.get(device_id)
         if ws is None:

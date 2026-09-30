@@ -28,62 +28,7 @@
             },
             "config": {
               "type": "object",
-              "properties": {
-                "heartbeat_interval_s": {
-                  "type": "integer",
-                  "minimum": 5
-                },
-                "server_ping_interval_s": {
-                  "type": "integer",
-                  "minimum": 5
-                },
-                "reconnect_base_ms": {
-                  "type": "integer",
-                  "minimum": 1000
-                },
-                "reconnect_max_ms": {
-                  "type": "integer",
-                  "minimum": 5000
-                },
-                "watchdog_interval_s": {
-                  "type": "integer",
-                  "minimum": 10
-                },
-                "report_debounce_ms": {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                "overlay_enabled": {
-                  "type": "boolean"
-                },
-                "overlay_message": {
-                  "type": "string"
-                },
-                "server_response_timeout_ms": {
-                  "type": "integer",
-                  "minimum": 1000
-                },
-                "id_verify_wait_ms": {
-                  "type": "integer",
-                  "minimum": 500
-                },
-                "home_budget_ms": {
-                  "type": "integer",
-                  "minimum": 1000
-                },
-                "poll_interval_ms": {
-                  "type": "integer",
-                  "minimum": 50
-                },
-                "ui_click_delay_ms": {
-                  "type": "integer",
-                  "minimum": 50
-                },
-                "ota_check_interval_s": {
-                  "type": "integer",
-                  "minimum": 60
-                }
-              }
+              "description": "设备端运行时配置。键集、类型、范围、默认值全部由服务端 modules/config/spec.py 的登记表定义——那里是唯一来源，这里不重复列举（抄一份必然漂移）。键按 scope=DEVICE 筛选后下发。"
             },
             "upgrade": {
               "oneOf": [

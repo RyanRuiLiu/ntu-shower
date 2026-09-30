@@ -51,7 +51,7 @@ def latest_for(device_id: str, current_version_code: int) -> JsonObject | None:
     - 常规发布：version_code 大于设备当前版本才适用；
     - force 调试发布：无视版本号推送同一/任意版本，但**已安装确认过即不再推**
       （防死循环，行业标准 roll-forward + 安装状态跟踪）；
-      需要重推时经 /admin/releases/{version}/rearm/{device_id} 重新武装。
+      需要重推时经 /ops/releases/{version}/rearm/{device_id} 重新武装。
     """
     rows = (
         get_conn()

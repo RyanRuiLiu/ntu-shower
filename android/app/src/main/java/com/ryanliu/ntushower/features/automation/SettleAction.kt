@@ -7,7 +7,7 @@ class SettleAction(override val certNo: String, override val password: String) :
 
     override fun perform(a11y: A11yService): FlowError? {
         if (!BathAppNavigator.clickSettleButton(a11y)) {
-            return FlowError("automation.click_failed", "无法点击结算按钮")
+            return FlowError("ui.click_no_effect", "无法点击结算按钮")
         }
         return null
     }

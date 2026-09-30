@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     bridge_base_port: int = 15655
 
     # ── 鉴权 ──
-    admin_token: str = "change-me"  # 管理后台静态令牌（运维通道），占位值会在启动自检中被拒绝
+    ops_token: str = "change-me"  # 管理后台静态令牌（运维通道），占位值会在启动自检中被拒绝
     config_ack_timeout_s: float = 15.0  # 等待设备 config.ack 的时限
 
 

@@ -32,7 +32,7 @@ object AutomationFlow {
     fun run(a11y: A11yService, action: Action, overlay: CoverOverlay): FlowOutcome {
         // 1 回首页
         if (!BathAppNavigator.navigateToHome(a11y, RuntimeConfig.homeBudgetMs)) {
-            return FlowOutcome(error = FlowError("automation.navigate_failed", "无法回到首页"))
+            return FlowOutcome(error = FlowError("device.home_unreachable", "无法回到首页"))
         }
         // 2 遮盖层（可经配置关闭；文案取运行时配置）
         if (RuntimeConfig.overlayEnabled) overlay.show(RuntimeConfig.overlayMessage)
@@ -46,20 +46,20 @@ object AutomationFlow {
             // 4 等待验证页
             if (!BathAppNavigator.waitForPage(a11y, PageState.ID_VERIFY, RuntimeConfig.idVerifyWaitMs)) {
                 overlay.hide()
-                return FlowOutcome(error = FlowError("automation.verify_page_timeout", "无法进入验证页面"))
+                return FlowOutcome(error = FlowError("device.verify_page_timeout", "无法进入验证页面"))
             }
 
             // 5 输入账号密码（凭证由命令参数下发）
             if (!BathAppNavigator.inputCredentialsAndConfirm(a11y, action.certNo, action.password)) {
                 overlay.hide()
-                return FlowOutcome(error = FlowError("automation.input_failed", "输入账号密码失败"))
+                return FlowOutcome(error = FlowError("device.login_input_failed", "输入账号密码失败"))
             }
 
             // 6 等待浴室服务器响应（终点页：HOME 成功 / HINT·VF_RESULT 拒绝）
             val terminal = awaitTerminal(a11y)
             if (!terminal.reached) {
                 overlay.hide()
-                return FlowOutcome(error = FlowError("automation.response_timeout", terminal.message))
+                return FlowOutcome(error = FlowError("device.bath_server_timeout", terminal.message))
             }
 
             return FlowOutcome(terminalMessage = terminal.message)
@@ -81,7 +81,7 @@ object AutomationFlow {
             overlay.hide()
             val center = BathAppNavigator.getDateViewCenter(a11y)
             if (center != null) {
-                RootShell.exec("input tap ${center.first} ${center.second}")
+                RootShell.control.exec("input tap ${center.first} ${center.second}")
             }
         }
     }

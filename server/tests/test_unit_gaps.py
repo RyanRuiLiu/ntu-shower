@@ -8,17 +8,17 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core import device_clock, errors, protocol
+from app.core import actions, device_clock, errors, protocol
 from app.core.clock import now_rfc3339
-from app.core.problems import ADMIN_UNAUTHORIZED, ApiProblemError
+from app.core.problems import OPS_UNAUTHORIZED, ApiProblemError
 from app.gateway.manager import ConnectionManager
 from app.modules.doors import service as doors_service
 from app.modules.doors.schemas import DoorState
 from app.modules.sessions import service as sessions_service
 
 
-def _admin(client: TestClient) -> dict:
-    return {"X-Admin-Token": "test-token"}
+def _ops_token(client: TestClient) -> dict:
+    return {"X-Ops-Token": "test-token"}
 
 
 # ── 协议 ──
@@ -70,7 +70,7 @@ class _WS:
 
 
 class _BrokenWS:
-    """发送即失败的设备连接替身（用于验证 send_to 的失败降级路径）。"""
+    """发送即失败的设备连接替身（用于验证 send_to 的失败路径）。"""
 
     async def send_text(self, data: str) -> bool:
         message = "socket gone"
@@ -194,7 +194,6 @@ def test_session_owner_change_closes_old_opens_new(client: TestClient) -> None:
     doors[0]["cert_no"] = "B"
     doors_service.process_snapshot("dev-swap", {"snapshot_id": str(uuid.uuid4()), "source": "db_watch", "doors": doors})
 
-    assert doors_repository.close_session.__code__  # 占位断言（真实断言在下方）
     assert first is not None
     assert doors_repository.get_open_session("dev-swap", 1) is not None
 
@@ -280,10 +279,10 @@ def test_command_offline_path_clears_device_pending(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(manager_module.manager, "_connections", {})
 
     async def flow() -> None:
-        result = await sessions_service.send_command_and_wait("dev-off", "photo.capture", {}, timeout_s=1)
+        result = await sessions_service.send_command_and_wait("dev-off", actions.CAMERA_CAPTURE, {}, timeout_s=1)
         assert result["status"] == "timeout"
         assert result["reason_code"] == "device.offline"
-        assert not sessions_service.is_device_busy("dev-off")
+        assert not sessions_service.is_device_busy("dev-off", actions.CHANNEL_CAPTURE)
 
     asyncio.run(flow())
 
@@ -295,18 +294,25 @@ def test_device_untrust_rename_and_exec_guards(client: TestClient) -> None:
     from app.modules.devices import repository as devices_repository
 
     devices_repository.register("dev-mgmt", "0.2.4", 6, "4.4.4", [], "127.0.0.1")
-    client.post("/admin/devices/dev-mgmt/trust", headers=_admin(client))
-    assert client.post("/admin/devices/dev-mgmt/untrust", headers=_admin(client)).json()["trusted"] is False
+    client.patch("/ops/devices/dev-mgmt", headers=_ops_token(client), json={"trusted": True})
+    untrusted = client.patch("/ops/devices/dev-mgmt", headers=_ops_token(client), json={"trusted": False})
+    assert untrusted.json()["trusted"] is False
 
     # 未信任设备上的 exec 被守卫拦截：未信任是 403，与"设备不存在"（404）区分开
-    denied = client.post("/admin/devices/dev-mgmt/exec", headers=_admin(client), json={"command": "id"})
+    denied = client.post("/ops/devices/dev-mgmt/exec", headers=_ops_token(client), json={"command": "id"})
     assert denied.status_code == 403
     assert denied.json()["type"].endswith("/problems/untrusted-device")
 
 
 def test_rename_unknown_device_returns_not_found(client: TestClient) -> None:
-    r = client.patch("/admin/devices/ghost", headers=_admin(client), json={"name": "n"})
-    assert r.json()["found"] is False
+    """改一台不存在的设备 → 404。
+
+    此前返回 `{"found": false}`——把错误藏在成功响应里，调用方要先看字段
+    才知道有没有生效。
+    """
+    r = client.patch("/ops/devices/ghost", headers=_ops_token(client), json={"name": "n"})
+    assert r.status_code == 404
+    assert r.json()["type"].endswith("/problems/device-not-found")
 
 
 def test_repository_set_name_unknown_device(client: TestClient) -> None:
@@ -315,12 +321,12 @@ def test_repository_set_name_unknown_device(client: TestClient) -> None:
     assert devices_repository.set_name("ghost", "n") is False
 
 
-def test_require_admin_rejects_missing_token() -> None:
-    from app.core.security import require_admin
+def test_require_ops_token_rejects_missing_token() -> None:
+    from app.core.security import require_ops_token
 
     with pytest.raises(ApiProblemError) as denied:
-        require_admin(x_admin_token=None)
-    assert denied.value.problem is ADMIN_UNAUTHORIZED
+        require_ops_token(x_ops_token=None)
+    assert denied.value.problem is OPS_UNAUTHORIZED
 
 
 def test_notify_target_devices_all(monkeypatch: pytest.MonkeyPatch) -> None:

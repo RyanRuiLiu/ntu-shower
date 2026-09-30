@@ -3,17 +3,24 @@
 cert_no/password 是浴室系统的业务凭证：随操作参数直传设备，
 真正的凭证验证发生在浴室服务器端（密码错会在终端页被拒）。
 本服务不做用户登录；未来的调用方身份体系（微信小程序 / 独立 APP）
-按 docs/decisions/0034 的 provider 方案另行引入。
+按 docs/DECISIONS.md0034 的 provider 方案另行引入。
 设备执行结果以结构化字段返回，terminal_message 为浴室 App 的人读文本。
 分配/结算下发前依据 door_live 现态做预检，避免对占用门误触发结算流。
 """
 
 from fastapi import APIRouter, Depends
 
+from app.core import actions
 from app.core.config import settings
-from app.core.problems import DEVICE_BUSY, DOOR_NOT_FREE, DUPLICATE_SESSION, NO_OCCUPIED_DOOR, ApiProblemError
+from app.core.problems import (
+    DOOR_NOT_FREE,
+    DUPLICATE_SESSION,
+    NO_OCCUPIED_DOOR,
+    SERVER_OVERLOADED,
+    ApiProblemError,
+)
 from app.core.protocol import JsonObject
-from app.core.security import require_admin
+from app.core.security import require_ops_token
 from app.modules.access.capabilities import Capability
 from app.modules.access.dependencies import require_capability
 from app.modules.devices.dependencies import require_trusted_online_device
@@ -26,7 +33,7 @@ from . import service
 
 router = APIRouter(prefix="/api/v1", tags=["sessions"])
 
-admin_router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)], tags=["sessions-admin"])
+ops_router = APIRouter(prefix="/ops", dependencies=[Depends(require_ops_token)], tags=["sessions-ops"])
 
 
 def _door_state(device_id: str, door_no: int) -> str | None:
@@ -44,15 +51,24 @@ def _reject_duplicate_session(device_id: str, cert_no: str) -> None:
         )
 
 
-def _reject_busy(result: CommandOutcome) -> CommandOutcome:
-    """设备已有在途命令时拒绝本次请求（409），而非排队。"""
+def _reject_overload(result: CommandOutcome) -> CommandOutcome:
+    """通道排队满时把拒绝转成 409。
+
+    注意这**不是**"设备忙"：同通道的先后命令会排队执行，只有队满才拒（见
+    `service.CHANNEL_QUEUE_MAX`）。两者语义不同——前者说明设备正忙、等一会就好，
+    后者说明积压已多、该换个时间再来。
+    """
     if result.get("status") == "rejected":
-        raise ApiProblemError(DEVICE_BUSY, f"reason={result.get('reason_code')}")
+        raise ApiProblemError(SERVER_OVERLOADED, f"reason={result.get('reason_code')}")
     return result
 
 
-@router.post("/sessions/assign", dependencies=[Depends(require_capability(Capability.OPS))])
-async def assign(req: AssignRequest) -> CommandOutcome:
+async def perform_assign(req: AssignRequest) -> CommandOutcome:
+    """分配喷头的领域逻辑。
+
+    用户面与管理面共用——两边的区别只在**怎么授权**，不在做什么。把逻辑写在路由
+    函数里会逼出第二份拷贝，那种拷贝迟早会分叉。
+    """
     require_trusted_online_device(req.device_id)
     state = _door_state(req.device_id, req.door_no)
     if state != DoorState.FREE.value:
@@ -60,41 +76,84 @@ async def assign(req: AssignRequest) -> CommandOutcome:
     _reject_duplicate_session(req.device_id, req.cert_no)
     result = await service.send_command_and_wait(
         req.device_id,
-        "session.assign",
+        actions.SESSION_ASSIGN,
         {"door_no": req.door_no, "cert_no": req.cert_no, "password": req.password},
         timeout_s=settings.assign_timeout_s,
     )
-    return _reject_busy(result)
+    return _reject_overload(result)
 
 
-@router.post("/sessions/settle", dependencies=[Depends(require_capability(Capability.OPS))])
-async def settle(req: SettleRequest) -> CommandOutcome:
+async def perform_settle(req: SettleRequest) -> CommandOutcome:
+    """结算的领域逻辑。"""
     require_trusted_online_device(req.device_id)
     occupied = doors_repository.get_occupied_by_cert(req.device_id, req.cert_no)
     if occupied is None:
         raise ApiProblemError(NO_OCCUPIED_DOOR, f"cert {req.cert_no}")
     result = await service.send_command_and_wait(
         req.device_id,
-        "session.settle",
+        actions.SESSION_SETTLE,
         {"cert_no": req.cert_no, "password": req.password},
         timeout_s=settings.settle_timeout_s,
     )
-    return _reject_busy(result)
+    return _reject_overload(result)
 
 
-@router.post("/photos", dependencies=[Depends(require_capability(Capability.PHOTO))])
-async def take_photo(req: PhotoRequest) -> CommandOutcome:
+async def perform_photo(req: PhotoRequest) -> CommandOutcome:
+    """拍照的领域逻辑。"""
     require_trusted_online_device(req.device_id)
     result = await service.send_command_and_wait(
         req.device_id,
-        "photo.capture",
+        actions.CAMERA_CAPTURE,
         {},
         timeout_s=settings.photo_timeout_s,
     )
-    return _reject_busy(result)
+    return _reject_overload(result)
 
 
-@admin_router.get("/commands")
+@router.post("/sessions/assign", dependencies=[Depends(require_capability(Capability.OPS))])
+async def assign(req: AssignRequest) -> CommandOutcome:
+    """用户面：小程序调用，凭 ops 能力位。"""
+    return await perform_assign(req)
+
+
+@router.post("/sessions/settle", dependencies=[Depends(require_capability(Capability.OPS))])
+async def settle(req: SettleRequest) -> CommandOutcome:
+    """用户面：小程序调用，凭 ops 能力位。"""
+    return await perform_settle(req)
+
+
+@router.post("/sessions/photo", dependencies=[Depends(require_capability(Capability.PHOTO))])
+async def take_photo(req: PhotoRequest) -> CommandOutcome:
+    """用户面：小程序调用，凭 photo 能力位。"""
+    return await perform_photo(req)
+
+
+# ── 管理面 ──
+#
+# 管理页是运维在代操作，**不代表某个终端用户**，所以它凭 `X-Ops-Token` 授权，
+# 而不是去借一个用户身份来通过能力位检查。给管理页套用户身份还有一层别扭：
+# 那个身份的每一次使用都会被算成"该用户的操作"，审计里就分不清是谁干的。
+
+
+@ops_router.post("/sessions/assign")
+async def ops_assign(req: AssignRequest) -> CommandOutcome:
+    """管理面：分配喷头。"""
+    return await perform_assign(req)
+
+
+@ops_router.post("/sessions/settle")
+async def ops_settle(req: SettleRequest) -> CommandOutcome:
+    """管理面：结算。"""
+    return await perform_settle(req)
+
+
+@ops_router.post("/sessions/photo")
+async def ops_take_photo(req: PhotoRequest) -> CommandOutcome:
+    """管理面：拍照。"""
+    return await perform_photo(req)
+
+
+@ops_router.get("/commands")
 def list_commands(device_id: str | None = None, limit: int = 50) -> list[JsonObject]:
     """命令审计查询：调试与问题追踪。"""
     return repository.list_commands(device_id=device_id, limit=limit)

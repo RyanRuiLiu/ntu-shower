@@ -11,6 +11,20 @@ threading.local 只能清理当前线程自见的副本。
 
 各领域模块持有自己的表结构（modules/*/repository.py 的 init_tables），
 本模块只负责连接生命周期。
+
+## 命名约定
+
+新增表与字段一律照此。**一个概念只有一个名字**，禁止为它造第二个——库里出现两个
+叫法的同一件事，查询和维护成本会翻倍。
+
+- 表名：单数 snake_case，带领域前缀避免歧义（`door_live`、`ota_release`、`device_config`）
+- 字段名：snake_case；**时间字段一律 `_at` 后缀**（`reported_at`、`applied_at`、`last_seen_at`）
+- 时间取值：一律 RFC 3339 UTC 毫秒字符串，唯一来源是 `core/clock.py`
+- 主键：自增用 `id`（不叫 `seq`、不叫 `pk`）
+- 索引：`idx_<表>_<列>`
+
+**唯一例外**是协议映射表 `door_live`：它保留协议字段名（`open_time` 而非
+`opened_at`）——那些列就是设备上报的字段，改名只会让人对不上协议。
 """
 
 import contextlib

@@ -3,7 +3,7 @@
 ## 为什么需要它
 
 RFC 9457 §3.1 要求 `type` 标识**问题类型**，不同问题应有不同的 URI。
-若用 HTTP 状态码充当 type，`device-offline` 与 `device-busy` 会同为 409 +
+若用 HTTP 状态码充当 type，`device-offline` 与 `server-overloaded` 会同为 409 +
 同一个 type，客户端只能解析自由文本 `detail` 来区分——文案一改客户端就坏。
 
 本表让每个问题有稳定 code：客户端按 `type` 分支，`title`/`detail` 只面向人。
@@ -12,7 +12,7 @@ RFC 9457 §3.1 要求 `type` 标识**问题类型**，不同问题应有不同�
 
 `title` 用**中文**：它是"人类可读的摘要"（RFC 9457 §3.1），而本系统的使用者
 是中文用户。服务端直接给出可展示的文案，客户端**原样显示**即可，不在前端再
-维护一层映射——那只会让同一句话有两处定义并随之漂移（见 docs/CONTENT.md）。
+维护一层映射——那只会让同一句话有两处定义并随之漂移（见 AGENTS.md）。
 
 ## 约定
 
@@ -36,13 +36,13 @@ class Problem:
 # ── 问题类型登记（新增类型只加常量，不改既有）──
 DEVICE_NOT_FOUND = Problem("device-not-found", 404, "找不到设备")
 DEVICE_OFFLINE = Problem("device-offline", 409, "设备离线")
-DEVICE_BUSY = Problem("device-busy", 409, "设备正在处理上一个操作")
+SERVER_OVERLOADED = Problem("server-overloaded", 409, "服务端同时处理的命令过多，请稍后再试")
 DOOR_NOT_FREE = Problem("door-not-free", 409, "喷头不是空闲状态")
 NO_OCCUPIED_DOOR = Problem("no-occupied-door", 409, "该学号没有正在使用的喷头")
 PORT_UNAVAILABLE = Problem("port-unavailable", 409, "调试通道端口被占用")
 RELEASE_NOT_FOUND = Problem("release-not-found", 404, "找不到该版本")
 RELEASE_TOO_LARGE = Problem("release-too-large", 413, "安装包超过体积上限")
-ADMIN_UNAUTHORIZED = Problem("admin-unauthorized", 401, "需要管理令牌")
+OPS_UNAUTHORIZED = Problem("ops-unauthorized", 401, "需要访问令牌")
 UNTRUSTED_DEVICE = Problem("untrusted-device", 403, "设备尚未被信任")
 DUPLICATE_SESSION = Problem("duplicate-session", 409, "该学号已有进行中的喷头")
 
@@ -63,13 +63,13 @@ VALIDATION_FAILED = Problem("validation-failed", 422, "提交的内容有误")
 REGISTRY: tuple[Problem, ...] = (
     DEVICE_NOT_FOUND,
     DEVICE_OFFLINE,
-    DEVICE_BUSY,
+    SERVER_OVERLOADED,
     DOOR_NOT_FREE,
     NO_OCCUPIED_DOOR,
     PORT_UNAVAILABLE,
     RELEASE_NOT_FOUND,
     RELEASE_TOO_LARGE,
-    ADMIN_UNAUTHORIZED,
+    OPS_UNAUTHORIZED,
     UNTRUSTED_DEVICE,
     DUPLICATE_SESSION,
     UNAUTHENTICATED,

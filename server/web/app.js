@@ -1,258 +1,293 @@
 /**
- * 应用核心：API 封装、实时推送、视图切换、共享状态。
+ * 应用装配：视图注册表、顶栏、实时通道、路由。
  *
- * 合并自旧系统的两个网页端（shower-server 的调试面板、bridge-server 的画面
- * 查看器）。两者原本各自维护一份 WebSocket 与状态，合并后这里只连一条。
+ * ## 目录结构
+ *
+ * - `core/` —— 基础设施，**每样只有一份**：请求封装、状态、DOM 助手、时间同步、
+ *   结果呈现。视图不直接碰 `fetch`，网络访问一律经 `core/api.js`。
+ * - `views/` —— 一个能力域一个模块，导出 `{ id, title, mount(root), unmount? }`。
+ * - `style/` —— `tokens.css` 是颜色与间距的唯一来源，其余按域分文件。
+ *
+ * 这里是**唯一**的装配点。加一个视图 = 在 `views/` 下加一个模块 + 在 [VIEWS] 里排
+ * 一个位置，别处都不用动。导航按钮由注册表生成，不写死在 HTML 里——两处维护的
+ * 导航迟早会对不上。
+ *
+ * `mount` 在切入时调用，`unmount` 负责停掉自己起的轮询与监听。
  */
+import { api, getToken, setToken } from './core/api.js'
+import { $, esc, listen } from './core/dom.js'
+import { log } from './core/log.js'
+import { toast } from './core/toast.js'
+import {
+  emit,
+  refreshDevices,
+  selectDevice,
+  setDoors,
+  setOnline,
+  setStreaming,
+  store,
+  subscribe,
+} from './core/store.js'
 
-// ── API ───────────────────────────────────────────────────
-const API = '/api/v1'
+import { auditView } from './views/audit.js'
+import { configView } from './views/config.js'
+import { devicesView } from './views/devices.js'
+import { identitiesView } from './views/identities.js'
+import { inspectorView } from './views/inspector.js'
+import { overviewView } from './views/overview.js'
+import { releasesView } from './views/releases.js'
 
-/** 服务端的 RFC 9457 问题详情。`title`/`detail` 已是可直接展示的中文。 */
-async function request(path, options = {}) {
-  const res = await fetch(API + path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
+/**
+ * 运行时报错直接进事件日志。
+ *
+ * 现场用平板或手机打开时没有控制台，报错若不落到页面上，表现只是"某个按钮没反应"，
+ * 无从判断是脚本挂了还是后端没回。异步失败（`unhandledrejection`）同样要接——
+ * `fetch` 抛出的错误大多走那条路。
+ */
+window.addEventListener('error', (event) => {
+  log('err', `脚本错误：${event.message}`)
+  // 同时也弹一下：日志区在概览视图里，而概览本身就可能没渲染出来
+  toast(`脚本错误：${event.message}`)
+})
+window.addEventListener('unhandledrejection', (event) => {
+  log('err', `未处理的失败：${event.reason?.message || event.reason}`)
+})
+
+/** 导航顺序即此数组顺序。 */
+const VIEWS = [
+  overviewView,
+  inspectorView,
+  devicesView,
+  configView,
+  identitiesView,
+  releasesView,
+  auditView,
+]
+
+let active = null
+
+// ── 路由与视图切换 ─────────────────────────────────────────
+
+function showView(id) {
+  const view = VIEWS.find((item) => item.id === id) || VIEWS[0]
+  if (active === view) return
+  if (active) active.unmount?.()
+
+  active = view
+  for (const item of VIEWS) $(`view-${item.id}`).hidden = item.id !== view.id
+  for (const btn of document.querySelectorAll('.bar-nav-item')) {
+    if (btn.dataset.view === view.id) btn.setAttribute('aria-current', 'page')
+    else btn.removeAttribute('aria-current')
+  }
+  if (location.hash.slice(1) !== view.id) location.hash = view.id
+  emit('view', view.id)
+  view.mount($(`view-${view.id}`))
+}
+
+function initNav() {
+  const nav = $('nav')
+  // 用 innerHTML 而不是 replaceChildren：后者是较新的 API，老一些的浏览器上不存在，
+  // 一旦抛错整个导航就是空的，表现成"点了没反应"，很难往 API 兼容性上想
+  nav.innerHTML = VIEWS.map(
+    (view) => `<button type="button" class="bar-nav-item" data-view="${esc(view.id)}">${esc(view.title)}</button>`,
+  ).join('')
+  for (const btn of nav.querySelectorAll('.bar-nav-item')) {
+    listen(btn, 'click', () => showView(btn.dataset.view))
+  }
+  const initial = location.hash.slice(1)
+  showView(VIEWS.some((item) => item.id === initial) ? initial : VIEWS[0].id)
+}
+
+// ── 顶栏 ───────────────────────────────────────────────────
+
+/** 设备选择器：多设备下每个视图都要能切，所以放在顶栏而不是某个视图里。 */
+function renderDevicePicker() {
+  const select = $('devicePicker')
+  select.innerHTML = store.devices
+    .map(
+      (device) =>
+        `<option value="${esc(device.device_id)}">${esc(device.name || device.device_id)}${device.online ? '（在线）' : '（离线）'}</option>`,
+    )
+    .join('')
+  select.value = store.deviceId
+  select.disabled = store.devices.length === 0
+}
+
+function bindTopbar() {
+  subscribe('online', (online) => {
+    $('deviceDot').className = `bar-dot ${online ? 'on' : 'off'}`
+    $('deviceText').textContent = online ? '设备在线' : '设备离线'
   })
 
-  if (!res.ok) {
-    // 服务端保证错误体是 problem+json；解析失败时退回状态码，不吞掉失败
-    const problem = await res.json().catch(() => null)
-    const message = problem?.detail || problem?.title || `HTTP ${res.status}`
-    throw new Error(message)
-  }
+  subscribe('streaming', (streaming) => {
+    const chip = $('streamChip')
+    chip.className = `badge ${streaming ? 'badge-green' : 'badge-red'}`
+    chip.textContent = streaming ? '实时' : '断开'
+  })
 
-  return res.status === 204 ? null : res.json()
+  subscribe('devices', renderDevicePicker)
+
+  subscribe('device', (id) => {
+    $('deviceId').textContent = id || '未选择'
+    $('devicePicker').value = id
+  })
+
+  listen($('devicePicker'), 'change', (event) => selectDevice(event.target.value))
+
+  // 设备相关的接口都要 X-Ops-Token，没它连清单都读不到——所以入口放在顶栏，
+  // 而不是某个视图里（那是全局凭证，不是某个功能的设置）
+  listen($('btnToken'), 'click', askForToken)
+
+  // 顶部显示服务端时间，便于与设备日志对齐
+  setInterval(() => {
+    $('clock').textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false })
+  }, 1000)
 }
 
-export const api = {
-  /** 全部喷头现态。查看类接口，无需身份。 */
-  doors: () => request('/doors'),
-  assign: (body) => request('/sessions/assign', { method: 'POST', body: JSON.stringify(body) }),
-  settle: (body) => request('/sessions/settle', { method: 'POST', body: JSON.stringify(body) }),
-  photo: (body) => request('/photos', { method: 'POST', body: JSON.stringify(body) }),
-}
+// ── 实时通道 ───────────────────────────────────────────────
 
-// ── 状态 ──────────────────────────────────────────────────
-/**
- * 共享状态。两个视图都从这里读，避免各自维护一份。
- *
- * `doors` 是当前全量现态；WS 只推变化，所以连上后要先 REST 拉一次兜底。
- */
-export const store = {
-  doors: [],
-  deviceId: '',
-  online: false,
-
-  setDoors(doors) {
-    this.doors = doors
-    if (doors.length > 0 && !this.deviceId) {
-      this.deviceId = doors[0].device_id
-      emit('device', this.deviceId)
-    }
-    emit('doors', doors)
-  },
-
-  setOnline(online) {
-    if (this.online === online) return
-    this.online = online
-    emit('online', online)
-  },
-}
-
-// 极简事件订阅：两个视图各注册自己关心的
-const listeners = new Map()
-
-function emit(event, data) {
-  for (const fn of listeners.get(event) ?? []) fn(data)
-}
-
-export function on(event, fn) {
-  if (!listeners.has(event)) listeners.set(event, [])
-  listeners.get(event).push(fn)
-}
-
-// ── 实时推送 ──────────────────────────────────────────────
 const RECONNECT_MS = 3000
-let ws = null
+let socket = null
 let reconnectTimer = null
 
-function wsUrl() {
+function streamUrl() {
   const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${scheme}//${location.host}${API}/stream`
-}
-
-function connect() {
-  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
-
-  clearTimeout(reconnectTimer)
-  try {
-    ws = new WebSocket(wsUrl())
-  } catch {
-    scheduleReconnect()
-    return
-  }
-
-  ws.onopen = () => {
-    clearTimeout(reconnectTimer)
-    emit('ws', true)
-    log('o', '实时连接已建立')
-  }
-
-  ws.onmessage = (e) => {
-    try {
-      handle(JSON.parse(e.data))
-    } catch (err) {
-      log('x', `消息解析失败：${err.message}`)
-    }
-  }
-
-  ws.onclose = (ev) => {
-    emit('ws', false)
-    log('x', `实时连接断开（${ev.code}），${RECONNECT_MS / 1000} 秒后重连`)
-    scheduleReconnect()
-  }
-
-  ws.onerror = () => emit('ws', false)
-}
-
-function scheduleReconnect() {
-  if (!reconnectTimer) reconnectTimer = setTimeout(connect, RECONNECT_MS)
+  return `${scheme}//${location.host}/api/v1/stream`
 }
 
 /**
  * 处理服务端推送。
  *
- * 消息形状是 `{ type, payload }`（见 server/app/core/events.py）。
- * 服务端只推变化，所以首次进页面必须先 REST 拉一次全量。
+ * 消息形状是 `{ type, payload }`（见 `server/app/core/events.py`）。服务端只推变化，
+ * 所以首次进页面必须先 REST 拉一次全量。
  */
-function handle(msg) {
-  switch (msg.type) {
+function handle(message) {
+  switch (message.type) {
     case 'door_update':
-      // payload: { device_id, doors, at }
-      mergeDoors(msg.payload.device_id, msg.payload.doors)
-      log('s', `喷头状态更新（${msg.payload.doors.length} 项）`)
+      // 推送里只有"哪几扇门变了"（`door_no` / `state` / `card_no`），**不是完整
+      // 现态**——分配时间、学号都不在其中。拿它替换列表会让门牌上的明细一夜之间
+      // 全变成 `--`，所以收到通知后重新拉一次全量。
+      scheduleDoorRefresh()
       break
 
     case 'device_online':
-      store.setOnline(true)
-      log('o', `设备上线：${msg.payload.device_id}`)
+      setOnline(true)
+      log('ok', `设备上线：${message.payload.device_id}`)
       break
 
     case 'device_offline':
-      store.setOnline(false)
-      log('x', `设备离线：${msg.payload.device_id}`)
+      setOnline(false)
+      log('err', `设备离线：${message.payload.device_id}`)
       break
 
     default:
-      log('i', `未知事件：${msg.type}`)
+      log('info', `未知事件：${message.type}`)
   }
 }
 
-/** 把变化合并进现态，并让对应门牌闪一下。 */
-function mergeDoors(deviceId, changed) {
-  const merged = [...store.doors]
-  for (const door of changed) {
-    const idx = merged.findIndex((d) => d.device_id === deviceId && d.door_no === door.door_no)
-    if (idx >= 0) {
-      merged[idx] = { ...merged[idx], ...door }
-      emit('flash', door.door_no)
-    } else {
-      merged.push(door)
+function connect() {
+  if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return
+  clearTimeout(reconnectTimer)
+  try {
+    socket = new WebSocket(streamUrl())
+  } catch {
+    reconnectTimer = setTimeout(connect, RECONNECT_MS)
+    return
+  }
+
+  socket.onopen = () => {
+    clearTimeout(reconnectTimer)
+    setStreaming(true)
+    log('ok', '实时连接已建立')
+  }
+  socket.onmessage = (event) => {
+    try {
+      handle(JSON.parse(event.data))
+    } catch {
+      log('err', '推送消息解析失败')
     }
   }
-  store.setDoors(merged)
-}
-
-// ── 事件日志 ──────────────────────────────────────────────
-const MAX_LOG = 200
-const logs = []
-
-export function log(level, message) {
-  logs.push({ level, message, at: new Date() })
-  if (logs.length > MAX_LOG) logs.shift()
-  emit('log', logs)
-}
-
-export function clearLog() {
-  logs.length = 0
-  emit('log', logs)
-}
-
-export function getLogs() {
-  return logs
-}
-
-// ── 通用小工具 ────────────────────────────────────────────
-export const $ = (id) => document.getElementById(id)
-
-/** 短暂的浮层提示，用于"已复制""已清空"这类不需要确认的操作。 */
-export function toast(text) {
-  const el = $('toast')
-  el.textContent = text
-  el.classList.add('show')
-  setTimeout(() => el.classList.remove('show'), 1500)
-}
-
-/** 时钟：顶部栏显示服务端时间，便于与设备日志对齐。 */
-function startClock() {
-  const el = $('clock')
-  setInterval(() => {
-    el.textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false })
-  }, 1000)
-}
-
-// ── 视图切换 ──────────────────────────────────────────────
-const VIEWS = ['status', 'control']
-
-function showView(name) {
-  for (const v of VIEWS) {
-    $(v === 'status' ? 'viewStatus' : 'viewControl').hidden = v !== name
+  socket.onclose = (event) => {
+    setStreaming(false)
+    log('err', `实时连接断开（${event.code}），${RECONNECT_MS / 1000} 秒后重连`)
+    reconnectTimer = setTimeout(connect, RECONNECT_MS)
   }
-  document.body.dataset.view = name
-
-  for (const btn of document.querySelectorAll('.bar-nav-item')) {
-    if (btn.dataset.view === name) {
-      btn.setAttribute('aria-current', 'page')
-    } else {
-      btn.removeAttribute('aria-current')
-    }
-  }
-
-  // 切走遥控视图时停止画面拉取，避免后台空耗设备
-  emit('view', name)
-  location.hash = name
+  socket.onerror = () => setStreaming(false)
 }
 
-function initNav() {
-  for (const btn of document.querySelectorAll('.bar-nav-item')) {
-    btn.addEventListener('click', () => showView(btn.dataset.view))
-  }
-  const initial = location.hash.slice(1)
-  showView(VIEWS.includes(initial) ? initial : 'status')
+// ── 启动 ───────────────────────────────────────────────────
+
+/**
+ * 提示填写访问令牌。
+ *
+ * 顶栏按钮与"收到 401"两条路径共用它。填完立刻重拉设备与门——否则用户填了令牌
+ * 还得自己再刷一次页面。
+ */
+function askForToken() {
+  const input = window.prompt('访问令牌（X-Ops-Token）', getToken())
+  if (input === null) return
+  setToken(input.trim())
+  toast(input.trim() ? '令牌已保存' : '令牌已清除')
+  refreshDevicesSafely()
+  refreshDoors()
 }
 
-// ── 启动 ──────────────────────────────────────────────────
+/**
+ * 处理鉴权失败：说明原因并请用户补令牌。
+ *
+ * **必须集中处理**。此前每个调用方各自 `catch` 后只写进事件日志，而那个面板已经
+ * 去掉了——于是 401 完全静默，页面只剩空列表，看起来就是"设备离线、刷新也没用"，
+ * 而真正的原因（缺令牌）一个字都看不到。返回 true 表示已处理，调用方不必再记一次。
+ */
+function handleAuthError(error) {
+  if (error?.status !== 401) return false
+  toast('访问令牌缺失或无效，请在顶栏填写')
+  askForToken()
+  return true
+}
+
 async function refreshDoors() {
   try {
-    store.setDoors(await api.doors())
-  } catch (err) {
-    log('x', `获取喷头状态失败：${err.message}`)
+    setDoors(await api.doors(store.deviceId))
+  } catch (error) {
+    if (!handleAuthError(error)) log('err', `获取喷头状态失败：${error.message}`)
+  }
+}
+
+/**
+ * 合并短时间内的多次刷新请求。
+ *
+ * 设备按秒级上报，一屋子喷头同时变动会瞬间推来一串通知。逐条去拉全量既浪费往返，
+ * 也会让界面在几百毫秒里反复重排；合并成一次就够了。
+ */
+let refreshTimer = null
+
+function scheduleDoorRefresh() {
+  if (refreshTimer) return
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null
+    refreshDoors()
+  }, 800)
+}
+
+async function refreshDevicesSafely() {
+  try {
+    await refreshDevices()
+  } catch (error) {
+    if (!handleAuthError(error)) log('err', `获取设备清单失败：${error.message}`)
   }
 }
 
 async function main() {
-  const { mountStatus } = await import('./status.js')
-  const { mountControl } = await import('./control.js')
-
-  mountStatus()
-  mountControl()
   initNav()
-  startClock()
+  bindTopbar()
   connect()
 
-  // WS 只推变化，首次进来先拉一次全量兜底
+  await refreshDevicesSafely()
   await refreshDoors()
+
+  // 设备清单与喷头现态各 30 秒兜一次：WS 断线期间也要能纠正在线状态
+  setInterval(refreshDevicesSafely, 30_000)
   setInterval(refreshDoors, 30_000)
 }
 

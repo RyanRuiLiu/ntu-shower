@@ -23,7 +23,7 @@ def test_unsupported_action_is_rejected_before_sending(client: TestClient) -> No
     )
 
     assert outcome["status"] == "failed"
-    assert outcome["reason_code"] == "session.unsupported_by_device"
+    assert outcome["reason_code"] == "device.unsupported_action"
 
 
 def test_supported_action_is_not_blocked_by_the_precheck(client: TestClient) -> None:
@@ -35,7 +35,7 @@ def test_supported_action_is_not_blocked_by_the_precheck(client: TestClient) -> 
         sessions_service.send_command_and_wait(device_id, "session.assign", {"cert_no": "C"}, timeout_s=0.1),
     )
 
-    assert outcome["reason_code"] != "session.unsupported_by_device"
+    assert outcome["reason_code"] != "device.unsupported_action"
 
 
 def test_empty_capabilities_means_undeclared_and_passes(client: TestClient) -> None:
@@ -47,7 +47,7 @@ def test_empty_capabilities_means_undeclared_and_passes(client: TestClient) -> N
         sessions_service.send_command_and_wait(device_id, "session.settle", {"cert_no": "C"}, timeout_s=0.1),
     )
 
-    assert outcome["reason_code"] != "session.unsupported_by_device"
+    assert outcome["reason_code"] != "device.unsupported_action"
 
 
 def test_unknown_device_has_no_capability_constraint(client: TestClient) -> None:
@@ -56,4 +56,4 @@ def test_unknown_device_has_no_capability_constraint(client: TestClient) -> None
         sessions_service.send_command_and_wait("dev-caps-ghost", "session.assign", {"cert_no": "C"}, timeout_s=0.1),
     )
 
-    assert outcome["reason_code"] != "session.unsupported_by_device"
+    assert outcome["reason_code"] != "device.unsupported_action"

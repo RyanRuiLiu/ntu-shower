@@ -38,8 +38,8 @@ android {
         applicationId = "com.ryanliu.ntushower"
         minSdk = 19          // 设备 ROM 固定 Android 4.4，运行时下限不可动
         targetSdk = 19       // 目标设备冻结在 4.4，无升级路径
-        versionCode = 13
-        versionName = "0.3.6"
+        versionCode = 27
+        versionName = "0.3.20"
         buildConfigField("String", "SERVER_DOMAIN", "\"${providers.gradleProperty("serverDomain").get()}\"")
         buildConfigField("String", "APP_VERSION", "\"$versionName\"")
         buildConfigField("int", "VERSION_CODE", "$versionCode")
@@ -71,10 +71,10 @@ android {
     lint {
         // 设备 ROM 冻结在 Android 4.4 且不进 Google Play：targetSdk 19 是有意决策
         disable += "ExpiredTargetSdkVersion"
-        // /sdcard/ 硬编码：AppConfig 是目标设备的环境锚点（实测路径，见 ADR-0011/0022），
+        // /sdcard/ 硬编码：AppConfig 是目标设备的环境锚点（实测路径，见 docs/DECISIONS.md），
         // Environment.getExternalStorageDirectory() 已废弃且返回同一位置
         disable += "SdCardPath"
-        // ANDROID_ID 即设备身份：设计决策（ADR-0004），多设备注册表的唯一键
+        // ANDROID_ID 即设备身份：设计决策（docs/DECISIONS.md），多设备注册表的唯一键
         disable += "HardwareIds"
         // okhttp 钉在 3.12.13：4.x 起要求 API 21，设备冻结 4.4（见 docs/ARCHITECTURE.md）
         disable += "NewerVersionAvailable"
@@ -84,7 +84,7 @@ android {
 
 // JVM 单测覆盖率范围：只排除**真正无法在 JVM 上覆盖**的类。
 // 原则：能通过抽取纯逻辑覆盖的，就不排除——赦免清单越短，门越有意义。
-// 逐条理由见 docs/STANDARDS.md §设备端测试。
+// 逐条理由见 AGENTS.md §设备端测试。
 val frameworkBoundClasses = listOf(
     // 应用入口与常驻服务：依赖 Looper / 系统服务
     "**/ShowerApp*",
@@ -100,6 +100,7 @@ val frameworkBoundClasses = listOf(
     "**/core/identity/**",
     // root shell 进程管理：依赖真实 su 进程（输出解析已抽为 ShellOutput 并纳入覆盖）
     "**/core/shell/RootShell*",
+    "**/core/shell/ShellChannel*",
     "**/core/perf/**",
     "**/core/config/AppConfig*",
     // 无障碍节点操作：依赖 android.view.accessibility 节点树与窗口管理器
@@ -117,8 +118,8 @@ val frameworkBoundClasses = listOf(
     "**/features/doors/DoorMonitor*",
     "**/features/doors/DoorSnapshotReader*",
     "**/features/doors/DoorSnapshotSender*",
-    // 自管理：依赖 root shell 与包管理器（设置合并不依赖，已纳入覆盖）
-    "**/features/selfmanage/A11yEnabler*",
+    // 自管理：依赖 root shell 与包管理器（A11ySettingsMerge / A11yState 是纯逻辑，已纳入覆盖）
+    "**/features/selfmanage/A11yGuard*",
     "**/features/selfmanage/OtaUpdater*",
     // 纯数据载体：仅编译器生成的 equals/hashCode/toString/copy/values/组件 N，
     // 无手写逻辑（JaCoCo 官方建议排除生成代码）。业务逻辑仍在其中方法之外。

@@ -143,7 +143,7 @@ print("install:", con.execute("SELECT * FROM ota_release_install").fetchall())
 PY'
 
 # 止损：下架该发布（最直接）
-curl -X DELETE -H "X-Admin-Token: $TOKEN" http://127.0.0.1:8001/admin/releases/<版本>
+curl -X DELETE -H "X-Ops-Token: $TOKEN" http://127.0.0.1:8001/ops/releases/<版本>
 ```
 
 **预防**：`mark_installed_upto` 已在设备 hello 时调用（且早于 `latest_for`），
@@ -155,9 +155,9 @@ curl -X DELETE -H "X-Admin-Token: $TOKEN" http://127.0.0.1:8001/admin/releases/<
 ssh iseekdream.com 'systemctl is-active ntu-shower; journalctl -u ntu-shower -n 40 --no-pager'
 ```
 
-- 日志出现 `AdminTokenNotConfiguredError` → 服务器 `.env` 的 `ADMIN_TOKEN` 是占位值，
+- 日志出现 `OpsTokenNotConfiguredError` → 服务器 `.env` 的 `OPS_TOKEN` 是占位值，
   设置真实令牌后重启（这是有意的启动自检，不是故障）；
-- 日志出现 `PydanticUserError` / `ImportError` → 部署了与本机解释器不兼容的代码，
+- 日志出现 `PydanticUserError` / `ImportError` → 部署了与本机解释器版本不匹配的代码，
   按 §2 回滚，并补齐第 ④ 步预检。
 
 ### 设备能力集（capabilities）
@@ -167,33 +167,42 @@ ssh iseekdream.com 'systemctl is-active ntu-shower; journalctl -u ntu-shower -n 
 
 - 空数组表示**未声明**（升级前的旧版本设备），此时不做拦截——否则升级服务端会把在网设备锁死；
 - 设备升级后 capabilities 会自动带上真实集合，拦截随之生效；
-- 若某命令被拒且 `reason_code=session.unsupported_by_device`，先看设备声明里有没有它：
+- 若某命令被拒且 `reason_code=device.unsupported_action`，先看设备声明里有没有它：
 
 ```bash
-ssh iseekdream.com 'TOKEN=$(grep ADMIN_TOKEN /opt/ntu-shower/server/.env | cut -d= -f2);
-  curl -s -H "X-Admin-Token: $TOKEN" http://127.0.0.1:8001/admin/devices | python3 -m json.tool'
+ssh iseekdream.com 'TOKEN=$(grep OPS_TOKEN /opt/ntu-shower/server/.env | cut -d= -f2);
+  curl -s -H "X-Ops-Token: $TOKEN" http://127.0.0.1:8001/ops/devices | python3 -m json.tool'
 ```
 
 ### 设备离线
 
 ```bash
-ssh iseekdream.com 'TOKEN=$(grep ADMIN_TOKEN /opt/ntu-shower/server/.env | cut -d= -f2); \
-  curl -s -H "X-Admin-Token: $TOKEN" http://127.0.0.1:8001/admin/devices'
+ssh iseekdream.com 'TOKEN=$(grep OPS_TOKEN /opt/ntu-shower/server/.env | cut -d= -f2); \
+  curl -s -H "X-Ops-Token: $TOKEN" http://127.0.0.1:8001/ops/devices'
 ```
 
 注意 `online` 字段是**最后一次上报值**，与内存中的活动连接可能不一致；
 以日志中是否有该设备的 `WebSocket /gateway/device [accepted]` 为准。
 
-### ADB 桥
+### 调试通道（ADB 桥）
+
+**按需开、到点自动关**：手动触发才开，空闲或到达寿命上限由服务端回收。
 
 ```bash
-# 管理面触发（设备侧会 root 开启 adbd）
-curl -X POST -H "X-Admin-Token: $TOKEN" http://127.0.0.1:8001/admin/devices/<id>/adb/open
+# 打开（设备侧会 root 开启 adbd）
+curl -X POST -H "X-Ops-Token: $TOKEN" http://127.0.0.1:8001/ops/devices/<id>/bridge/open
 # 本地隧道 + adb
 ssh -N -L 15655:127.0.0.1:15655 root@iseekdream.com &
 adb connect 127.0.0.1:15655 && adb devices
-# 用毕关闭：/adb/close（空闲 300s 也会被应用层回收）
+
+# 查看状态：含 expires_in_s（距寿命到点还有多久）
+curl -s -H "X-Ops-Token: $TOKEN" http://127.0.0.1:8001/ops/devices/<id>/bridge/status
+# 用毕关闭
+curl -X POST -H "X-Ops-Token: $TOKEN" http://127.0.0.1:8001/ops/devices/<id>/bridge/close
 ```
+
+两个上限都可配（`bridge_idle_timeout_s` 默认 300 秒、`bridge_max_lifetime_s` 默认 3600 秒）。
+**空闲超时管不到"一直有流量"的情况**，所以要寿命上限兜着——调试通道不该无限期开着。
 
 ## 5. 日常任务
 
@@ -202,7 +211,8 @@ adb connect 127.0.0.1:15655 && adb devices
 | 服务状态 | `systemctl status ntu-shower` |
 | 实时日志 | `journalctl -u ntu-shower -f` |
 | 备份列表 | `ls -lh /opt/ntu-shower-backup/` |
-| 发布新 APK | 管理面 `POST /admin/releases`（表单：version / version_code / mandatory / force / target / file） |
-| 抓设备画面 | `POST /admin/devices/<id>/screen`（返回 `data.image_base64`） |
-| 远程执行 shell | `POST /admin/devices/<id>/exec`，body `{"command": "..."}` |
-| 重启设备 Agent | 设备命令 `app.restart`，经 `session.command` 下发（**无管理面 HTTP 端点**）；紧急时用 exec 通道：`(sleep 1; am force-stop …; am startservice -n …) &` |
+| 发布新 APK | 管理面 `POST /ops/releases`（表单：version / version_code / mandatory / force / target / file） |
+| 抓设备画面 | `POST /ops/devices/<id>/capture`（返回 `data.image_base64`） |
+| 远程执行 shell | `POST /ops/devices/<id>/exec`，body `{"command": "..."}` |
+| 重启设备端程序 | `POST /ops/devices/<id>/restart` |
+| 卸载设备端程序 | `POST /ops/devices/<id>/uninstall` |

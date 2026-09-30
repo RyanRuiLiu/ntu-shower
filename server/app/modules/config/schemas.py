@@ -14,7 +14,7 @@ ConfigValues = dict[str, int | bool | str | dict[str, str]]
 
 
 class ConfigSpecView(TypedDict):
-    """配置登记表中的一条（`GET /admin/config/spec`）。
+    """配置登记表中的一条（`GET /ops/config/spec`）。
 
     客户端据此渲染控件：`kind` 决定控件形态，`minimum`/`maximum` 决定输入约束，
     `unit` 用于提示，`scope` 让界面区分"下发给设备的"与"服务端自己的"。
@@ -63,7 +63,7 @@ class GlobalConfigUpdateReport(TypedDict):
 class DeviceConfigView(TypedDict):
     """单台设备的配置视图。
 
-    `overrides` 单独给出：管理员需要区分"这台设备被特殊设置过"与"它跟随全局"。
+    `overrides` 单独给出：需要区分"这台设备被特殊设置过"与"它跟随全局"。
     为 None 表示该设备没有任何覆盖。
     """
 

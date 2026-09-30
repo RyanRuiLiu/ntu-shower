@@ -7,14 +7,14 @@
 from fastapi import APIRouter, Depends
 
 from app.core.problems import DEVICE_NOT_FOUND, ApiProblemError
-from app.core.security import require_admin
+from app.core.security import require_ops_token
 
 from . import service
 from .schemas import DeviceShadow, ShadowReported
 
 router = APIRouter(prefix="/api/v1", tags=["shadow"])
 
-admin_router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)], tags=["shadow-admin"])
+ops_router = APIRouter(prefix="/ops", dependencies=[Depends(require_ops_token)], tags=["shadow-ops"])
 
 
 @router.get("/devices/{device_id}/shadow")
@@ -26,7 +26,7 @@ def get_device_shadow(device_id: str) -> ShadowReported:
     return reported
 
 
-@admin_router.get("/devices/{device_id}/shadow")
+@ops_router.get("/devices/{device_id}/shadow")
 def get_full_shadow(device_id: str) -> DeviceShadow:
     """管理面影子：reported + desired + metadata 完整文档。"""
     shadow = service.get_shadow(device_id)
