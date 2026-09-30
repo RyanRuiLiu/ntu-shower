@@ -35,7 +35,7 @@ object AutomationFlow {
             return FlowOutcome(error = FlowError("device.home_unreachable", "无法回到首页"))
         }
         // 2 遮盖层（可经配置关闭；文案取运行时配置）
-        if (RuntimeConfig.overlayEnabled) overlay.show(RuntimeConfig.overlayMessage)
+        if (RuntimeConfig.overlayEnabled) overlay.show()
         try {
             // 3 命令动作
             action.perform(a11y)?.let {
