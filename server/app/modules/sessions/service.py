@@ -185,9 +185,9 @@ async def _send_and_wait(
             remaining = deadline - loop.time()
             if remaining <= 0:
                 repository.insert_command(command_id, device_id, action)
-                repository.finish(command_id, "timeout", reason_codes.DEADLINE_EXCEEDED.code, "")
+                repository.finish(command_id, outcomes.TIMEOUT.value, reason_codes.DEADLINE_EXCEEDED.code, "")
                 return CommandOutcome(
-                    status="timeout",
+                    status=outcomes.TIMEOUT.value,
                     reason_code=reason_codes.DEADLINE_EXCEEDED.code,
                     terminal_message="",
                     data=None,
@@ -215,7 +215,7 @@ async def _dispatch(
     started_at = loop.time()
     # 取消时的终值：协程被取消时它就是最终状态，审计记为 aborted 而不是留一行永不收尾的记录
     outcome = CommandOutcome(
-        status="failed",
+        status=outcomes.FAILED.value,
         reason_code=reason_codes.COMMAND_ABORTED.code,
         terminal_message="",
         data=None,
@@ -240,7 +240,7 @@ async def _dispatch(
                 action,
             )
             outcome = CommandOutcome(
-                status="timeout",
+                status=outcomes.TIMEOUT.value,
                 reason_code=reason_codes.DEVICE_OFFLINE.code,
                 terminal_message="设备离线",
                 data=None,
@@ -252,14 +252,14 @@ async def _dispatch(
             result = await asyncio.wait_for(pending.future, timeout=timeout_s)
         except asyncio.TimeoutError:
             outcome = CommandOutcome(
-                status="timeout",
+                status=outcomes.TIMEOUT.value,
                 reason_code=reason_codes.DEADLINE_EXCEEDED.code,
                 terminal_message="",
                 data=None,
             )
         else:
             outcome = CommandOutcome(
-                status=str(result.get("status", "failed")),
+                status=str(result.get("status", outcomes.FAILED.value)),
                 reason_code=str(result.get("reason_code", "")),
                 terminal_message=str(result.get("terminal_message", "")),
                 data=result.get("data"),
