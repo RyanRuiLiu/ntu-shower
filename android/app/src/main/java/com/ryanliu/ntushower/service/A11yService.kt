@@ -13,6 +13,7 @@ import android.content.Intent
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.threading.MainThread
@@ -92,7 +93,7 @@ class A11yService : AccessibilityService() {
     /** 浴室 App 退出到桌面：崩溃守护决策（拉起 / 冷却），自动化期间不拉起。 */
     private fun handleBathAppExit(leftToPackage: String) {
         if (!RuntimeConfig.bathGuardEnabled) return
-        val now = System.currentTimeMillis()
+        val now = Uptime.nowMs()
         when (guard.onBackground(now)) {
             BathAppGuard.Action.RELAUNCH ->
                 if (!automationInProgress) {
@@ -239,9 +240,9 @@ class A11yService : AccessibilityService() {
         @JvmStatic
         fun awaitPageChangeAfter(mark: Long, timeoutMs: Long) {
             synchronized(pageChangeLock) {
-                val deadline = System.currentTimeMillis() + timeoutMs
+                val deadline = Uptime.nowMs() + timeoutMs
                 while (pageChangeCount.get() == mark) {
-                    val left = deadline - System.currentTimeMillis()
+                    val left = deadline - Uptime.nowMs()
                     if (left <= 0) return
                     pageChangeLock.wait(left)
                 }

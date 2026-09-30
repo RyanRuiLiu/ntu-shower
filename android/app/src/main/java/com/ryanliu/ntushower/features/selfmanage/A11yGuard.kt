@@ -1,6 +1,7 @@
 package com.ryanliu.ntushower.features.selfmanage
 
 import android.util.Log
+import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.shell.RootShell
 import com.ryanliu.ntushower.service.A11yService
 
@@ -99,8 +100,8 @@ object A11yGuard {
      * 这个方法只在修复路径上调用（链路本来就完整时提前返回了），正常运行时不会走到。
      */
     private fun waitForBind(): Boolean {
-        val deadline = System.currentTimeMillis() + BIND_WAIT_MS
-        while (System.currentTimeMillis() < deadline) {
+        val deadline = Uptime.nowMs() + BIND_WAIT_MS
+        while (Uptime.nowMs() < deadline) {
             if (A11yService.instance != null) return true
             Thread.sleep(BIND_POLL_MS)
         }
