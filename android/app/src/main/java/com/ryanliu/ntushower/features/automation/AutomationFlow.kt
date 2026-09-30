@@ -119,15 +119,44 @@ object AutomationFlow {
 
     private data class Terminal(val reached: Boolean, val message: String = "")
 
+    /**
+     * 等浴室服务器的终点：回首页即成功，提示页即被拒（附它给出的话）。
+     *
+     * ## 回首页不一定是成功
+     *
+     * 提交之后浴室 App 被切走、随后重启，落点同样是首页——它与"服务器处理完了"落在同一个
+     * 页面上，只看页面分不开。分得开的是**中间经历过什么**：重启会走一遍启动闪屏，那期间
+     * 浴室 App 已经在前台、却认不出页面；而正常完成是从验证页直接跳到首页，没有这一段。
+     *
+     * 所以判据是"离开过前台，且回来后在**前台**却认不出页面"。限定在前台是因为学生拉下
+     * 通知栏时活动窗口变成 SystemUI，那时同样认不出页面——那是外部干扰，不是 App 在重建。
+     *
+     * 判成失败而不是继续等：两种情况给出的答复都是"不知道成没成"，而失败至少让调用方知道
+     * 该去核对，成功则会让学生以为水已经开了。
+     *
+     * 拉回前台走 [BathAppNavigator.ensureForeground]（含关系统面板），不是裸的热切前台。
+     */
     private fun awaitTerminal(a11y: A11yService): Terminal {
         val start = System.currentTimeMillis()
         var relaunched = false
+        var leftForeground = false
+        var rebuiltAfterLeave = false
         var unknownRounds = 0
         while (System.currentTimeMillis() - start < RuntimeConfig.serverResponseTimeoutMs) {
             val mark = A11yService.pageChangeMark()
+            val inForeground = A11yService.bathAppInForeground
+            if (!inForeground) leftForeground = true
             val snapshot = BathAppPage.snapshot()
+            if (leftForeground && inForeground && snapshot.state == PageState.UNKNOWN) {
+                rebuiltAfterLeave = true
+            }
             when (snapshot.state) {
-                PageState.HOME -> return Terminal(true)
+                PageState.HOME ->
+                    if (rebuiltAfterLeave) {
+                        Terminal(false, "浴室 App 中途重启，无法确认这次操作的结果")
+                    } else {
+                        Terminal(true)
+                    }
 
                 PageState.ID_VERIFY -> Unit
 
@@ -135,8 +164,8 @@ object AutomationFlow {
                 PageState.HINT, PageState.VF_RESULT -> return Terminal(true, snapshot.message)
 
                 PageState.UNKNOWN, PageState.BOOKING, PageState.BOOKING_CODE -> {
-                    if (!relaunched && !A11yService.bathAppInForeground) {
-                        a11y.launchBathApp()
+                    if (!relaunched && !inForeground) {
+                        BathAppNavigator.ensureForeground(a11y)
                         relaunched = true
                         A11yService.awaitPageChangeAfter(mark, RuntimeConfig.pollIntervalMs)
                         continue
