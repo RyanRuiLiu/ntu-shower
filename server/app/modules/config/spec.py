@@ -190,6 +190,16 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         unit="dp",
     ),
     ConfigSpec(
+        "automation_trace_enabled",
+        BOOL,
+        DEVICE,
+        False,
+        "记录自动化耗时",
+        "把分配/结算流程的分段耗时写进 /sdcard/ntu-shower/automation.log，"
+        "用 device.exec 可以直接 cat 取回。默认关：每次记录都要开一次文件，长期开着是"
+        "白花的开销，而它的用途本来就是「要量的时候量一轮」",
+    ),
+    ConfigSpec(
         "bath_response_timeout_ms",
         INT,
         DEVICE,

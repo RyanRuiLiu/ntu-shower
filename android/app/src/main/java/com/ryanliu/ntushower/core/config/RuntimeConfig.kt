@@ -69,6 +69,15 @@ object RuntimeConfig {
     @Volatile var overlayMarginLeftDp = ConfigDefaults.OVERLAY_MARGIN_LEFT_DP.toInt()
         private set
 
+    /**
+     * 是否记录自动化流程的分段耗时。
+     *
+     * 默认关：每次记录都要开一次文件，长期开着是白花的开销，而它的用途本来就是
+     * "要量的时候量一轮"。见 [com.ryanliu.ntushower.features.automation.AutomationTrace]。
+     */
+    @Volatile var automationTraceEnabled = ConfigDefaults.AUTOMATION_TRACE_ENABLED
+        private set
+
     @Volatile var serverResponseTimeoutMs = ConfigDefaults.BATH_RESPONSE_TIMEOUT_MS
         private set
 
@@ -137,6 +146,8 @@ object RuntimeConfig {
         "overlay_text_color" to { c -> overlayTextColor = c.optString("overlay_text_color", overlayTextColor) },
         "overlay_margin_left_dp" to
             { c -> overlayMarginLeftDp = atLeastOne(c.optInt("overlay_margin_left_dp", overlayMarginLeftDp)) },
+        "automation_trace_enabled" to
+            { c -> automationTraceEnabled = c.optBoolean("automation_trace_enabled", automationTraceEnabled) },
         "bath_response_timeout_ms" to
             { c ->
                 serverResponseTimeoutMs = atLeastOne(c.optLong("bath_response_timeout_ms", serverResponseTimeoutMs))

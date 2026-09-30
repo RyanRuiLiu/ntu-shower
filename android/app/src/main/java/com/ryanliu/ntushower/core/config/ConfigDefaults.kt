@@ -42,6 +42,9 @@ object ConfigDefaults {
     /** 遮罩文字左边距 */
     const val OVERLAY_MARGIN_LEFT_DP = 600L
 
+    /** 记录自动化耗时 */
+    const val AUTOMATION_TRACE_ENABLED = false
+
     /** 等待服务端响应 */
     const val BATH_RESPONSE_TIMEOUT_MS = 10000L
 

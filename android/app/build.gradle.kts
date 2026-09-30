@@ -38,8 +38,8 @@ android {
         applicationId = "com.ryanliu.ntushower"
         minSdk = 19          // 设备 ROM 固定 Android 4.4，运行时下限不可动
         targetSdk = 19       // 目标设备冻结在 4.4，无升级路径
-        versionCode = 27
-        versionName = "0.3.20"
+        versionCode = 28
+        versionName = "0.3.21"
         buildConfigField("String", "SERVER_DOMAIN", "\"${providers.gradleProperty("serverDomain").get()}\"")
         buildConfigField("String", "APP_VERSION", "\"$versionName\"")
         buildConfigField("int", "VERSION_CODE", "$versionCode")
@@ -78,6 +78,18 @@ android {
         disable += "HardwareIds"
         // okhttp 钉在 3.12.13：4.x 起要求 API 21，设备冻结 4.4（见 docs/ARCHITECTURE.md）
         disable += "NewerVersionAvailable"
+    }
+
+    testOptions {
+        // 未 mock 的 Android 框架方法返回默认值而不是抛异常。
+        //
+        // 我们测的是"抽出来的纯逻辑"，但那条路径上难免擦到 Logger 或系统时钟——那些类在
+        // JVM 里只有 stub，默认行为是抛 RuntimeException。让它们返回默认值，测的仍然是
+        // 被测逻辑本身的分支与结果，而不是"某个框架调用恰好被 mock 了没有"。
+        //
+        // 代价是它也掩盖了"本不该调用框架方法"这类问题。因此纳入覆盖的类要经得起看：
+        // 真正依赖框架的那些已经列在 frameworkBoundClasses 里，不参与覆盖率门禁。
+        unitTests.isReturnDefaultValues = true
     }
 
 }
@@ -127,9 +139,14 @@ val frameworkBoundClasses = listOf(
     // 纯数据载体：仅编译器生成的 equals/hashCode/toString/copy/values/组件 N，
     // 无手写逻辑（JaCoCo 官方建议排除生成代码）。业务逻辑仍在其中方法之外。
     "**/features/automation/PageState*",
+    "**/features/automation/PageSnapshot*",
+    "**/features/automation/PageInfo*",
     "**/features/automation/CommandOutcome*",
     "**/features/automation/FlowError*",
     "**/transport/Envelope*",
+    // 耗时记录：写 /sdcard 并打 Log，依赖真机环境（崩溃日志那套同类）。它的分段计算
+    // 由 AutomationTraceTest 覆盖，守的是"记录器自己绝不能把流程搞挂"
+    "**/features/automation/AutomationTrace*",
 )
 
 tasks.register<JacocoReport>("jacocoUnitTestReport") {
