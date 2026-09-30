@@ -61,6 +61,7 @@ UNKNOWN_COMMAND_ID = Reason("command.unknown_id", "收到一个对不上任何�
 DEVICE_OFFLINE = Reason("device.offline", "设备离线")
 DEVICE_UNSUPPORTED_ACTION = Reason("device.unsupported_action", "设备未声明该能力，无法执行")
 DEVICE_INTERNAL_ERROR = Reason("device.internal_error", "设备端内部错误")
+DEVICE_EXEC_FAILED = Reason("device.exec_failed", "命令执行失败，原因见输出")
 DEVICE_A11Y_UNAVAILABLE = Reason("device.a11y_unavailable", "无障碍服务不可用")
 DEVICE_HOME_UNREACHABLE = Reason("device.home_unreachable", "无法回到浴室 App 首页")
 DEVICE_VERIFY_PAGE_TIMEOUT = Reason("device.verify_page_timeout", "无法进入验证页面")
@@ -110,6 +111,7 @@ REGISTRY: tuple[Reason, ...] = (
     DEVICE_OFFLINE,
     DEVICE_UNSUPPORTED_ACTION,
     DEVICE_INTERNAL_ERROR,
+    DEVICE_EXEC_FAILED,
     DEVICE_A11Y_UNAVAILABLE,
     DEVICE_HOME_UNREACHABLE,
     DEVICE_VERIFY_PAGE_TIMEOUT,
