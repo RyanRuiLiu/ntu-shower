@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from app.core.protocol import JsonObject
 from app.core.security import require_admin
 
 from . import service
@@ -12,7 +13,7 @@ admin_router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)],
 
 
 @router.get("/devices/{device_id}/shadow")
-def get_device_shadow(device_id: str) -> dict:
+def get_device_shadow(device_id: str) -> JsonObject:
     """用户面影子：reported 视图（门状态 + 设备在线/名称）。"""
     reported = service.get_reported(device_id)
     if reported is None:
@@ -21,7 +22,7 @@ def get_device_shadow(device_id: str) -> dict:
 
 
 @admin_router.get("/devices/{device_id}/shadow")
-def get_full_shadow(device_id: str) -> dict:
+def get_full_shadow(device_id: str) -> JsonObject:
     """管理面影子：reported + desired + metadata 完整文档。"""
     shadow = service.get_shadow(device_id)
     if shadow is None:

@@ -6,8 +6,10 @@
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+from app.core.protocol import JsonObject
 from app.core.security import require_admin
 from app.modules.sessions import service as sessions_service
+from app.modules.sessions.service import CommandOutcome
 
 from . import service
 from .dependencies import require_trusted_online_device
@@ -28,30 +30,30 @@ class DeviceExecRequest(BaseModel):
 
 
 @admin_router.get("/devices")
-def list_devices() -> list[dict]:
+def list_devices() -> list[JsonObject]:
     return service.list_devices()
 
 
 @admin_router.post("/devices/{device_id}/trust")
-def trust_device(device_id: str) -> dict:
+def trust_device(device_id: str) -> JsonObject:
     found = service.set_trusted(device_id, True)
     return {"device_id": device_id, "trusted": True, "found": found}
 
 
 @admin_router.post("/devices/{device_id}/untrust")
-def untrust_device(device_id: str) -> dict:
+def untrust_device(device_id: str) -> JsonObject:
     found = service.set_trusted(device_id, False)
     return {"device_id": device_id, "trusted": False, "found": found}
 
 
 @admin_router.patch("/devices/{device_id}")
-def rename_device(device_id: str, req: DeviceNameRequest) -> dict:
+def rename_device(device_id: str, req: DeviceNameRequest) -> JsonObject:
     found = service.rename_device(device_id, req.name)
     return {"device_id": device_id, "name": req.name, "found": found}
 
 
 @admin_router.post("/devices/{device_id}/exec")
-async def exec_command(device_id: str, req: DeviceExecRequest) -> dict:
+async def exec_command(device_id: str, req: DeviceExecRequest) -> CommandOutcome:
     """远程调试：在设备上以 root 执行 shell 命令并取回输出（审计留痕）。"""
     require_trusted_online_device(device_id)
     return await sessions_service.send_command_and_wait(
@@ -63,7 +65,7 @@ async def exec_command(device_id: str, req: DeviceExecRequest) -> dict:
 
 
 @admin_router.post("/devices/{device_id}/screen")
-async def capture_screen(device_id: str) -> dict:
+async def capture_screen(device_id: str) -> CommandOutcome:
     """远程调试：抓取设备全屏画面，结果在 data.image_base64（JPEG，NO_WRAP）。
 
     设备端走 screenrecord + MediaCodec 解码首帧——本机 framebuffer/screencap

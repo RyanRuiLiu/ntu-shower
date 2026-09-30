@@ -88,7 +88,8 @@ source = ["app"]
 branch = true
 
 [tool.coverage.report]
-fail_under = 95
+# 门槛跟随实际水平上移，只升不降（当前 96.2%，见 CI 输出）
+fail_under = 96
 show_missing = true
 # 赦免机制：不可在测试进程内复现的分支须就地标注原因
 exclude_lines = [

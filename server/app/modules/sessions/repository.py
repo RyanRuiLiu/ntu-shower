@@ -2,6 +2,7 @@
 
 from app.core.clock import now_rfc3339
 from app.core.db import get_conn
+from app.core.protocol import JsonObject
 
 
 def init_tables() -> None:
@@ -41,7 +42,7 @@ def finish(command_id: str, status: str, reason_code: str, terminal_message: str
     get_conn().commit()
 
 
-def list_commands(device_id: str | None = None, limit: int = 50) -> list[dict]:
+def list_commands(device_id: str | None = None, limit: int = 50) -> list[JsonObject]:
     """按时间倒序取命令审计记录（调试与问题追踪）。"""
     sql = (
         "SELECT command_id, device_id, action, created_at, finished_at, status,"

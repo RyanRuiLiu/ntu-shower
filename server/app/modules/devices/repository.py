@@ -3,6 +3,7 @@
 import json
 
 from app.core.db import get_conn
+from app.core.protocol import JsonObject
 
 
 def init_tables() -> None:
@@ -24,7 +25,7 @@ def init_tables() -> None:
     )
 
 
-def get(device_id: str) -> dict | None:
+def get(device_id: str) -> JsonObject | None:
     row = (
         get_conn()
         .execute(
@@ -43,7 +44,7 @@ def get(device_id: str) -> dict | None:
     return device
 
 
-def list_all() -> list[dict]:
+def list_all() -> list[JsonObject]:
     rows = (
         get_conn()
         .execute(
@@ -62,7 +63,14 @@ def list_all() -> list[dict]:
     return devices
 
 
-def register(device_id: str, app_version: str, version_code: int, os_version: str, capabilities: list, ip: str) -> None:
+def register(
+    device_id: str,
+    app_version: str,
+    version_code: int,
+    os_version: str,
+    capabilities: list[object],
+    ip: str,
+) -> None:
     """上线登记：只覆盖版本/能力/在线/时间，绝不触碰 name 与 trusted。"""
     from app.core.clock import now_rfc3339
 

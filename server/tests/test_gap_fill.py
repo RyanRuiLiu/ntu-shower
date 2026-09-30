@@ -4,7 +4,9 @@ import asyncio
 import json
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
+from starlette.testclient import WebSocketTestSession
 
 from app.gateway import manager as manager_module
 from app.modules.bridge.manager import AdbBridge
@@ -33,7 +35,7 @@ def _hello(device_id: str) -> str:
     )
 
 
-def _connect_trusted(client: TestClient, device_id: str):
+def _connect_trusted(client: TestClient, device_id: str) -> WebSocketTestSession:
     from app.modules.devices import repository as devices_repository
 
     devices_repository.register(device_id, "0.2.5", 7, "4.4.4", [], "127.0.0.1")
@@ -54,7 +56,7 @@ class FakeGatewayWS:
         return True
 
 
-def test_bridge_close_with_active_session(client: TestClient, monkeypatch) -> None:
+def test_bridge_close_with_active_session(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """桥接活跃时 adb/close 返回 True 并清理；重复关闭返回 False。"""
     from app.modules.devices import repository as devices_repository
 
@@ -85,7 +87,7 @@ def test_auto_settle_loop_lifecycle(client: TestClient) -> None:
     auto_settle.stop()  # 重复 stop 幂等
 
 
-def test_auto_settle_scan_offline_device(client: TestClient, monkeypatch) -> None:
+def test_auto_settle_scan_offline_device(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """命中的候选设备离线 → 不下发，返回 False。"""
     from datetime import datetime, timedelta, timezone
 

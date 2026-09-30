@@ -110,5 +110,16 @@ class BridgeRegistry:
     def remove(self, device_id: str) -> None:
         self.active.pop(device_id, None)
 
+    def reset(self) -> None:
+        """清空全部会话状态。
+
+        注册表是进程级单例，端口分配与世代计数会跨用例累积；测试隔离需要
+        一个显式重置入口，而不是让用例去动私有字段。
+        """
+        self.pending.clear()
+        self.active.clear()
+        self.ports.clear()
+        self._generation_by_device.clear()
+
 
 registry = BridgeRegistry()

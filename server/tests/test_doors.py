@@ -8,13 +8,11 @@ from app.modules.doors import repository, service
 
 
 @pytest.fixture
-def client(fresh_db):
-    from fastapi.testclient import TestClient
-
+def client(fresh_db: str) -> TestClient:
     return TestClient(create_app())
 
 
-def _door(door_no: int, **overrides) -> dict:
+def _door(door_no: int, **overrides: object) -> dict:
     door = {
         "door_no": door_no,
         "card_no": 0,
@@ -88,7 +86,8 @@ def test_snapshot_flow(client: TestClient) -> None:
 
     # 首次快照：落现态，无事件
     live = repository.get_all_live(device_id)
-    assert len(live) == 2 and live[1]["state"] == service.STATE_FREE
+    assert len(live) == 2
+    assert live[1]["state"] == service.STATE_FREE
 
     # 第二次：1 号门被占用进门 → 事件 free→waiting + 会话开启
     service.process_snapshot(
@@ -96,7 +95,8 @@ def test_snapshot_flow(client: TestClient) -> None:
         _snapshot([_door(1, card_no=2001, cert_no="C1", open_time="2026-09-29T12:30:00.000Z"), _door(2)]),
     )
     live = repository.get_all_live(device_id)
-    assert live[1]["state"] == service.STATE_WAITING and live[1]["card_no"] == 2001
+    assert live[1]["state"] == service.STATE_WAITING
+    assert live[1]["card_no"] == 2001
 
     # 进门后开水 → bathing，同一会话延续
     service.process_snapshot(
@@ -144,7 +144,9 @@ def test_snapshot_flow(client: TestClient) -> None:
     sessions = get_conn().execute("SELECT * FROM usage_session WHERE device_id=?", (device_id,)).fetchall()
     assert len(sessions) == 1
     s = sessions[0]
-    assert s["card_no"] == 2001 and s["ended_at"] is not None and s["end_reason"] == "checkout"
+    assert s["card_no"] == 2001
+    assert s["ended_at"] is not None
+    assert s["end_reason"] == "checkout"
 
 
 def test_snapshot_via_websocket(client: TestClient) -> None:

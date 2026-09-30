@@ -2,14 +2,19 @@
 
 import json
 import uuid
+from datetime import datetime, timedelta, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core import config as config_module
+from app.core.clock import now_rfc3339
 from app.gateway import manager as manager_module
 from app.modules.doors import repository as doors_repository
 from app.modules.doors import service as doors_service
 from app.modules.sessions import auto_settle
+
+SETTLE_THRESHOLD_S = 1140  # 19 分钟：与 DEFAULT_CONFIG.auto_settle_threshold_s 对齐
 
 
 def _admin(client: TestClient) -> dict:
@@ -17,10 +22,7 @@ def _admin(client: TestClient) -> dict:
 
 
 def _seed_session(device_id: str, door_no: int, cert_no: str, minutes_ago: int) -> None:
-    from datetime import datetime, timedelta, timezone
-
-    from app.core.clock import now_rfc3339
-
+    """构造一条已占用 minutes_ago 分钟的会话（经真实快照链路落库）。"""
     started = (
         (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago))
         .isoformat(timespec="milliseconds")
@@ -52,7 +54,8 @@ def _seed_session(device_id: str, door_no: int, cert_no: str, minutes_ago: int) 
     doors_repository.open_session(device_id, door_no, 900 + door_no, cert_no, started)
 
 
-def test_pick_candidate_requires_enabled_and_listed(tmp_path, monkeypatch) -> None:
+def test_pick_candidate_requires_enabled_and_listed(client: TestClient) -> None:
+    """否决条件：开关关闭、学号不在名单——任一不满足都不产生候选。"""
     from app.modules.devices import repository as devices_repository
 
     devices_repository.register("dev-as-1", "0.2.5", 7, "4.4.4", [], "127.0.0.1")
@@ -61,7 +64,7 @@ def test_pick_candidate_requires_enabled_and_listed(tmp_path, monkeypatch) -> No
 
     base = {
         "auto_settle_enabled": True,
-        "auto_settle_threshold_s": 1140,
+        "auto_settle_threshold_s": SETTLE_THRESHOLD_S,
         "auto_settle_students": {"2530110052": "000000"},
     }
 
@@ -69,20 +72,37 @@ def test_pick_candidate_requires_enabled_and_listed(tmp_path, monkeypatch) -> No
     assert auto_settle.pick_auto_settle_candidate({**base, "auto_settle_enabled": False}) is None
     # 名单外 → 不结算
     assert auto_settle.pick_auto_settle_candidate({**base, "auto_settle_students": {"other": "x"}}) is None
-    # 未超时 → 不结算
-    short = _seed_and_duration(1, "2530110052", minutes_ago=5)
-    assert auto_settle.pick_auto_settle_candidate({**base}) is None or short is None
-    # 名单内 + 超时 → 命中
+    # 名单内 + 超时 → 命中（device_id, cert_no, password, duration_s）
     hit = auto_settle.pick_auto_settle_candidate(base)
-    assert hit == ("dev-as-1", "2530110052", hit[2])
-    assert hit[2] >= 1140
+    assert hit is not None
+    assert hit[0] == "dev-as-1"
+    assert hit[1] == "2530110052"
+    assert hit[2] == "000000"
+    assert hit[3] >= SETTLE_THRESHOLD_S
 
 
-def _seed_and_duration(door_no: int, cert_no: str, minutes_ago: int):
-    return None  # 未超时场景由 pick 返回 None 表达，无需附加构造
+def test_pick_candidate_rejects_session_below_threshold(client: TestClient) -> None:
+    """时长不足阈值 → 不产生候选。
+
+    此前该场景被写成了 `pick(...) is None or short is None` 形式的断言，
+    而 `short` 恒为 None，断言恒真——等于没有测试。
+    """
+    from app.modules.devices import repository as devices_repository
+
+    devices_repository.register("dev-as-short", "0.2.5", 7, "4.4.4", [], "127.0.0.1")
+    devices_repository.set_trusted("dev-as-short", True)
+    _seed_session("dev-as-short", 1, "2530110052", minutes_ago=5)  # 5 分钟 < 19 分钟阈值
+
+    config = {
+        "auto_settle_enabled": True,
+        "auto_settle_threshold_s": SETTLE_THRESHOLD_S,
+        "auto_settle_students": {"2530110052": "000000"},
+    }
+
+    assert auto_settle.pick_auto_settle_candidate(config) is None
 
 
-def test_scan_once_settles_listed_timeout_session(client: TestClient, monkeypatch) -> None:
+def test_scan_once_settles_listed_timeout_session(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.modules.devices import repository as devices_repository
 
     device_id = "dev-as-2"

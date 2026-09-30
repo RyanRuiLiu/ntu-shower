@@ -4,6 +4,7 @@ import json
 import uuid
 
 from fastapi.testclient import TestClient
+from starlette.testclient import WebSocketTestSession
 
 
 def _hello(device_id: str) -> str:
@@ -24,14 +25,14 @@ def _hello(device_id: str) -> str:
     )
 
 
-def _recv_until(ws, msg_type: str) -> dict:
+def _recv_until(ws: WebSocketTestSession, msg_type: str) -> dict:
     while True:
         msg = json.loads(ws.receive_text())
         if msg.get("type") == msg_type:
             return msg
 
 
-def _connect_trusted(client: TestClient, device_id: str):
+def _connect_trusted(client: TestClient, device_id: str) -> WebSocketTestSession:
     """建档 → 信任 → 重连，返回保持在线的 ws 会话（调用方负责退出）。"""
     with client.websocket_connect("/gateway/device") as ws:
         ws.send_text(_hello(device_id))

@@ -5,9 +5,10 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.testclient import WebSocketTestSession
 
 
-def _recv_until(ws, msg_type: str) -> dict:
+def _recv_until(ws: WebSocketTestSession, msg_type: str) -> dict:
     while True:
         msg = json.loads(ws.receive_text())
         if msg.get("type") == msg_type:
@@ -33,9 +34,7 @@ def _hello(device_id: str) -> str:
 
 
 @pytest.fixture
-def client(fresh_db):
-    from fastapi.testclient import TestClient
-
+def client(fresh_db: str) -> TestClient:
     from app.main import create_app
 
     return TestClient(create_app())
@@ -49,12 +48,13 @@ def test_rename_device_via_patch(client: TestClient) -> None:
         ws.__exit__(None, None, None)
 
     r = client.patch(f"/admin/devices/{device_id}", headers={"X-Admin-Token": "test-token"}, json={"name": "二楼浴室"})
-    assert r.status_code == 200 and r.json()["name"] == "二楼浴室"
+    assert r.status_code == 200
+    assert r.json()["name"] == "二楼浴室"
     devices = client.get("/admin/devices", headers={"X-Admin-Token": "test-token"}).json()
     assert next(d for d in devices if d["device_id"] == device_id)["name"] == "二楼浴室"
 
 
-def _recv_until(ws, msg_type: str) -> dict:
+def _recv_until(ws: WebSocketTestSession, msg_type: str) -> dict:
     while True:
         msg = json.loads(ws.receive_text())
         if msg.get("type") == msg_type:

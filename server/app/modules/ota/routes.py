@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, UploadF
 from fastapi.responses import FileResponse
 
 from app.core.config import settings
+from app.core.protocol import JsonObject
 from app.core.security import require_admin
 from app.modules.ota import repository, service
 from app.modules.ota.service import VERSION_PATTERN
@@ -24,12 +25,12 @@ ReleaseVersionForm = Annotated[str, Form(pattern=VERSION_PATTERN)]
 
 
 @router.get("/releases")
-def list_releases() -> list[dict]:
+def list_releases() -> list[JsonObject]:
     return repository.list_releases()
 
 
 @router.get("/manifest")
-def manifest(device_id: str, version_code: int) -> dict:
+def manifest(device_id: str, version_code: int) -> JsonObject:
     """设备定期轮询：返回是否有可用更新及其元数据。"""
     rel = repository.latest_for(device_id, version_code)
     if rel is None:
@@ -58,13 +59,13 @@ def download(version: ReleaseVersion) -> FileResponse:
 
 
 @admin_router.post("/releases/{version}/rearm/{device_id}")
-def rearm_release(version: str, device_id: str) -> dict:
+def rearm_release(version: str, device_id: str) -> JsonObject:
     """清除安装确认：force 发布对该设备重新生效（调试重推）。"""
     return {"version": version, "device_id": device_id, "rearmed": repository.rearm(device_id, version)}
 
 
 @admin_router.delete("/releases/{version}")
-def delete_release(version: str) -> dict:
+def delete_release(version: str) -> JsonObject:
     """下架发布（紧急止损，如终止 OTA 循环）。"""
     return {"version": version, "deleted": repository.delete_release(version)}
 
@@ -77,7 +78,7 @@ async def upload_release(
     mandatory: Annotated[bool, Form()] = False,
     force: Annotated[bool, Form()] = False,
     target: Annotated[str, Form()] = "all",
-) -> dict:
+) -> JsonObject:
     """上传新版本 APK 并注册发布（target='all' 或逗号分隔的 device_id 列表）。
 
     发布成功后向在线的目标设备即时推送 ota.upgrade_available。
