@@ -16,9 +16,10 @@ from starlette.concurrency import run_in_threadpool
 
 from ..core import events, outcomes, protocol, reason_codes
 from ..core.clock import now_rfc3339, rfc3339_ago
-from ..core.device_clock import ping_payload, update_skew
+from ..core.device_clock import load_skew, ping_payload, update_skew
 from ..core.protocol import JsonObject, as_int, list_of, payload_of, text_of
 from ..modules.config import store as config_store
+from ..modules.devices import repository as devices_repository
 from ..modules.devices import service as devices_service
 from ..modules.doors import service as doors_service
 from ..modules.ota import repository as ota_repository
@@ -97,6 +98,15 @@ async def device_gateway(ws: WebSocket) -> None:
             )
         )
 
+        # 偏差从库里恢复，再做一次主动探测。
+        #
+        # 两件事缺一不可：设备上报的 openTime/inTime/closeTime 是它的墙上时钟（实测有
+        # 一台快 59 分 47 秒），落库前全靠这个偏差校正。不载入的话，服务重启后偏差是
+        # 0——那等于不校正；不主动探测的话，要等 `ping_interval_s`（默认 60 秒）才轮到
+        # 第一轮 ping，那之前到达的快照同样没校正。
+        load_skew(device_id, await run_in_threadpool(devices_repository.get_clock_skew, device_id))
+        await ws.send_text(ping_payload())
+
         events.publish(events.DEVICE_UPDATE, await _device_snapshot(device_id))
         ping_task = asyncio.create_task(_server_ping_loop(ws, device_id, pong_seen))
 
@@ -156,7 +166,10 @@ async def _handle_frame(
     if mtype == "link.ping":
         await ws.send_text(protocol.envelope("link.pong", {"sender_time": now_rfc3339()}, reply_to=frame_id))
     elif mtype == "link.pong":
-        update_skew(device_id, text_of(payload, "sender_time"))
+        config = await run_in_threadpool(config_store.effective, device_id)
+        threshold = as_int(config.get("clock_jump_threshold_s"), default=300)
+        skew = update_skew(device_id, text_of(payload, "sender_time"), threshold)
+        await run_in_threadpool(devices_repository.set_clock_skew, device_id, skew)
         pong_seen.set()
     elif mtype == "config.ack":
         sessions_service.resolve_config_ack(device_id, as_int(payload.get("revision")))

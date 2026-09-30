@@ -54,21 +54,18 @@ def test_untrusted_device_pends_then_trusted(client: TestClient) -> None:
     # 1) 未信任设备：连接成功但 trusted=false
     with client.websocket_connect("/gateway/device") as ws:
         ws.send_text(_hello(device_id))
-        ack = json.loads(ws.receive_text())
-        assert ack["type"] == "link.hello_ack"
+        ack = _recv_until(ws, "link.hello_ack")
         assert ack["payload"]["trusted"] is False
         assert ack["payload"]["config"]["heartbeat_interval_s"] == 30
 
         # 2) 心跳回路
         ws.send_text(_envelope("link.ping", {"sender_time": "2026-09-29T12:00:01.000Z"}))
-        pong = json.loads(ws.receive_text())
-        assert pong["type"] == "link.pong"
+        pong = _recv_until(ws, "link.pong")
         assert pong["reply_to"]
 
         # 3) 未知类型 → 结构化错误，不断开
         ws.send_text(_envelope("made.up", {}))
-        err = json.loads(ws.receive_text())
-        assert err["type"] == "link.error"
+        err = _recv_until(ws, "link.error")
         assert err["payload"]["code"] == "proto.unknown_type"
 
     # 4) 后台信任（需令牌）
@@ -83,7 +80,7 @@ def test_untrusted_device_pends_then_trusted(client: TestClient) -> None:
     # 6) 重新连接：trusted=true，出现在设备列表
     with client.websocket_connect("/gateway/device") as ws:
         ws.send_text(_hello(device_id))
-        ack = json.loads(ws.receive_text())
+        ack = _recv_until(ws, "link.hello_ack")
         assert ack["payload"]["trusted"] is True
         r = client.get("/ops/devices", headers={"X-Ops-Token": "test-token"})
         devices = r.json()
@@ -165,7 +162,10 @@ def test_unexpected_frame_error_is_logged_before_reraise(
     monkeypatch.setattr(gateway_routes, "_handle_frame", boom)
 
     device_id = "dev-gw-boom"
-    # 异常会穿透到 TestClient，这里只关心它有没有被记下来
+    # 异常会穿透到 TestClient，这里只关心它有没有被记下来。
+    #
+    # 读到连接中断为止，而不是只读一帧：`link.hello` 之后服务端会回 hello_ack 并主动发
+    # 一次探测 ping，它们都排在触发异常的那一帧之前。只读一帧时异常尚未发生，断言会假失败。
     with (
         caplog.at_level(logging.WARNING, logger="ntu-shower.gateway"),
         contextlib.suppress(Exception),
@@ -173,7 +173,8 @@ def test_unexpected_frame_error_is_logged_before_reraise(
     ):
         ws.send_text(_hello(device_id))
         ws.send_text(_envelope("link.ping", {"sender_time": "2026-09-29T12:00:01.000Z"}))
-        ws.receive_text()
+        while True:
+            ws.receive_text()
 
     assert any("gateway session failed" in record.getMessage() for record in caplog.records), (
         "未预期的帧处理异常没有留痕"

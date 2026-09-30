@@ -97,6 +97,20 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         unit="秒",
     ),
     ConfigSpec(
+        "clock_jump_threshold_s",
+        INT,
+        SERVER,
+        300,
+        "设备时钟跳变阈值",
+        "单次观测到的时钟偏差与当前值相差超过它，就判定设备的钟被改过，"
+        "直接用新值取代平滑结果。平滑是为了滤掉单次往返的抖动（几十毫秒级），"
+        "而设备重启、手动改时间、NTP 生效这类跳变是几十分钟级的——"
+        "继续平滑会让中间那几次校正按错误的偏差算，而新值才是事实",
+        minimum=30,
+        maximum=86400,
+        unit="秒",
+    ),
+    ConfigSpec(
         "reconnect_base_ms",
         INT,
         DEVICE,
