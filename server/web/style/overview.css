@@ -127,6 +127,22 @@
   }
 }
 
+/**
+ * 头部右端那一格。
+ *
+ * 结构与网格里的 `.door-cell` 完全相同（标签 + 值、等宽字体、时间用正文色），因为它
+ * 本来就是同一类信息；差别只在位置。
+ *
+ * 用双类选择器而不是单加一个 `.door-last-used`：两者特异性相同时，文件里**后面**那条
+ * 会赢，而 `.door-cell` 定义在这条之下——单类写法会被它的 `space-between` 覆盖掉，
+ * 表现是标签和值被推到两端。这里显式压过它。
+ */
+.door-cell.door-last-used {
+  margin-left: auto;
+  justify-content: flex-start;
+  gap: 6px;
+}
+
 .door-head {
   display: flex;
   align-items: center;

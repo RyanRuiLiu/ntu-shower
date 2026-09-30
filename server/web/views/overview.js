@@ -233,7 +233,10 @@ function renderDoors(doors) {
           <div class="door-head">
             <span class="door-no">#${esc(door.door_no)}</span>
             <span class="door-tag ${esc(door.state)}">${esc(LABELS[door.state] || door.state)}</span>
-            <span class="door-last-used">${esc(lastUsedText(door))}</span>
+            <span class="door-cell door-last-used">
+              <span class="k">上次使用时间</span>
+              <span class="v time">${esc(lastUsedText(door))}</span>
+            </span>
           </div>
           ${certLine}
           ${grid}
