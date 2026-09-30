@@ -60,6 +60,14 @@ class ShellChannel(private val name: String) {
     private var stdin: DataOutputStream? = null
     private var stdout: BufferedReader? = null
 
+    /**
+     * 拉起常驻进程；超过 [SHELL_START_TIMEOUT_MS] 没起来就算失败。
+     *
+     * 上限不可省：`Runtime.exec` 本身不可中断，ROM 的 `su` 一旦在启动阶段挂住就再也不会
+     * 返回。真机上出过——本通道的 `@Synchronized` 被那条永不返回的调用一直持有，而调用它
+     * 的执行器是单线程的，于是排在该执行器上的每条命令都无声消失：服务端只看到一串超时，
+     * 设备侧连"我超时了"都回报不出来（回报本身要经同一个执行器）。
+     */
     @Synchronized
     private fun ensureShell(): Boolean {
         process?.let { p ->
@@ -70,22 +78,39 @@ class ShellChannel(private val name: String) {
             }
             process = null
         }
+        val task = FutureTask { startShell() }
+        Thread(task, "root-shell-start").apply {
+            isDaemon = true
+            start()
+        }
         return try {
-            process = Runtime.getRuntime().exec("su")
-            stdin = DataOutputStream(process!!.outputStream)
-            stdout = BufferedReader(InputStreamReader(process!!.inputStream))
-            Thread {
-                try {
-                    process?.errorStream?.readBytes() // 丢弃 stderr，防止缓冲区塞满
-                } catch (_: Exception) {
-                    // stderr 读取失败不影响命令执行
-                }
-            }.start()
-            true
+            task.get(SHELL_START_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         } catch (e: Exception) {
-            Log.e(TAG, "[$name] failed to start su: ${e.message}")
+            // 超时意味着那个启动线程多半还挂在 exec 里，回收不掉，会泄漏一个线程。这是有意
+            // 的取舍：宁可漏一个线程，也不能让本通道把调用方的执行器一起拖死。
+            Log.w(TAG, "[$name] su did not start within ${SHELL_START_TIMEOUT_MS}ms: ${e.message}")
+            resetShell()
             false
         }
+    }
+
+    /** 真正拉起进程；放在 [ensureShell] 的带超时任务里跑，所以这里不必自己设上限。 */
+    private fun startShell(): Boolean = try {
+        val started = Runtime.getRuntime().exec("su")
+        process = started
+        stdin = DataOutputStream(started.outputStream)
+        stdout = BufferedReader(InputStreamReader(started.inputStream))
+        Thread {
+            try {
+                started.errorStream.readBytes() // 丢弃 stderr，防止缓冲区塞满
+            } catch (_: Exception) {
+                // stderr 读取失败不影响命令执行
+            }
+        }.start()
+        true
+    } catch (e: Exception) {
+        Log.e(TAG, "[$name] failed to start su: ${e.message}")
+        false
     }
 
     @Synchronized
@@ -166,6 +191,14 @@ class ShellChannel(private val name: String) {
          * 必须是 public：默认参数在**调用方**求值，引用私有成员编译不过。
          */
         const val DEFAULT_TIMEOUT_MS = 20_000L
+
+        /**
+         * 拉起常驻进程的上限。
+         *
+         * `su` 正常启动不到一秒，给到 10 秒是留给设备过载的余量——真机上 loadavg 长期在 7~8
+         * 之间（八核），而这个应用的每次界面识别还要再压上几十毫秒。
+         */
+        private const val SHELL_START_TIMEOUT_MS = 10_000L
 
         private const val TAG = "ShellChannel"
     }
