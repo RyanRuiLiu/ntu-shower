@@ -43,6 +43,7 @@
 | [0037](decisions/0037-identity-and-capabilities.md) | 用户面访问控制：身份标识 + 能力位 | 2026-09-30 |
 | [0038](decisions/0038-config-registry-and-diff-storage.md) | 远程配置：登记表 + 只存差异 | 2026-09-30 |
 | [0039](decisions/0039-frontend-stack-taro-react-vite.md) | 前端技术栈：Taro + React + Vite，接受 Vite 4 约束 ⚠️ 已取代 | 2026-09-30 |
+| [0040](decisions/0040-merged-web-ui.md) | 网页端：合并旧系统的两个页面，零构建静态文件 | 2026-09-30 |
 
 ## 已取代的决策
 

@@ -1,0 +1,58 @@
+feat(web): 合并旧系统的两个网页端，零构建静态文件挂在根路径
+
+## 做了什么
+
+把旧系统（ntu-remote-shower）各自独立的两套网页端合并为一个界面：
+
+| 来源 | 原位置 | 合并后 |
+|---|---|---|
+| 调试面板 | `shower-server/app/debug/index.html`（端口 5020） | `web/status.js` |
+| 画面查看器 | `bridge-server/src/viewer.html`（端口 7003） | `web/control.js` |
+
+两者本就是一体界面（同一个 GitHub 暗色主题）却各写一份 CSS，色值彼此不一致
+（绿色一处 #22c55e、一处 #3fb950；变量名 --bg-surface 与 --surface 混用）。
+合并后共用一套设计令牌。
+
+## 视觉：只统一色值，其余照搬
+
+用户要求"风格不变"。以 GitHub 官方色值统一（主题本就是它），
+布局、间距、圆角、动效全部保留。
+
+**文案例外**：KPI 标签改用 docs/CONTENT.md 的术语表（"使用中"而非旧的"淋浴中"），
+术语统一是跨端的硬要求，优先于沿袭旧文案。
+
+## 承载：服务端挂在根路径
+
+`StaticFiles` 挂在 `/`，**注册在所有路由之后**——Starlette 按注册顺序匹配，
+mount("/") 是兜底；顺序反了会让 /api、/admin、/docs 全部返回 404。
+`test_e2e_branches.py` 用 `test_api_routes_win_over_the_web_mount` 锁定这个约束。
+
+nginx 无需改动（它把 / 通配代理到应用）。
+
+## 接入：复用既有契约
+
+旧面板调用的接口本系统基本都有，字段名不同：
+
+- `sid` → `cert_no`，且 `device_id` 必填
+- WS 从 `{type:'snapshot', doors, devices, time}` 改为
+  `{type:'door_update', payload:{doors}}`
+
+**关键差异**：本系统 WS 只推变化，不像旧系统连上即推全量，
+因此进页面时先 REST 拉一次兜底，之后由 WS 增量更新并按门号合并。
+
+## 暂未搬入（功能后续加）
+
+`/api/v1/tunnel/*`（旧 ADB 隧道）、`/api/v1/video/*`（视频推流）本系统无对应能力；
+界面节点树待设备端提供导出接口。因此 viewer.html 里为点击涟漪、长按进度环、
+准星写的样式**也未搬入**——提前留着只会成为死代码。
+
+## 其他
+
+- 删除 docs/img/：其中的截图来自已移除的 Taro 工程，且文档未引用，留着是死资源
+- ADR-0040 记录合并决策；ADR-0039 的前一次尝试结论保持不变
+
+## 验证
+
+本地：首页与 6 个静态资源 200、WS 连接成功、真实数据渲染正确（8 喷头 / 2 空闲 / 4 使用中）
+生产：同一组 curl 检查全部通过，/api、/admin、/docs 未被静态文件抢占
+服务端：ruff / mypy --strict / 210 passed / 覆盖率 97.27%

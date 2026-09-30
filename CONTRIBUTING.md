@@ -75,6 +75,7 @@ server/app/
   core/            协议 · 时钟 · 配置 · 数据库 · 事件总线 · 鉴权 · 错误 · 版本
   gateway/         设备 WS 网关与连接注册表
   modules/<领域>/   routes（HTTP 编排）/ service（领域逻辑）/ repository（持久化）/ dependencies（守卫）
+  web/             网页端：零构建静态文件，挂在根路径
 
 protocol/schema/   全部协议消息的 JSON Schema（单一事实源）
 docs/              ARCHITECTURE · PROTOCOL · STANDARDS · CONTENT · DECISIONS · RUNBOOK · 本册

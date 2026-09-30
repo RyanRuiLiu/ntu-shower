@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>喷头管理</title>
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="status.css">
+<link rel="stylesheet" href="control.css">
+</head>
+<body>
+
+<!--
+  顶部栏。左侧是视图切换，右侧是连接状态与时钟——两者合并自旧系统的
+  shower-server/app/debug/index.html 与 bridge-server/src/viewer.html，
+  视觉与交互沿用原样。
+-->
+<div class="bar">
+  <nav class="bar-nav" id="nav">
+    <button type="button" class="bar-nav-item" data-view="status">状态</button>
+    <button type="button" class="bar-nav-item" data-view="control">遥控</button>
+  </nav>
+
+  <div class="bar-status">
+    <span class="bar-dot off" id="deviceDot"></span>
+    <span id="deviceText">设备离线</span>
+  </div>
+
+  <div class="bar-right">
+    <span class="bar-chip err" id="wsChip">WS</span>
+    <span id="deviceId" class="bar-mono"></span>
+    <span id="clock" class="bar-mono">--:--:--</span>
+  </div>
+</div>
+
+<!-- 状态视图：KPI + 门牌墙 + 控制操作 + 事件日志 -->
+<main class="view" id="viewStatus">
+  <div class="kpi" id="kpi"></div>
+
+  <div class="doors" id="doors">
+    <div class="empty">等待设备上报喷头数据…</div>
+  </div>
+
+  <section class="sec" id="secAct">
+    <header class="sec-head" data-toggle="secAct">
+      <span class="sec-title">控制操作</span>
+      <span class="sec-arrow">▾</span>
+    </header>
+    <div class="sec-body">
+      <div class="actions">
+        <div class="act-card full">
+          <div class="act-title">分配 / 结算</div>
+          <div class="fld">
+            <label for="inDoor">喷头编号（仅分配时需要）</label>
+            <input id="inDoor" type="number" min="1" placeholder="例: 1">
+          </div>
+          <div class="fld">
+            <label for="inSid">学号</label>
+            <input id="inSid" type="text" placeholder="例: B12345678">
+          </div>
+          <div class="fld">
+            <label for="inPwd">密码</label>
+            <input id="inPwd" type="password" placeholder="浴室密码">
+          </div>
+          <div class="btn-row">
+            <button type="button" class="btn" id="btnAssign">分配喷头</button>
+            <button type="button" class="btn" id="btnSettle">结算</button>
+          </div>
+          <div class="res" id="resAction"></div>
+        </div>
+
+        <div class="act-card">
+          <div class="act-title">拍照</div>
+          <button type="button" class="btn" id="btnPhoto">拍照</button>
+          <div class="res" id="resPhoto"></div>
+          <div class="photo-box" id="photoBox"><img id="photoImg" alt="设备摄像头画面"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec collapsed" id="secLog">
+    <header class="sec-head" data-toggle="secLog">
+      <span class="sec-title">事件日志</span>
+      <div class="log-tools">
+        <span id="logCount" class="log-count">0</span>
+        <button type="button" class="btn-sm" id="btnClearLog">清空</button>
+        <span class="sec-arrow">▾</span>
+      </div>
+    </header>
+    <div class="sec-body"><div class="log-body" id="log"></div></div>
+  </section>
+</main>
+
+<!-- 遥控视图：实时画面 + 远程操作 + 无障碍节点树 -->
+<main class="view" id="viewControl" hidden>
+  <div class="bar-sub" id="controlToolbar">
+    <div class="grp">
+      <button type="button" data-act="back">返回</button>
+      <button type="button" data-act="home">主页</button>
+      <button type="button" data-act="recents">最近</button>
+    </div>
+    <span class="sep"></span>
+    <div class="grp">
+      <button type="button" class="primary" id="btnScreenOn">开始画面</button>
+      <button type="button" class="danger" id="btnScreenOff" disabled>停止</button>
+    </div>
+    <span class="sep"></span>
+    <div class="grp">
+      <button type="button" id="btnToken">管理令牌</button>
+    </div>
+    <div class="bar-right">
+      <span class="bar-chip err" id="screenChip">画面</span>
+    </div>
+  </div>
+
+  <div class="control-main">
+    <div class="screen-panel" id="screenPanel">
+      <span class="screen-placeholder" id="screenPlaceholder">未连接画面</span>
+      <img id="screenImg" alt="设备屏幕" hidden>
+    </div>
+
+    <aside class="tree-panel">
+      <div class="panel-header">
+        <span>界面节点</span>
+        <span class="count" id="treeCount">--</span>
+      </div>
+      <input id="treeSearch" type="search" placeholder="搜索节点…">
+      <div id="breadcrumb" class="breadcrumb"></div>
+      <div id="treeContent" class="tree-content">
+        <div class="empty">画面未连接</div>
+      </div>
+    </aside>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

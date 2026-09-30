@@ -10,8 +10,8 @@
 - modules.ota        版本清单 / 下载 / 发布（/ota/*、/admin/releases）
 - modules.bridge     真实 ADB 桥接（/admin/devices/{id}/adb/*，经 443 透传）
 
-前端是独立工程（仓库根 `web/`，Taro 一套代码编译小程序与 H5），
-静态产物由 nginx 托管，不经过本进程。
+网页端（`web/`）挂在根路径：合并自旧系统的调试面板与画面查看器，零构建静态文件。
+服务端同时是 API 与这个界面的宿主，因此入口只有一个。
 
 访问控制见 core/security 与 modules/access：查看类接口无需凭据，
 操作类需 `X-Identity` 标识 + 能力位，管理面用 `X-Admin-Token`（ADR-0037）。
@@ -22,6 +22,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from typing_extensions import TypedDict
 
 from .core import db
@@ -102,6 +103,13 @@ def create_app() -> FastAPI:
     @app.get("/healthz", tags=["meta"])
     def health() -> HealthStatus:
         return {"status": "ok", "name": "ntu-shower", "version": APP_VERSION}
+
+    # 网页端挂在根路径：它就是这个服务唯一的人机界面，而 API 在 /api、/admin、
+    # /ota、/gateway 下，路由已在前注册，不会被静态文件抢走。
+    #
+    # 必须放在最后注册：Starlette 按注册顺序匹配，mount("/") 是兜底。
+    web_dir = Path(__file__).resolve().parent.parent / "web"
+    app.mount("/", StaticFiles(directory=str(web_dir), html=True), name="web")
 
     return app
 
