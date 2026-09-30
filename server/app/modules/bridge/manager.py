@@ -17,10 +17,11 @@ from dataclasses import dataclass, field
 
 from fastapi import WebSocket
 
+from app.core.config import settings
+
 BRIDGE_BUFFER_SIZE = 65536
 BRIDGE_IDLE_TIMEOUT_S = 300  # 秒：adb 会话空闲上限（5 分钟，长于任何 adb 交互间隔）
 PENDING_MAX = 1024 * 1024  # 对端未就绪时的有界缓冲
-BASE_PORT = 15655  # 避开旧系统 bridge-server 占用的 127.0.0.1:15555
 
 
 @dataclass
@@ -92,7 +93,8 @@ class BridgeRegistry:
 
     def open_session(self, device_id: str) -> tuple[int, int, str]:
         """开一个新会话世代：世代严格递增（同设备跨会话可比较）、端口稳定、nonce 一次性。"""
-        port = self.ports.setdefault(device_id, BASE_PORT + len(self.ports))
+        base_port = settings.bridge_base_port
+        port = self.ports.setdefault(device_id, base_port + len(self.ports))
         generation = self._generation_by_device.get(device_id, 0) + 1
         self._generation_by_device[device_id] = generation
         nonce = uuid.uuid4().hex
