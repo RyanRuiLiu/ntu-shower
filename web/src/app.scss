@@ -1,0 +1,68 @@
+@use './styles/tokens' as *;
+
+// ── 基础 ─────────────────────────────────────────────────
+// 小程序没有浏览器默认样式表，基础重置要自己写
+
+page {
+  background: $color-tile;
+  color: $color-ink;
+  font-size: $font-label;
+  line-height: 1.5;
+
+  // 小程序不嵌入自定义字体（加载慢且支持有限），靠字重与字距塑造层级
+  font-weight: $weight-normal;
+  -webkit-font-smoothing: antialiased;
+}
+
+// ── 门牌 ─────────────────────────────────────────────────
+
+.door {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: $space-md $space-sm;
+  border-radius: $radius;
+  background: $color-surface;
+
+  // 瓷砖靠明度与窄缝区分，不靠阴影——阴影会让它看起来浮在墙上
+  border-bottom: 3px solid $color-seam;
+  transition: transform 120ms ease-out;
+
+  // 按压反馈：只在这个真实交互时才有动效，不做入场动画
+  &:active {
+    transform: scale(0.97);
+  }
+}
+
+.door__no {
+  font-size: $font-door-no;
+  font-weight: $weight-door-no;
+  line-height: 1;
+
+  // 数字是主角：收紧字距让门号更紧凑
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.door__state {
+  margin-top: $space-xs;
+  font-size: $font-door-state;
+  letter-spacing: 0.05em;
+}
+
+// 状态色由 token 的 map 生成，新增状态时只改 _tokens.scss 一处。
+// 颜色只在这里出现，TS 侧只负责给出 `door--<state>` 这个类名。
+@each $state, $color in $state-colors {
+  .door--#{$state} {
+    border-bottom-color: $color;
+
+    .door__state {
+      color: $color;
+    }
+
+    .door__no {
+      color: $color;
+    }
+  }
+}

@@ -1,0 +1,81 @@
+@use '../../styles/tokens' as *;
+
+// 门牌墙页面。样式分三层：
+//   1. 页面骨架（本文件）
+//   2. 门牌与其状态色（app.scss 的 .door* 与 @each 生成的状态类）
+//   3. 设计 token（styles/_tokens.scss）
+// 本文件只放第 1 层，避免与另两层竞争同一批属性。
+
+.page {
+  min-height: 100vh;
+  padding: $space-lg $space-md;
+  background: $color-tile;
+}
+
+.page__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: $space-md;
+}
+
+.page__title {
+  font-size: $font-title;
+  font-weight: $weight-door-no;
+  letter-spacing: -0.01em;
+  color: $color-ink;
+}
+
+.page__count {
+  font-size: $font-label;
+  color: $color-ink-soft;
+}
+
+.page__hint {
+  display: block;
+  padding: $space-lg 0;
+  font-size: $font-label;
+  color: $color-muted;
+  text-align: center;
+}
+
+.page__error {
+  padding: $space-md;
+  border-radius: $radius;
+  border-bottom: 3px solid $color-fault;
+  background: $color-surface;
+}
+
+.page__error-text {
+  display: block;
+  font-size: $font-label;
+  color: $color-fault;
+}
+
+.page__error-action {
+  display: block;
+  margin-top: $space-xs;
+  font-size: $font-label;
+  color: $color-ink-soft;
+}
+
+// 门牌墙网格：窄缝像瓷砖缝，一屏尽量放下所有门牌。
+// 用 auto-fill 而非固定列数——设备门数不同（本机 7，别的可能更多），
+// 固定列数会在门数变化时留下空位。
+.wall {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: $space-sm;
+}
+
+.wall--empty {
+  display: block;
+  padding: $space-lg 0;
+}
+
+.wall__empty-text {
+  display: block;
+  font-size: $font-label;
+  color: $color-muted;
+  text-align: center;
+}
