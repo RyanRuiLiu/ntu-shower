@@ -1,9 +1,14 @@
 name: ci
 
+# 与 README「质量门」小节逐条对应：本地跑绿即 CI 跑绿。
 on:
   push:
     branches: [main]
   pull_request:
+
+# 工作流令牌按最小权限授予（OpenSSF Scorecard: Token-Permissions）
+permissions:
+  contents: read
 
 jobs:
   server:
@@ -19,8 +24,8 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: ruff format --check app tests
       - run: ruff check app tests
-      - run: mypy app
-      - run: pytest tests -q --cov=app --cov-report=term-missing
+      - run: mypy app --strict
+      - run: pytest -q --cov=app --cov-report=term-missing
 
   android:
     runs-on: ubuntu-latest
