@@ -131,6 +131,8 @@ object BathAppNavigator {
         ensureForeground(a11y)
         val start = System.currentTimeMillis()
         while (System.currentTimeMillis() - start < budgetMs) {
+            // 标记取在检测之前：检测本身要遍历一遍节点树，那期间发生的变化也该算数
+            val mark = A11yService.pageChangeMark()
             when (detectPage().state) {
                 PageState.HOME -> return true
 
@@ -139,7 +141,7 @@ object BathAppNavigator {
 
                 PageState.HINT, PageState.VF_RESULT -> Unit // 等待自动消失
             }
-            A11yService.awaitPageChange(RuntimeConfig.pollIntervalMs)
+            A11yService.awaitPageChangeAfter(mark, RuntimeConfig.pollIntervalMs)
         }
         return false
     }
@@ -196,14 +198,15 @@ object BathAppNavigator {
         val start = System.currentTimeMillis()
         var relaunched = false
         while (System.currentTimeMillis() - start < timeoutMs) {
+            val mark = A11yService.pageChangeMark()
             if (detectPage().state == target) return true
             if (!relaunched && !A11yService.bathAppInForeground) {
                 a11y.launchBathApp()
                 relaunched = true
-                A11yService.awaitPageChange(RuntimeConfig.pollIntervalMs)
+                A11yService.awaitPageChangeAfter(mark, RuntimeConfig.pollIntervalMs)
                 continue
             }
-            A11yService.awaitPageChange(RuntimeConfig.pollIntervalMs)
+            A11yService.awaitPageChangeAfter(mark, RuntimeConfig.pollIntervalMs)
         }
         return false
     }
