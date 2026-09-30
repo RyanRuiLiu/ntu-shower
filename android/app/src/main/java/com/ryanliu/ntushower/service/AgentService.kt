@@ -8,7 +8,6 @@ import android.os.IBinder
 import android.os.SystemClock
 import android.util.Log
 import com.ryanliu.ntushower.BuildConfig
-import com.ryanliu.ntushower.core.clock.Clock
 import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.identity.DeviceIdentity
 import com.ryanliu.ntushower.core.net.HttpClientFactory
@@ -27,6 +26,7 @@ import com.ryanliu.ntushower.receiver.WatchdogReceiver
 import com.ryanliu.ntushower.transport.Envelope
 import com.ryanliu.ntushower.transport.GatewayClient
 import com.ryanliu.ntushower.transport.OutcomeStatus
+import com.ryanliu.ntushower.transport.ReasonCodes
 import org.json.JSONObject
 import java.util.concurrent.Executors
 
@@ -178,22 +178,6 @@ class AgentService : Service() {
         val action = payload.optString("action", "")
         val params = payload.optJSONObject("params") ?: JSONObject()
 
-        // 过期命令直接拒绝，一步都不执行。
-        //
-        // 服务端按 deadline_ts 计时：超时后它清掉挂起项、把这条记为超时，此时已经不再
-        // 等结果了。设备若照常执行，做出来的操作没有任何人接收——而它是有真实副作用的
-        // （分配会写浴室 App 的库、界面注入会动到别人正在用的会话）。
-        //
-        // 用 rejected 而不是 failed：这条命令**没有产生任何副作用**，服务端据此可以
-        // 安全重试，而 failed 意味着可能已经改了一半。
-        if (Clock.isPast(payload.optString("deadline_ts", ""), DEADLINE_TOLERANCE_MS)) {
-            Log.i(TAG, "command expired, not executed: $action ($commandId)")
-            sendOutcome(
-                CommandOutcome(commandId, OutcomeStatus.REJECTED, "command.deadline_exceeded", "命令已过期，未执行"),
-            )
-            return
-        }
-
         Log.i(TAG, "command: $action ($commandId)")
         // 按类别分发。三类互斥，顺序无副作用。
         //
@@ -201,8 +185,19 @@ class AgentService : Service() {
         // （`handler.post { callback.onMessage(env) }`），而 execShell 会一直阻塞到命令
         // 结束。那段时间里心跳、看门狗广播、无障碍事件全部排队，设备在服务端看来像
         // 掉线——一条 `sleep 20` 的远程命令就能造成这个效果。
+        // 过期判定交给调度器，用**相对时长**而不是绝对时刻。
+        //
+        // 设备没有 NTP，与服务器的墙上时钟可能差几分钟；拿本机时钟去比一个对端给出的
+        // 时刻，会让"设备时钟走得快"这一件事把所有命令都判成已过期——而那与命令本身还
+        // 值不值得执行毫无关系。这里把"还能等多久"换算成本机单调时钟上的一个点传下去，
+        // 由调度器在真正开始执行前判：排队等待正是这条限制要管的场景。
+        //
+        // 用 rejected 而不是 failed：被拒的命令**没有产生任何副作用**，服务端据此可以
+        // 安全重试；failed 意味着可能已经改了一半。
+        val checkpoint = System.nanoTime() / 1_000_000
+        val timeoutMs = payload.optLong("timeout_ms", 0L)
         CommandFactory.create(action, params, commandId)?.let {
-            scheduler.enqueue(it)
+            scheduler.enqueue(it, checkpoint + timeoutMs)
             return
         }
         if (DeviceMaintenance.handles(action)) {
@@ -210,7 +205,7 @@ class AgentService : Service() {
             return
         }
         sendOutcome(
-            CommandOutcome(commandId, OutcomeStatus.FAILED, "proto.unknown_action", "设备不认识这个操作：$action"),
+            CommandOutcome(commandId, OutcomeStatus.FAILED, ReasonCodes.PROTO_UNKNOWN_ACTION, "设备不认识这个操作：$action"),
         )
     }
 
