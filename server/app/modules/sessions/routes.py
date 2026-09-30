@@ -18,7 +18,7 @@ from app.modules.access.capabilities import Capability
 from app.modules.access.dependencies import require_capability
 from app.modules.devices.dependencies import require_trusted_online_device
 from app.modules.doors import repository as doors_repository
-from app.modules.doors import service as doors_service
+from app.modules.doors.schemas import DoorState
 from app.modules.sessions import repository
 from app.modules.sessions.schemas import AssignRequest, CommandOutcome, PhotoRequest, SettleRequest
 
@@ -55,7 +55,7 @@ def _reject_busy(result: CommandOutcome) -> CommandOutcome:
 async def assign(req: AssignRequest) -> CommandOutcome:
     require_trusted_online_device(req.device_id)
     state = _door_state(req.device_id, req.door_no)
-    if state != doors_service.STATE_FREE:
+    if state != DoorState.FREE.value:
         raise ApiProblemError(DOOR_NOT_FREE, f"door {req.door_no} state={state}")
     _reject_duplicate_session(req.device_id, req.cert_no)
     result = await service.send_command_and_wait(

@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.main import create_app
 from app.modules.doors import repository, service
+from app.modules.doors.schemas import DoorState
 
 
 @pytest.fixture
@@ -36,26 +37,26 @@ def _snapshot(doors: list[dict], snapshot_id: str = "11111111-1111-4111-8111-111
 
 
 def test_free() -> None:
-    assert service.derive_state(_door(1)) == service.STATE_FREE
+    assert service.derive_state(_door(1)) == DoorState.FREE
 
 
 def test_repair_priority_over_occupied() -> None:
     door = _door(1, status_raw=1, card_no=123, in_time="2026-09-29T12:00:00.000Z")
-    assert service.derive_state(door) == service.STATE_REPAIR
+    assert service.derive_state(door) == DoorState.REPAIR
 
 
 def test_disabled() -> None:
-    assert service.derive_state(_door(1, status_raw=3)) == service.STATE_DISABLED
+    assert service.derive_state(_door(1, status_raw=3)) == DoorState.DISABLED
 
 
 def test_waiting_entered_but_not_started() -> None:
     door = _door(1, card_no=1001, open_time="2026-09-29T12:00:00.000Z")
-    assert service.derive_state(door) == service.STATE_WAITING
+    assert service.derive_state(door) == DoorState.WAITING
 
 
 def test_bathing_when_in_time_set() -> None:
     door = _door(1, card_no=1001, open_time="2026-09-29T12:00:00.000Z", in_time="2026-09-29T12:01:00.000Z")
-    assert service.derive_state(door) == service.STATE_BATHING
+    assert service.derive_state(door) == DoorState.BATHING
 
 
 def test_paused_after_close() -> None:
@@ -66,15 +67,15 @@ def test_paused_after_close() -> None:
         close_time="2026-09-29T12:10:00.000Z",
         bath_time_s=300,
     )
-    assert service.derive_state(door) == service.STATE_PAUSED
+    assert service.derive_state(door) == DoorState.PAUSED
 
 
 def test_selected_rare_external_state() -> None:
-    assert service.derive_state(_door(1, status_raw=2)) == service.STATE_SELECTED
+    assert service.derive_state(_door(1, status_raw=2)) == DoorState.SELECTED
 
 
 def test_accno_alone_occupies() -> None:
-    assert service.derive_state(_door(1, acc_no="A001")) == service.STATE_WAITING
+    assert service.derive_state(_door(1, acc_no="A001")) == DoorState.WAITING
 
 
 # ── 快照处理：现态 / 事件 / 会话 ──
@@ -87,7 +88,7 @@ def test_snapshot_flow(client: TestClient) -> None:
     # 首次快照：落现态，无事件
     live = repository.get_all_live(device_id)
     assert len(live) == 2
-    assert live[1]["state"] == service.STATE_FREE
+    assert live[1]["state"] == DoorState.FREE.value
 
     # 第二次：1 号门被占用进门 → 事件 free→waiting + 会话开启
     service.process_snapshot(
@@ -95,7 +96,7 @@ def test_snapshot_flow(client: TestClient) -> None:
         _snapshot([_door(1, card_no=2001, cert_no="C1", open_time="2026-09-29T12:30:00.000Z"), _door(2)]),
     )
     live = repository.get_all_live(device_id)
-    assert live[1]["state"] == service.STATE_WAITING
+    assert live[1]["state"] == DoorState.WAITING.value
     assert live[1]["card_no"] == 2001
 
     # 进门后开水 → bathing，同一会话延续
@@ -114,13 +115,13 @@ def test_snapshot_flow(client: TestClient) -> None:
         ),
     )
     live = repository.get_all_live(device_id)
-    assert live[1]["state"] == service.STATE_BATHING
+    assert live[1]["state"] == DoorState.BATHING.value
     assert repository.get_open_session(device_id, 1) is not None
 
     # 出门释放 → 会话收尾
     service.process_snapshot(device_id, _snapshot([_door(1), _door(2)]))
     live = repository.get_all_live(device_id)
-    assert live[1]["state"] == service.STATE_FREE
+    assert live[1]["state"] == DoorState.FREE.value
 
     session = repository.get_open_session(device_id, 1)
     assert session is None
@@ -137,9 +138,9 @@ def test_snapshot_flow(client: TestClient) -> None:
         .fetchall()
     )
     assert [(e["from_state"], e["to_state"]) for e in events] == [
-        (service.STATE_FREE, service.STATE_WAITING),
-        (service.STATE_WAITING, service.STATE_BATHING),
-        (service.STATE_BATHING, service.STATE_FREE),
+        (DoorState.FREE.value, DoorState.WAITING.value),
+        (DoorState.WAITING.value, DoorState.BATHING.value),
+        (DoorState.BATHING.value, DoorState.FREE.value),
     ]
     sessions = get_conn().execute("SELECT * FROM usage_session WHERE device_id=?", (device_id,)).fetchall()
     assert len(sessions) == 1

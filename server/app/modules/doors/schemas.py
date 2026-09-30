@@ -4,7 +4,45 @@
 前端"这扇门属于哪台设备、那台设备是否在线"，拆成两个模型只会让前端自己拼。
 """
 
+from enum import Enum
+
 from typing_extensions import TypedDict
+
+
+class DoorState(str, Enum):
+    """喷头的派生状态。
+
+    设备只上报 4 个原始整数（`status_raw`），这 7 个状态由服务端派生
+    （规则见 `service.derive_state`）。定义成枚举而非裸字符串，是为了让
+    OpenAPI 生成 `enum`：客户端据此生成联合类型，**不必手抄一份状态清单**。
+
+    用 `str, Enum` 而非 `StrEnum`：运行时是 Python 3.10，后者 3.11 才有。
+    """
+
+    FREE = "free"
+    """空闲：可用。"""
+
+    WAITING = "waiting"
+    """已入门：已刷卡进入但尚未开始出水。"""
+
+    BATHING = "bathing"
+    """使用中：正在出水。"""
+
+    PAUSED = "paused"
+    """已暂停：出水后暂停，未结束会话。"""
+
+    SELECTED = "selected"
+    """选中：被界面选中但未开始使用。"""
+
+    REPAIR = "repair"
+    """报修：设备标记为待维修。"""
+
+    DISABLED = "disabled"
+    """禁用：设备标记为停用。"""
+
+
+#: 占用中的状态（有人）。用于会话维护与自动结算判断。
+OCCUPIED_STATES = frozenset({DoorState.WAITING, DoorState.BATHING, DoorState.PAUSED})
 
 
 class DoorView(TypedDict):
@@ -22,7 +60,7 @@ class DoorView(TypedDict):
 
     device_id: str
     door_no: int
-    state: str
+    state: DoorState
     card_no: int
     cert_no: str
     bath_time_s: int
