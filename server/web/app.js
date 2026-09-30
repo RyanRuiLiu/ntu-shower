@@ -16,6 +16,7 @@
  */
 import { api, getToken, setToken } from './core/api.js'
 import { fmtDateTime, fmtServerTimeNow, fmtUptime } from './core/clock.js'
+import { EVENT_TYPES } from './core/contract.js'
 import { $, esc, listen, PLACEHOLDER } from './core/dom.js'
 import { toast } from './core/toast.js'
 import {
@@ -23,7 +24,7 @@ import {
   emit,
   refreshDevices,
   selectDevice,
-  setDeviceOnline,
+  upsertDevice,
   setDoors,
   setStreaming,
   store,
@@ -238,19 +239,18 @@ function streamUrl() {
  */
 function handle(message) {
   switch (message.type) {
-    case 'door_update':
+    case EVENT_TYPES.DOOR_UPDATE:
       // 推送里只有"哪几个喷头变了"（`door_no` / `state` / `card_no`），**不是完整
       // 现态**——分配时间、学号都不在其中。拿它替换列表会让喷头卡片上的明细一夜之间
-      // 全变成 `--`，所以收到通知后重新拉一次全量。
+      // 全变成占位符，所以收到通知后重新拉一次全量。
       scheduleDoorRefresh()
       break
 
-    case 'device_online':
-      setDeviceOnline(message.payload.device_id, true)
-      break
-
-    case 'device_offline':
-      setDeviceOnline(message.payload.device_id, false)
+    case EVENT_TYPES.DEVICE_UPDATE:
+      // payload 是**完整的设备记录**，直接替换本地那一条。上线、下线、改名、调整信任
+      // 位都走这一个事件——它们是同一个问题（这台设备的档案变了）的四种情形，拆成多个
+      // 事件名只会让这里多几个做同样事情的分支。
+      upsertDevice(message.payload)
       break
 
     default:
