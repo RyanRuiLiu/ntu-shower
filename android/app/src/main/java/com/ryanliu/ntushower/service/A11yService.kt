@@ -18,6 +18,7 @@ import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.features.automation.BathAppGuard
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * 无障碍服务实体：UI 操作原语与页面事件流。
@@ -52,9 +53,10 @@ class A11yService : AccessibilityService() {
             val pkg = event.packageName?.toString() ?: ""
             if (pkg == AppConfig.BATH_APP_PACKAGE) {
                 bathAppInForeground = true
-                if (guard.isCoolingDown(System.currentTimeMillis())) {
-                    guard.onForeground()
-                }
+                // 回到前台即清除退出历史与冷却：不论此前是否处于冷却期，
+                // App 能回到前台就说明它自己活过来了。此前只在冷却期清除，
+                // 会让未达阈值的退出记录残留，导致下次退出提前触发冷却。
+                guard.onForeground()
             } else if (bathAppInForeground) {
                 bathAppInForeground = false
                 handleBathAppExit(pkg)
@@ -119,8 +121,13 @@ class A11yService : AccessibilityService() {
             latch.countDown()
         }
         try {
-            latch.await()
+            // 主线程若被长时间占用，这里必须能放弃：无限等待会让调用方线程永久卡死
+            if (!latch.await(CLIPBOARD_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                Log.w(TAG, "set clipboard timed out")
+                return false
+            }
         } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
             return false
         }
         if (!clipboardOk) return false
@@ -160,6 +167,9 @@ class A11yService : AccessibilityService() {
 
     companion object {
         private const val TAG = "A11yService"
+
+        /** 等待主线程写剪贴板的上限。 */
+        private const val CLIPBOARD_TIMEOUT_MS = 3_000L
 
         @Volatile
         var instance: A11yService? = null
