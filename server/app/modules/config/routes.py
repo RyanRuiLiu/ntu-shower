@@ -8,6 +8,7 @@
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+from app.core.protocol import JsonObject
 from app.core.security import require_admin
 from app.gateway.manager import manager
 from app.modules.devices.dependencies import require_trusted_online_device
@@ -25,16 +26,16 @@ class ConfigUpdateRequest(BaseModel):
 
 
 @admin_router.get("/config/global")
-def get_global_config() -> dict:
+def get_global_config() -> JsonObject:
     revision, config = store.get_global()
     return {"revision": revision, "config": config}
 
 
 @admin_router.put("/config/global")
-async def put_global_config(req: ConfigUpdateRequest) -> dict:
+async def put_global_config(req: ConfigUpdateRequest) -> JsonObject:
     """更新全局默认配置并推送给所有在线设备。"""
     revision, _config = store.put_global(dict(req.config))
-    notified: list[dict] = []
+    notified: list[JsonObject] = []
     for device_id, _ws in manager.online_connections():
         result = await sessions_service.push_config_update(device_id, revision, store.effective(device_id))
         notified.append({"device_id": device_id, **result})
@@ -42,7 +43,7 @@ async def put_global_config(req: ConfigUpdateRequest) -> dict:
 
 
 @admin_router.get("/devices/{device_id}/config")
-def get_device_config(device_id: str) -> dict:
+def get_device_config(device_id: str) -> JsonObject:
     override = store.get_device_override(device_id)
     return {
         "effective": store.effective(device_id),
@@ -51,7 +52,7 @@ def get_device_config(device_id: str) -> dict:
 
 
 @admin_router.put("/devices/{device_id}/config")
-async def put_device_config(device_id: str, req: ConfigUpdateRequest) -> dict:
+async def put_device_config(device_id: str, req: ConfigUpdateRequest) -> JsonObject:
     """设置设备级覆盖并推送给该设备。"""
     require_trusted_online_device(device_id)
     revision, merged = store.put_device_override(device_id, dict(req.config))
@@ -60,7 +61,7 @@ async def put_device_config(device_id: str, req: ConfigUpdateRequest) -> dict:
 
 
 @admin_router.delete("/devices/{device_id}/config")
-def delete_device_config(device_id: str) -> dict:
+def delete_device_config(device_id: str) -> JsonObject:
     """删除设备级覆盖，回退到全局默认。"""
     removed = store.delete_device_override(device_id)
     return {"device_id": device_id, "override_removed": removed}

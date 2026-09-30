@@ -40,7 +40,7 @@ def _status(client: TestClient) -> dict[str, Any]:
     return dict(client.get(f"/admin/devices/{DEVICE_ID}/adb/status", headers=ADMIN_HEADERS).json())
 
 
-def test_adb_bridge_lifecycle(client: TestClient, monkeypatch) -> None:
+def test_adb_bridge_lifecycle(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """完整生命周期：开启→世代/nonce→往返→审计→关闭语义。"""
     from app.modules.devices import repository as devices_repository
 
@@ -65,9 +65,11 @@ def test_adb_bridge_lifecycle(client: TestClient, monkeypatch) -> None:
     assert status["generation"] > 0
 
     # ── 错误 nonce 被拒（4401，配对失败）──
-    with pytest.raises(WebSocketDisconnect) as wrong_nonce:
-        with client.websocket_connect(f"/gateway/bridge?device_id={DEVICE_ID}&nonce=wrong") as ws:
-            ws.receive_bytes()
+    with (
+        pytest.raises(WebSocketDisconnect) as wrong_nonce,
+        client.websocket_connect(f"/gateway/bridge?device_id={DEVICE_ID}&nonce=wrong") as ws,
+    ):
+        ws.receive_bytes()
     assert wrong_nonce.value.code == 4401
 
     # ── 真实往返：本地 TCP ↔ 设备 WS 字节透传 ──

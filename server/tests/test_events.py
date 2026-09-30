@@ -6,18 +6,19 @@ from app.core import events
 
 
 def test_publish_reaches_subscriber() -> None:
-    async def flow():
+    async def flow() -> None:
         sid, queue = events.subscribe()
         events.publish("door_update", {"device_id": "d1"})
         msg = await asyncio.wait_for(queue.get(), timeout=1)
         events.unsubscribe(sid)
-        assert '"door_update"' in msg and '"d1"' in msg
+        assert '"door_update"' in msg
+        assert '"d1"' in msg
 
     asyncio.run(flow())
 
 
 def test_unsubscribe_stops_delivery() -> None:
-    async def flow():
+    async def flow() -> None:
         sid, queue = events.subscribe()
         events.unsubscribe(sid)
         events.publish("door_update", {"device_id": "d1"})
@@ -27,7 +28,7 @@ def test_unsubscribe_stops_delivery() -> None:
 
 
 def test_full_queue_drops_silently() -> None:
-    async def flow():
+    async def flow() -> None:
         sid, queue = events.subscribe()
         for _ in range(300):
             events.publish("door_update", {"n": 1})

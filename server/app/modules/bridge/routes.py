@@ -16,6 +16,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 
 from app.core import protocol
+from app.core.protocol import JsonObject
 from app.core.security import require_admin
 from app.gateway.manager import manager
 from app.modules.devices.dependencies import require_trusted_online_device
@@ -31,8 +32,7 @@ from .manager import (
 
 router = APIRouter(tags=["bridge"])
 
-admin_router = APIRouter(prefix="/admin", tags=["bridge-admin"],
-                         dependencies=[Depends(require_admin)])
+admin_router = APIRouter(prefix="/admin", tags=["bridge-admin"], dependencies=[Depends(require_admin)])
 
 
 def _append(buffer: bytearray, data: bytes) -> None:
@@ -145,7 +145,7 @@ async def _pump_tcp_to_ws(bridge: AdbBridge, reader: asyncio.StreamReader) -> No
 
 
 @admin_router.post("/devices/{device_id}/adb/open")
-async def adb_open(device_id: str) -> dict:
+async def adb_open(device_id: str) -> JsonObject:
     """打开设备的 ADB 桥：下发 bridge.open 并绑定本机回环 TCP 监听。"""
     require_trusted_online_device(device_id)
     existing = registry.active.get(device_id)
@@ -196,15 +196,17 @@ async def adb_open(device_id: str) -> dict:
         registry.pending.pop(device_id, None)
         registry.remove(device_id)
         command_audit.finish(audit_id, "failed", "port.bind_failed", str(last_error))
-        raise HTTPException(status_code=409,
-                            detail=f"port {port} unavailable: {last_error}")
+        raise HTTPException(status_code=409, detail=f"port {port} unavailable: {last_error}")
     bridge.server = server
-    return {"device_id": device_id, "port": port,
-            "ssh": f"ssh -L {port}:127.0.0.1:{port} root@<server> 后 adb connect 127.0.0.1:{port}"}
+    return {
+        "device_id": device_id,
+        "port": port,
+        "ssh": f"ssh -L {port}:127.0.0.1:{port} root@<server> 后 adb connect 127.0.0.1:{port}",
+    }
 
 
 @admin_router.post("/devices/{device_id}/adb/close")
-async def adb_close(device_id: str) -> dict:
+async def adb_close(device_id: str) -> JsonObject:
     bridge = registry.active.get(device_id)
     audit_id = f"bridge-{uuid.uuid4()}"
     command_audit.insert(audit_id, device_id, "adb.close")
@@ -219,7 +221,7 @@ async def adb_close(device_id: str) -> dict:
 
 
 @admin_router.get("/devices/{device_id}/adb/status")
-async def adb_status(device_id: str) -> dict:
+async def adb_status(device_id: str) -> JsonObject:
     """桥接状态可观测（管理面）。"""
     bridge = registry.active.get(device_id)
     if bridge is None:

@@ -105,9 +105,7 @@ async def _handle_frame(ws: WebSocket, msg: JsonObject, device_id: str, trusted:
     payload = payload_of(msg)
 
     if mtype == "link.ping":
-        await ws.send_text(
-            protocol.envelope("link.pong", {"sender_time": now_rfc3339()}, reply_to=frame_id)
-        )
+        await ws.send_text(protocol.envelope("link.pong", {"sender_time": now_rfc3339()}, reply_to=frame_id))
     elif mtype == "link.pong":
         update_skew(device_id, text_of(payload, "sender_time"))
     elif mtype == "config.ack":
@@ -133,9 +131,7 @@ async def _handle_frame(ws: WebSocket, msg: JsonObject, device_id: str, trusted:
         if not sessions_service.resolve(text_of(msg, "reply_to"), payload):
             # 回执找不到对应的在途命令（多半是命令已超时收尾）：回错误帧保持
             # 协议完整性反馈，设备端只记日志，不产生副作用。
-            await ws.send_text(
-                protocol.error("command.unknown_id", "no pending command for result", reply_to=frame_id)
-            )
+            await ws.send_text(protocol.error("command.unknown_id", "no pending command for result", reply_to=frame_id))
     else:
         await ws.send_text(protocol.error("proto.unknown_type", f"unknown type: {mtype}"))
 

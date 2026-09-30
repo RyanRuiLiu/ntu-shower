@@ -3,6 +3,8 @@
 import asyncio
 import json
 
+import pytest
+
 from app.gateway import manager as manager_module
 from app.modules.sessions import service
 
@@ -18,13 +20,13 @@ class FakeWS:
         return True
 
 
-def _setup(monkeypatch, device_id: str) -> FakeWS:
+def _setup(monkeypatch: pytest.MonkeyPatch, device_id: str) -> FakeWS:
     ws = FakeWS()
     monkeypatch.setattr(manager_module.manager, "_connections", {device_id: ws})
     return ws
 
 
-def test_send_command_and_wait_ok(monkeypatch) -> None:
+def test_send_command_and_wait_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     device_id = "dev-x"
     ws = _setup(monkeypatch, device_id)
 
@@ -44,7 +46,7 @@ def test_send_command_and_wait_ok(monkeypatch) -> None:
     assert result["terminal_message"] == "已分配"
 
 
-def test_send_command_offline(monkeypatch) -> None:
+def test_send_command_offline(monkeypatch: pytest.MonkeyPatch) -> None:
     _setup(monkeypatch, "dev-x")
     monkeypatch.setattr(manager_module.manager, "_connections", {})  # 设备不在线
 
@@ -60,7 +62,7 @@ def test_send_command_offline(monkeypatch) -> None:
     }
 
 
-def test_send_command_timeout(monkeypatch) -> None:
+def test_send_command_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     _setup(monkeypatch, "dev-x")  # 在线但不回报
 
     async def flow() -> dict:
@@ -73,7 +75,7 @@ def test_send_command_timeout(monkeypatch) -> None:
     assert result["reason_code"] == "command.deadline_exceeded"
 
 
-def test_push_config_ack(monkeypatch) -> None:
+def test_push_config_ack(monkeypatch: pytest.MonkeyPatch) -> None:
     device_id = "dev-x"
     ws = _setup(monkeypatch, device_id)
 
@@ -89,7 +91,7 @@ def test_push_config_ack(monkeypatch) -> None:
     assert result == {"notified": True, "applied": True}
 
 
-def test_push_config_offline(monkeypatch) -> None:
+def test_push_config_offline(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(manager_module.manager, "_connections", {})
 
     async def flow() -> dict:

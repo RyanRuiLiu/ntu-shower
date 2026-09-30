@@ -24,8 +24,7 @@ class AdminTokenNotConfiguredError(RuntimeError):
 
     def __init__(self) -> None:
         super().__init__(
-            "ADMIN_TOKEN 仍为占位值，服务拒绝启动。"
-            "请在 server/.env 中设置真实令牌（模板见 server/.env.example）。"
+            "ADMIN_TOKEN 仍为占位值，服务拒绝启动。请在 server/.env 中设置真实令牌（模板见 server/.env.example）。"
         )
 
 

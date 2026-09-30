@@ -6,6 +6,7 @@ datetime('now')，它的格式（"YYYY-MM-DD HH:MM:SS"）与全库其余时间�
 
 from app.core.clock import now_rfc3339
 from app.core.db import get_conn
+from app.core.protocol import JsonObject
 
 
 def init_tables() -> None:
@@ -40,7 +41,7 @@ def insert(version: str, version_code: int, sha256: str, mandatory: bool, force:
     get_conn().commit()
 
 
-def latest_for(device_id: str, current_version_code: int) -> dict | None:
+def latest_for(device_id: str, current_version_code: int) -> JsonObject | None:
     """取该设备适用的最新发布。
 
     - target='all' 或逗号分隔列表包含该 device_id；
@@ -62,9 +63,7 @@ def latest_for(device_id: str, current_version_code: int) -> dict | None:
         .fetchall()
     )
     for row in rows:
-        if row["version_code"] > current_version_code or (
-            row["force"] and not is_installed(device_id, row["version"])
-        ):
+        if row["version_code"] > current_version_code or (row["force"] and not is_installed(device_id, row["version"])):
             release = dict(row)
             release["mandatory"] = bool(release["mandatory"])
             release["force"] = bool(release["force"])
@@ -119,7 +118,7 @@ def delete_release(version: str) -> bool:
     return cursor.rowcount > 0
 
 
-def list_releases() -> list[dict]:
+def list_releases() -> list[JsonObject]:
     rows = (
         get_conn()
         .execute(
@@ -128,7 +127,7 @@ def list_releases() -> list[dict]:
         )
         .fetchall()
     )
-    releases: list[dict] = []
+    releases: list[JsonObject] = []
     for row in rows:
         release = dict(row)
         release["mandatory"] = bool(release["mandatory"])

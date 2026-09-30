@@ -31,9 +31,11 @@ def test_parse_rejects_non_object_and_bad_json() -> None:
 
 def test_envelope_carries_explicit_frame_id_and_reply_to() -> None:
     frame = json.loads(protocol.envelope("link.ping", {}, reply_to="r", frame_id="f"))
-    assert frame["id"] == "f" and frame["reply_to"] == "r"
+    assert frame["id"] == "f"
+    assert frame["reply_to"] == "r"
     plain = json.loads(protocol.envelope("link.ping", {}))
-    assert "reply_to" not in plain and plain["v"] == protocol.PROTOCOL_VERSION
+    assert "reply_to" not in plain
+    assert plain["v"] == protocol.PROTOCOL_VERSION
 
 
 def test_error_frame_is_flat_payload() -> None:
@@ -59,8 +61,11 @@ class _WS:
 
 
 class _BrokenWS:
+    """发送即失败的设备连接替身（用于验证 send_to 的失败降级路径）。"""
+
     async def send_text(self, data: str) -> bool:
-        raise RuntimeError("socket gone")
+        message = "socket gone"
+        raise RuntimeError(message)
 
 
 def test_connection_manager_register_replace_and_stale_unregister() -> None:
@@ -70,7 +75,8 @@ def test_connection_manager_register_replace_and_stale_unregister() -> None:
         assert manager.register("d", first) is False
         assert manager.register("d", second) is True  # 顶替旧连接
         assert manager.get("d") is second
-        assert manager.is_online("d") and manager.online_connections() == [("d", second)]
+        assert manager.is_online("d")
+        assert manager.online_connections() == [("d", second)]
 
         manager.unregister("d", first)  # 过期连接不误删新连接
         assert manager.is_online("d")
@@ -217,7 +223,7 @@ def test_pending_result_second_resolve_is_noop() -> None:
     assert asyncio.run(flow())
 
 
-def test_push_config_update_offline_and_ack_paths(monkeypatch) -> None:
+def test_push_config_update_offline_and_ack_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.gateway import manager as manager_module
 
     class FakeWS:
@@ -238,7 +244,8 @@ def test_push_config_update_offline_and_ack_paths(monkeypatch) -> None:
         )
         await asyncio.sleep(0.05)
         frame = json.loads(ws.sent[-1])
-        assert frame["type"] == "config.update" and frame["payload"]["revision"] == 3
+        assert frame["type"] == "config.update"
+        assert frame["payload"]["revision"] == 3
         assert sessions_service.resolve_config_ack("dev-push", "3")
         result = await task
         assert result == {"notified": True, "applied": True}
@@ -258,7 +265,7 @@ def test_push_config_update_offline_and_ack_paths(monkeypatch) -> None:
     asyncio.run(flow())
 
 
-def test_command_offline_path_clears_device_pending(monkeypatch) -> None:
+def test_command_offline_path_clears_device_pending(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.gateway import manager as manager_module
 
     monkeypatch.setattr(manager_module.manager, "_connections", {})
@@ -306,7 +313,7 @@ def test_require_admin_rejects_missing_token() -> None:
         require_admin(x_admin_token=None)
 
 
-def test_notify_target_devices_all(monkeypatch) -> None:
+def test_notify_target_devices_all(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.gateway import manager as manager_module
 
     class FakeWS:
@@ -318,7 +325,7 @@ def test_notify_target_devices_all(monkeypatch) -> None:
     assert set(notified) == {"dev-1", "dev-2"}
 
 
-async def ota_service_notify_all():
+async def ota_service_notify_all() -> list[str]:
     from app.modules.ota import service as ota_service
 
     return await ota_service.notify_target_devices("0.2.5", 7, False, "all")

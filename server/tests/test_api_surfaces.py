@@ -2,8 +2,11 @@
 
 import json
 import uuid
+from collections.abc import Coroutine
 
+import pytest
 from fastapi.testclient import TestClient
+from starlette.testclient import WebSocketTestSession
 
 from app.core import events
 
@@ -26,7 +29,7 @@ def _hello(device_id: str) -> str:
     )
 
 
-def _recv_until(ws, msg_type: str) -> dict:
+def _recv_until(ws: WebSocketTestSession, msg_type: str) -> dict:
     while True:
         msg = json.loads(ws.receive_text())
         if msg.get("type") == msg_type:
@@ -37,7 +40,7 @@ def _admin(client: TestClient) -> dict:
     return {"X-Admin-Token": "test-token"}
 
 
-def _connect_trusted(client: TestClient, device_id: str):
+def _connect_trusted(client: TestClient, device_id: str) -> WebSocketTestSession:
     with client.websocket_connect("/gateway/device") as ws:
         ws.send_text(_hello(device_id))
         _recv_until(ws, "link.hello_ack")
@@ -119,7 +122,8 @@ def test_shadow_user_and_admin_views(client: TestClient) -> None:
 
 def test_global_config_get_put(client: TestClient) -> None:
     r = client.get("/admin/config/global", headers=_admin(client))
-    assert r.status_code == 200 and r.json()["revision"] == 1
+    assert r.status_code == 200
+    assert r.json()["revision"] == 1
 
     r = client.put("/admin/config/global", headers=_admin(client), json={"config": {"heartbeat_interval_s": 45}})
     assert r.json()["revision"] == 2
@@ -130,7 +134,7 @@ def test_global_config_get_put(client: TestClient) -> None:
     assert "nonexistent_key" not in global_cfg["config"]
 
 
-def test_device_config_override_lifecycle(client: TestClient, monkeypatch) -> None:
+def test_device_config_override_lifecycle(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """设备在线但不应答（无 ack）时：推送已送达、覆盖照常生效。"""
     from app.core import config as config_module
 
@@ -171,7 +175,7 @@ def test_device_config_rejected_when_offline(client: TestClient) -> None:
     assert r.status_code == 409
 
 
-def test_device_busy_rejects_second_command(client: TestClient, monkeypatch) -> None:
+def test_device_busy_rejects_second_command(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """设备已有在途命令时，第二条命令立即被拒（409 device.busy），不排队。"""
     import asyncio
 
@@ -225,7 +229,8 @@ def test_ota_manifest_and_download_flow(client: TestClient) -> None:
 
     ota_repository.insert("0.2.5", 7, "a" * 64, False, False, "dev-ota-1")
     manifest = client.get("/ota/manifest", params={"device_id": "dev-ota-1", "version_code": 6}).json()
-    assert manifest["up_to_date"] is False and manifest["version"] == "0.2.5"
+    assert manifest["up_to_date"] is False
+    assert manifest["version"] == "0.2.5"
 
     assert client.get("/ota/download/0.2.5").content == b"apk-bytes"
     assert client.get("/ota/download/9.9.9").status_code == 404  # 格式合法但未发布
@@ -235,7 +240,7 @@ def test_ota_manifest_and_download_flow(client: TestClient) -> None:
     assert any(r["version"] == "0.2.5" for r in releases)
 
 
-def test_ota_upload_rejects_oversize(client: TestClient, monkeypatch) -> None:
+def test_ota_upload_rejects_oversize(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.core import config as config_module
 
     monkeypatch.setattr(config_module.settings, "max_ota_bytes", 8)
@@ -251,7 +256,7 @@ def test_ota_upload_rejects_oversize(client: TestClient, monkeypatch) -> None:
 # ── 命令审计（管理面）──
 
 
-def test_command_audit_listing(client: TestClient, monkeypatch) -> None:
+def test_command_audit_listing(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.gateway import manager as manager_module
     from app.modules.sessions import service as sessions_service
 
@@ -264,12 +269,13 @@ def test_command_audit_listing(client: TestClient, monkeypatch) -> None:
     assert result["status"] == "timeout"
 
     rows = client.get("/admin/commands", headers=_admin(client), params={"device_id": "dev-audit"}).json()
-    assert rows and rows[0]["status"] == "timeout"
+    assert rows
+    assert rows[0]["status"] == "timeout"
     all_rows = client.get("/admin/commands", headers=_admin(client), params={"limit": 1}).json()
     assert len(all_rows) == 1
 
 
-def asyncio_run_command(coroutine) -> dict:
+def asyncio_run_command(coroutine: Coroutine[object, object, dict[str, object]]) -> dict:
     import asyncio
 
     return asyncio.run(coroutine)
@@ -292,5 +298,6 @@ def test_ping_payload_uses_symmetric_sender_time() -> None:
     from app.core import device_clock, protocol
 
     frame = json.loads(device_clock.ping_payload())
-    assert frame["type"] == "link.ping" and "sender_time" in frame["payload"]
+    assert frame["type"] == "link.ping"
+    assert "sender_time" in frame["payload"]
     assert frame["v"] == protocol.PROTOCOL_VERSION

@@ -16,6 +16,8 @@ import json
 import threading
 from dataclasses import dataclass
 
+from .protocol import JsonObject
+
 QUEUE_MAX_SIZE = 256
 
 
@@ -45,7 +47,7 @@ def unsubscribe(sid: int) -> None:
         _subscribers.pop(sid, None)
 
 
-def publish(event_type: str, payload: dict) -> None:
+def publish(event_type: str, payload: JsonObject) -> None:
     """非阻塞广播；队列满则丢弃并继续（推送是尽力而为，现态可经 REST 兜取）。"""
     message = json.dumps({"type": event_type, "payload": payload}, separators=(",", ":"), ensure_ascii=False)
     with _lock:

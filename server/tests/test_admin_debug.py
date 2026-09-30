@@ -4,8 +4,8 @@
 因此这里逐个锁定，避免任一侧改名后链路静默失效。
 """
 
+import pytest
 from fastapi.testclient import TestClient
-from pytest import MonkeyPatch
 
 from app.gateway import manager as manager_module
 
@@ -21,7 +21,7 @@ def _trust_device() -> None:
     devices_repository.set_trusted(DEVICE_ID, True)
 
 
-def _capture_command(monkeypatch: MonkeyPatch) -> dict:
+def _capture_command(monkeypatch: pytest.MonkeyPatch) -> dict:
     """用假实现顶替命令往返，只观察端点下发的 action 与参数。"""
     from app.modules.sessions import service as sessions_service
 
@@ -36,7 +36,9 @@ def _capture_command(monkeypatch: MonkeyPatch) -> dict:
 
 
 def test_debug_endpoints_reject_unknown_device(client: TestClient) -> None:
-    assert client.post(f"/admin/devices/{GHOST_ID}/exec", headers=ADMIN_HEADERS, json={"command": "id"}).status_code == 404
+    assert (
+        client.post(f"/admin/devices/{GHOST_ID}/exec", headers=ADMIN_HEADERS, json={"command": "id"}).status_code == 404
+    )
     assert client.post(f"/admin/devices/{GHOST_ID}/screen", headers=ADMIN_HEADERS).status_code == 404
 
 
@@ -50,7 +52,7 @@ def test_debug_endpoints_reject_offline_device(client: TestClient) -> None:
     assert client.post(f"/admin/devices/{GHOST_ID}/screen", headers=ADMIN_HEADERS).status_code == 409
 
 
-def test_exec_dispatches_debug_exec_action(client: TestClient, monkeypatch) -> None:
+def test_exec_dispatches_debug_exec_action(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     _trust_device()
     monkeypatch.setattr(manager_module.manager, "_connections", {DEVICE_ID: object()})
     captured = _capture_command(monkeypatch)
@@ -62,7 +64,7 @@ def test_exec_dispatches_debug_exec_action(client: TestClient, monkeypatch) -> N
     assert captured["params"] == {"command": "id"}
 
 
-def test_screen_capture_dispatches_screen_action(client: TestClient, monkeypatch) -> None:
+def test_screen_capture_dispatches_screen_action(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """全屏截图链路：管理面 → 设备端 screen.capture（AgentService 识别的动作名）。"""
     _trust_device()
     monkeypatch.setattr(manager_module.manager, "_connections", {DEVICE_ID: object()})

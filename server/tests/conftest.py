@@ -1,13 +1,35 @@
 """测试隔离：每个测试使用独立临时数据库，连接随用例创建与回收。"""
 
+from collections.abc import Iterator
+from pathlib import Path
+
 import pytest
+from fastapi.testclient import TestClient
 
 from app.core import config as config_module
 from app.core import db as db_module
 
 
+@pytest.fixture(autouse=True)
+def _reset_process_singletons() -> Iterator[None]:
+    """进程级单例的用例隔离：网关连接表与桥接注册表。
+
+    桥接注册表持有端口分配与世代计数，跨用例累积会让后续用例拿到别的端口。
+    """
+    from app.gateway.manager import manager as gateway_manager
+    from app.modules.bridge.manager import registry
+
+    def clear() -> None:
+        gateway_manager._connections.clear()
+        registry.reset()
+
+    clear()
+    yield
+    clear()
+
+
 @pytest.fixture
-def fresh_db(tmp_path, monkeypatch):
+def fresh_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     db_module.close_all_connections()
     path = str(tmp_path / "test.db")
     monkeypatch.setattr(config_module.settings, "db_path", path)
@@ -17,15 +39,15 @@ def fresh_db(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def client(fresh_db):
+def client(fresh_db: str) -> Iterator[TestClient]:
     """应用客户端：with 上下文持有常驻事件循环（portal）。
 
     常驻 portal 是必须的，不是风格选择：处理请求的循环注册了需要跨请求存活的
     资源（如 ADB 桥的本地 TCP 监听器）。不进入 with 上下文时每次请求自建
     临时 portal，请求一结束循环即关闭，监听器随之死亡。
-    """
-    from fastapi.testclient import TestClient
 
+    create_app 延后到用例内导入：避免测试收集阶段就构造应用（建库、起后台任务）。
+    """
     from app.main import create_app
 
     with TestClient(create_app()) as c:
