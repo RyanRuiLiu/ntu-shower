@@ -18,8 +18,11 @@ import java.util.UUID
  * 快照发件箱：本地 SQLite 按序保存未确认快照，收到 door.snapshot_ack 才删除；
  * 未确认的按序重发（断网不丢数据，恢复后续传）。
  *
- * 去重：逐扇喷头取 [DoorRaw.fingerprint] 再比对，内容未变化不上报。指纹刻意不含
- * `bath_time_s`——它每秒都变，含进去等于没有去重（见那个函数的说明）。
+ * 去重：逐扇喷头取 [DoorRaw.fingerprint] 再比对，内容未变化不上报。
+ *
+ * 上报因此只发生在**状态迁移**那一刻（进人、开阀、关阀暂停、恢复、出门清零）——这与
+ * 浴室 App 的写库节奏一致：它洗浴期间根本不写，只在迁移时落 SQL（见
+ * `ntu-remote-shower/dbGUIDE.md`）。实测 100 天的平均上报量是每 4 分钟一份。
  */
 class DoorSnapshotSender(context: Context) {
 
