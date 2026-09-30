@@ -37,6 +37,10 @@ def fresh_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     # 桥接端口基址换成测试段：默认段是生产环境值，本机 SSH 隧道/其他实例
     # 占用该端口时会让桥接用例失败（已发生过两次）
     monkeypatch.setattr(config_module.settings, "bridge_base_port", 25655)
+    # 命令等待超时收紧：依赖超时的用例不应白等真实的一分钟
+    monkeypatch.setattr(config_module.settings, "assign_timeout_s", 0.3)
+    monkeypatch.setattr(config_module.settings, "settle_timeout_s", 0.3)
+    monkeypatch.setattr(config_module.settings, "photo_timeout_s", 0.3)
     yield path
     db_module.close_all_connections()
 

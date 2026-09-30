@@ -16,8 +16,6 @@ from app.modules.sessions import service as sessions_service
 
 from . import store
 
-router = APIRouter(tags=["config"])
-
 admin_router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)], tags=["config-admin"])
 
 

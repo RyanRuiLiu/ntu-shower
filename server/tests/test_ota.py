@@ -14,7 +14,7 @@ def repo(fresh_db: str) -> ModuleType:
 
 
 def test_normal_release_applies_when_newer(repo: ModuleType) -> None:
-    repo.insert("0.2.0", 2, "a" * 64, False, False, "all")
+    repo.insert_release("0.2.0", 2, "a" * 64, False, False, "all")
     rel = repo.latest_for("dev-1", 1)
     assert rel is not None
     assert rel["version"] == "0.2.0"
@@ -22,14 +22,14 @@ def test_normal_release_applies_when_newer(repo: ModuleType) -> None:
 
 
 def test_force_release_ignores_version(repo: ModuleType) -> None:
-    repo.insert("0.2.0", 2, "b" * 64, False, True, "dev-1")
+    repo.insert_release("0.2.0", 2, "b" * 64, False, True, "dev-1")
     rel = repo.latest_for("dev-1", 2)  # 版本号相同，force 仍适用
     assert rel is not None
     assert rel["force"] is True
 
 
 def test_target_filters_devices(repo: ModuleType) -> None:
-    repo.insert("0.3.0", 3, "c" * 64, False, False, "dev-1,dev-2")
+    repo.insert_release("0.3.0", 3, "c" * 64, False, False, "dev-1,dev-2")
     assert repo.latest_for("dev-1", 1) is not None
     assert repo.latest_for("dev-2", 1) is not None
     assert repo.latest_for("dev-3", 1) is None  # 未在目标列表
@@ -37,15 +37,15 @@ def test_target_filters_devices(repo: ModuleType) -> None:
 
 
 def test_force_higher_version_wins_over_normal(repo: ModuleType) -> None:
-    repo.insert("0.2.0", 2, "a" * 64, False, False, "all")
-    repo.insert("0.2.0", 2, "b" * 64, False, True, "dev-1")
+    repo.insert_release("0.2.0", 2, "a" * 64, False, False, "all")
+    repo.insert_release("0.2.0", 2, "b" * 64, False, True, "dev-1")
     rel = repo.latest_for("dev-1", 1)
     assert rel is not None
     assert rel["force"] is True
 
 
 def test_list_releases(repo: ModuleType) -> None:
-    repo.insert("0.2.0", 2, "a" * 64, False, False, "all")
+    repo.insert_release("0.2.0", 2, "a" * 64, False, False, "all")
     assert len(repo.list_releases()) == 1
 
 
@@ -54,7 +54,7 @@ def test_force_release_no_loop_and_rearm(repo: ModuleType) -> None:
     from app.modules.ota import repository as ota_repository
 
     # 同 code 的 force 发布验证防循环语义：
-    ota_repository.insert("0.2.5x", 7, "c" * 64, False, True, "dev-loop")
+    ota_repository.insert_release("0.2.5x", 7, "c" * 64, False, True, "dev-loop")
     ota_repository.mark_installed_upto("dev-loop", 7)
     assert ota_repository.latest_for("dev-loop", 7) is None  # 已确认，不再推
 
@@ -64,7 +64,7 @@ def test_force_release_no_loop_and_rearm(repo: ModuleType) -> None:
     assert rel["version"] == "0.2.5x"
 
     # 常规（非 force）不受安装确认影响
-    ota_repository.insert("0.3.0", 8, "d" * 64, False, False, "dev-loop")
+    ota_repository.insert_release("0.3.0", 8, "d" * 64, False, False, "dev-loop")
     rel = ota_repository.latest_for("dev-loop", 7)
     assert rel is not None
     assert rel["version"] == "0.3.0"
@@ -78,7 +78,7 @@ def test_force_lower_version_offered_when_not_installed(repo: ModuleType) -> Non
     """force 发布低于设备版本也推送（调试重推语义），安装确认后停止。"""
     from app.modules.ota import repository as ota_repository
 
-    ota_repository.insert("0.1.0x", 1, "e" * 64, False, True, "dev-f2")
+    ota_repository.insert_release("0.1.0x", 1, "e" * 64, False, True, "dev-f2")
     rel = ota_repository.latest_for("dev-f2", 7)
     assert rel is not None
     assert rel["version"] == "0.1.0x"

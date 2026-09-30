@@ -13,9 +13,10 @@ import asyncio
 import contextlib
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
 from app.core import protocol
+from app.core.problems import DEVICE_OFFLINE, PORT_UNAVAILABLE, ApiProblemError
 from app.core.protocol import JsonObject
 from app.core.security import require_admin
 from app.gateway.manager import manager
@@ -109,7 +110,7 @@ async def device_bridge(ws: WebSocket) -> None:
             await bridge.close_stream()
             registry.remove(device_id)
             audit_id = f"bridge-{uuid.uuid4()}"
-            command_audit.insert(audit_id, device_id, "adb.session_end")
+            command_audit.insert_command(audit_id, device_id, "adb.session_end")
             command_audit.finish(audit_id, "ok", "", "")
 
 
@@ -150,11 +151,12 @@ async def adb_open(device_id: str) -> JsonObject:
     require_trusted_online_device(device_id)
     existing = registry.active.get(device_id)
     if existing is not None and existing.connected:
-        return {"device_id": device_id, "port": existing.port, "already_open": True}
+        # 与下方成功分支保持同一字段集：客户端只需处理一种响应形状
+        return {"device_id": device_id, "port": existing.port, "already_open": True, "generation": existing.generation}
 
     generation, port, nonce = registry.open_session(device_id)
     audit_id = f"bridge-{uuid.uuid4()}"
-    command_audit.insert(audit_id, device_id, "adb.open")
+    command_audit.insert_command(audit_id, device_id, "adb.open")
     sent = await manager.send_to(
         device_id,
         protocol.envelope("bridge.open", {"device_id": device_id, "nonce": nonce}),
@@ -162,7 +164,7 @@ async def adb_open(device_id: str) -> JsonObject:
     if not sent:
         registry.pending.pop(device_id, None)
         command_audit.finish(audit_id, "timeout", "device.offline", "device offline")
-        raise HTTPException(status_code=409, detail="device offline")
+        raise ApiProblemError(DEVICE_OFFLINE, f"device {device_id} has no active connection")
     command_audit.finish(audit_id, "ok", "", f"port {port} gen {generation}")
 
     bridge = AdbBridge(device_id, port, generation)
@@ -196,20 +198,17 @@ async def adb_open(device_id: str) -> JsonObject:
         registry.pending.pop(device_id, None)
         registry.remove(device_id)
         command_audit.finish(audit_id, "failed", "port.bind_failed", str(last_error))
-        raise HTTPException(status_code=409, detail=f"port {port} unavailable: {last_error}")
+        raise ApiProblemError(PORT_UNAVAILABLE, f"port {port}: {last_error}")
     bridge.server = server
-    return {
-        "device_id": device_id,
-        "port": port,
-        "ssh": f"ssh -L {port}:127.0.0.1:{port} root@<server> 后 adb connect 127.0.0.1:{port}",
-    }
+    # 只返回结构化字段：连接指引属于文档职责（见 docs/RUNBOOK.md §4）
+    return {"device_id": device_id, "port": port, "already_open": False, "generation": generation}
 
 
 @admin_router.post("/devices/{device_id}/adb/close")
 async def adb_close(device_id: str) -> JsonObject:
     bridge = registry.active.get(device_id)
     audit_id = f"bridge-{uuid.uuid4()}"
-    command_audit.insert(audit_id, device_id, "adb.close")
+    command_audit.insert_command(audit_id, device_id, "adb.close")
     if bridge is None:
         command_audit.finish(audit_id, "ok", "", "already closed")
         return {"device_id": device_id, "closed": False}

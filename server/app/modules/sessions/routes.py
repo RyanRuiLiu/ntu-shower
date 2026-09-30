@@ -8,9 +8,11 @@ cert_no/password 是浴室系统的业务凭证：随操作参数直传设备，
 分配/结算下发前依据 door_live 现态做预检，避免对占用门误触发结算流。
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+from app.core.config import settings
+from app.core.problems import DEVICE_BUSY, DOOR_NOT_FREE, DUPLICATE_SESSION, NO_OCCUPIED_DOOR, ApiProblemError
 from app.core.protocol import JsonObject
 from app.core.security import require_admin
 from app.modules.devices.dependencies import require_trusted_online_device
@@ -24,9 +26,6 @@ from . import service
 router = APIRouter(prefix="/api/v1", tags=["sessions"])
 
 admin_router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)], tags=["sessions-admin"])
-
-ASSIGN_TIMEOUT_S = 60.0
-PHOTO_TIMEOUT_S = 15.0
 
 
 class AssignRequest(BaseModel):
@@ -55,16 +54,16 @@ def _reject_duplicate_session(device_id: str, cert_no: str) -> None:
     """同一学号已有活跃会话则拒绝（对齐旧系统 duplicate_session 语义）。"""
     active = doors_repository.get_active_by_cert(device_id, cert_no)
     if active is not None:
-        raise HTTPException(
-            status_code=409,
-            detail=f"cert {cert_no} already has an active session on door {active['door_no']}",
+        raise ApiProblemError(
+            DUPLICATE_SESSION,
+            f"cert {cert_no} already active on door {active['door_no']}",
         )
 
 
 def _reject_busy(result: CommandOutcome) -> CommandOutcome:
     """设备已有在途命令时拒绝本次请求（409），而非排队。"""
     if result.get("status") == "rejected":
-        raise HTTPException(status_code=409, detail=f"device busy ({result.get('reason_code')})")
+        raise ApiProblemError(DEVICE_BUSY, f"reason={result.get('reason_code')}")
     return result
 
 
@@ -73,13 +72,13 @@ async def assign(req: AssignRequest) -> CommandOutcome:
     require_trusted_online_device(req.device_id)
     state = _door_state(req.device_id, req.door_no)
     if state != doors_service.STATE_FREE:
-        raise HTTPException(status_code=409, detail=f"door not free (state={state})")
+        raise ApiProblemError(DOOR_NOT_FREE, f"door {req.door_no} state={state}")
     _reject_duplicate_session(req.device_id, req.cert_no)
     result = await service.send_command_and_wait(
         req.device_id,
         "session.assign",
         {"door_no": req.door_no, "cert_no": req.cert_no, "password": req.password},
-        timeout_s=ASSIGN_TIMEOUT_S,
+        timeout_s=settings.assign_timeout_s,
     )
     return _reject_busy(result)
 
@@ -89,12 +88,12 @@ async def settle(req: SettleRequest) -> CommandOutcome:
     require_trusted_online_device(req.device_id)
     occupied = doors_repository.get_occupied_by_cert(req.device_id, req.cert_no)
     if occupied is None:
-        raise HTTPException(status_code=409, detail="no occupied door for this account")
+        raise ApiProblemError(NO_OCCUPIED_DOOR, f"cert {req.cert_no}")
     result = await service.send_command_and_wait(
         req.device_id,
         "session.settle",
         {"cert_no": req.cert_no, "password": req.password},
-        timeout_s=ASSIGN_TIMEOUT_S,
+        timeout_s=settings.settle_timeout_s,
     )
     return _reject_busy(result)
 
@@ -106,7 +105,7 @@ async def take_photo(req: PhotoRequest) -> CommandOutcome:
         req.device_id,
         "photo.capture",
         {},
-        timeout_s=PHOTO_TIMEOUT_S,
+        timeout_s=settings.photo_timeout_s,
     )
     return _reject_busy(result)
 

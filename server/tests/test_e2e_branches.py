@@ -158,7 +158,7 @@ def test_ota_notify_target_devices_filters_and_handles_failure(monkeypatch: pyte
 
 
 def test_ota_repository_force_release_ignores_version(client: TestClient) -> None:
-    ota_repository.insert("9.9.9", 1, "b" * 64, False, True, "dev-force")
+    ota_repository.insert_release("9.9.9", 1, "b" * 64, False, True, "dev-force")
     rel = ota_repository.latest_for("dev-force", 999)
     assert rel is not None
     assert rel["force"] is True
@@ -299,7 +299,7 @@ def test_assign_roundtrip_and_busy_rejection(client: TestClient) -> None:
             "/api/v1/sessions/assign", json={"device_id": device_id, "door_no": 2, "cert_no": "S8", "password": "P"}
         )
         assert busy.status_code == 409
-        assert "device busy" in busy.json()["detail"]
+        assert busy.json()["type"].endswith("/problems/device-busy")
 
         ws.send_text(
             json.dumps(
