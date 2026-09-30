@@ -19,7 +19,7 @@
  * 凭证与分配时间。
  */
 import { api } from '../core/api.js'
-import { serverNowMs } from '../core/clock.js'
+import { fmtDateTime, fmtTime, serverNowMs } from '../core/clock.js'
 import { DOOR_STATES } from '../core/contract.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
 import { outcomeText, problemText } from '../core/outcome.js'
@@ -71,29 +71,6 @@ function fmtDuration(seconds) {
   const minutes = Math.floor(total / 60)
   const rest = total % 60
   return minutes > 0 ? `${minutes}m${String(rest).padStart(2, '0')}s` : `${rest}s`
-}
-
-/** RFC 3339 → `HH:MM:SS`；缺值给占位符。 */
-function fmtTime(value) {
-  if (!value) return PLACEHOLDER
-  const at = new Date(value)
-  if (Number.isNaN(at.getTime())) return PLACEHOLDER
-  const pad = (n) => String(n).padStart(2, '0')
-  return `${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`
-}
-
-/**
- * RFC 3339 → `MM-DD HH:MM`；缺值给占位符。
- *
- * 喷头卡片上的时间有两种粒度：进行中的会话问的是"今天几点"，`HH:MM:SS` 够用；而"上次
- * 使用"可能发生在几天前，只给时分看不出是哪天，给完整年份又会把宽度挤掉。
- */
-function fmtDateTime(value) {
-  if (!value) return PLACEHOLDER
-  const at = new Date(value)
-  if (Number.isNaN(at.getTime())) return PLACEHOLDER
-  const pad = (n) => String(n).padStart(2, '0')
-  return `${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`
 }
 
 /** 从某时刻到服务端此刻的秒数。 */
@@ -204,7 +181,7 @@ function fieldValue(door, field) {
 
 function doorCell(door, field) {
   return (
-    `<div class="door-cell"><span class="k">${esc(DOOR_LABELS[field])}</span>` +
+    `<div class="kv door-cell"><span class="k">${esc(DOOR_LABELS[field])}</span>` +
     `<span class="v ${FIELD_TONE[field]}" data-field="${esc(field)}">${esc(fieldValue(door, field))}</span></div>`
   )
 }
@@ -233,7 +210,7 @@ function renderDoors(doors) {
           <div class="door-head">
             <span class="door-no">#${esc(door.door_no)}</span>
             <span class="door-tag ${esc(door.state)}">${esc(LABELS[door.state] || door.state)}</span>
-            <span class="door-cell door-last-used">
+            <span class="kv door-cell door-last-used">
               <span class="k">上次使用时间</span>
               <span class="v time">${esc(lastUsedText(door))}</span>
             </span>
