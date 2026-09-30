@@ -52,7 +52,7 @@ object ConfigDefaults {
     const val HOME_TIMEOUT_MS = 10000L
 
     /** 界面轮询间隔 */
-    const val UI_POLL_INTERVAL_MS = 200L
+    const val UI_POLL_INTERVAL_MS = 60L
 
     /** 点击后延迟 */
     const val UI_CLICK_DELAY_MS = 200L
