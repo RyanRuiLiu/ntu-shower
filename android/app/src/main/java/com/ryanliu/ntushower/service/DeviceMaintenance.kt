@@ -30,12 +30,31 @@ object DeviceMaintenance {
     )
 
     /**
+     * 终结类动作：执行它们等于终止本进程。
+     *
+     * 这两个必须**立刻**执行，不与其他维护命令共用一个执行器。动作本身是毫秒级的——
+     * [restartAgent] 与 [uninstallAgent] 都只是起一个脱手进程（[RootShell.execDetached]，
+     * 不等结果）；而共用执行器会让它们排在前面的命令之后，每条 `device.exec` 可以等满
+     * 25 秒（见 [RootShell.command] 的超时上限）。真机上因此丢过一次恢复机会：一串超时
+     * 的 `device.exec` 挡在前面，随后发的重启从服务端看也是超时，而设备侧一次都没执行。
+     */
+    private val TERMINATING = setOf(
+        SupportedActions.DEVICE_RESTART,
+        SupportedActions.DEVICE_UNINSTALL,
+    )
+
+    /**
      * 本模块是否处理该 action。
      *
      * 存在这个判断是因为 [handle] **不能在主线程上调用**（理由见 [AgentService] 的
      * 分发处），调用方要先分类、再决定在哪个线程上执行。
      */
     fun handles(action: String): Boolean = action in HANDLED
+
+    /**
+     * 该动作是否属于终结类。调用方据此选执行器：终结类走独立的即时执行器，其余走共用队列。
+     */
+    fun isTerminating(action: String): Boolean = action in TERMINATING
 
     /**
      * 处理一条维护命令；不属于此类返回 false。

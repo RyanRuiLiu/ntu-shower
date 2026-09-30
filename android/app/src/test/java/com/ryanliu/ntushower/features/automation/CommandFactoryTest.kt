@@ -147,6 +147,14 @@ class CommandFactoryTest {
             assertTrue("$action 没有维护类处理器", DeviceMaintenance.handles(action))
         }
 
+        // 终结类走独立执行器：它们的动作就是终止本进程，排在别的维护命令后面等于没有执行。
+        // 真机上如此丢过一次恢复机会——一串超时的 device.exec 挡在前面，重启一次都没跑。
+        val terminating = setOf(SupportedActions.DEVICE_RESTART, SupportedActions.DEVICE_UNINSTALL)
+        maintenance.forEach { action ->
+            assertEquals("$action 的终结类判定不对", action in terminating, DeviceMaintenance.isTerminating(action))
+        }
+        assertFalse("未知动作不该被判成终结类", DeviceMaintenance.isTerminating("nonexistent.action"))
+
         // bridge.open / bridge.close 是独立的信封类型，由 AgentService 直接分支处理，
         // 不进命令分发；服务端发出即返回，不等答复。
         val bridge = setOf(SupportedActions.BRIDGE_OPEN, SupportedActions.BRIDGE_CLOSE)

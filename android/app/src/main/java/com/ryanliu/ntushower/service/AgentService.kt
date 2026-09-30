@@ -51,6 +51,15 @@ class AgentService : Service() {
      * 无障碍事件都在那儿排队（见 [dispatchCommand]）。
      */
     private val maintenanceExecutor = Executors.newSingleThreadExecutor()
+
+    /**
+     * 终结类维护动作（重启、卸载）的执行器。
+     *
+     * 与 [maintenanceExecutor] 分开，理由见 [DeviceMaintenance.isTerminating]：这两个动作的作用
+     * 就是终止本进程，排在别的维护命令后面没有意义。真机上出过——一串 `device.exec` 各自等满
+     * 25 秒，随后发的重启排在其后，服务端看到的仍是超时，而那一次重启其实一次都没执行。
+     */
+    private val terminatingExecutor = Executors.newSingleThreadExecutor()
     private var otaCheckFuture: java.util.concurrent.ScheduledFuture<*>? = null
     private var otaUpdater: OtaUpdater? = null
     private lateinit var client: GatewayClient
@@ -136,8 +145,11 @@ class AgentService : Service() {
 
                 // 调试桥也要离开主线程：openAdbBridge 里的 setprop / stop adbd / start adbd
                 // 是同步 shell 调用，closeAdbBridge 的关闭回调里还藏着一条——两条都会把
-                // 主线程压住，连带排队心跳与无障碍事件。它们同属维护类，走同一个执行器，
-                // 也就与 device.restart/uninstall 天然互斥（调试桥开着时重启设备本就危险）。
+                // 主线程压住，连带排队心跳与无障碍事件。它们与 device.exec 共用执行器。
+                //
+                // 与 device.restart/uninstall 不再互斥（那两个走 terminatingExecutor）：
+                // 重启会打断正在进行的调试桥字节流，而重启的用途本就是"设备已经不通了"，
+                // 那时打断一条调试桥不是代价。
                 "bridge.open" -> maintenanceExecutor.execute {
                     // 这两条不产生命令结果（服务端发出即返回，不等答复），但崩了必须留痕：
                     // 静默失败会让服务端一直等一个永远连不上来的设备，而日志里什么都没有
@@ -201,7 +213,8 @@ class AgentService : Service() {
             return
         }
         if (DeviceMaintenance.handles(action)) {
-            maintenanceExecutor.execute { DeviceMaintenance.handle(action, params, commandId, ::sendOutcome) }
+            val executor = if (DeviceMaintenance.isTerminating(action)) terminatingExecutor else maintenanceExecutor
+            executor.execute { DeviceMaintenance.handle(action, params, commandId, ::sendOutcome) }
             return
         }
         sendOutcome(
@@ -359,6 +372,7 @@ class AgentService : Service() {
         otaScheduler.shutdownNow()
         worker.shutdownNow()
         maintenanceExecutor.shutdownNow()
+        terminatingExecutor.shutdownNow()
         closeAdbBridge("service destroyed")
         client.disconnect()
         monitor?.stopWatching()
