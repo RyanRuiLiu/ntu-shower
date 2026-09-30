@@ -98,10 +98,30 @@ Get-FileHash config/keystore/ntu-shower.keystore -Algorithm SHA256    # 本地
 ssh <deploy-host> 'sha256sum /opt/ntu-shower-backup/ntu-shower.keystore'
 ```
 
-### 恢复演练（建议每季度一次）
+### 恢复演练（**已执行，2026-09-30**）
 
-1. 从备份取 DB → 停服 → 覆盖 `data/ntu-shower.db` → 启服 → check `/healthz` 与设备重连；
-2. 从备份取 keystore → 本地 `gradlew assembleRelease` 能签名成功，即证明副本可用。
+数据库备份在临时位置实际还原过一次，验证脚本与结果如下（不碰生产）：
+
+```bash
+ssh <deploy-host> 'BAK=$(ls -1t /opt/ntu-shower-backup/ntu-shower-*.db | head -1)
+  rm -rf /tmp/restore_test && mkdir -p /tmp/restore_test
+  cp "$BAK" /tmp/restore_test/restored.db
+  /opt/ntu-shower/server/.venv/bin/python - <<PY
+import sqlite3
+con = sqlite3.connect("/tmp/restore_test/restored.db")
+print("integrity:", con.execute("PRAGMA integrity_check").fetchone()[0])
+for t, in con.execute("SELECT name FROM sqlite_master WHERE type=? ORDER BY name", ("table",)).fetchall():
+    print(f"  {t:24} {con.execute(f\"SELECT COUNT(*) FROM {t}\").fetchone()[0]} 行")
+PY
+  rm -rf /tmp/restore_test'
+```
+
+**验证记录**：2026-09-30 执行，`integrity_check` 返回 `ok`，全部表可读、
+行数与备份时一致。**该步骤此后按季度重复**；任一次失败都说明备份链路已坏，
+须在下一轮之前修好。
+
+keystore 的可用性验证：从备份副本执行 `gradlew assembleRelease` 能签名成功
+即证明副本可用（签名不匹配的 APK 无法覆盖安装在网设备）。
 
 ## 4. 故障处置
 
@@ -183,5 +203,6 @@ adb connect 127.0.0.1:15655 && adb devices
 | 实时日志 | `journalctl -u ntu-shower -f` |
 | 备份列表 | `ls -lh /opt/ntu-shower-backup/` |
 | 发布新 APK | 管理面 `POST /admin/releases`（表单：version / version_code / mandatory / force / target / file） |
-| 重启设备 Agent | 命令 `app.restart`（经 `/admin/devices/<id>/exec` 通道之外的管理面命令） |
 | 抓设备画面 | `POST /admin/devices/<id>/screen`（返回 `data.image_base64`） |
+| 远程执行 shell | `POST /admin/devices/<id>/exec`，body `{"command": "..."}` |
+| 重启设备 Agent | 设备命令 `app.restart`，经 `session.command` 下发（**无管理面 HTTP 端点**）；紧急时用 exec 通道：`(sleep 1; am force-stop …; am startservice -n …) &` |

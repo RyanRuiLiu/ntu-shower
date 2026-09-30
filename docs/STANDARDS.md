@@ -44,6 +44,8 @@
 |---|---|
 | RFC 9457 Problem Details（`application/problem+json`） | `core/errors.py` 统一装配；问题类型登记于 `core/problems.py` |
 | 问题类型（`type`）标识**问题种类**而非状态码 | 每个问题在 `core/problems.py` 登记稳定 code；测试断言 `type` 后缀，不解析 `detail` 文案 |
+| **响应类型必须显式**：每个端点的 200 响应都要有具名模型，不得返回无类型的 `object` | 契约模型集中在各模块 `schemas.py`（请求用 Pydantic 承担校验，响应用 TypedDict 零开销）；客户端据此生成类型，而不是手抄字段 |
+| **可选字段用 `total=False` 表达**，不得靠"有时带有时不带"的松散对象 | 例：`OtaManifest`（有更新时才带版本字段）、`BridgeStatus`（桥打开时才带端口） |
 | OpenAPI 3.1 | FastAPI 自动生成，`/docs` 可视 |
 | JSON Schema draft 2020-12 覆盖**全部**协议消息 | `protocol/schema/` + `tests/test_protocol_schemas.py`（含"无多余 schema"反向断言） |
 | 跨端动作名一致（服务端下发 ↔ 设备端识别） | `tests/test_admin_debug.py` 逐条锁定 |
@@ -60,7 +62,7 @@
 | 令牌比较 | `secrets.compare_digest` 恒定时间比较，避免时序侧信道 |
 | 路径构造 | 参与文件路径的外部输入先按白名单正则校验（`ota/service.release_path` 是唯一构造点） |
 | 对象级授权 | 设备与门是全局资源；写操作经角色守卫 |
-| 认证 | 管理面 X-Admin-Token；用户面操作匿名（凭证由浴室系统校验，ADR-0034） |
+| 认证 | 管理面 `X-Admin-Token`；用户面操作需 `X-Identity` 标识 + 能力位（`ops`/`photo`），查看类接口无需凭据（ADR-0037）；浴室账号密码不落库，由调用方在操作时携带 |
 | 资源消耗 | 每设备同时至多一条在途命令（409 device.busy）；OTA 上传体积上限 |
 | SSRF | 服务端不代取外部 URL |
 | 密钥 | 全部走环境变量（`server/.env`），模板只含占位值 |
@@ -81,15 +83,25 @@
 
 ### 赦免清单（唯一合法的不测理由）
 
-| 范围 | 理由 | 替代验证 |
-|---|---|---|
-| `service/`、`receiver/`、`ShowerApp`、`features/automation/`、`features/remote/`（设备端） | 依赖 android.jar 桩、无障碍服务、Looper 线程、MediaCodec | 真机 E2E（分配/结算/拍照/截图/自更新均已实测） |
-| `transport/GatewayClient`、`core/net`、`core/tls`、`core/shell`、`core/identity`（设备端） | 依赖真实 TLS 栈 / root shell / 系统服务 | 探针 APK 真机实测 |
-| `core/config/AppConfig`（设备端） | 纯常量 | 编译期保障 |
-| 端口不可用等内核竞态分支（服务端） | 需真实占用端口，进程内不可稳定复现 | 已用真实占用端口的测试覆盖，见 `test_edge_branches.py` |
+设备端的实现清单在 `android/app/build.gradle.kts` 的 `frameworkBoundClasses`，
+**本文档不再重复列举**（同一份清单写两处必然分叉）。分组与理由如下：
 
-**新增豁免必须先证明"不可测"**（列出尝试过的手段），并在本表登记。
-禁止用豁免掩盖"懒得搭测试脚手架"。
+| 分组 | 范围 | 为什么不可测 | 替代验证 |
+|---|---|---|---|
+| 入口与常驻服务 | `ShowerApp`、`service/`、`receiver/` | 依赖系统服务与 Looper | 真机 E2E（分配/结算/拍照/截图均已实测） |
+| 主线程投递 | `core/threading/` | 两个"当前已是主线程"的短路分支必须真实 Looper 才走得到 | 真机运行；等待逻辑本身是 JDK 的 `CountDownLatch`，无自研分支 |
+| 网络栈 | `transport/GatewayClient`、`core/net/HttpClientFactory`、`core/tls/`、`core/identity/` | 依赖真实 TLS/DNS 套接字 | 探针 APK 真机实测；可抽的部分已抽为 `ReconnectBackoff`/`DnsResolver` 并纳入覆盖 |
+| root shell | `core/shell/RootShell`、`core/perf/`、`core/config/AppConfig` | 依赖真实 `su` 进程与系统服务 | 真机实测；输出解析已抽为 `ShellOutput` 并纳入覆盖 |
+| 无障碍节点操作 | `features/automation/`（7 个类） | 依赖 `android.view.accessibility` 节点树与窗口管理器 | 真机 E2E；串行决策已抽为 `SerialCommandQueue` 并纳入覆盖 |
+| 设备 IO | `features/remote/`、`features/doors/` | ADB 字节泵 / MediaCodec / FileObserver | 真机实测；事件过滤已抽为 `DoorEventFilter` 并纳入覆盖 |
+| 自管理 | `features/selfmanage/` | 依赖 root shell 与包管理器 | 真机 OTA 实测；设置合并已抽为 `A11ySettingsMerge` 并纳入覆盖 |
+| 纯数据载体 | `PageState`/`CommandOutcome`/`FlowError`/`Envelope` | 仅编译器生成的 `equals`/`hashCode`/`copy`，无手写逻辑 | 编译期保障（JaCoCo 官方亦建议排除生成代码） |
+
+服务端无需豁免清单：`pyproject.toml` 的 `fail_under` 覆盖全部源码，
+端口竞态等分支已用真实占用端口的测试覆盖（见 `test_edge_branches.py`）。
+
+**新增豁免必须先证明"不可测"**（列出尝试过的手段）并同时更新两处：
+`frameworkBoundClasses` 与本表的分组。禁止用豁免掩盖"懒得搭测试脚手架"。
 
 ## 6. 日志与可观测性
 
@@ -147,9 +159,24 @@
 
 ## 9. 文档
 
-- 架构决策：[MADR v3](https://adr.github.io)（`docs/decisions/NNNN-slug.md`，只追加不重写）。
-- 协议：`docs/PROTOCOL.md`；架构：`docs/ARCHITECTURE.md`；本册：工程与安全约束。
+读者与用途决定文档的边界，**同一件事不写两处**。仓库文档只有这些：
+
+| 文档 | 读者 | 写什么 |
+|---|---|---|
+| `AGENTS.md` | AI 协作者 | **入口**：一屏读完知道读哪份、门禁命令、硬约束、当前状态 |
+| `README.md` | 首次接触者 | 项目是什么、怎么跑起来 |
+| `docs/ARCHITECTURE.md` | 需要理解全局的人 | 分层与数据流（"为什么这样分"） |
+| `docs/PROTOCOL.md` | 改协议的人 | 跨端消息表与字段 |
+| `docs/STANDARDS.md`（本册） | 所有人 | 受约束的标准与执行机制 |
+| `docs/RUNBOOK.md` | 运维 | 部署、备份、故障处置步骤 |
+| `docs/DECISIONS.md` + `decisions/` | 想知道"为什么这样决定"的人 | MADR v3 决策记录，**只追加不重写**；被取代的在索引里标注 |
+| `CONTRIBUTING.md` | 要动手改的人 | 环境准备与"任务 → 改哪里"的映射 |
+| `deploy/README.md` | 改部署配置的人 | nginx/systemd 的同步方式与易错点 |
+
+- 决策记录：[MADR v3](https://adr.github.io)（`docs/decisions/NNNN-slug.md`）。过期的**不删**——
+  它记录了当时为什么这么选；但在 `DECISIONS.md` 的"已取代的决策"表里标明被谁取代。
 - **文档与代码冲突时以代码为准，当场修文档**——不允许把过期文档留在仓库。
+  只做关键词检索不够：整段描述的前提可能已变，必须通读该节再判断。
 
 ## 10. 环境值
 
@@ -157,7 +184,8 @@
 
 - 服务端：`server/.env`（模板 `server/.env.example`），经 `core/config.py` 的类型化 `Settings` 读取；
 - 设备端：构建期唯一锚点是 `android/gradle.properties` 的 `serverDomain`；
-- 运行时可变参数全部走远程配置（`modules/config` 的键白名单）。
+- 运行时可变参数全部走远程配置，**键集与范围由 `modules/config/spec.py` 的登记表定义**
+  （类型、上下限、归属、说明都在那一处；服务端据此校验、客户端据此渲染控件）。
 
 例外：JSON Schema 的 `$id` 按规范必须是 URI（draft 2020-12 §9.1），
 使用域名形式是规范要求而非环境耦合。
@@ -168,7 +196,7 @@
 
 | 要加什么 | 接缝 | 需要的改动 |
 |---|---|---|
-| 一个远程配置键 | `config/store.py` 的 `DEFAULT_CONFIG` | 加一行 + 设备端 `RuntimeConfig.appliers` 加一行（键名只写一次） |
+| 一个远程配置键 | `config/spec.py` 的 `CONFIG_SPECS` | 加一条 ConfigSpec（类型/范围/归属/说明）+ 设备端 `RuntimeConfig.appliers` 加一行（键集合由 `test_config_spec.py` 对账） |
 | 一个新协议消息 | `protocol/schema/` | 加 schema + `tests/test_protocol_schemas.py` 的 `KNOWN_TYPES` 与样例 + `docs/PROTOCOL.md` + 双端实现 |
 | 一个新设备命令 | 设备端 `AgentService.dispatchCommand` | 加 action 分支 + 服务端下发点 + 锁定动作名的测试 |
 | 一个新领域模块 | `server/app/modules/<domain>/` | `routes.py`（挂载于 `main.create_app`）+ `service.py` + `repository.py` |

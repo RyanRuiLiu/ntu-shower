@@ -37,6 +37,18 @@
 | [0031](decisions/0031-madr-decision-records.md) | 决策记录迁移 MADR v3 | 2026-09-30 |
 | [0032](decisions/0032-test-strategy-coverage-exemptions.md) | 测试策略：全面覆盖 + 赦免制 | 2026-09-30 |
 | [0033](decisions/0033-versioning-release-policy.md) | 版本与发布规范 | 2026-09-30 |
-| [0034](decisions/0034-user-plane-anonymous-auth.md) | 用户面操作接口匿名，废除用户登录体系 | 2026-09-30 |
+| [0034](decisions/0034-user-plane-anonymous-auth.md) | 用户面操作接口匿名，废除用户登录体系 ⚠️ 已取代 | 2026-09-30 |
 | [0035](decisions/0035-adb-bridge-zero-port.md) | 真实 ADB 经 443 网关透传（零新端口） | 2026-09-30 |
 | [0036](decisions/0036-ota-install-tracking.md) | OTA 安装状态跟踪（防 force 死循环） | 2026-09-30 |
+| [0037](decisions/0037-identity-and-capabilities.md) | 用户面访问控制：身份标识 + 能力位 | 2026-09-30 |
+| [0038](decisions/0038-config-registry-and-diff-storage.md) | 远程配置：登记表 + 只存差异 | 2026-09-30 |
+
+## 已取代的决策
+
+标 ⚠️ 的 ADR **不再是当前实现**，只在需要了解演进过程时阅读。照它写代码会出错。
+
+| 原决策 | 被谁取代 | 取代的部分 |
+|---|---|---|
+| [0021](decisions/0021-remote-config-14-keys.md) | [0038](decisions/0038-config-registry-and-diff-storage.md) | 键集与存储方式 |
+| [0025](decisions/0025-role-model-rbac.md) | [0034](decisions/0034-user-plane-anonymous-auth.md) → [0037](decisions/0037-identity-and-capabilities.md) | 用户面登录；三级角色改为能力位 |
+| [0034](decisions/0034-user-plane-anonymous-auth.md) | [0037](decisions/0037-identity-and-capabilities.md) | 用户面操作接口匿名 |

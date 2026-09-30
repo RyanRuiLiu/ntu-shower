@@ -23,9 +23,10 @@ cp gradle.properties.example gradle.properties
 
 ```bash
 # ① 改代码
-# ② 跑门禁（与服务端 CI 完全同一组命令）
+# ② 跑门禁（CI 跑的是同一组命令；本地 format 用 . 直接改文件，CI 用 --check 只校验）
 cd server
-ruff format . && ruff check . --fix
+ruff format .
+ruff check . --fix
 mypy app --strict
 pytest -q --cov=app --cov-report=term-missing
 
@@ -53,7 +54,7 @@ git commit -m "fix: 修复 OTA force 发布重复推送" -m "mark_installed_upto
 
 | 任务 | 改哪里 |
 |---|---|
-| 加一个远程配置键 | `server/app/modules/config/store.py` 的 `DEFAULT_CONFIG` + 设备端 `core/config/RuntimeConfig.kt` 的 `appliers`（键名各写一次） |
+| 加一个远程配置键 | `server/app/modules/config/spec.py` 的 `CONFIG_SPECS` 加一条（类型/范围/单位/归属/说明）+ 设备端 `core/config/RuntimeConfig.kt` 的 `appliers` 加一行；两端键集合由 `test_config_spec.py` 对账 |
 | 加一个协议消息 | `protocol/schema/<type>.json` + `tests/test_protocol_schemas.py` 的 `KNOWN_TYPES` 与样例 + `docs/PROTOCOL.md` 总表 + 双端实现（`PROTOCOL.md` 缺登记会被测试拦下） |
 | 加一个设备命令 | 设备端 `AgentService.dispatchCommand` 加分支 + 服务端下发点 + 锁定动作名的测试（见 `tests/test_admin_debug.py`） |
 | 加一个领域模块 | `server/app/modules/<domain>/`：`routes.py` + `service.py` + `repository.py`，在 `main.create_app` 挂载 |
