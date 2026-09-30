@@ -11,6 +11,8 @@ import com.ryanliu.ntushower.service.A11yService
 class AssignAction(override val certNo: String, override val password: String, private val doorNo: Int) :
     AutomationFlow.Action {
 
+    override val traceLabel = "assign door=$doorNo"
+
     override fun perform(a11y: A11yService): FlowError? {
         val door = BathAppNavigator.findDoor(a11y, doorNo)
             ?: return FlowError("door.not_found", "喷头 $doorNo 不存在")

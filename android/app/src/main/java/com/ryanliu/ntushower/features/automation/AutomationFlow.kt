@@ -25,49 +25,68 @@ object AutomationFlow {
         val certNo: String
         val password: String
 
+        /** 耗时记录里用作区分的前缀，见 [AutomationTrace]。 */
+        val traceLabel: String
+
         /** 执行命令专属 UI 动作；返回 null 表示成功，返回 [FlowError] 表示失败。 */
         fun perform(a11y: A11yService): FlowError?
     }
 
     fun run(a11y: A11yService, action: Action, overlay: CoverOverlay): FlowOutcome {
+        // 开关关闭时 trace 为 null，各标记点退化成空操作——两条路径跑的是同一套代码
+        val trace = AutomationTrace.begin(action.traceLabel)
         // 先让页面状态与当前界面同步一次：缓存只在无障碍事件到达时更新，而"上一次事件"
         // 可能发生在很久以前（比如流程之间的空档）。不刷新就开始判断，读到的可能是
         // 上一轮残留的状态。
         BathAppPage.refresh()
+        trace?.mark("refresh-page")
         // 1 回首页
         if (!BathAppNavigator.navigateToHome(a11y, RuntimeConfig.homeBudgetMs)) {
+            trace?.end("home_unreachable")
             return FlowOutcome(error = FlowError("device.home_unreachable", "无法回到首页"))
         }
+        trace?.mark("navigate-home")
         // 2 遮盖层（可经配置关闭；文案取运行时配置）
         if (RuntimeConfig.overlayEnabled) overlay.show()
+        trace?.mark("overlay-show")
         try {
             // 3 命令动作
             action.perform(a11y)?.let {
                 overlay.hide()
+                trace?.end("action_failed:${it.reasonCode}")
                 return FlowOutcome(error = it)
             }
+            trace?.mark("perform-action")
 
             // 4 等待验证页
             if (!BathAppNavigator.waitForPage(a11y, PageState.ID_VERIFY, RuntimeConfig.idVerifyWaitMs)) {
                 overlay.hide()
+                trace?.end("verify_page_timeout")
                 return FlowOutcome(error = FlowError("device.verify_page_timeout", "无法进入验证页面"))
             }
+            trace?.mark("wait-verify-page")
 
             // 5 输入账号密码（凭证由命令参数下发）
             if (!BathAppNavigator.inputCredentialsAndConfirm(a11y, action.certNo, action.password)) {
                 overlay.hide()
+                trace?.end("input_failed")
                 return FlowOutcome(error = FlowError("device.login_input_failed", "输入账号密码失败"))
             }
+            trace?.mark("input-credentials")
 
             // 6 等待浴室服务器响应（终点页：HOME 成功 / HINT·VF_RESULT 拒绝）
             val terminal = awaitTerminal(a11y)
             if (!terminal.reached) {
                 overlay.hide()
+                trace?.end("bath_server_timeout")
                 return FlowOutcome(error = FlowError("device.bath_server_timeout", terminal.message))
             }
+            trace?.mark("await-terminal")
 
+            trace?.end("ok")
             return FlowOutcome(terminalMessage = terminal.message)
         } catch (e: Exception) {
+            trace?.end("crashed:${e.message}")
             try {
                 overlay.hide()
             } catch (_: Exception) {}
