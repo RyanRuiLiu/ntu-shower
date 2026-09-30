@@ -12,8 +12,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.security import require_admin
-from app.modules.devices.routes import require_trusted_online_device
+from app.modules.devices.dependencies import require_trusted_online_device
 from app.modules.doors import repository as doors_repository
+from app.modules.doors import service as doors_service
 from app.modules.sessions import repository
 
 from . import service
@@ -69,7 +70,7 @@ def _reject_busy(result: dict) -> dict:
 async def assign(req: AssignRequest) -> dict:
     require_trusted_online_device(req.device_id)
     state = _door_state(req.device_id, req.door_no)
-    if state != "free":
+    if state != doors_service.STATE_FREE:
         raise HTTPException(status_code=409, detail=f"door not free (state={state})")
     _reject_duplicate_session(req.device_id, req.cert_no)
     result = await service.send_command_and_wait(

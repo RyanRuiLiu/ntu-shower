@@ -1,13 +1,22 @@
-"""设备 API：管理面（注册表管理）与用户面依赖守卫。"""
+"""设备管理 API：注册表管理与远程调试入口。
 
-from fastapi import APIRouter, Depends, HTTPException
+跨模块复用的依赖守卫定义在 dependencies.py，本模块只负责路由编排。
+"""
+
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from app.core.security import require_admin
+from app.modules.sessions import service as sessions_service
 
 from . import service
+from .dependencies import require_trusted_online_device
 
 admin_router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)], tags=["devices-admin"])
+
+# 远程调试超时：设备端需完成 root shell 执行或截图编解码，给足余量
+DEBUG_EXEC_TIMEOUT_S = 30.0
+SCREEN_CAPTURE_TIMEOUT_S = 30.0
 
 
 class DeviceNameRequest(BaseModel):
@@ -43,23 +52,27 @@ def rename_device(device_id: str, req: DeviceNameRequest) -> dict:
 
 @admin_router.post("/devices/{device_id}/exec")
 async def exec_command(device_id: str, req: DeviceExecRequest) -> dict:
-    """远程调试：在指定设备上以 root 执行 shell 命令并取回输出（审计留痕）。"""
+    """远程调试：在设备上以 root 执行 shell 命令并取回输出（审计留痕）。"""
     require_trusted_online_device(device_id)
-    from app.modules.sessions import service as sessions_service
-
     return await sessions_service.send_command_and_wait(
         device_id,
         "debug.exec",
         {"command": req.command},
-        timeout_s=30.0,
+        timeout_s=DEBUG_EXEC_TIMEOUT_S,
     )
 
 
-def require_trusted_online_device(device_id: str) -> dict:
-    """依赖守卫：设备必须存在且已信任、当前在线；否则拒绝进入业务。"""
-    device = service.get_device(device_id)
-    if device is None or not device["trusted"]:
-        raise HTTPException(status_code=404, detail="device not found")
-    if not service.is_online(device_id):
-        raise HTTPException(status_code=409, detail="device offline")
-    return device
+@admin_router.post("/devices/{device_id}/screen")
+async def capture_screen(device_id: str) -> dict:
+    """远程调试：抓取设备全屏画面，结果在 data.image_base64（JPEG，NO_WRAP）。
+
+    设备端走 screenrecord + MediaCodec 解码首帧——本机 framebuffer/screencap
+    取不到画面（硬件合成器直出），实现见 features/remote/ScreenCapture.kt。
+    """
+    require_trusted_online_device(device_id)
+    return await sessions_service.send_command_and_wait(
+        device_id,
+        "screen.capture",
+        {},
+        timeout_s=SCREEN_CAPTURE_TIMEOUT_S,
+    )

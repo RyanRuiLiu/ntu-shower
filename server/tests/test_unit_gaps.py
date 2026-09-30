@@ -117,7 +117,7 @@ def _rfc3339_after(seconds: float) -> str:
 
 
 def test_ping_payload_is_protocol_frame() -> None:
-    frame = json.loads(device_clock.ping_payload("dev-x"))
+    frame = json.loads(device_clock.ping_payload())
     assert frame["type"] == "link.ping"
     assert frame["payload"]["sender_time"].endswith("Z")
 
@@ -130,10 +130,10 @@ def test_derive_state_safe_int_and_unknown_status() -> None:
     assert doors_service._safe_int("x", default=3) == 3
     assert doors_service._safe_int(None) == 0
 
-    assert doors_service.derive_state({"status_raw": "1"}) == doors_service.REPAIR
-    assert doors_service.derive_state({"status_raw": "3"}) == doors_service.DISABLED
+    assert doors_service.derive_state({"status_raw": "1"}) == doors_service.STATE_REPAIR
+    assert doors_service.derive_state({"status_raw": "3"}) == doors_service.STATE_DISABLED
     # 占用者标识：acc_no 非零也算占用
-    assert doors_service.derive_state({"status_raw": 0, "card_no": 0, "acc_no": "8"}) == doors_service.WAITING
+    assert doors_service.derive_state({"status_raw": 0, "card_no": 0, "acc_no": "8"}) == doors_service.STATE_WAITING
 
 
 def test_process_snapshot_skips_invalid_and_zero_door_no(client: TestClient) -> None:

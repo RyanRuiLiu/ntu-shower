@@ -52,7 +52,12 @@ def test_send_command_offline(monkeypatch) -> None:
         return await service.send_command_and_wait("dev-x", "session.assign", {}, timeout_s=5)
 
     result = asyncio.run(flow())
-    assert result == {"status": "timeout", "reason_code": "device.offline", "terminal_message": "设备离线"}
+    assert result == {
+        "status": "timeout",
+        "reason_code": "device.offline",
+        "terminal_message": "设备离线",
+        "data": None,
+    }
 
 
 def test_send_command_timeout(monkeypatch) -> None:

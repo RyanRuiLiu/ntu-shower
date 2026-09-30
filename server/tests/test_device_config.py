@@ -5,7 +5,7 @@ import pytest
 from app.modules.config import store as device_config
 
 
-@pytest.fixture()
+@pytest.fixture
 def store(fresh_db):
     device_config.init_tables()
     return device_config

@@ -228,7 +228,8 @@ def test_ota_manifest_and_download_flow(client: TestClient) -> None:
     assert manifest["up_to_date"] is False and manifest["version"] == "0.2.5"
 
     assert client.get("/ota/download/0.2.5").content == b"apk-bytes"
-    assert client.get("/ota/download/no-such").status_code == 404
+    assert client.get("/ota/download/9.9.9").status_code == 404  # 格式合法但未发布
+    assert client.get("/ota/download/no-such").status_code == 422  # 格式非法，HTTP 边界拦截
 
     releases = client.get("/ota/releases").json()
     assert any(r["version"] == "0.2.5" for r in releases)
@@ -290,6 +291,6 @@ def test_device_clock_boundaries() -> None:
 def test_ping_payload_uses_symmetric_sender_time() -> None:
     from app.core import device_clock, protocol
 
-    frame = json.loads(device_clock.ping_payload("d"))
+    frame = json.loads(device_clock.ping_payload())
     assert frame["type"] == "link.ping" and "sender_time" in frame["payload"]
     assert frame["v"] == protocol.PROTOCOL_VERSION

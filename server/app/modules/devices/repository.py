@@ -115,9 +115,10 @@ def set_trusted(device_id: str, trusted: bool) -> bool:
     return cur.rowcount > 0
 
 
-def _load_json(raw: str) -> list:
+def _load_json(raw: str) -> list[object]:
+    """解析 capabilities 列；内容损坏时视为空能力集（不让脏数据拖垮注册）。"""
     try:
         value = json.loads(raw)
-    except Exception:
+    except json.JSONDecodeError:
         return []
     return value if isinstance(value, list) else []

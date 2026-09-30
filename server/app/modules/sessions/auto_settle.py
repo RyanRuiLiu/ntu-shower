@@ -11,6 +11,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
+from app.core.clock import parse_rfc3339
 from app.gateway.manager import manager
 from app.modules.config import store as config_store
 from app.modules.doors import repository as doors_repository
@@ -22,11 +23,11 @@ SCAN_INTERVAL_S = 30
 
 
 def _duration_s(started_at: str) -> int:
-    try:
-        start = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
-        return int((datetime.now(timezone.utc) - start).total_seconds())
-    except (ValueError, TypeError):
+    """会话已持续秒数；时间不可解析时返回 0（不参与自动结算）。"""
+    moment = parse_rfc3339(started_at)
+    if moment is None:
         return 0
+    return int((datetime.now(timezone.utc) - moment).total_seconds())
 
 
 def pick_auto_settle_candidate(config: dict) -> tuple[str, str, int] | None:
@@ -83,7 +84,7 @@ async def _loop() -> None:
     while True:
         try:
             await scan_once()
-        except Exception as exc:  # 单次失败不影响后续扫描
+        except Exception as exc:  # noqa: BLE001 —— 扫描循环必须存活：单次失败不得终止后续扫描，且已记录日志
             logger.warning("auto-settle scan failed: %s", exc)
         await asyncio.sleep(SCAN_INTERVAL_S)
 

@@ -8,7 +8,7 @@ from app.modules.doors import service as doors_service
 from app.modules.shadow import service as shadow_service
 
 
-@pytest.fixture()
+@pytest.fixture
 def shadow_db(fresh_db):
     from app.core import db
     from app.modules.devices import repository as devices_repository

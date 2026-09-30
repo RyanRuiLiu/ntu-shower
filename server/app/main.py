@@ -13,9 +13,9 @@
 鉴权语义见 core/security：匿名只读、user 可操作设备、admin 全功能。
 """
 
-import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
@@ -24,6 +24,8 @@ from fastapi.staticfiles import StaticFiles
 from .core import db
 from .core.config import settings
 from .core.errors import install_error_handlers
+from .core.security import assert_admin_token_configured
+from .core.version import APP_VERSION
 from .gateway.routes import router as gateway_router
 from .modules.bridge.routes import admin_router as bridge_admin_router
 from .modules.bridge.routes import router as bridge_router
@@ -42,8 +44,6 @@ from .modules.sessions.routes import router as sessions_router
 from .modules.shadow.routes import admin_router as shadow_admin_router
 from .modules.shadow.routes import router as shadow_router
 
-APP_VERSION = "0.3.1"
-
 
 def create_app() -> FastAPI:
     db.init_db()
@@ -54,10 +54,12 @@ def create_app() -> FastAPI:
     from app.modules.config import store as config_store
 
     config_store.init_tables()
-    os.makedirs(settings.ota_dir, exist_ok=True)
+    Path(settings.ota_dir).mkdir(parents=True, exist_ok=True)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        # 启动自检：配置不合法时拒绝启动，而非带着占位密钥对外服务
+        assert_admin_token_configured()
         from app.modules.sessions import auto_settle
 
         auto_settle.start()
@@ -80,10 +82,9 @@ def create_app() -> FastAPI:
     app.include_router(ota_admin_router)
     app.include_router(bridge_router)
     app.include_router(bridge_admin_router)
-    app.include_router(bridge_admin_router)
 
-    web_dir = os.path.join(os.path.dirname(__file__), "..", "web")
-    app.mount("/web", StaticFiles(directory=web_dir), name="web")
+    web_dir = Path(__file__).resolve().parent.parent / "web"
+    app.mount("/web", StaticFiles(directory=str(web_dir)), name="web")
 
     @app.get("/", include_in_schema=False)
     def root() -> RedirectResponse:
