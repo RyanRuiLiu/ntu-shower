@@ -69,13 +69,18 @@ class AdbBridge:
         self.pending_to_tcp.clear()
 
     async def close(self) -> None:
-        """整体回收：流 + 监听 + 设备 WS。幂等。"""
+        """整体回收：流 + 监听 + 设备 WS。幂等。
+
+        `is_serving()` 那层判断是幂等的实际来源：`asyncio.Server.close()` 重复调用会在
+        内部撞上已清空的成员（`NoneType._stop_serving`），光靠 `is not None` 挡不住
+        ——两个回收路径先后到达时它已经不是 None 了。
+        """
         await self.close_stream()
-        if self.server is not None:
+        if self.server is not None and self.server.is_serving():
             self.server.close()
             with contextlib.suppress(Exception):
                 await self.server.wait_closed()
-            self.server = None
+        self.server = None
         if self.device_ws is not None:
             # 连接可能已经断了，关闭动作失败不影响回收流程
             with contextlib.suppress(Exception):
@@ -127,7 +132,23 @@ class BridgeRegistry:
 
         注册表是进程级单例，端口分配与世代计数会跨用例累积；测试隔离需要
         一个显式重置入口，而不是让用例去动私有字段。
+
+        监听套接字也要关：只清字典的话，用例之间会残留监听端口，而端口是**固定分配**的
+        （同一台设备每次拿同一个），下一个用例开桥必然 `Errno 98`。`server.close()` 是
+        同步的（只是停止 accept），所以在这里调不违反"同步重置"的前提。
+
+        判据用 `is_serving()` 而不是 `server is not None`：`asyncio.Server.close()` 不是
+        幂等的，重复调用会在内部撞上已经清空的成员（`NoneType._stop_serving`）。
+
+        整段套 `suppress`：这是最后一道回收，常在事件循环已经关掉之后被调（pytest 反向
+        销毁夹具，`client` 先退出）。那时关闭动作既无效果也无必要，但不该让 teardown 报错
+        ——它会把一个通过的用例记成 ERROR。
         """
+        with contextlib.suppress(Exception):
+            for bridge in self.active.values():
+                if bridge.server is not None and bridge.server.is_serving():
+                    bridge.server.close()
+                bridge.server = None
         self.pending.clear()
         self.active.clear()
         self.ports.clear()

@@ -88,6 +88,15 @@ def test_adb_bridge_lifecycle(client: TestClient, monkeypatch: pytest.MonkeyPatc
     # 设备 WS 断开 → 整桥回收
     assert _status(client)["open"] is False
 
+    # 而且**监听套接字也回收了**。这条是必须的：只把桥从注册表摘掉的话，端口会被永久
+    # 占着，而端口按设备固定分配——下一次开桥必然 `Errno 98 address already in use`，
+    # 表现为 409，而设备侧此时明明已经连上来（/gateway/bridge 有 accepted 日志）。
+    # 真实发生过，光断言 open=False 是看不出来的。
+    reopened = client.post(f"/ops/devices/{DEVICE_ID}/bridge/open", headers=OPS_HEADERS)
+    assert reopened.status_code == 200, "设备 WS 断开后端口未释放，再开桥会因端口占用失败"
+    assert reopened.json()["already_open"] is False
+    client.post(f"/ops/devices/{DEVICE_ID}/bridge/close", headers=OPS_HEADERS)
+
     # ── 审计留痕：开桥与桥会话结束全落 command_audit ──
     audit = client.get("/ops/commands", headers=OPS_HEADERS, params={"device_id": DEVICE_ID}).json()
     recorded = {row["action"] for row in audit}

@@ -22,7 +22,7 @@ import { api } from '../core/api.js'
 import { elapsedSince, fmtDateTime, fmtDuration, fmtTime } from '../core/clock.js'
 import { DOOR_STATES } from '../core/contract.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
-import { outcomeText, problemText } from '../core/outcome.js'
+import { outcomeText, problemText, report } from '../core/outcome.js'
 import { store, subscribe } from '../core/store.js'
 
 /**
@@ -234,12 +234,6 @@ function stopTicking() {
   if (tickTimer === null) return
   clearInterval(tickTimer)
   tickTimer = null
-}
-
-function report(id, text, kind) {
-  const box = $(id)
-  box.className = `result ${kind}`
-  box.textContent = text
 }
 
 function paint() {
