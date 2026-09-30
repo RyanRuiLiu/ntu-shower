@@ -98,7 +98,10 @@ class CoverOverlay(context: Context) {
         if (!showing) return
         try {
             wm.removeView(view)
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+            // 视图可能已被系统回收（服务重启/窗口管理器异常）：撤层失败不影响主流程，
+            // showing 标志照常复位，下次 show 会重新添加
+        }
         showing = false
     }
 }

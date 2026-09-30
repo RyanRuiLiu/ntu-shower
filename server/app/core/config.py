@@ -13,6 +13,11 @@ class Settings(BaseSettings):
     # ── 对外地址 ──
     public_base_url: str = ""  # 对外基址（RFC 9457 问题 type 等绝对引用用）；留空则输出相对引用
 
+    # ── ADB 桥接 ──
+    # 回环监听端口基址（每台设备顺延取用）。是环境值：测试与并行实例需要
+    # 不同的端口段，硬编码会让"本机已占用该端口"变成测试失败。
+    bridge_base_port: int = 15655
+
     # ── 鉴权 ──
     admin_token: str = "change-me"  # 管理后台静态令牌（运维通道），占位值会在启动自检中被拒绝
     config_ack_timeout_s: float = 15.0  # 等待设备 config.ack 的时限
