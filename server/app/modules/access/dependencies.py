@@ -16,16 +16,16 @@ from collections.abc import Callable
 from fastapi import Depends, Header
 
 from app.core.problems import CAPABILITY_DENIED, UNAUTHENTICATED, UNKNOWN_IDENTITY, ApiProblemError
-from app.core.protocol import JsonObject
 
 from . import service
 from .capabilities import Capability
+from .schemas import GrantRecord
 
 #: 调用方携带自身标识的请求头。
 IDENTITY_HEADER = "X-Identity"
 
 
-def require_identity(x_identity: str | None = Header(default=None, alias=IDENTITY_HEADER)) -> JsonObject:
+def require_identity(x_identity: str | None = Header(default=None, alias=IDENTITY_HEADER)) -> GrantRecord:
     """要求携带一个在名单里的标识，不要求具体能力。
 
     用于"查询自己有什么能力"这类接口——若它本身要求某种能力，只被授予另一种
@@ -39,10 +39,10 @@ def require_identity(x_identity: str | None = Header(default=None, alias=IDENTIT
     return caller
 
 
-def require_capability(capability: Capability) -> Callable[..., JsonObject]:
+def require_capability(capability: Capability) -> Callable[..., GrantRecord]:
     """构造守卫：要求调用方持有该能力。"""
 
-    def guard(caller: JsonObject = Depends(require_identity)) -> JsonObject:
+    def guard(caller: GrantRecord = Depends(require_identity)) -> GrantRecord:
         if capability.value not in caller["capabilities"]:
             raise ApiProblemError(CAPABILITY_DENIED, f"缺少能力：{capability.value}")
         return caller

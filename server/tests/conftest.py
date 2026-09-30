@@ -53,8 +53,9 @@ def ops_headers(fresh_db: str) -> dict[str, str]:
     不要去探名单表的结构。
     """
     from app.modules.access import repository as access_repository
+    from app.modules.access.identity import IdentityKind
 
-    access_repository.put_grant("test-identity", "token", ["ops", "photo"], "测试用")
+    access_repository.put_grant("test-identity", IdentityKind.WEB, ["ops", "photo"], "测试用")
     return {"X-Identity": "test-identity"}
 
 

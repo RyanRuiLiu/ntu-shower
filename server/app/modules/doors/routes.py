@@ -6,14 +6,15 @@ import contextlib
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.core import events
-from app.core.protocol import JsonObject
 from app.modules.doors import repository
+
+from .schemas import DoorView
 
 router = APIRouter(prefix="/api/v1", tags=["doors"])
 
 
 @router.get("/doors")
-def list_doors(device_id: str | None = None) -> list[JsonObject]:
+def list_doors(device_id: str | None = None) -> list[DoorView]:
     return repository.list_doors_with_device(device_id)
 
 

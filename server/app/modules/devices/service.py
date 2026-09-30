@@ -1,16 +1,16 @@
 """设备领域服务：注册表操作与在线/信任语义（在线 = 存在活动网关连接）。"""
 
-from app.core.protocol import JsonObject
 from app.gateway.manager import manager
 
 from . import repository
+from .schemas import DeviceRecord
 
 
-def get_device(device_id: str) -> JsonObject | None:
+def get_device(device_id: str) -> DeviceRecord | None:
     return repository.get(device_id)
 
 
-def list_devices() -> list[JsonObject]:
+def list_devices() -> list[DeviceRecord]:
     return repository.list_all()
 
 
@@ -19,7 +19,7 @@ def register_device(
     app_version: str,
     version_code: int,
     os_version: str,
-    capabilities: list[object],
+    capabilities: list[str],
     ip: str,
 ) -> None:
     repository.register(device_id, app_version, version_code, os_version, capabilities, ip)
