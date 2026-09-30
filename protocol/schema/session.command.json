@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ntu-shower.iseekdream.com/schema/session.command.json",
+  "title": "Server command to device",
+  "allOf": [
+    {
+      "$ref": "https://ntu-shower.iseekdream.com/schema/envelope.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session.command"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "action",
+            "params",
+            "deadline_ts"
+          ],
+          "properties": {
+            "action": {
+              "type": "string",
+              "pattern": "^[a-z]+\\.[a-z_]+$"
+            },
+            "params": {
+              "type": "object"
+            },
+            "deadline_ts": {
+              "$ref": "https://ntu-shower.iseekdream.com/schema/envelope.json#/$defs/rfc3339"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

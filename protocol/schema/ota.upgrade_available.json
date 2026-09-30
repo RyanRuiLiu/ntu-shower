@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ntu-shower.iseekdream.com/schema/ota.upgrade_available.json",
+  "title": "New release pushed to an online device",
+  "allOf": [
+    {
+      "$ref": "https://ntu-shower.iseekdream.com/schema/envelope.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "ota.upgrade_available"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "version",
+            "version_code",
+            "url",
+            "mandatory"
+          ],
+          "properties": {
+            "version": {
+              "type": "string"
+            },
+            "version_code": {
+              "type": "integer"
+            },
+            "url": {
+              "type": "string"
+            },
+            "mandatory": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

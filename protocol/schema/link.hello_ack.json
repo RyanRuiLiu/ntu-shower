@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ntu-shower.iseekdream.com/schema/link.hello_ack.json",
+  "title": "Server hello acknowledgement",
+  "allOf": [
+    {
+      "$ref": "https://ntu-shower.iseekdream.com/schema/envelope.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "link.hello_ack"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "trusted",
+            "server_time",
+            "config"
+          ],
+          "properties": {
+            "trusted": {
+              "type": "boolean"
+            },
+            "server_time": {
+              "$ref": "https://ntu-shower.iseekdream.com/schema/envelope.json#/$defs/rfc3339"
+            },
+            "config": {
+              "type": "object",
+              "properties": {
+                "heartbeat_interval_s": {
+                  "type": "integer",
+                  "minimum": 5
+                },
+                "server_ping_interval_s": {
+                  "type": "integer",
+                  "minimum": 5
+                },
+                "reconnect_base_ms": {
+                  "type": "integer",
+                  "minimum": 1000
+                },
+                "reconnect_max_ms": {
+                  "type": "integer",
+                  "minimum": 5000
+                },
+                "watchdog_interval_s": {
+                  "type": "integer",
+                  "minimum": 10
+                },
+                "report_debounce_ms": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "overlay_enabled": {
+                  "type": "boolean"
+                },
+                "overlay_message": {
+                  "type": "string"
+                },
+                "server_response_timeout_ms": {
+                  "type": "integer",
+                  "minimum": 1000
+                },
+                "id_verify_wait_ms": {
+                  "type": "integer",
+                  "minimum": 500
+                },
+                "home_budget_ms": {
+                  "type": "integer",
+                  "minimum": 1000
+                },
+                "poll_interval_ms": {
+                  "type": "integer",
+                  "minimum": 50
+                },
+                "ui_click_delay_ms": {
+                  "type": "integer",
+                  "minimum": 50
+                },
+                "ota_check_interval_s": {
+                  "type": "integer",
+                  "minimum": 60
+                }
+              }
+            },
+            "upgrade": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "version",
+                    "version_code",
+                    "url"
+                  ],
+                  "properties": {
+                    "version": {
+                      "type": "string"
+                    },
+                    "version_code": {
+                      "type": "integer"
+                    },
+                    "sha256": {
+                      "type": "string"
+                    },
+                    "mandatory": {
+                      "type": "boolean"
+                    },
+                    "force": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ]
+}

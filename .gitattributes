@@ -1,0 +1,22 @@
+# 跨平台换行符与二进制文件类型规范化（Git 官方推荐做法）
+* text=auto eol=lf
+
+# Windows 专用脚本保持 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# 明确二进制类型，避免 Git 尝试做文本转换
+*.keystore binary
+*.apk binary
+*.jar binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+
+# 锁文件不参与 diff 统计
+gradle.lockfile -diff

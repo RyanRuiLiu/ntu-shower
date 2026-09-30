@@ -1,0 +1,11 @@
+# 复制为 gradle.properties（真实文件已被 .gitignore 排除，绝不入库）
+# 签名口令不在仓库中保存：从 keystore 保管方单独获取后填入下方占位符。
+org.gradle.jvmargs=-Xmx2048m
+android.useAndroidX=false
+
+# 设备端唯一锚点：服务域名（构建期注入 BuildConfig）
+serverDomain=ntu-shower.iseekdream.com
+
+# 签名密钥（keystore 文件位于 ../config/keystore/，已 gitignore）
+keystorePassword=REPLACE_WITH_KEYSTORE_PASSWORD
+keystoreAlias=ntu-shower

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ntu-shower.iseekdream.com/schema/door.snapshot_ack.json",
+  "title": "Server acknowledgement for a snapshot",
+  "allOf": [
+    {
+      "$ref": "https://ntu-shower.iseekdream.com/schema/envelope.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "door.snapshot_ack"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "snapshot_id"
+          ],
+          "properties": {
+            "snapshot_id": {
+              "$ref": "https://ntu-shower.iseekdream.com/schema/envelope.json#/$defs/uuid"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

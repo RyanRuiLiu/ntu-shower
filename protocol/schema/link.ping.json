@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ntu-shower.iseekdream.com/schema/link.ping.json",
+  "title": "Heartbeat ping (either side)",
+  "allOf": [
+    {
+      "$ref": "https://ntu-shower.iseekdream.com/schema/envelope.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "link.ping"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "sender_time"
+          ],
+          "properties": {
+            "sender_time": {
+              "$ref": "https://ntu-shower.iseekdream.com/schema/envelope.json#/$defs/rfc3339"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>NTU Shower · 喷头</title>
+<link rel="stylesheet" href="plate.css">
+<link rel="stylesheet" href="plate-wall.css">
+</head>
+<body>
+<header class="topbar">
+  <h1>NTU Shower</h1>
+  <span class="live-flag" id="live">连接中</span>
+  <span class="spacer"></span>
+  <a href="console.html">管理台</a>
+</header>
+
+<div class="split">
+  <section aria-label="喷头状态">
+    <p class="status-flash" id="offline" hidden>设备离线，门牌显示的是最后一次上报的状态。</p>
+    <p class="hint" id="empty" hidden>还没有喷头数据。设备上线并通过信任后，门牌会自动挂上来。</p>
+    <div class="plates" id="plates" aria-live="polite"></div>
+  </section>
+
+  <aside class="actions" aria-label="操作">
+    <h2>本次使用</h2>
+    <div class="field">
+      <label for="deviceId">设备</label>
+      <select id="deviceId"></select>
+    </div>
+    <div class="field">
+      <label for="doorNo">喷头</label>
+      <select id="doorNo"></select>
+    </div>
+    <div class="field">
+      <label for="certNo">学号</label>
+      <input id="certNo" autocomplete="username">
+    </div>
+    <div class="field">
+      <label for="password">密码</label>
+      <input id="password" type="password" autocomplete="current-password">
+    </div>
+    <div class="btn-row">
+      <button class="primary" id="assign">分配喷头</button>
+      <button id="settle">用完结算</button>
+      <button id="photo" class="wide">看一眼现场</button>
+    </div>
+    <p class="result-line" id="result" role="status"></p>
+    <div id="photoBox"></div>
+    <p class="hint">学号和密码只用于向浴室系统验证，本系统不保存、不登录。</p>
+  </aside>
+</div>
+
+<script src="core.js"></script>
+<script src="wall.js"></script>
+</body>
+</html>

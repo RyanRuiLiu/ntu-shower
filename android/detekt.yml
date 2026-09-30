@@ -1,0 +1,26 @@
+# detekt 质量基线：默认规则之上仅放开确有理由的项，防止代码漂移
+complexity:
+  LongMethod:
+    allowedLines: 120
+  CyclomaticComplexMethod:
+    active: true
+    allowedComplexity: 15  # 配置键映射与页面状态机分支数即复杂度，15 以内可读
+  LongParameterList:
+    active: false
+  TooManyFunctions:
+    active: false
+
+style:
+  MagicNumber:
+    active: false
+  ReturnCount:
+    active: false
+  MaxLineLength:
+    maxLineLength: 120
+
+exceptions:
+  # 设备端防御式编程：清理/回调路径必须吞掉一切异常保证服务存活（有意设计，见 ADR-0022）
+  TooGenericExceptionCaught:
+    active: false
+  SwallowedException:
+    active: false
