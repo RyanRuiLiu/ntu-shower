@@ -45,30 +45,54 @@ object A11yGuard {
     private const val APP_PACKAGE = "com.ryanliu.ntushower"
     private const val COMPONENT = "$APP_PACKAGE/.service.A11yService"
 
+    /** 修完之后等系统重绑的上限。 */
+    private const val BIND_WAIT_MS = 10_000L
+
+    /** 等待重绑时的轮询间隔。 */
+    private const val BIND_POLL_MS = 250L
+
     /** 核对并按需修复；返回修复后链路是否完整。链路本已完整时是只读操作。 */
     fun ensureAvailable(): Boolean {
         val bound = A11yService.instance != null
         val switch = readSwitch()
         val list = readServiceList()
-        if (!A11yState.needsRepair(switch, list, APP_PACKAGE, bound)) return true
+        if (!A11yState.needsRepair(switch, list, COMPONENT, bound)) return true
 
         Log.w(TAG, "accessibility degraded: bound=$bound enabled=$switch, repairing")
-        if (!bound && !A11yState.needsRepair(switch, list, APP_PACKAGE, bound = true)) {
+        if (!bound && !A11yState.needsRepair(switch, list, COMPONENT, bound = true)) {
             // 设置全对却没绑上：系统侧的绑定状态坏了，改值没用（写同样的值它不重新评估），
             // 必须把组件从清单里摘掉再放回，逼它重走一遍绑定
             rebind()
         }
         if (!A11yState.isSwitchOn(switch)) enableSwitch()
-        if (!A11ySettingsMerge.contains(readServiceList(), APP_PACKAGE)) appendToServiceList()
+        if (!A11ySettingsMerge.contains(readServiceList(), COMPONENT)) appendToServiceList()
 
-        val stillBound = A11yService.instance != null
-        val repaired = !A11yState.needsRepair(readSwitch(), readServiceList(), APP_PACKAGE, stillBound)
-        if (repaired) {
+        val stillBound = waitForBind()
+        if (stillBound) {
             Log.i(TAG, "accessibility restored")
         } else {
             Log.e(TAG, "accessibility repair failed")
         }
-        return repaired
+        return stillBound
+    }
+
+    /**
+     * 等系统把服务绑回来，最多 [BIND_WAIT_MS]。
+     *
+     * `settings put` 之后系统的重绑是**异步**的，几百毫秒到数秒不等。写完就立刻读
+     * `A11yService.instance` 多半还是 null，于是刚刚修好的那一次被记成
+     * `accessibility repair failed`——排障时把人往完全相反的方向带。
+     *
+     * 只做一轮等待，不做多层重试环：看门狗本身就是重试入口，60 秒后还会再来一次。
+     * 这个方法只在修复路径上调用（链路本来就完整时提前返回了），正常运行时不会走到。
+     */
+    private fun waitForBind(): Boolean {
+        val deadline = System.currentTimeMillis() + BIND_WAIT_MS
+        while (System.currentTimeMillis() < deadline) {
+            if (A11yService.instance != null) return true
+            Thread.sleep(BIND_POLL_MS)
+        }
+        return A11yService.instance != null
     }
 
     /**

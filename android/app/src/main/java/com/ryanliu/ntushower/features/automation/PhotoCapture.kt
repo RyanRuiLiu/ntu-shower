@@ -67,9 +67,15 @@ object PhotoCapture {
             camera.stopPreview()
 
             val yuv = captured ?: return null
-            // 尺寸必须与实际预览一致：YUV 帧按此宽高解析，不符会得到错位画面
-            val width = size?.width ?: params.previewSize.width
-            val height = size?.height ?: params.previewSize.height
+            // 尺寸要回读**相机实际采纳的**，而不是我们请求的：`setPreviewSize` 不保证被接受
+            // （相机常把它夹取到最接近的支持尺寸）。拿请求值去解析 YUV，轻则画面错位花屏、
+            // 重则 `YuvImage` 直接抛异常——两者都被上层收敛成 `camera.capture_failed`，
+            // 现象是"照片随机失败或糊"，而原因藏在一次没人看的参数协商里。
+            //
+            // 回读也可能为 null（支持列表为空时），退回请求值：有尺寸总比没有强。
+            val actual = camera.parameters.previewSize
+            val width = actual?.width ?: size?.width ?: MAX_WIDTH
+            val height = actual?.height ?: size?.height ?: PREVIEW_HEIGHT
             val out = ByteArrayOutputStream()
             YuvImage(yuv, ImageFormat.NV21, width, height, null)
                 .compressToJpeg(Rect(0, 0, width, height), JPEG_QUALITY, out)

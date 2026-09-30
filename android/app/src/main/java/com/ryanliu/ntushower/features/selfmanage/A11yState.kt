@@ -26,7 +26,11 @@ object A11yState {
      * 绑定状态却坏了，服务压根没连上。真机上发生过：进程被杀后系统没有重绑
      * `A11yService`，界面能力整片失效，而设置查起来一切都是对的，于是守护每次都
      * 判定"正常"而放行。
+     *
+     * `component` 必须是**完整组件名**（`包名/.service.A11yService`），不是裸包名。
+     * 清单判定是子串匹配，拿裸包名去比会命中形如 `com.ryanliu.ntushower` 的残缺条目
+     * ——系统并不认识那种写法，服务没绑上，而这里会判定"已在列"并放行。
      */
-    fun needsRepair(switchRaw: String, serviceList: String, appPackage: String, bound: Boolean): Boolean =
-        !bound || !isSwitchOn(switchRaw) || !A11ySettingsMerge.contains(serviceList, appPackage)
+    fun needsRepair(switchRaw: String, serviceList: String, component: String, bound: Boolean): Boolean =
+        !bound || !isSwitchOn(switchRaw) || !A11ySettingsMerge.contains(serviceList, component)
 }

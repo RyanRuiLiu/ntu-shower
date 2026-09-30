@@ -103,6 +103,10 @@ class AgentService : Service() {
             Log.i(TAG, "gateway connected, trusted=$trusted")
             if (trusted) {
                 worker.execute {
+                    // 服务端的门现态可能已经被清空重建（开发期"删了重建"是常规操作），
+                    // 而设备侧状态可能一直没变。先忘掉指纹，这次采集才会无条件入队，
+                    // 把那批门重新推一遍；只补发积压是不够的，那时发件箱多半是空的。
+                    sender.forgetLastState()
                     sender.captureAndEnqueue(client)
                     // 断网期间积压的快照与门状态是否变化无关：重连时必须直接 flush，
                     // 否则门状态未变时积压数据永远不会重发。
@@ -261,10 +265,19 @@ class AgentService : Service() {
         )
     }
 
-    /** ADB 桥接：root 开启 adbd TCP 后经 443 网关透传真实 adb 字节流。 */
+    /**
+     * ADB 桥接：root 开启 adbd TCP 后经 443 网关透传真实 adb 字节流。
+     *
+     * 守卫看的是"有没有实例"而不是"实例就绪没有"。只看 `ready` 的话，服务端在第一条
+     * 还没连上时再发一条（adbd 拉起有重试窗口、WSS 握手也在其后）就会新建第二个实例：
+     * 那一次 `stop adbd; start adbd` 会打断第一个刚建立的字节流，字段被覆盖后第一个实例
+     * 永远没人 close（线程与 socket 泄漏），而它的关闭回调仍会执行 `adbBridge = null`
+     * 与关 adbd——把新会话一起抹掉。现象是远程 adb 反复掉线，之后再也关不掉桥。
+     */
     private fun openAdbBridge(envelope: Envelope) {
-        if (adbBridge?.ready == true) {
-            Log.i(TAG, "adb bridge already open")
+        val existing = adbBridge
+        if (existing != null) {
+            Log.i(TAG, "adb bridge already open (ready=${existing.ready})")
             return
         }
         val nonce = envelope.payload.optString("nonce")
