@@ -8,7 +8,6 @@ import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import com.ryanliu.ntushower.service.A11yService
 import java.util.concurrent.ArrayBlockingQueue
-import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TAG = "BathAppPage"
@@ -33,22 +32,10 @@ data class PageSnapshot(val state: PageState, val message: String = "")
  * 全是随事件一起送来的本地数据。`AccessibilityEvent.getSource()` 不在其列——那要触发一次
  * IPC 去系统侧取节点，而这类事件每秒来十几次。
  *
- * 采它的用途是量出"哪些事件根本不会改变页面状态"：浴室 App 首页挂着跑马灯与时钟，界面每秒
- * 变十几次，每次都付一次窗口快照的钱，而绝大多数什么都没算出来。要过滤就得先知道页面**真正
- * 切换**时那几个事件长什么样，否则只能靠猜。
+ * 这两个字段是 [PageEventRules] 全部的判据，够了：浴室 App 的界面上，值得算的与不值得算的
+ * 事件在这两个维度上分得干干净净。
  */
-internal data class ContentEvent(val className: String, val text: String, val contentChangeTypes: Int) {
-
-    /** 统计用的短标识：类名只留末段、文本截断，避免一行日志被一条公告撑爆。 */
-    fun describe(): String {
-        val shortClass = className.substringAfterLast('.')
-        return "$shortClass|$contentChangeTypes|${text.take(TEXT_IN_DESCRIPTION)}"
-    }
-
-    private companion object {
-        const val TEXT_IN_DESCRIPTION = 24
-    }
-}
+internal data class ContentEvent(val className: String, val contentChangeTypes: Int)
 
 /**
  * 探针找到的控件。
@@ -91,21 +78,14 @@ internal interface PageProbe {
  */
 internal object PageRules {
 
-    private const val RID_GV_SPRINKLER = "com.datalook.bath:id/gv_sprinkler"
-    private const val RID_LL_VERIFY_IDSERIAL = "com.datalook.bath:id/ll_verify_idserial"
-    private const val RID_TV_HINT = "com.datalook.bath:id/tv_hint"
-    private const val RID_TV_VF_RESULT = "com.datalook.bath:id/tv_vf_result"
-    private const val RID_LL_BOOKING = "com.datalook.bath:id/ll_booking"
-    private const val RID_LL_VERIFY_BOOKINGCODE = "com.datalook.bath:id/ll_verify_bookingcode"
-
     fun decide(probe: PageProbe): PageSnapshot {
-        if (probe.find(RID_GV_SPRINKLER) != null) return PageSnapshot(PageState.HOME)
+        if (probe.find(BathAppResIds.SPRINKLER_GRID) != null) return PageSnapshot(PageState.HOME)
         // 停在 ID_VERIFY 上说明还在等输入，要压过下面两个"一闪过"的提示页
-        if (probe.find(RID_LL_VERIFY_IDSERIAL) != null) return PageSnapshot(PageState.ID_VERIFY)
-        probe.find(RID_TV_HINT)?.let { return PageSnapshot(PageState.HINT, it.text) }
-        probe.find(RID_TV_VF_RESULT)?.let { return PageSnapshot(PageState.VF_RESULT, it.text) }
-        if (probe.find(RID_LL_BOOKING) != null) return PageSnapshot(PageState.BOOKING)
-        if (probe.find(RID_LL_VERIFY_BOOKINGCODE) != null) return PageSnapshot(PageState.BOOKING_CODE)
+        if (probe.find(BathAppResIds.VERIFY_ID_SERIAL) != null) return PageSnapshot(PageState.ID_VERIFY)
+        probe.find(BathAppResIds.HINT_TEXT)?.let { return PageSnapshot(PageState.HINT, it.text) }
+        probe.find(BathAppResIds.VF_RESULT_TEXT)?.let { return PageSnapshot(PageState.VF_RESULT, it.text) }
+        if (probe.find(BathAppResIds.BOOKING_ROOT) != null) return PageSnapshot(PageState.BOOKING)
+        if (probe.find(BathAppResIds.BOOKING_CODE_ROOT) != null) return PageSnapshot(PageState.BOOKING_CODE)
         return PageSnapshot(PageState.UNKNOWN)
     }
 }
@@ -115,7 +95,7 @@ internal object PageRules {
  *
  * ## 判据是量出来的
  *
- * 真机跑出来的分布（`automation.log` 的 `ev` 行，每行是一个重算窗口内各来源的条数）：
+ * 真机跑出来的分布（当时按事件来源分桶统计，每行是一个重算窗口内各来源的条数）：
  *
  * | 事件 | 稳态 | 页面切换时 |
  * |---|---|---|
@@ -125,7 +105,7 @@ internal object PageRules {
  * | `LinearLayout` + 子树 | 0 | 2 条 |
  * | `TextView` + 未指定 | 0 | 1 条 |
  *
- * 稳态那两类撑着全部分母（每秒五十来条），而它们**一次都没让页面状态变过**——`changed` 在
+ * 稳态那两类占了全部事件的九成以上（每秒五十来条），而它们**一次都没让页面状态变过**——`changed` 在
  * 几十个窗口里恒为 0。来源就是首页那 7 个计时文本与一条跑马灯，每个每秒重设文本。切换页面
  * 那三类只在真实切换的窗口里出现，与稳态两类完全不重叠。
  *
@@ -169,12 +149,12 @@ internal object PageEventRules {
  *
  * ## 为什么不是"每次问就重新算"
  *
- * 识别要问一次系统（见 [PageRules] 里那组数字），而它现在有**三个消费方**——自动化流程、
- * 浴室 App 的退出监控、以及网页端按页面状态做展示。让每个消费方各自算一次，等于同一份
- * 答案被反复问，而且每次都要等下一次事件才知道状态变了。
+ * 识别要问一次系统（见 [PageRules] 里那组数字），而它被自动化流程的好几个环节反复读——等页面、
+ * 回首页、判终态。让每个环节各自算一次，等于同一份答案被反复问，而且每次都要等下一次事件
+ * 才知道状态变了。
  *
- * 改成推模型：无障碍事件到达时重算一次，状态**真的变了**才通知订阅者。消费方读
- * [snapshot] 是纯内存读，随时拿到的是当前状态，而不是"上次轮询时的状态"。
+ * 改成推模型：无障碍事件到达时重算一次。读 [snapshot] 是纯内存读，随时拿到的是当前状态，
+ * 而不是"上次轮询时的状态"。
  *
  * ## 哪些事件不值得算
  *
@@ -195,8 +175,7 @@ internal object PageEventRules {
  * 而 `WatchdogReceiver` 的广播排在主线程后面等满 10 秒，系统随即以 `background ANR`
  * 把整个进程杀掉，表现为网关每两分钟断一次。主线程只做一次入队。
  *
- * [snapshot] 与订阅回调可能来自任意线程，因此状态用 `@Volatile`、订阅表用
- * `CopyOnWriteArrayList`。
+ * [snapshot] 可能来自任意线程，因此状态用 `@Volatile`。
  */
 object BathAppPage {
 
@@ -215,8 +194,6 @@ object BathAppPage {
     @Volatile
     private var cached = PageSnapshot(PageState.UNKNOWN)
 
-    private val listeners = CopyOnWriteArrayList<(PageSnapshot) -> Unit>()
-
     init {
         Thread(::loop, "page-refresh").apply { isDaemon = true }.start()
     }
@@ -227,19 +204,15 @@ object BathAppPage {
     /**
      * 请求一次重算；**立即返回**，实际重算在 [loop] 那个线程上做。
      *
-     * 由无障碍服务的事件回调调用（主线程），所以这里只允许做原子操作与一次入队——[event]
-     * 的统计同样受这条约束，它只是往一张内存表里加个计数。
+     * 由无障碍服务的事件回调调用（主线程），所以这里只允许做原子操作与一次入队。
      *
-     * 不值得算的事件（判据见 [PageEventRules]）**只进统计、不入队**：这正是它省下来的那部分。
-     * 统计不能一起省——被筛掉的条数本身就是"筛掉了多少"这个答案。
+     * 不值得算的事件（判据见 [PageEventRules]）**直接返回**，连入队都不做——省下来的就是这
+     * 一部分，而它占了全部事件的九成以上。
      *
      * [event] 为 null 表示这是主动请求（自动化流程动手前先要一份当前状态），一律照算。
      */
     internal fun refresh(event: ContentEvent? = null) {
-        if (event != null) {
-            AutomationTrace.recordEvent(event)
-            if (!PageEventRules.mayChangePage(event)) return
-        }
+        if (event != null && !PageEventRules.mayChangePage(event)) return
         if (pending.getAndSet(true)) return
         signal.offer(Unit)
     }
@@ -265,17 +238,6 @@ object BathAppPage {
         if (next == cached) return
         cached = next
         Log.d(TAG, "page -> ${next.state}${if (next.message.isEmpty()) "" else " (${next.message})"}")
-        listeners.forEach { it(next) }
-    }
-
-    /**
-     * 订阅页面状态变化；返回取消订阅的动作。
-     *
-     * 回调在重算线程（`page-refresh`）上执行——**不要在里面做长操作**，那会拖住后续的重算。
-     */
-    fun observe(listener: (PageSnapshot) -> Unit): () -> Unit {
-        listeners.add(listener)
-        return { listeners.remove(listener) }
     }
 
     private fun compute(): PageSnapshot {

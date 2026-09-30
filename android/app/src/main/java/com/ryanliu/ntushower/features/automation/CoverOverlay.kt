@@ -40,18 +40,15 @@ class CoverOverlay(context: Context) {
     }
     private var showing = false
 
-    /** 盖住屏幕。文案与样式取自 [RuntimeConfig]，改配置后下一次 show 生效。 */
+    /** 盖住屏幕。文案与样式取自 [RuntimeConfig]，改配置后下一次 show 生效。重复调用是空操作。 */
     fun show() {
         if (showing) return
-        runOnMain { addInternal() }
+        MainThread.runAndWait { addInternal() }
     }
 
+    /** 撤掉遮盖层。没在显示时是空操作。 */
     fun hide() {
-        runOnMain { removeInternal() }
-    }
-
-    private fun runOnMain(op: () -> Unit) {
-        MainThread.runAndWait(op)
+        MainThread.runAndWait { removeInternal() }
     }
 
     private fun addInternal() {

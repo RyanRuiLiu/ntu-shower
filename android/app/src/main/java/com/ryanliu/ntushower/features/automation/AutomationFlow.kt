@@ -3,10 +3,19 @@ package com.ryanliu.ntushower.features.automation
 import android.util.Log
 import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.shell.RootShell
-import com.ryanliu.ntushower.features.automation.CoverOverlay
 import com.ryanliu.ntushower.service.A11yService
+import com.ryanliu.ntushower.transport.ReasonCodes
 
-/** 流程失败：reason_code 结构化错误码 + 人读描述。 */
+/**
+ * 流程失败：结构化错误码 + 人读描述。
+ *
+ * [reasonCode] 是跨端契约，**必须取 [ReasonCodes] 里的常量**：服务端按它分支、网页端按它选
+ * 文案，写错一个字就会静默落到"提示不对"那一类，不报错也没人留意。
+ *
+ * [message] 是**这一次**失败的具体处境——哪个喷头、哪个按钮、卡在哪一步。服务端登记表里那句
+ * 是这个码的通用含义，两句话是两件事：一个回答"怎么回事"，一个回答"这次卡在哪"。别把前者
+ * 抄过来，抄过来就丢了上下文，排障的人只能看到一个笼统的结论。
+ */
 data class FlowError(val reasonCode: String, val message: String)
 
 /**
@@ -51,7 +60,7 @@ object AutomationFlow {
         // 1 回首页
         if (!BathAppNavigator.navigateToHome(a11y, RuntimeConfig.homeBudgetMs)) {
             trace?.end("home_unreachable")
-            return FlowOutcome(error = FlowError("device.home_unreachable", "无法回到首页"))
+            return FlowOutcome(error = FlowError(ReasonCodes.DEVICE_HOME_UNREACHABLE, "无法回到首页"))
         }
         trace?.mark("navigate-home")
         // 2 遮盖层（可经配置关闭；文案取运行时配置）
@@ -70,7 +79,7 @@ object AutomationFlow {
             if (!BathAppNavigator.waitForPage(a11y, PageState.ID_VERIFY, RuntimeConfig.idVerifyWaitMs)) {
                 overlay.hide()
                 trace?.end("verify_page_timeout")
-                return FlowOutcome(error = FlowError("device.verify_page_timeout", "无法进入验证页面"))
+                return FlowOutcome(error = FlowError(ReasonCodes.DEVICE_VERIFY_PAGE_TIMEOUT, "无法进入验证页面"))
             }
             trace?.mark("wait-verify-page")
 
@@ -78,7 +87,7 @@ object AutomationFlow {
             if (!BathAppNavigator.inputCredentialsAndConfirm(a11y, action.certNo, action.password)) {
                 overlay.hide()
                 trace?.end("input_failed")
-                return FlowOutcome(error = FlowError("device.login_input_failed", "输入账号密码失败"))
+                return FlowOutcome(error = FlowError(ReasonCodes.DEVICE_LOGIN_INPUT_FAILED, "输入账号密码失败"))
             }
             trace?.mark("input-credentials")
 
@@ -87,7 +96,7 @@ object AutomationFlow {
             if (!terminal.reached) {
                 overlay.hide()
                 trace?.end("bath_server_timeout")
-                return FlowOutcome(error = FlowError("device.bath_server_timeout", terminal.message))
+                return FlowOutcome(error = FlowError(ReasonCodes.DEVICE_BATH_SERVER_TIMEOUT, terminal.message))
             }
             trace?.mark("await-terminal")
 

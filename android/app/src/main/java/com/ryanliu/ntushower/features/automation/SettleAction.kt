@@ -1,6 +1,7 @@
 package com.ryanliu.ntushower.features.automation
 
 import com.ryanliu.ntushower.service.A11yService
+import com.ryanliu.ntushower.transport.ReasonCodes
 
 /** 结算动作：HOME 页点击结算按钮。 */
 class SettleAction(override val certNo: String, override val password: String) : AutomationFlow.Action {
@@ -9,7 +10,7 @@ class SettleAction(override val certNo: String, override val password: String) :
 
     override fun perform(a11y: A11yService, trace: AutomationTrace.Trace?): FlowError? {
         if (!BathAppNavigator.clickSettleButton(a11y)) {
-            return FlowError("ui.click_no_effect", "无法点击结算按钮")
+            return FlowError(ReasonCodes.UI_CLICK_NO_EFFECT, "无法点击结算按钮")
         }
         trace?.mark("click-settle")
         return null
