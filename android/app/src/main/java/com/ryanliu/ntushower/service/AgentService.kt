@@ -289,6 +289,11 @@ class AgentService : Service() {
         if (outcome.data != null) {
             payload.put("data", outcome.data)
         }
+        // 与下发日志用同一个 command_id 对齐：两端日志能按 id 串成一条链路
+        Log.i(
+            TAG,
+            "command result: id=${outcome.commandId} status=${outcome.status} reason=${outcome.reasonCode}",
+        )
         client.send("session.command_result", payload, replyTo = outcome.commandId)
     }
 
