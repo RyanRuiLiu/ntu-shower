@@ -78,7 +78,9 @@ object BathAppPage {
      * 事件恰恰可能就是最后一次变化。为了一个测不出来的收益引入这层状态不划算。
      */
     fun refresh() {
+        val startedAt = System.nanoTime() / 1_000_000
         val next = compute()
+        AutomationTrace.recordRefresh(System.nanoTime() / 1_000_000 - startedAt, next.state.name)
         if (next == cached) return
         cached = next
         Log.d(TAG, "page -> ${next.state}${if (next.message.isEmpty()) "" else " (${next.message})"}")
