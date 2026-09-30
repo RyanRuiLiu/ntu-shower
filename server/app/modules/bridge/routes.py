@@ -18,9 +18,9 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
 from app.core import protocol
 from app.core.problems import DEVICE_OFFLINE, PORT_UNAVAILABLE, ApiProblemError
-from app.core.protocol import JsonObject
 from app.core.security import require_admin
 from app.gateway.manager import manager
+from app.modules.bridge.schemas import BridgeClosed, BridgeOpened, BridgeStatus
 from app.modules.devices.dependencies import require_trusted_online_device
 from app.modules.sessions import repository as command_audit
 
@@ -149,7 +149,7 @@ async def _pump_tcp_to_ws(bridge: AdbBridge, reader: asyncio.StreamReader) -> No
 
 
 @admin_router.post("/devices/{device_id}/adb/open")
-async def adb_open(device_id: str) -> JsonObject:
+async def adb_open(device_id: str) -> BridgeOpened:
     """打开设备的 ADB 桥：下发 bridge.open 并绑定本机回环 TCP 监听。"""
     require_trusted_online_device(device_id)
     existing = registry.active.get(device_id)
@@ -210,7 +210,7 @@ async def adb_open(device_id: str) -> JsonObject:
 
 
 @admin_router.post("/devices/{device_id}/adb/close")
-async def adb_close(device_id: str) -> JsonObject:
+async def adb_close(device_id: str) -> BridgeClosed:
     bridge = registry.active.get(device_id)
     audit_id = f"bridge-{uuid.uuid4()}"
     command_audit.insert_command(audit_id, device_id, "adb.close")
@@ -225,7 +225,7 @@ async def adb_close(device_id: str) -> JsonObject:
 
 
 @admin_router.get("/devices/{device_id}/adb/status")
-async def adb_status(device_id: str) -> JsonObject:
+async def adb_status(device_id: str) -> BridgeStatus:
     """桥接状态可观测（管理面）。"""
     bridge = registry.active.get(device_id)
     if bridge is None:

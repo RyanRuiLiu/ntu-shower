@@ -4,9 +4,12 @@
 datetime('now')，它的格式（"YYYY-MM-DD HH:MM:SS"）与全库其余时间列不一致。
 """
 
+from sqlite3 import Row
+
 from app.core.clock import now_rfc3339
 from app.core.db import get_conn
 from app.core.protocol import JsonObject
+from app.modules.ota.schemas import ReleaseRecord
 
 
 def init_tables() -> None:
@@ -118,7 +121,7 @@ def delete_release(version: str) -> bool:
     return cursor.rowcount > 0
 
 
-def list_releases() -> list[JsonObject]:
+def list_releases() -> list[ReleaseRecord]:
     rows = (
         get_conn()
         .execute(
@@ -127,10 +130,18 @@ def list_releases() -> list[JsonObject]:
         )
         .fetchall()
     )
-    releases: list[JsonObject] = []
-    for row in rows:
-        release = dict(row)
-        release["mandatory"] = bool(release["mandatory"])
-        release["force"] = bool(release["force"])
-        releases.append(release)
-    return releases
+    return [_as_release(row) for row in rows]
+
+
+def _as_release(row: Row) -> ReleaseRecord:
+    """把行转成 ReleaseRecord；SQLite 以 0/1 存布尔，此处转换。"""
+    release: ReleaseRecord = {
+        "version": row["version"],
+        "version_code": row["version_code"],
+        "sha256": row["sha256"],
+        "mandatory": bool(row["mandatory"]),
+        "force": bool(row["force"]),
+        "target": row["target"],
+        "created_at": row["created_at"],
+    }
+    return release

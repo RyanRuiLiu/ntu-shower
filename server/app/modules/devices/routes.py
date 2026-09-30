@@ -6,14 +6,13 @@
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from app.core.protocol import JsonObject
 from app.core.security import require_admin
 from app.modules.sessions import service as sessions_service
 from app.modules.sessions.schemas import CommandOutcome
 
 from . import service
 from .dependencies import require_trusted_online_device
-from .schemas import DeviceRecord
+from .schemas import DeviceRecord, DeviceRenameResult, DeviceTrustResult
 
 admin_router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)], tags=["devices-admin"])
 
@@ -36,19 +35,19 @@ def list_devices() -> list[DeviceRecord]:
 
 
 @admin_router.post("/devices/{device_id}/trust")
-def trust_device(device_id: str) -> JsonObject:
+def trust_device(device_id: str) -> DeviceTrustResult:
     found = service.set_trusted(device_id, True)
     return {"device_id": device_id, "trusted": True, "found": found}
 
 
 @admin_router.post("/devices/{device_id}/untrust")
-def untrust_device(device_id: str) -> JsonObject:
+def untrust_device(device_id: str) -> DeviceTrustResult:
     found = service.set_trusted(device_id, False)
     return {"device_id": device_id, "trusted": False, "found": found}
 
 
 @admin_router.patch("/devices/{device_id}")
-def rename_device(device_id: str, req: DeviceNameRequest) -> JsonObject:
+def rename_device(device_id: str, req: DeviceNameRequest) -> DeviceRenameResult:
     found = service.rename_device(device_id, req.name)
     return {"device_id": device_id, "name": req.name, "found": found}
 
