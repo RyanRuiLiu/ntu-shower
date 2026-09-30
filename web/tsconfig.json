@@ -24,7 +24,8 @@
     "isolatedModules": true,
     "skipLibCheck": true,
 
-    "baseUrl": ".",
+    /* paths 不加 baseUrl：后者自 TS 4.4 起可用、5.x 已弃用、7.0 将移除。
+       省略它时 paths 相对本文件所在目录解析，正是我们要的语义。 */
     "paths": {
       "@/*": ["./src/*"]
     },

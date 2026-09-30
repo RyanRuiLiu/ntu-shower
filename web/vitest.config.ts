@@ -17,6 +17,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
+      // Taro 组件需要真实运行时；测试期映射到语义相近的 DOM 标签
+      '@tarojs/components': resolve(__dirname, 'src/test/taro-components.tsx'),
     },
   },
   esbuild: {
@@ -24,6 +26,11 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    // 开启后 testing-library 会自动注册 afterEach(cleanup)。
+    // 不开的话，同一个文件里多次 render 的 DOM 会累积，`screen.getByText`
+    // 会因为匹配到上一轮的残留元素而报 getMultipleElementsFoundError。
+    // 注意这不等于要在测试里用全局函数——显式 import { it, expect } 仍然更好。
+    globals: true,
     // 测试与源码同目录（*.test.ts / *.test.tsx），就近放置
     include: ['src/**/*.test.{ts,tsx}'],
     coverage: {
@@ -32,11 +39,21 @@ export default defineConfig({
       include: ['src/**/*.{ts,tsx}'],
       exclude: [
         'src/**/*.test.{ts,tsx}',
+        // 生成物：由 openapi-typescript 从 openapi.json 产出，没有运行时代码
+        'src/api/schema.d.ts',
         // 页面与入口：由 Taro 运行时驱动，Node 环境测不出真实行为
         'src/pages/**',
         'src/app.ts',
         'src/app.config.ts',
       ],
+      // 门槛只升不降（与服务端 96、设备端 98 同一原则）。
+      // 起步 95 是给尚未编写的页面组件留余量；纯逻辑（src/domain）当前已是 100。
+      thresholds: {
+        statements: 95,
+        branches: 95,
+        functions: 95,
+        lines: 95,
+      },
     },
   },
 })
