@@ -83,7 +83,7 @@ class GatewayClient(context: Context, private val callback: Callback) {
                 .put("app_version", BuildConfig.APP_VERSION)
                 .put("version_code", BuildConfig.VERSION_CODE)
                 .put("os_version", android.os.Build.VERSION.RELEASE)
-                .put("capabilities", JSONArray())
+                .put("capabilities", JSONArray(SupportedActions.ALL.toList()))
             webSocket.send(MessageCodec.encode("link.hello", hello))
         }
 

@@ -7,6 +7,22 @@
 
 ### 修复
 
+- **API 问题类型不再用状态码充当**：`device-offline` 与 `device-busy` 此前同为 409 +
+  同一 type，客户端只能解析 `detail` 文案。新增 `core/problems.py` 登记 11 个稳定 code。
+- **未信任设备返回 403 而非 404**：设备存在却被报成"不存在"，把授权问题伪装成资源问题。
+- **测试依赖真实 60 秒超时**：`TestClient` 的同步请求是串行的，"第二条命令在途时被拒"
+  这类用例实际白等一分钟。命令超时改为可配置环境值，全量 66s → 7s。
+- 桥接 `/adb/open` 的响应里混进未替换的 `root@<server>` 占位文本与人类操作指引。
+
+### 变更
+
+- **`capabilities` 从空转变为生效**：设备端此前恒发空数组、服务端只存不用。
+  现由 `SupportedActions` 统一声明，服务端下发前比对；空数组表示"未声明"（旧版本）不拦截。
+- 泛化名具名化：`repository.insert` → `insert_command` / `insert_release`，
+  `problems.adhoc` → `adhoc_problem`。
+
+### 修复
+
 - **OTA force 无限重装循环（0.3.1 线上事故）**：`mark_installed_upto` 定义了却从未被调用，
   安装确认表恒为空，force 发布因此每次握手都判定"未安装"，设备每约 7 秒重装一次 APK。
   已接入 hello 流程（且早于 `latest_for`），并补回归测试锁定。

@@ -74,6 +74,17 @@ def is_device_busy(device_id: str) -> bool:
     return device_id in _device_pending
 
 
+def _supported_actions(device_id: str) -> list[str]:
+    """设备在 link.hello 中声明的能力集合（未声明或设备不存在时为空）。"""
+    from app.modules.devices import service as devices_service
+
+    device = devices_service.get_device(device_id)
+    if device is None:
+        return []
+    capabilities = device.get("capabilities")
+    return capabilities if isinstance(capabilities, list) else []
+
+
 async def send_command_and_wait(
     device_id: str,
     action: str,
@@ -85,6 +96,17 @@ async def send_command_and_wait(
     设备已有在途命令时立即返回 rejected（device.busy），不排队。
     """
     command_id = str(uuid.uuid4())
+    supported = _supported_actions(device_id)
+    # 空能力集表示设备未声明（旧版本）：不据此拦截，否则升级服务端会锁死在网设备
+    if supported and action not in supported:
+        repository.insert_command(command_id, device_id, action)
+        repository.finish(command_id, "failed", "session.unsupported_by_device", "")
+        return {
+            "status": "failed",
+            "reason_code": "session.unsupported_by_device",
+            "terminal_message": f"设备不支持该操作: {action}",
+            "data": None,
+        }
     if device_id in _device_pending:
         repository.insert_command(command_id, device_id, action)
         repository.finish(command_id, "rejected", "device.busy", "")
