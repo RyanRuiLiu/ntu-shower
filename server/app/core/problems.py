@@ -34,21 +34,28 @@ class Problem:
 
 
 # ── 问题类型登记（新增类型只加常量，不改既有）──
+#
+# 标题是**通用陈述**：它会在任何上下文里显示，所以不带指示代词（"这个"/"该"），
+# 也避免"不认识""对不上"这类口语。具体的对象由 `detail` 指出来。
+#
+# 与 `core.reason_codes` 里同码的那几条措辞保持一致：同一件事在 HTTP 层与命令回报层
+# 应当是同一句话，否则排障时要先判断"我看的是哪一层"。
 DEVICE_NOT_FOUND = Problem("device-not-found", 404, "找不到设备")
 DEVICE_OFFLINE = Problem("device-offline", 409, "设备离线")
 SERVER_OVERLOADED = Problem("server-overloaded", 409, "服务端同时处理的命令过多，请稍后再试")
+DOOR_NOT_FOUND = Problem("door-not-found", 404, "找不到喷头")
 DOOR_NOT_FREE = Problem("door-not-free", 409, "喷头不是空闲状态")
 NO_OCCUPIED_DOOR = Problem("no-occupied-door", 409, "该学号没有正在使用的喷头")
 PORT_UNAVAILABLE = Problem("port-unavailable", 409, "调试通道端口被占用")
-RELEASE_NOT_FOUND = Problem("release-not-found", 404, "找不到该版本")
+RELEASE_NOT_FOUND = Problem("release-not-found", 404, "找不到版本")
 RELEASE_TOO_LARGE = Problem("release-too-large", 413, "安装包超过体积上限")
 OPS_UNAUTHORIZED = Problem("ops-unauthorized", 401, "需要访问令牌")
 UNTRUSTED_DEVICE = Problem("untrusted-device", 403, "设备尚未被信任")
-DUPLICATE_SESSION = Problem("duplicate-session", 409, "该学号已有进行中的喷头")
+DUPLICATE_SESSION = Problem("duplicate-session", 409, "该学号已有进行中的会话")
 
 # ── 访问授权 ──
 UNAUTHENTICATED = Problem("unauthenticated", 401, "需要登录")
-UNKNOWN_IDENTITY = Problem("unknown-identity", 401, "该身份未被授权")
+UNKNOWN_IDENTITY = Problem("unknown-identity", 401, "该身份尚未被授权")
 LOGIN_REJECTED = Problem("login-rejected", 401, "登录失败")
 CAPABILITY_DENIED = Problem("capability-denied", 403, "权限不足")
 UNKNOWN_CAPABILITY = Problem("unknown-capability", 422, "未知的权限名")
@@ -64,6 +71,7 @@ REGISTRY: tuple[Problem, ...] = (
     DEVICE_NOT_FOUND,
     DEVICE_OFFLINE,
     SERVER_OVERLOADED,
+    DOOR_NOT_FOUND,
     DOOR_NOT_FREE,
     NO_OCCUPIED_DOOR,
     PORT_UNAVAILABLE,

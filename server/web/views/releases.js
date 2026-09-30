@@ -25,7 +25,7 @@ function report(id, text, kind) {
 
 function render(list) {
   if (list.length === 0) {
-    $('releaseTable').innerHTML = '<div class="empty">还没有发布记录</div>'
+    $('releaseTable').innerHTML = '<div class="empty">暂无发布记录</div>'
     return
   }
   const rows = list

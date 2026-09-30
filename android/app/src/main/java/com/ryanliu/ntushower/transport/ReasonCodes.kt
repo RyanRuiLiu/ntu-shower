@@ -14,19 +14,19 @@ object ReasonCodes {
     /** 收到的帧不是合法 JSON */
     const val PROTO_BAD_JSON = "proto.bad_json"
 
-    /** 不认识这种消息类型 */
+    /** 未知的消息类型 */
     const val PROTO_UNKNOWN_TYPE = "proto.unknown_type"
 
-    /** 首帧必须先发送 link.hello */
+    /** 首帧必须是 link.hello */
     const val PROTO_HELLO_REQUIRED = "proto.hello_required"
 
     /** 协议版本不匹配 */
     const val PROTO_VERSION_MISMATCH = "proto.version_mismatch"
 
-    /** 设备不认识这个操作 */
+    /** 设备不支持该操作 */
     const val PROTO_UNKNOWN_ACTION = "proto.unknown_action"
 
-    /** 收到一个对不上任何待办命令的结果 */
+    /** 该结果没有对应的待办命令 */
     const val COMMAND_UNKNOWN_ID = "command.unknown_id"
 
     /** 设备离线 */
@@ -62,13 +62,13 @@ object ReasonCodes {
     /** 命令超时，设备未在时限内给出结果 */
     const val COMMAND_DEADLINE_EXCEEDED = "command.deadline_exceeded"
 
-    /** 命令被中断（发起方已断开） */
+    /** 命令已中断：发起方断开 */
     const val COMMAND_ABORTED = "command.aborted"
 
-    /** 这个喷头不是空闲状态 */
+    /** 喷头不是空闲状态 */
     const val DOOR_NOT_FREE = "door.not_free"
 
-    /** 找不到这个喷头 */
+    /** 找不到喷头 */
     const val DOOR_NOT_FOUND = "door.not_found"
 
     /** 该学号没有正在使用的喷头 */
@@ -86,13 +86,13 @@ object ReasonCodes {
     /** 没有可输入的控件 */
     const val UI_NO_EDITABLE_FIELD = "ui.no_editable_field"
 
-    /** 系统拒绝了这个按键 */
+    /** 系统拒绝了该按键 */
     const val UI_KEY_REJECTED = "ui.key_rejected"
 
-    /** 不认识这个按键名 */
+    /** 未知的按键名 */
     const val UI_UNKNOWN_KEY = "ui.unknown_key"
 
-    /** 无障碍通道不支持这个操作 */
+    /** 无障碍通道不支持该操作 */
     const val UI_UNSUPPORTED_ACTION = "ui.unsupported_action"
 
     /** 读不到当前窗口的节点树 */

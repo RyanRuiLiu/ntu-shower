@@ -5,6 +5,7 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 
+import pytest
 from fastapi.testclient import TestClient
 from starlette.testclient import WebSocketTestSession
 
@@ -197,3 +198,105 @@ def test_two_planes_share_the_same_precheck(
 
     assert user_plane.status_code == ops_plane.status_code
     assert user_plane.json()["type"] == ops_plane.json()["type"]
+
+
+# ── 分配前的喷头状态预检 ──
+
+
+def _seed_door(device_id: str, door_no: int, **fields: object) -> None:
+    """推一份只含一扇门的快照；缺省字段表示空闲。"""
+    from app.modules.doors import service as doors_service
+
+    doors_service.process_snapshot(
+        device_id,
+        {
+            "snapshot_id": str(uuid.uuid4()),
+            "source": "db_watch",
+            "doors": [
+                {
+                    "door_no": door_no,
+                    "card_no": fields.get("card_no", 0),
+                    "cert_no": "",
+                    "acc_no": "",
+                    "open_time": None,
+                    "in_time": fields.get("in_time"),
+                    "close_time": fields.get("close_time"),
+                    "bath_time_s": fields.get("bath_time_s", 0),
+                    "status_raw": fields.get("status_raw", 0),
+                }
+            ],
+        },
+    )
+
+
+def test_assignable_states_are_free_and_selected() -> None:
+    """可分配的状态集合本身。
+
+    单独锁这个集合而不是只看接口返回：接口那边为了不真的下发命令，只能覆盖被拒的分支。
+    `selected` 必须在内——它表示"有人在浴室 App 上选中了这扇门"，而 `cardno` 仍是 0，
+    没有任何人占用，且这个状态会自行消失（真机实测两次，门自己回到了 free）。
+    要求必须 free 会把学生点选中的那几秒挡在门外。
+
+    `repair` / `disabled` 必须不在：旧系统把它们也放行了，那是它的疏漏。
+    """
+    from app.modules.doors.schemas import ASSIGNABLE_STATES, DoorState
+
+    assert {DoorState.FREE, DoorState.SELECTED} == ASSIGNABLE_STATES
+
+
+@pytest.mark.parametrize(
+    ("label", "raw"),
+    [
+        ("已进门但未出水", {"card_no": 1001}),
+        ("出水中", {"card_no": 1001, "in_time": "2026-09-30T12:00:00.000Z"}),
+        ("暂停", {"card_no": 1001, "bath_time_s": 60, "close_time": "2026-09-30T12:05:00.000Z"}),
+        ("报修", {"status_raw": 1}),
+        ("停用", {"status_raw": 3}),
+    ],
+)
+def test_assign_rejects_unassignable_states(
+    client: TestClient,
+    ops_headers: dict[str, str],
+    label: str,
+    raw: dict[str, object],
+) -> None:
+    """不可分配的状态一律 409，且**在下发命令之前**就拒。
+
+    这条也顺带证明预检没有退化成"先发给设备再说"：拒绝发生在 `send_command_and_wait`
+    之前，所以这里不会等设备回执（设备根本没接上）。
+    """
+    device_id = f"dev-reject-{label.encode('utf-8').hex()[:8]}"
+    with _online_device(client, device_id):
+        _seed_door(device_id, 1, **raw)
+        r = client.post(
+            "/api/v1/sessions/assign",
+            json={"device_id": device_id, "door_no": 1, "cert_no": "C", "password": "P"},
+            headers=ops_headers,
+        )
+
+    assert r.status_code == 409, label
+    assert r.json()["type"].endswith("/problems/door-not-free")
+
+
+def test_assign_reports_unreported_door_as_not_found(
+    client: TestClient,
+    ops_headers: dict[str, str],
+) -> None:
+    """门从没被上报过是 404，不是 409。
+
+    "这个门号不存在"与"门在、但现在不能分配"是两回事——前者说明设备没上报那扇门
+    （门号打错，或设备的采集出了问题），后者说明里面有人。合成一句话会让排查走错方向。
+
+    门号范围不硬编码：存在哪些门是设备上报的事实，不是服务端的常量。
+    """
+    device_id = "dev-no-such-door"
+    with _online_device(client, device_id):
+        _seed_door(device_id, 1)  # 只上报 1 号门
+        r = client.post(
+            "/api/v1/sessions/assign",
+            json={"device_id": device_id, "door_no": 9, "cert_no": "C", "password": "P"},
+            headers=ops_headers,
+        )
+
+    assert r.status_code == 404
+    assert r.json()["type"].endswith("/problems/door-not-found")

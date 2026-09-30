@@ -50,11 +50,11 @@ class Reason:
 # ── 帧与协议（两端都可能产生）──
 
 BAD_JSON = Reason("proto.bad_json", "收到的帧不是合法 JSON")
-UNKNOWN_TYPE = Reason("proto.unknown_type", "不认识这种消息类型")
-HELLO_REQUIRED = Reason("proto.hello_required", "首帧必须先发送 link.hello")
+UNKNOWN_TYPE = Reason("proto.unknown_type", "未知的消息类型")
+HELLO_REQUIRED = Reason("proto.hello_required", "首帧必须是 link.hello")
 VERSION_MISMATCH = Reason("proto.version_mismatch", "协议版本不匹配")
-UNKNOWN_ACTION = Reason("proto.unknown_action", "设备不认识这个操作")
-UNKNOWN_COMMAND_ID = Reason("command.unknown_id", "收到一个对不上任何待办命令的结果")
+UNKNOWN_ACTION = Reason("proto.unknown_action", "设备不支持该操作")
+UNKNOWN_COMMAND_ID = Reason("command.unknown_id", "该结果没有对应的待办命令")
 
 # ── 设备侧 ──
 
@@ -75,12 +75,15 @@ SERVER_OVERLOADED = Reason("server.overloaded", "服务端同时处理的命令�
 # ── 命令生命周期 ──
 
 DEADLINE_EXCEEDED = Reason("command.deadline_exceeded", "命令超时，设备未在时限内给出结果")
-COMMAND_ABORTED = Reason("command.aborted", "命令被中断（发起方已断开）")
+COMMAND_ABORTED = Reason("command.aborted", "命令已中断：发起方断开")
 
 # ── 业务规则 ──
+#
+# 与 `core.problems` 里同名的那几条措辞保持一致：同一件事在 HTTP 层与命令回报层
+# 应当是同一句话，否则排障时要先判断"我看的是哪一层"。
 
-DOOR_NOT_FREE = Reason("door.not_free", "这个喷头不是空闲状态")
-DOOR_NOT_FOUND = Reason("door.not_found", "找不到这个喷头")
+DOOR_NOT_FREE = Reason("door.not_free", "喷头不是空闲状态")
+DOOR_NOT_FOUND = Reason("door.not_found", "找不到喷头")
 DOOR_NO_OCCUPIED = Reason("door.no_occupied", "该学号没有正在使用的喷头")
 DOOR_INVALID_SNAPSHOT = Reason("door.invalid_snapshot", "上报的喷头快照结构不合法")
 
@@ -89,9 +92,9 @@ DOOR_INVALID_SNAPSHOT = Reason("door.invalid_snapshot", "上报的喷头快照�
 UI_NO_TARGET_AT_POINT = Reason("ui.no_target_at_point", "该位置没有可点击的控件")
 UI_NO_SCROLLABLE_CONTAINER = Reason("ui.no_scrollable_container", "当前界面上没有可滚动的容器")
 UI_NO_EDITABLE_FIELD = Reason("ui.no_editable_field", "没有可输入的控件")
-UI_KEY_REJECTED = Reason("ui.key_rejected", "系统拒绝了这个按键")
-UI_UNKNOWN_KEY = Reason("ui.unknown_key", "不认识这个按键名")
-UI_UNSUPPORTED_ACTION = Reason("ui.unsupported_action", "无障碍通道不支持这个操作")
+UI_KEY_REJECTED = Reason("ui.key_rejected", "系统拒绝了该按键")
+UI_UNKNOWN_KEY = Reason("ui.unknown_key", "未知的按键名")
+UI_UNSUPPORTED_ACTION = Reason("ui.unsupported_action", "无障碍通道不支持该操作")
 UI_NO_WINDOW = Reason("ui.no_window", "读不到当前窗口的节点树")
 UI_CLICK_NO_EFFECT = Reason("ui.click_no_effect", "点击已发出，但界面没有变化")
 

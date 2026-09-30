@@ -40,7 +40,7 @@ function report(id, text, kind) {
 
 function render(list) {
   if (list.length === 0) {
-    $('identityTable').innerHTML = '<div class="empty">还没有登记任何身份</div>'
+    $('identityTable').innerHTML = '<div class="empty">暂无身份记录</div>'
     return
   }
   const rows = list
