@@ -1,3 +1,7 @@
+// 设备 ROM 冻结在 Android 4.4（API 19）：TYPE_PHONE / FLAG_FULLSCREEN 等处在新版 SDK
+// 中废弃，替代项（TYPE_APPLICATION_OVERLAY 等）要求 API 26+。
+@file:Suppress("DEPRECATION")
+
 package com.ryanliu.ntushower.features.automation
 
 import android.content.Context

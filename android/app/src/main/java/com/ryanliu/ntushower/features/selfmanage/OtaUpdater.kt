@@ -86,7 +86,8 @@ class OtaUpdater(
         }
 
         onProgress(version, "installing", "")
-        val result = RootShell.exec("pm install -r ${target.absolutePath}")
+        // 安装是长命令（写入 /data 并触发包管理器），显式放宽超时
+        val result = RootShell.exec("pm install -r ${target.absolutePath}", timeoutMs = INSTALL_TIMEOUT_MS)
         Log.i(TAG, "pm install: success=${result.success} output=${result.output.take(200)}")
         if (result.success) {
             onProgress(version, "done", "")
@@ -125,5 +126,11 @@ class OtaUpdater(
 
     companion object {
         private const val TAG = "OtaUpdater"
+
+        /**
+         * pm install 的等待上限：安装要写入 /data 并触发包管理器，
+         * 远长于普通 shell 命令的默认超时。
+         */
+        private const val INSTALL_TIMEOUT_MS = 120_000L
     }
 }

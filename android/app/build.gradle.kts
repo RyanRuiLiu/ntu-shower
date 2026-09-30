@@ -9,6 +9,8 @@ plugins {
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_22)
+        // 警告即错误：警告堆积是代码漂移的起点，也让"统一"无从谈起。
+        allWarningsAsErrors.set(true)
     }
 }
 
@@ -112,7 +114,7 @@ tasks.register<JacocoReport>("jacocoUnitTestReport") {
         xml.required.set(true)
         html.required.set(true)
     }
-    executionData(files("$buildDir/outputs/unit_test_code_coverage/debugUnitTest/testDebugUnitTest.exec"))
+    executionData(files(layout.buildDirectory.file("outputs/unit_test_code_coverage/debugUnitTest/testDebugUnitTest.exec")))
     sourceDirectories.setFrom(files("$projectDir/src/main/java"))
     classDirectories.setFrom(
         fileTree(layout.buildDirectory.dir("intermediates/built_in_kotlinc/debug/compileDebugKotlin/classes")) {
@@ -134,7 +136,7 @@ dependencies {
 // 覆盖率门：赦免清单之外的纯逻辑指令覆盖率不得低于 80%（随测试演进只升不降）
 tasks.register<JacocoCoverageVerification>("jacocoUnitTestCoverageVerification") {
     dependsOn("jacocoUnitTestReport")
-    executionData(files("$buildDir/outputs/unit_test_code_coverage/debugUnitTest/testDebugUnitTest.exec"))
+    executionData(files(layout.buildDirectory.file("outputs/unit_test_code_coverage/debugUnitTest/testDebugUnitTest.exec")))
     sourceDirectories.setFrom(files("$projectDir/src/main/java"))
     classDirectories.setFrom(
         fileTree(layout.buildDirectory.dir("intermediates/built_in_kotlinc/debug/compileDebugKotlin/classes")) {

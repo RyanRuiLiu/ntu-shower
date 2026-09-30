@@ -1,18 +1,28 @@
-# detekt 质量基线：默认规则之上仅放开确有理由的项，防止代码漂移
+# detekt 质量基线：默认规则 + ktlint 格式规则（与服务端 ruff format 对位）。
+# 只放开确有理由的项，每条都注明原因。
+ktlint:
+  active: true
+  android: true
+  autoCorrect: false # 由开发者显式执行修正，避免构建过程静默改源码
+  MaximumLineLength:
+    maxLineLength: 120
+
 complexity:
   LongMethod:
     allowedLines: 120
   CyclomaticComplexMethod:
     active: true
-    allowedComplexity: 15  # 配置键映射与页面状态机分支数即复杂度，15 以内可读
+    allowedComplexity: 15 # 配置键映射与页面状态机分支数即复杂度，15 以内可读
   LongParameterList:
-    active: false
+    active: true
+  # 数量类规则的例外一律用声明级 @Suppress 就地标注并写明理由，
+  # 不放宽全局阈值（全局放宽会连带放过其他对象）。
   TooManyFunctions:
-    active: false
+    active: true
 
 style:
   MagicNumber:
-    active: false
+    active: false # 设备端密集使用硬件常量（分辨率/像素格式/列索引），逐一命名反而失真
   ReturnCount:
     active: false
   MaxLineLength:

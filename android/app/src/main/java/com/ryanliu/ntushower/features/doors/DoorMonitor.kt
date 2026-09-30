@@ -1,3 +1,7 @@
+// 设备 ROM 冻结在 Android 4.4（API 19）：FileObserver(String, Int) 构造函数在新版 SDK
+// 中废弃（改用 File 参数的重载，要求 API 29+），在 19 上是唯一可用路径。
+@file:Suppress("DEPRECATION")
+
 package com.ryanliu.ntushower.features.doors
 
 import android.os.FileObserver
