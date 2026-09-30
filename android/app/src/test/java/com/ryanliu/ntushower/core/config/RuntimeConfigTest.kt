@@ -3,7 +3,6 @@ package com.ryanliu.ntushower.core.config
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -11,7 +10,10 @@ class RuntimeConfigTest {
 
     @Before
     fun resetDefaults() {
-        RuntimeConfig.apply(DEFAULTS)
+        // 复位读的是 ConfigDefaults（唯一来源）。此前这里是测试内手写的一份默认值副本，
+        // 它已经与生成的那份漂移（overlay_message、ui_poll_interval_ms 都不同），还少 7 个键
+        // ——被 apply_acceptsAnyJsonTypeForEveryKey 污染之后不复位，测试之间互相干扰。
+        RuntimeConfig.resetToDefaults()
     }
 
     @Test
@@ -70,24 +72,21 @@ class RuntimeConfigTest {
     }
 
     @Test
-    fun defaults_matchProtocol() {
-        assertEquals(30, RuntimeConfig.heartbeatIntervalS)
-        assertEquals(5000L, RuntimeConfig.reconnectBaseMs)
-        assertEquals(60000L, RuntimeConfig.reconnectMaxMs)
-        assertEquals(60L, RuntimeConfig.watchdogIntervalS)
-        assertEquals(1000L, RuntimeConfig.reportDebounceMs)
-        assertTrue(RuntimeConfig.overlayEnabled)
-        assertEquals("自动操作中…", RuntimeConfig.overlayMessage)
-        assertEquals(10000L, RuntimeConfig.serverResponseTimeoutMs)
-        assertEquals(5000L, RuntimeConfig.idVerifyWaitMs)
-        assertEquals(10000L, RuntimeConfig.homeBudgetMs)
-        assertEquals(200L, RuntimeConfig.pollIntervalMs)
-        assertEquals(200L, RuntimeConfig.uiClickDelayMs)
-        assertEquals(3600, RuntimeConfig.otaCheckIntervalS)
-        assertTrue(RuntimeConfig.bathGuardEnabled)
-        assertEquals(30000L, RuntimeConfig.bathExitWindowMs)
-        assertEquals(3, RuntimeConfig.bathExitMaxCount)
-        assertEquals(600000L, RuntimeConfig.bathExitCooldownMs)
+    fun resetToDefaults_readsEveryFieldFromConfigDefaults() {
+        // 复位是测试之间隔离的基础，而它必须读同一个来源。抽四种类型各验一个：
+        // 哪一处写死成字面量，都会在这里露出来。
+        RuntimeConfig.apply(
+            JSONObject(
+                "{\"heartbeat_interval_s\": 45, \"overlay_enabled\": false, " +
+                    "\"overlay_message\": \"维护中\", \"bath_app_exit_max_count\": 9}",
+            ),
+        )
+        RuntimeConfig.resetToDefaults()
+
+        assertEquals(ConfigDefaults.HEARTBEAT_INTERVAL_S.toInt(), RuntimeConfig.heartbeatIntervalS)
+        assertEquals(ConfigDefaults.OVERLAY_ENABLED, RuntimeConfig.overlayEnabled)
+        assertEquals(ConfigDefaults.OVERLAY_MESSAGE, RuntimeConfig.overlayMessage)
+        assertEquals(ConfigDefaults.BATH_APP_EXIT_MAX_COUNT.toInt(), RuntimeConfig.bathExitMaxCount)
     }
 
     @Test
@@ -151,20 +150,5 @@ class RuntimeConfigTest {
 
         assertEquals(10000L, RuntimeConfig.serverResponseTimeoutMs)
         assertEquals(3, RuntimeConfig.bathExitMaxCount)
-    }
-
-    private companion object {
-        // 全键默认值：保证任意测试执行顺序下 resetDefaults 都真实复位
-        val DEFAULTS = JSONObject(
-            "{\"heartbeat_interval_s\": 30, \"reconnect_base_ms\": 5000, " +
-                "\"reconnect_max_ms\": 60000, \"watchdog_interval_s\": 60, " +
-                "\"door_report_debounce_ms\": 1000, \"overlay_enabled\": true, " +
-                "\"overlay_message\": \"自动操作中…\", \"bath_response_timeout_ms\": 10000, " +
-                "\"cert_verify_wait_ms\": 5000, \"home_timeout_ms\": 10000, " +
-                "\"ui_poll_interval_ms\": 200, \"ui_click_delay_ms\": 200, " +
-                "\"ota_check_interval_s\": 3600, \"bath_app_guard_enabled\": true, " +
-                "\"bath_app_exit_window_ms\": 30000, \"bath_app_exit_max_count\": 3, " +
-                "\"bath_app_exit_cooldown_ms\": 600000}",
-        )
     }
 }

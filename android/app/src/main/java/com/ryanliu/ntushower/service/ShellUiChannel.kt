@@ -31,7 +31,9 @@ import com.ryanliu.ntushower.core.shell.RootShell
  * | `input text` | 可用（仅 ASCII） | 拨号盘 `digits` 节点文本变为写入值 |
  *
  * `input text` 按字节处理，**非 ASCII 会被写坏**——中文必须走无障碍的剪贴板
- * 粘贴（API 19 没有 `ACTION_SET_TEXT`）。
+ * 粘贴（API 19 没有 `ACTION_SET_TEXT`）。因此本通道**不提供**文本输入：它只走得通
+ * ASCII，而要输的账号密码是纯数字、中文提示走不到这里，一条只能输 ASCII 的通路
+ * 没有用武之地。真需要时再按上表那一行的结论接回来即可。
  */
 object ShellUiChannel {
 
@@ -86,20 +88,6 @@ object ShellUiChannel {
 
     /** 系统按键。 */
     fun key(key: UiKey): Boolean = run("input keyevent ${key.keyCode}", "key ${key.name}")
-
-    /**
-     * 输入文本。
-     *
-     * 只接受 ASCII：`input text` 在 4.4 上按字节处理，非 ASCII 会写坏。不满足时
-     * 返回 false 让调用方知道该换通道，而不是发一条注定写乱内容的命令。
-     */
-    fun text(value: String): Boolean {
-        if (!ShellTextCodec.isAsciiSafe(value)) {
-            Log.w(TAG, "text is not ascii-safe, refusing input text")
-            return false
-        }
-        return run("input text ${ShellTextCodec.encode(value)}", "text")
-    }
 
     private fun run(command: String, label: String): Boolean {
         val result = RootShell.control.exec(command)
