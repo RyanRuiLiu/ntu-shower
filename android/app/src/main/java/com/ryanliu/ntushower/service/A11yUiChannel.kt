@@ -4,10 +4,6 @@
 
 package com.ryanliu.ntushower.service
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 
 /**
@@ -21,10 +17,12 @@ import android.view.accessibility.AccessibilityNodeInfo
  *
  * **输入是唯一的例外，因为它必须支持中文**。shell 的 `input text` 在本 ROM 上按
  * 字节处理，非 ASCII 会被写坏；而剪贴板 + `ACTION_PASTE` 是 API 19 上唯一能写入
- * 任意字符的方式（`ACTION_SET_TEXT` 要 API 21）。
+ * 任意字符的方式（`ACTION_SET_TEXT` 要 API 21）。它同时也是**最快**的一条：`input`
+ * 每次执行都要起一个 `app_process`（ART 启动 + 加载 framework，几百毫秒），而剪贴板
+ * 与 `ACTION_PASTE` 都是纯 IPC。
  *
- * 自动化流程（分配/结算）不经过这里：它走 [A11yService.performClick] 按**节点**
- * 操作——那一步会真的扣钱，坐标不够可靠。
+ * 自动化流程（分配/结算）不经过这里：它走 [A11yService.performSetText] 按**节点**
+ * 写入，那条路会真的扣钱，需要精确落到 `et_id_code` / `et_id_pwd` 上。
  *
  * ## API 19 的约束
  *
@@ -32,48 +30,29 @@ import android.view.accessibility.AccessibilityNodeInfo
  */
 object A11yUiChannel {
 
-    private const val TAG = "A11yUiChannel"
-
-    /** 剪贴板条目标签。 */
-    private const val CLIPBOARD_LABEL = "ntushower"
-
-    /** 向当前焦点控件输入文本；无焦点时取第一个可编辑节点。 */
+    /**
+     * 向当前焦点控件输入文本；无焦点时取第一个可编辑节点。
+     *
+     * 写入本身交给 [A11yService.performSetText]：那一份已经处理了 4.4 上
+     * 「ClipboardManager 必须在主线程构造」这条约束（经 MainThread 投递并同步等待），
+     * 而它也是自动化流程正在用的同一条路径。这里再写一遍，就多出一条不受那条约束
+     * 保护的路——而调用方跑在后台线程，正好踩中。
+     *
+     * 写进去的内容不留在剪贴板里：远程帮人打字可能是任何东西，没理由让它留在那里。
+     */
     fun typeIntoFocus(service: A11yService, text: String): Boolean {
         val root = service.rootInActiveWindow ?: return false
         try {
             val target = findFocusOrEditable(root) ?: return false
-            return if (target == root) {
-                false
-            } else {
-                try {
-                    setText(service, target, text)
-                } finally {
-                    target.recycle()
-                }
+            if (target == root) return false
+            return try {
+                service.performSetText(target, text)
+            } finally {
+                target.recycle()
+                service.clearClipboard()
             }
         } finally {
             root.recycle()
-        }
-    }
-
-    /**
-     * 用剪贴板粘贴写入文本。
-     *
-     * 4.4 上 ClipboardManager 构造需主线程 Looper，故由调用方确保不在主线程上直接
-     * 调用；这里只做同步的剪贴板写入。
-     */
-    private fun setText(service: A11yService, node: AccessibilityNodeInfo, text: String): Boolean {
-        val clipboard = service.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return false
-        return try {
-            clipboard.setPrimaryClip(ClipData.newPlainText(CLIPBOARD_LABEL, text))
-            node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-            val pasted = node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
-            // 输入后清空剪贴板：里面可能是账号密码
-            clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
-            pasted
-        } catch (e: Exception) {
-            Log.e(TAG, "set text failed: ${e.message}")
-            false
         }
     }
 
