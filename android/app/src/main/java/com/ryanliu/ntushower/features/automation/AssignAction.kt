@@ -13,9 +13,10 @@ class AssignAction(override val certNo: String, override val password: String, p
 
     override val traceLabel = "assign door=$doorNo"
 
-    override fun perform(a11y: A11yService): FlowError? {
+    override fun perform(a11y: A11yService, trace: AutomationTrace.Trace?): FlowError? {
         val door = BathAppNavigator.findDoor(a11y, doorNo)
             ?: return FlowError("door.not_found", "喷头 $doorNo 不存在")
+        trace?.mark("find-door")
         // 标记取在点击**之前**：点完才取的话，这一下引起的变化会落在标记之外，
         // 于是又退回"等满固定间隔"——那正是这套标记要消掉的白等
         val mark = A11yService.pageChangeMark()
@@ -26,10 +27,13 @@ class AssignAction(override val certNo: String, override val password: String, p
         } finally {
             door.recycle()
         }
+        trace?.mark("click-door")
         A11yService.awaitPageChangeAfter(mark, RuntimeConfig.uiClickDelayMs)
+        trace?.mark("await-door-selected")
         if (!BathAppNavigator.clickNoCardButton(a11y)) {
             return FlowError("ui.click_no_effect", "无法点击无卡模式按钮")
         }
+        trace?.mark("click-nocard")
         return null
     }
 }
