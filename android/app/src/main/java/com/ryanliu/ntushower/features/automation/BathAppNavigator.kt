@@ -7,6 +7,7 @@ package com.ryanliu.ntushower.features.automation
 import android.content.Intent
 import android.graphics.Rect
 import android.view.accessibility.AccessibilityNodeInfo
+import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.service.A11yService
@@ -35,8 +36,8 @@ object BathAppNavigator {
         // 窗口状态事件维护，它才是"浴室 App 此刻在前台"的即时依据。
         if (A11yService.bathAppInForeground && BathAppPage.snapshot().state == PageState.HOME) return true
         ensureForeground(a11y)
-        val start = System.currentTimeMillis()
-        while (System.currentTimeMillis() - start < budgetMs) {
+        val start = Uptime.nowMs()
+        while (Uptime.nowMs() - start < budgetMs) {
             // 标记取在检测之前：检测本身要遍历一遍节点树，那期间发生的变化也该算数
             val mark = A11yService.pageChangeMark()
             when (BathAppPage.snapshot().state) {
@@ -116,8 +117,8 @@ object BathAppNavigator {
      * 在浴室 App 已在前台时什么都不做，重试不会空转。
      */
     fun waitForPage(a11y: A11yService, target: PageState, timeoutMs: Long): Boolean {
-        val start = System.currentTimeMillis()
-        while (System.currentTimeMillis() - start < timeoutMs) {
+        val start = Uptime.nowMs()
+        while (Uptime.nowMs() - start < timeoutMs) {
             val mark = A11yService.pageChangeMark()
             if (BathAppPage.snapshot().state == target) return true
             if (!A11yService.bathAppInForeground) {

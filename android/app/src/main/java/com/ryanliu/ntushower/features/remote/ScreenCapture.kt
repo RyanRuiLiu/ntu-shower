@@ -7,6 +7,7 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.util.Base64
+import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.shell.RootShell
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -63,7 +64,7 @@ object ScreenCapture {
     private fun decodeFirstFrameAsJpeg(videoPath: String): ByteArray? {
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
-        val startedAt = System.currentTimeMillis()
+        val startedAt = Uptime.nowMs()
 
         try {
             extractor.setDataSource(videoPath)
@@ -77,7 +78,7 @@ object ScreenCapture {
 
             val info = MediaCodec.BufferInfo()
             var inputDone = false
-            while (System.currentTimeMillis() - startedAt < DECODE_TIMEOUT_MS) {
+            while (Uptime.nowMs() - startedAt < DECODE_TIMEOUT_MS) {
                 if (!inputDone) inputDone = feedInput(extractor, codec, DEQUEUE_TIMEOUT_US)
 
                 val outputIndex = codec.dequeueOutputBuffer(info, DEQUEUE_TIMEOUT_US)
