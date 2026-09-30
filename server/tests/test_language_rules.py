@@ -27,7 +27,25 @@ SCAN_SUFFIXES = {".py", ".kt", ".md", ".js", ".css", ".html", ".kts"}
 SKIP_DIRS = {"build", ".gradle", "node_modules", ".venv", "__pycache__", ".git", ".mypy_cache"}
 
 #: 被禁止的措辞。中文词与英文对应词一并覆盖——换个说法绕过没有意义。
-BANNED = ("兜底", "降级", "兼容垫层", "回退", "fallback", "graceful degradation")
+#
+#: 分三类，共同点是**它们都先把主方案说成不完整的**：
+#:   - "兜底/降级/兼容垫层/回退"：假定主方案不够，再补一个次等的；
+#:   - "推测"：假定自己会给不出结论，于是先把话说过；
+#:   - "保障/防御/容错/健壮"：假定自己会出错，于是加一层并非必需的东西。
+#: 本项目的取向是每条通路各自完整、按场景选，所以这三类描述在这里都不成立。
+BANNED = (
+    "兜底",
+    "降级",
+    "兼容垫层",
+    "回退",
+    "fallback",
+    "graceful degradation",
+    "推测",
+    "保障",
+    "防御",
+    "容错",
+    "健壮",
+)
 
 #: 允许出现的地方，每条都要有理由。
 EXEMPT = {
@@ -84,9 +102,13 @@ def test_exempt_entries_carry_a_reason() -> None:
 
 
 def test_banned_list_covers_the_named_offenders() -> None:
-    """守住清单本身：AGENTS.md 点名的四类措辞必须都在里面。"""
-    for word in ("兜底", "降级", "兼容垫层"):
-        assert word in BANNED, f"清单漏了 AGENTS.md 点名的措辞：{word}"
+    """守住清单本身：被点名的措辞必须都在里面。
+
+    守的是"有人把清单改短"——那是最容易让规则静默失效的一种改法。
+    """
+    named = ("兜底", "降级", "兼容垫层", "回退", "推测", "保障", "防御", "容错", "健壮")
+    for word in named:
+        assert word in BANNED, f"清单漏了被点名的措辞：{word}"
 
 
 @pytest.mark.parametrize("word", BANNED)

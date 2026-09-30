@@ -72,8 +72,8 @@ class OtaUpdater(
     private fun applyUpdate(manifest: JSONObject) {
         val version = manifest.getString("version")
         if (!VERSION_PATTERN.matches(version)) {
-            // 版本号参与文件名构造：服务端已校验，此处为纵深防御——设备虽只连自家服务端，
-            // 但一旦服务端配置出错，路径穿越的代价是写入任意路径
+            // 版本号参与文件名构造，所以这里先按允许的形状校验一遍：设备这一侧自己成立，
+            // 不依赖服务端先拦
             throw IllegalStateException("unexpected version format: $version")
         }
         val url = "https://${BuildConfig.SERVER_DOMAIN}${manifest.getString("url")}"
