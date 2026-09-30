@@ -147,44 +147,63 @@ class CommandScheduler(
     /** 执行一条采集命令，结束后放行采集队列中的下一条。 */
     private fun runCapture(command: Command) {
         captureExecutor.execute {
+            var reported = false
             try {
                 onOutcome(captureImage(command))
+                reported = true
             } catch (e: Throwable) {
-                Log.e(TAG, "capture crashed: ${e.message}", e)
-                onOutcome(
-                    CommandOutcome(
-                        command.id,
-                        OutcomeStatus.FAILED,
-                        ReasonCodes.DEVICE_INTERNAL_ERROR,
-                        "设备端内部错误",
-                    ),
-                )
+                if (reported) {
+                    Log.w(TAG, "结果已回报，收尾步骤失败：${e.message}", e)
+                } else {
+                    Log.e(TAG, "capture crashed: ${e.message}", e)
+                    onOutcome(
+                        CommandOutcome(
+                            command.id,
+                            OutcomeStatus.FAILED,
+                            ReasonCodes.DEVICE_INTERNAL_ERROR,
+                            "设备端内部错误",
+                        ),
+                    )
+                }
             } finally {
                 captureQueue.complete()?.let { runCapture(it) }
             }
         }
     }
 
-    /** 执行一条自动化命令，结束后放行队列中的下一条。 */
+    /**
+     * 执行一条自动化命令，结束后放行队列中的下一条。
+     *
+     * **结果只回报一次**（`reported` 标记，与 [com.ryanliu.ntushower.service.DeviceMaintenance]
+     * 同构）：回报之后还有慢速收尾（等回首页、撤遮盖、清选中态），那一步失败不能补发第二条
+     * ——服务端按 command_id 关联，收到第二条只会让"这条命令到底成没成"多出一个互相矛盾的
+     * 答案，而第一条才是真的。
+     */
     private fun runAutomation(command: Command) {
         automationExecutor.execute {
             var needsFinish = false
+            var reported = false
             try {
                 val outcome = execute(command) { needsFinish = it }
                 onOutcome(outcome) // 结果先回报
+                reported = true
                 if (needsFinish) { // 再做慢速收尾
                     A11yService.instance?.let { AutomationFlow.finish(it, overlay) }
                 }
             } catch (e: Throwable) {
-                Log.e(TAG, "command crashed: ${e.message}", e)
-                onOutcome(
-                    CommandOutcome(
-                        command.id,
-                        OutcomeStatus.FAILED,
-                        ReasonCodes.DEVICE_INTERNAL_ERROR,
-                        "设备端内部错误",
-                    ),
-                )
+                if (reported) {
+                    Log.w(TAG, "结果已回报，收尾步骤失败：${e.message}", e)
+                } else {
+                    Log.e(TAG, "command crashed: ${e.message}", e)
+                    onOutcome(
+                        CommandOutcome(
+                            command.id,
+                            OutcomeStatus.FAILED,
+                            ReasonCodes.DEVICE_INTERNAL_ERROR,
+                            "设备端内部错误",
+                        ),
+                    )
+                }
             } finally {
                 automationQueue.complete()?.let { runAutomation(it) }
             }
