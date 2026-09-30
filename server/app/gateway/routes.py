@@ -13,7 +13,7 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.concurrency import run_in_threadpool
 
-from ..core import events, protocol, reason_codes
+from ..core import events, outcomes, protocol, reason_codes
 from ..core.clock import now_rfc3339
 from ..core.device_clock import ping_payload, update_skew
 from ..core.protocol import JsonObject, as_int, list_of, payload_of, text_of
@@ -129,7 +129,7 @@ async def _handle_frame(ws: WebSocket, msg: JsonObject, device_id: str, trusted:
         if not trusted:
             return
         result = await run_in_threadpool(doors_service.process_snapshot, device_id, payload)
-        if result["status"] == "ok":
+        if result["status"] == outcomes.OK.value:
             await ws.send_text(
                 protocol.envelope(
                     "door.snapshot_ack",

@@ -16,7 +16,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
-from app.core import actions, protocol, reason_codes
+from app.core import actions, outcomes, protocol, reason_codes
 from app.core.problems import DEVICE_OFFLINE, PORT_UNAVAILABLE, ApiProblemError
 from app.core.security import require_ops_token
 from app.gateway.manager import manager
@@ -134,7 +134,7 @@ async def device_bridge(ws: WebSocket) -> None:
             registry.remove(device_id)
             audit_id = f"bridge-{uuid.uuid4()}"
             command_audit.insert_command(audit_id, device_id, "bridge.session_end")
-            command_audit.finish(audit_id, "ok", "", "")
+            command_audit.finish(audit_id, outcomes.OK.value, "", "")
 
 
 async def _pump_tcp_to_ws(bridge: AdbBridge, reader: asyncio.StreamReader, idle_s: float) -> None:
@@ -188,9 +188,11 @@ async def adb_open(device_id: str) -> BridgeOpened:
     )
     if not sent:
         registry.pending.pop(device_id, None)
-        command_audit.finish(audit_id, "timeout", reason_codes.DEVICE_OFFLINE.code, reason_codes.DEVICE_OFFLINE.message)
+        command_audit.finish(
+            audit_id, outcomes.TIMEOUT.value, reason_codes.DEVICE_OFFLINE.code, reason_codes.DEVICE_OFFLINE.message
+        )
         raise ApiProblemError(DEVICE_OFFLINE, f"device {device_id} has no active connection")
-    command_audit.finish(audit_id, "ok", "", f"port {port} gen {generation}")
+    command_audit.finish(audit_id, outcomes.OK.value, "", f"port {port} gen {generation}")
 
     bridge = AdbBridge(device_id, port, generation, opened_at=loop.time())
     registry.active[device_id] = bridge
@@ -222,7 +224,7 @@ async def adb_open(device_id: str) -> BridgeOpened:
     if server is None:
         registry.pending.pop(device_id, None)
         registry.remove(device_id)
-        command_audit.finish(audit_id, "failed", "port.bind_failed", str(last_error))
+        command_audit.finish(audit_id, outcomes.FAILED.value, "port.bind_failed", str(last_error))
         logger.warning("bridge listen failed: device=%s port=%d error=%s", device_id, port, last_error)
         raise ApiProblemError(PORT_UNAVAILABLE, f"port {port}: {last_error}")
     bridge.server = server
@@ -237,11 +239,11 @@ async def adb_close(device_id: str) -> BridgeClosed:
     audit_id = f"bridge-{uuid.uuid4()}"
     command_audit.insert_command(audit_id, device_id, actions.BRIDGE_CLOSE)
     if bridge is None:
-        command_audit.finish(audit_id, "ok", "", "already closed")
+        command_audit.finish(audit_id, outcomes.OK.value, "", "already closed")
         return {"device_id": device_id, "closed": False}
     await bridge.close()
     registry.remove(device_id)
-    command_audit.finish(audit_id, "ok", "", "")
+    command_audit.finish(audit_id, outcomes.OK.value, "", "")
     await manager.send_to(device_id, protocol.envelope(actions.BRIDGE_CLOSE, {}))
     return {"device_id": device_id, "closed": True}
 

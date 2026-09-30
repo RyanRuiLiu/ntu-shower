@@ -3,14 +3,14 @@
 cert_no/password 是浴室系统的业务凭证：随操作参数直传设备，
 真正的凭证验证发生在浴室服务器端（密码错会在终端页被拒）。
 本服务不做用户登录；未来的调用方身份体系（微信小程序 / 独立 APP）
-按 docs/DECISIONS.md0034 的 provider 方案另行引入。
+按 docs/DECISIONS.md 的 provider 方案另行引入。
 设备执行结果以结构化字段返回，terminal_message 为浴室 App 的人读文本。
 分配/结算下发前依据 door_live 现态做预检，避免对占用门误触发结算流。
 """
 
 from fastapi import APIRouter, Depends
 
-from app.core import actions
+from app.core import actions, outcomes
 from app.core.config import settings
 from app.core.problems import (
     DOOR_NOT_FREE,
@@ -58,7 +58,7 @@ def _reject_overload(result: CommandOutcome) -> CommandOutcome:
     `service.CHANNEL_QUEUE_MAX`）。两者语义不同——前者说明设备正忙、等一会就好，
     后者说明积压已多、该换个时间再来。
     """
-    if result.get("status") == "rejected":
+    if result.get("status") == outcomes.REJECTED.value:
         raise ApiProblemError(SERVER_OVERLOADED, f"reason={result.get('reason_code')}")
     return result
 
