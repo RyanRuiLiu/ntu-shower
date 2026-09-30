@@ -143,7 +143,7 @@ class BathAppPageTest {
  */
 class PageEventRulesTest {
 
-    private fun event(className: String, changeTypes: Int) = ContentEvent(className, "", changeTypes)
+    private fun event(className: String, changeTypes: Int) = ContentEvent(className, changeTypes)
 
     @Test
     fun `plain text from a text view is not worth recomputing`() {
