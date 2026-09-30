@@ -50,6 +50,24 @@ class BathAppGuardTest {
     }
 
     @Test
+    fun `exits during cooldown stay in cooldown`() {
+        val g = guard()
+        repeat(maxCount) { g.onBackground(it * 1_000L) }
+
+        // 冷却期内再次退出：不得重新计数，也不得拉起
+        assertEquals(BathAppGuard.Action.COOLDOWN, g.onBackground(10_000))
+        assertEquals(BathAppGuard.Action.COOLDOWN, g.onBackground(20_000))
+    }
+
+    @Test
+    fun `cooldown is lifted only by returning to foreground`() {
+        val g = guard()
+        repeat(maxCount) { g.onBackground(it * 1_000L) }
+        // 仅仅时间流逝不足以解除：期间仍然保持冷却
+        assertEquals(BathAppGuard.Action.COOLDOWN, g.onBackground(300_000))
+    }
+
+    @Test
     fun `old exits outside window do not accumulate`() {
         val g = guard()
         g.onBackground(0)

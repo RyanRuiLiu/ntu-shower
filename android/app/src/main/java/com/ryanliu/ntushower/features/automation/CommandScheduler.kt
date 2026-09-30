@@ -3,7 +3,7 @@ package com.ryanliu.ntushower.features.automation
 import android.util.Log
 import com.ryanliu.ntushower.service.A11yService
 import org.json.JSONObject
-import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 
 /** 调度器产出的命令结果（与 session.command_result payload 对应）。 */
@@ -16,9 +16,16 @@ data class CommandOutcome(
 )
 
 /**
- * 命令调度器：分配/结算共享浴室 App UI 必须串行；拍照资源独立可并行。
+ * 命令调度器：自动化类命令（分配/结算）经 [SerialCommandQueue] 串行放行——
+ * 浴室 App 的 UI 操作必须串行，并发会让节点定位互相错位；
+ * 拍照/截图资源独立，走单独执行器并行处理。
  */
-class CommandScheduler(private val overlay: CoverOverlay, private val onOutcome: (CommandOutcome) -> Unit) {
+class CommandScheduler(
+    private val overlay: CoverOverlay,
+    private val onOutcome: (CommandOutcome) -> Unit,
+    private val automationExecutor: Executor = Executors.newSingleThreadExecutor(),
+    private val captureExecutor: Executor = Executors.newSingleThreadExecutor(),
+) {
 
     sealed class Command(val id: String) {
         class Assign(id: String, val doorNo: Int, val certNo: String, val password: String) : Command(id)
@@ -29,41 +36,24 @@ class CommandScheduler(private val overlay: CoverOverlay, private val onOutcome:
         class Screen(id: String) : Command(id)
     }
 
-    private val queue = ConcurrentLinkedQueue<Command>()
-    private val photoExecutor = Executors.newSingleThreadExecutor()
-    private val automationExecutor = Executors.newSingleThreadExecutor()
-
-    @Volatile private var executing = false
+    private val automationQueue = SerialCommandQueue<Command>()
 
     fun enqueue(command: Command) {
         when (command) {
-            is Command.Photo -> {
-                Log.i(TAG, "photo enqueued: ${command.id}")
-                photoExecutor.execute {
-                    onOutcome(executeCapture(command))
-                }
-            }
-
-            is Command.Screen -> {
-                Log.i(TAG, "screen enqueued: ${command.id}")
-                photoExecutor.execute {
-                    onOutcome(executeCapture(command))
-                }
+            is Command.Photo, is Command.Screen -> {
+                Log.i(TAG, "capture enqueued: ${command.id}")
+                captureExecutor.execute { onOutcome(executeCapture(command)) }
             }
 
             else -> {
                 Log.i(TAG, "enqueued: ${command.id} (${command::class.java.simpleName})")
-                queue.add(command)
-                drain()
+                automationQueue.enqueue(command)?.let { runAutomation(it) }
             }
         }
     }
 
-    @Synchronized
-    private fun drain() {
-        if (executing) return
-        val command = queue.poll() ?: return
-        executing = true
+    /** 执行一条自动化命令，结束后放行队列中的下一条。 */
+    private fun runAutomation(command: Command) {
         automationExecutor.execute {
             var needsFinish = false
             try {
@@ -76,8 +66,7 @@ class CommandScheduler(private val overlay: CoverOverlay, private val onOutcome:
                 Log.e(TAG, "command crashed: ${e.message}", e)
                 onOutcome(CommandOutcome(command.id, "failed", "automation.internal_error", ""))
             } finally {
-                executing = false
-                drain()
+                automationQueue.complete()?.let { runAutomation(it) }
             }
         }
     }

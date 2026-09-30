@@ -23,7 +23,7 @@ class DoorMonitor(private val onChange: () -> Unit) :
     private val triggered = AtomicBoolean(false)
 
     override fun onEvent(event: Int, path: String?) {
-        if (path == null || !(path == AppConfig.BATH_DB_FILE || path == "${AppConfig.BATH_DB_FILE}-journal")) return
+        if (!DoorEventFilter.isRelevant(path, AppConfig.BATH_DB_FILE)) return
         if (!triggered.compareAndSet(false, true)) return
         Log.d(TAG, "db event 0x${event.toString(16)}, capture scheduled")
         Thread {

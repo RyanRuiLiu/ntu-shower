@@ -71,7 +71,11 @@
 | 端 | 执行机制 |
 |---|---|
 | 服务端 | `pytest --cov=app --cov-report=term-missing`，`fail_under` 见 `server/pyproject.toml`（门槛只升不降） |
-| 设备端 | `:app:jacocoUnitTestCoverageVerification`（排除清单见 `android/app/build.gradle.kts` 的 `frameworkBoundClasses`） |
+| 设备端 | `:app:jacocoUnitTestCoverageVerification`，门槛见 `android/app/build.gradle.kts`（只升不降） |
+
+**提高覆盖率靠抽取，不靠放宽容忍**。框架耦合类里的业务决策必须抽成纯逻辑再测，
+只有确实无法在 JVM 上执行的（节点树、MediaCodec、真实 socket 的进程管理）才登记豁免。
+豁免清单越短，门槛越有意义——它是排除项，不是挡箭牌。
 
 ### 赦免清单（唯一合法的不测理由）
 

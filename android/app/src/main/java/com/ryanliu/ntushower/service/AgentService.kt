@@ -56,7 +56,7 @@ class AgentService : Service() {
             worker.execute { A11yEnabler.ensureEnabled() } // 幂等：root 启用无障碍（append 语义）
             sender = DoorSnapshotSender(this)
             overlay = CoverOverlay(this)
-            scheduler = CommandScheduler(overlay) { outcome -> sendOutcome(outcome) }
+            scheduler = CommandScheduler(overlay, onOutcome = { outcome -> sendOutcome(outcome) })
             client = GatewayClient(this, callback)
             client.connect()
             monitor = DoorMonitor {

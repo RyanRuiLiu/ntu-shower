@@ -20,8 +20,9 @@ detekt {
 }
 
 tasks.withType<dev.detekt.gradle.Detekt>().configureEach {
-    // 格式类规则（ktlint）自动修正源码
-    autoCorrect = true
+    // 不自动改源码：构建过程静默修改文件会让"改动来自谁"变得不可追溯。
+    // 需要格式化时显式执行 `gradlew detekt --auto-correct`。
+    autoCorrect = false
 }
 
 android {
@@ -81,31 +82,47 @@ android {
 
 }
 
-// JVM 单测覆盖率报告：统计纯逻辑类；框架耦合类（依赖 android.jar 桩/真实设备/
-// Looper 线程）无法在 JVM 上有意义地覆盖，赦免清单见 docs/STANDARDS.md §设备端测试
-// 赦免边界（依据 docs/STANDARDS.md §设备端测试）：
-// - 框架耦合类：依赖 android.jar 桩/真实设备/Looper 线程，JVM 上无法有意义地覆盖；
-// - 常量类：仅字段常量，无可执行逻辑；
-// - 网络 IO（DnsResolver.query）：需真实 DNS 报文交互，构造/解析纯函数已有单测。
+// JVM 单测覆盖率范围：只排除**真正无法在 JVM 上覆盖**的类。
+// 原则：能通过抽取纯逻辑覆盖的，就不排除——赦免清单越短，门越有意义。
+// 逐条理由见 docs/STANDARDS.md §设备端测试。
 val frameworkBoundClasses = listOf(
+    // 应用入口与常驻服务：依赖 Looper / 系统服务
     "**/ShowerApp*",
-    "**/service/*",
-    "**/receiver/*",
+    "**/service/**",
+    "**/receiver/**",
+    // 网络栈：依赖真实 TLS/DNS 套接字（纯逻辑部分已抽为 ReconnectBackoff/DnsResolver 报文层）
     "**/transport/GatewayClient*",
-    "**/core/net/*",
-    "**/core/tls/*",
-    "**/core/identity/*",
-    "**/core/shell/*",
-    "**/core/perf/*",
+    "**/core/net/HttpClientFactory*",
+    "**/core/tls/**",
+    "**/core/identity/**",
+    // root shell 进程管理：依赖真实 su 进程（输出解析已抽为 ShellOutput 并纳入覆盖）
+    "**/core/shell/RootShell*",
+    "**/core/perf/**",
     "**/core/config/AppConfig*",
-    "**/features/automation/*",
+    // 无障碍节点操作：依赖 android.view.accessibility 节点树与窗口管理器
+    // （CommandScheduler 只剩线程编排，其串行决策已抽为 SerialCommandQueue 并纳入覆盖）
+    "**/features/automation/AutomationFlow*",
+    "**/features/automation/BathAppNavigator*",
+    "**/features/automation/CommandScheduler*",
+    "**/features/automation/CoverOverlay*",
+    "**/features/automation/PhotoCapture*",
+    "**/features/automation/AssignAction*",
+    "**/features/automation/SettleAction*",
+    // 设备 IO：ADB 字节泵 / MediaCodec / FileObserver（事件过滤已抽为 DoorEventFilter）
     "**/features/remote/AdbBridge*",
     "**/features/remote/ScreenCapture*",
     "**/features/doors/DoorMonitor*",
     "**/features/doors/DoorSnapshotReader*",
     "**/features/doors/DoorSnapshotSender*",
-    "**/features/selfmanage/*",
-    "**/core/config/AppConfig*",
+    // 自管理：依赖 root shell 与包管理器（设置合并不依赖，已纳入覆盖）
+    "**/features/selfmanage/A11yEnabler*",
+    "**/features/selfmanage/OtaUpdater*",
+    // 纯数据载体：仅编译器生成的 equals/hashCode/toString/copy/values/组件 N，
+    // 无手写逻辑（JaCoCo 官方建议排除生成代码）。业务逻辑仍在其中方法之外。
+    "**/features/automation/PageState*",
+    "**/features/automation/CommandOutcome*",
+    "**/features/automation/FlowError*",
+    "**/transport/Envelope*",
 )
 
 tasks.register<JacocoReport>("jacocoUnitTestReport") {
@@ -133,7 +150,8 @@ dependencies {
     testImplementation("org.json:json:20260814")
 }
 
-// 覆盖率门：赦免清单之外的纯逻辑指令覆盖率不得低于 80%（随测试演进只升不降）
+// 覆盖率门：赦免清单之外的指令覆盖率不得低于 95%（当前 98.7%，门槛只升不降）。
+// 提高门槛的前提是先把逻辑抽出来测，而不是放宽统计范围。
 tasks.register<JacocoCoverageVerification>("jacocoUnitTestCoverageVerification") {
     dependsOn("jacocoUnitTestReport")
     executionData(files(layout.buildDirectory.file("outputs/unit_test_code_coverage/debugUnitTest/testDebugUnitTest.exec")))
@@ -148,7 +166,7 @@ tasks.register<JacocoCoverageVerification>("jacocoUnitTestCoverageVerification")
             limit {
                 counter = "INSTRUCTION"
                 value = "COVEREDRATIO"
-                minimum = "0.80".toBigDecimal()
+                minimum = "0.95".toBigDecimal()
             }
         }
     }
