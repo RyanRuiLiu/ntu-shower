@@ -17,7 +17,7 @@ from app.gateway.manager import manager
 from app.modules.config import store as config_store
 from app.modules.doors import repository as doors_repository
 
-logger = logging.getLogger("ntu-shower.auto-settle")
+logger = logging.getLogger("ntu-shower.sessions.auto_settle")
 
 # 未取到配置项时使用的阈值（秒）：与 config.DEFAULT_CONFIG 的
 # auto_settle_threshold_s 保持一致（19 分钟，沿用旧项目实测取值）

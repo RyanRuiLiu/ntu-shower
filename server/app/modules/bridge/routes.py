@@ -11,6 +11,7 @@
 
 import asyncio
 import contextlib
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
@@ -30,6 +31,8 @@ from .manager import (
     AdbBridge,
     registry,
 )
+
+logger = logging.getLogger("ntu-shower.bridge")
 
 router = APIRouter(tags=["bridge"])
 
@@ -198,8 +201,10 @@ async def adb_open(device_id: str) -> JsonObject:
         registry.pending.pop(device_id, None)
         registry.remove(device_id)
         command_audit.finish(audit_id, "failed", "port.bind_failed", str(last_error))
+        logger.warning("bridge listen failed: device=%s port=%d error=%s", device_id, port, last_error)
         raise ApiProblemError(PORT_UNAVAILABLE, f"port {port}: {last_error}")
     bridge.server = server
+    logger.info("bridge opened: device=%s port=%d generation=%d", device_id, port, generation)
     # 只返回结构化字段：连接指引属于文档职责（见 docs/RUNBOOK.md §4）
     return {"device_id": device_id, "port": port, "already_open": False, "generation": generation}
 
