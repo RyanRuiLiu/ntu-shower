@@ -133,9 +133,23 @@ class AgentService : Service() {
                 // 是同步 shell 调用，closeAdbBridge 的关闭回调里还藏着一条——两条都会把
                 // 主线程压住，连带排队心跳与无障碍事件。它们同属维护类，走同一个执行器，
                 // 也就与 device.restart/uninstall 天然互斥（调试桥开着时重启设备本就危险）。
-                "bridge.open" -> maintenanceExecutor.execute { openAdbBridge(envelope) }
+                "bridge.open" -> maintenanceExecutor.execute {
+                    // 这两条不产生命令结果（服务端发出即返回，不等答复），但崩了必须留痕：
+                    // 静默失败会让服务端一直等一个永远连不上来的设备，而日志里什么都没有
+                    try {
+                        openAdbBridge(envelope)
+                    } catch (e: Throwable) {
+                        Log.e(TAG, "bridge.open 失败：${e.message}", e)
+                    }
+                }
 
-                "bridge.close" -> maintenanceExecutor.execute { closeAdbBridge("server requested") }
+                "bridge.close" -> maintenanceExecutor.execute {
+                    try {
+                        closeAdbBridge("server requested")
+                    } catch (e: Throwable) {
+                        Log.e(TAG, "bridge.close 失败：${e.message}", e)
+                    }
+                }
 
                 "ota.upgrade_available" -> {
                     // 实时推送：立即触发一次检查（自动化期间 OtaUpdater 自行推迟）

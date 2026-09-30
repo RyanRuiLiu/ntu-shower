@@ -1,5 +1,6 @@
 package com.ryanliu.ntushower.service
 
+import android.util.Log
 import com.ryanliu.ntushower.BuildConfig
 import com.ryanliu.ntushower.core.shell.RootShell
 import com.ryanliu.ntushower.features.automation.CommandOutcome
@@ -18,6 +19,8 @@ import org.json.JSONObject
  * 重启与卸载**先回报再动作**：它们会杀死本进程，若不先回报，命令方只能等超时。
  */
 object DeviceMaintenance {
+
+    private const val TAG = "DeviceMaintenance"
 
     /** 本模块负责的 action。调用方据此判断是否要把它挪到工作线程。 */
     private val HANDLED = setOf(
@@ -38,23 +41,51 @@ object DeviceMaintenance {
      * 处理一条维护命令；不属于此类返回 false。
      *
      * 结果经 [onOutcome] 交回调用方发送——这里不持有连接，也不留可变状态。
+     *
+     * **保证回报一次**：服务端在等一个有终点的答复，任何漏网的异常都会让那条命令永远
+     * 悬着——服务端只能等到超时，而设备这边连"我失败了"都说不出来。[CommandScheduler]
+     * 对自动化命令有同样的保证。
+     *
+     * `reported` 这个标记是必要的：`device.restart` 与 `device.uninstall` 必须**先回报
+     * 再执行**（那两个操作会杀掉本进程），所以它们的收尾动作跑在结果已发出之后。
+     * 那之后崩了不影响服务端——它已经拿到答复了，不该再收到第二条。
      */
     fun handle(action: String, params: JSONObject, commandId: String, onOutcome: (CommandOutcome) -> Unit): Boolean {
-        when (action) {
-            SupportedActions.DEVICE_RESTART -> {
-                onOutcome(CommandOutcome(commandId, OutcomeStatus.OK, "", ""))
-                restartAgent()
+        if (action !in HANDLED) return false
+        var reported = false
+        try {
+            when (action) {
+                SupportedActions.DEVICE_RESTART -> {
+                    onOutcome(CommandOutcome(commandId, OutcomeStatus.OK, "", ""))
+                    reported = true
+                    restartAgent()
+                }
+
+                SupportedActions.DEVICE_EXEC -> {
+                    onOutcome(execShell(params, commandId))
+                    reported = true
+                }
+
+                SupportedActions.DEVICE_UNINSTALL -> {
+                    onOutcome(CommandOutcome(commandId, OutcomeStatus.OK, "", ""))
+                    reported = true
+                    uninstallAgent()
+                }
             }
-
-            SupportedActions.DEVICE_EXEC -> onOutcome(execShell(params, commandId))
-
-            SupportedActions.DEVICE_UNINSTALL -> {
-                onOutcome(CommandOutcome(commandId, OutcomeStatus.OK, "", ""))
-                uninstallAgent()
+        } catch (e: Throwable) {
+            if (reported) {
+                Log.w(TAG, "结果已回报，收尾步骤失败：${e.message}", e)
+            } else {
+                Log.e(TAG, "维护命令崩溃：$action (${e.message})", e)
+                onOutcome(
+                    CommandOutcome(
+                        commandId,
+                        OutcomeStatus.FAILED,
+                        ReasonCodes.DEVICE_INTERNAL_ERROR,
+                        "设备端内部错误",
+                    ),
+                )
             }
-
-            // 正常路径下调用方已用 handles 判过；这里只是防御直接调用
-            else -> return false
         }
         return true
     }
