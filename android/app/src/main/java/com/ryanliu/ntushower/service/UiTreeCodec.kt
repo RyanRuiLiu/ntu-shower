@@ -72,6 +72,13 @@ object UiTreeCodec {
                 }
                 child.recycle()
             }
+            if (budget == 0) {
+                // 静默截断会让远端把"没写下的"当成"界面上没有的"——与上面那句"不返回空文档"
+                // 是同一条原则。标注写成 XML 注释：它必须能被解析器忽略（不是树的一部分），
+                // 又要人一眼看得见。判据取 budget 归零即可；"节点数恰好等于上限"会被误报，
+                // 但那与"截断了却不说"相比是可以接受的。
+                out.append("  <!-- 已达节点上限 ").append(maxNodes).append("，其余内容省略 -->\n")
+            }
             out.append("</hierarchy>\n")
             return out.toString()
         } finally {

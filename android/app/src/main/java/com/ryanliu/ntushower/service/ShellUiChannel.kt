@@ -18,9 +18,11 @@ import com.ryanliu.ntushower.core.shell.RootShell
  *
  * ## 命令在本 ROM 上的实测结论
  *
- * DS83X / Android 4.4.4。判据是**界面是否真的变了**（截图或节点树做前后比对），
- * 不是命令的退出码——早年按退出码判断得出过"`input keyevent` 无效"的错误结论，
- * 原因是在不可滚动的界面上取证据，不是命令本身的问题。
+ * DS83X / Android 4.4.4。下表第三列的"判据"指**当初怎么验证**这条命令真的生效——看界面
+ * 是否真的变了（截图或节点树前后比对），而不是看命令的退出码。早年按退出码判断得出过
+ * "`input keyevent` 无效"的错误结论，原因是在不可滚动的界面上取证据，不是命令本身的问题。
+ *
+ * 这与 [run] 用退出码判成败不是一回事：那里判的是"命令执行了没有"。
  *
  * | 命令 | 结论 | 判据 |
  * |---|---|---|
@@ -89,6 +91,13 @@ object ShellUiChannel {
     /** 系统按键。 */
     fun key(key: UiKey): Boolean = run("input keyevent ${key.keyCode}", "key ${key.name}")
 
+    /**
+     * 执行一条 input 命令。
+     *
+     * 判的是**命令有没有执行成功**（shell 退出码），不是"界面是否因此变了"——后者要再做
+     * 一次节点树或截图比对，成本高一个量级，而调用方要的只是"这条命令发出去了且没报错"。
+     * 两者为什么不能用同一个判据，见类注释那张实测表。
+     */
     private fun run(command: String, label: String): Boolean {
         val result = RootShell.control.exec(command)
         val ok = result.exitCode == 0

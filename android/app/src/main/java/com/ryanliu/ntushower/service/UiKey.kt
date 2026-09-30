@@ -1,13 +1,17 @@
 package com.ryanliu.ntushower.service
 
 /**
- * 系统按键。
+ * 系统按键：远程界面操作里的 home / back / recents / notifications。
  *
- * 两条通道各自有原生表示：无障碍用 `performGlobalAction` 的常量，
- * shell 用 `input keyevent` 的数字码。两者在此对齐，调用方只认这个枚举。
+ * 只有 shell 一条通道（`input keyevent`），[keyCode] 就是它的数字码。无障碍侧不做按键
+ * ——那里曾经有过 `performGlobalAction`，界面检视的写操作统一走 shell 之后撤掉了
+ * （理由见 [A11yUiChannel] 的类注释：那些操作本来就是坐标语义）。
  *
- * 只包含**无障碍服务能处理的全局动作**。音量、电源不属于它的职责范围，
- * 那类按键需要实体按键事件注入，不在本项目的能力集内。
+ * **[RECENTS] 在本 ROM 上实测无效**：`input keyevent 187` 返回成功但界面不变。保留它是因为
+ * "有哪些按键"是跨端契约的一部分（服务端的 `DeviceUiKeyRequest` 与网页端都按这套取值），
+ * 移除要三处一起改，而它作为选项本身无害。真要 recent 界面得另找通路。
+ *
+ * 音量与电源不在这里：那类按键需要实体按键事件注入，不在本项目的能力集内。
  */
 enum class UiKey(val keyCode: Int) {
     BACK(4),
