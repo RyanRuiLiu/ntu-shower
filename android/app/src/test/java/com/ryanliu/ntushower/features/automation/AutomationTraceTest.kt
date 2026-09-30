@@ -107,4 +107,74 @@ class RefreshWindowTest {
             window.add(costMs = 4, state = "HOME", changed = false, nowMs = 110),
         )
     }
+
+    @Test
+    fun `events are listed by frequency under the summary`() {
+        // 要回答的是"谁在撑着这个分母"：跑马灯与时钟贡献的分母最大，而分子恒为零
+        val window = RefreshWindow(flushEvery = 2)
+        window.addEvent(ContentEvent("android.widget.TextView", "14:32:05", 1))
+        window.addEvent(ContentEvent("android.widget.TextView", "14:32:05", 1))
+        window.addEvent(ContentEvent("android.widget.FrameLayout", "", 8))
+        window.add(costMs = 1, state = "HOME", changed = false, nowMs = 0)
+        val line = checkNotNull(window.add(costMs = 1, state = "HOME", changed = false, nowMs = 10))
+
+        assertEquals(
+            "refresh n=2 span=10ms avg=1ms max=1ms qavg=0ms qmax=0ms changed=0 last=HOME\n" +
+                "  ev 2× TextView|1|14:32:05\n" +
+                "  ev 1× FrameLayout|8|",
+            line,
+        )
+    }
+
+    @Test
+    fun `event kinds stop being remembered past the cap`() {
+        // 事件的文本可能带倒计时、流水号这类每次都不同的内容，不设上限这张表会一直长
+        val window = RefreshWindow(flushEvery = 1)
+        repeat(200) { window.addEvent(ContentEvent("android.widget.TextView", "tick-$it", 1)) }
+        val line = checkNotNull(window.add(costMs = 1, state = "HOME", changed = false, nowMs = 0))
+
+        // 记住 64 种，其中列 6 种，其余 58 种；200 - 64 = 136 条溢出
+        assertTrue(line, line.contains("其余 58 种"))
+        assertTrue(line, line.contains("溢出 136 条"))
+    }
+
+    @Test
+    fun `a new batch starts with an empty event table`() {
+        // 分窗口正是为了看趋势：上一批的噪声源混进下一批，比例就再也对不上了
+        val window = RefreshWindow(flushEvery = 1)
+        window.addEvent(ContentEvent("android.widget.TextView", "14:32:05", 1))
+        checkNotNull(window.add(costMs = 1, state = "HOME", changed = false, nowMs = 0))
+        val line = checkNotNull(window.add(costMs = 1, state = "HOME", changed = false, nowMs = 10))
+
+        assertEquals("refresh n=1 span=0ms avg=1ms max=1ms qavg=0ms qmax=0ms changed=0 last=HOME", line)
+    }
+}
+
+/**
+ * 事件特征的短标识。
+ *
+ * 它进的是落盘的统计行，所以要短：一条公告几百字，原样拼进去会把整行撑爆，反而看不出是谁在刷屏。
+ */
+class ContentEventTest {
+
+    @Test
+    fun `describe keeps the class tail and drops the package`() {
+        assertEquals("TextView|0|", ContentEvent("android.widget.TextView", "", 0).describe())
+    }
+
+    @Test
+    fun `describe truncates a long text`() {
+        val described = ContentEvent("android.widget.TextView", "公告".repeat(50), 1).describe()
+
+        assertEquals("TextView|1|" + "公告".repeat(12), described)
+    }
+
+    @Test
+    fun `describe distinguishes change types`() {
+        // 纯文本变化与子树变化是两种来源，混在一起就看不出该过滤哪一个
+        val text = ContentEvent("android.widget.TextView", "x", 1).describe()
+        val subtree = ContentEvent("android.widget.TextView", "x", 8).describe()
+
+        assertTrue("$text 与 $subtree 不该相同", text != subtree)
+    }
 }

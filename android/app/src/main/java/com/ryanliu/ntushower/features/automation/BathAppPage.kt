@@ -28,6 +28,29 @@ enum class PageState {
 data class PageSnapshot(val state: PageState, val message: String = "")
 
 /**
+ * 一次内容变化事件里**不必再问系统**就能拿到的字段。
+ *
+ * 全是随事件一起送来的本地数据。`AccessibilityEvent.getSource()` 不在其列——那要触发一次
+ * IPC 去系统侧取节点，而这类事件每秒来十几次。
+ *
+ * 采它的用途是量出"哪些事件根本不会改变页面状态"：浴室 App 首页挂着跑马灯与时钟，界面每秒
+ * 变十几次，每次都付一次窗口快照的钱，而绝大多数什么都没算出来。要过滤就得先知道页面**真正
+ * 切换**时那几个事件长什么样，否则只能靠猜。
+ */
+internal data class ContentEvent(val className: String, val text: String, val contentChangeTypes: Int) {
+
+    /** 统计用的短标识：类名只留末段、文本截断，避免一行日志被一条公告撑爆。 */
+    fun describe(): String {
+        val shortClass = className.substringAfterLast('.')
+        return "$shortClass|$contentChangeTypes|${text.take(TEXT_IN_DESCRIPTION)}"
+    }
+
+    private companion object {
+        const val TEXT_IN_DESCRIPTION = 24
+    }
+}
+
+/**
  * 探针找到的控件。
  *
  * 只需要文本一项，做成类而不是直接返回 `String?`，是为了让"控件在、但没填字"与"控件不在"
@@ -146,9 +169,14 @@ object BathAppPage {
     /**
      * 请求一次重算；**立即返回**，实际重算在 [loop] 那个线程上做。
      *
-     * 由无障碍服务的事件回调调用（主线程），所以这里只允许做原子操作与一次入队。
+     * 由无障碍服务的事件回调调用（主线程），所以这里只允许做原子操作与一次入队——[event]
+     * 的统计同样受这条约束，它只是往一张内存表里加个计数。
+     *
+     * 记事件与是否重算**分开**：被合并掉的那些事件不触发重算，但它们同样是噪声的一部分，
+     * 统计里少了它们，比例就会算错。
      */
-    fun refresh() {
+    internal fun refresh(event: ContentEvent? = null) {
+        event?.let { AutomationTrace.recordEvent(it) }
         if (pending.getAndSet(true)) return
         signal.offer(Unit)
     }

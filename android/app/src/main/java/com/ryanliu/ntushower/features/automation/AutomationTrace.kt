@@ -72,6 +72,20 @@ object AutomationTrace {
     }
 
     /**
+     * 记一次内容变化事件的来源。
+     *
+     * 与 [recordRefresh] 记的是两件事：那个记"这次重算花了多久、算出来有没有变"，这个记
+     * "事件自己长什么样"。两个答案要能对上——一个是分母（来了多少事件），一个是分子（几次
+     * 真换了页）。跑马灯与时钟贡献的分母最大，而分子恒为零。
+     *
+     * 它由无障碍事件回调在**主线程**上调用，所以只往一张内存表加个计数，不碰磁盘。
+     */
+    internal fun recordEvent(event: ContentEvent) {
+        if (!RuntimeConfig.automationTraceEnabled) return
+        refreshWindow.addEvent(event)
+    }
+
+    /**
      * 记一次页面状态重算。
      *
      * 这条记录要回答三个问题：**界面事件来得有多密**（`span/n` 就是事件间隔）、**每次重算
@@ -99,15 +113,17 @@ object AutomationTrace {
         refreshWindow.addQuery(ms)
     }
 
-    private fun append(line: String) {
+    private fun append(text: String) {
         // 整段包在 try 里：记录跑在自动化流程的关键路径上，它自己把流程搞挂就本末倒置了。
         // 写文件会失败（路径不可写、存储满），日志调用在单测里也会失败。
         try {
-            Log.d(TAG, line)
+            Log.d(TAG, text)
             val dir = File(AppConfig.WORK_DIR).apply { mkdirs() }
             val file = File(dir, FILE_NAME)
             if (file.length() > MAX_BYTES) file.delete()
-            file.appendText("[${System.nanoTime() / 1_000_000}] $line\n")
+            // 一条记录可能不止一行（汇总行后面跟着事件来源分布），逐行带时间戳便于按时间对齐
+            val stamp = System.nanoTime() / 1_000_000
+            file.appendText(text.split('\n').joinToString("") { "[$stamp] $it\n" })
         } catch (_: Exception) {
             // 记录是"顺便"的，失败了不该影响主流程
         }
@@ -132,6 +148,15 @@ internal class RefreshWindow(private val flushEvery: Int) {
     private var openedAtMs = 0L
     private var lastState = ""
 
+    /**
+     * 本窗口内各来源的事件条数，键是 [ContentEvent.describe]。
+     *
+     * 种类数要有上限：事件的文本字段可能带倒计时、流水号这类每次都不同的内容，不设上限
+     * 这张表会随运行时长一直长下去。
+     */
+    private val eventCounts = HashMap<String, Int>()
+    private var overflowed = 0
+
     /** 累加一次按 ID 查询的耗时；由 [AutomationTrace.recordQueryTime] 转发。 */
     @Synchronized
     fun addQuery(ms: Long) {
@@ -139,7 +164,19 @@ internal class RefreshWindow(private val flushEvery: Int) {
         if (ms > queryMaxMs) queryMaxMs = ms
     }
 
-    /** 记一次重算；攒够一批时返回要落的行，否则返回 null。 */
+    /** 累加一次事件来源；由 [AutomationTrace.recordEvent] 转发，在**主线程**上调用。 */
+    @Synchronized
+    fun addEvent(event: ContentEvent) {
+        val key = event.describe()
+        val seen = eventCounts[key]
+        when {
+            seen != null -> eventCounts[key] = seen + 1
+            eventCounts.size < MAX_EVENT_KINDS -> eventCounts[key] = 1
+            else -> overflowed++
+        }
+    }
+
+    /** 记一次重算；攒够一批时返回要落的记录（可能多行），否则返回 null。 */
     @Synchronized
     fun add(costMs: Long, state: String, changed: Boolean, nowMs: Long): String? {
         if (count == 0) openedAtMs = nowMs
@@ -149,15 +186,49 @@ internal class RefreshWindow(private val flushEvery: Int) {
         if (costMs > maxMs) maxMs = costMs
         lastState = state
         if (count < flushEvery) return null
-        val line = "refresh n=$count span=${nowMs - openedAtMs}ms avg=${totalMs / count}ms " +
+        val summary = "refresh n=$count span=${nowMs - openedAtMs}ms avg=${totalMs / count}ms " +
             "max=${maxMs}ms qavg=${queryTotalMs / count}ms qmax=${queryMaxMs}ms " +
             "changed=$changedCount last=$lastState"
+        val breakdown = breakdown()
         count = 0
         changedCount = 0
         totalMs = 0
         maxMs = 0
         queryTotalMs = 0
         queryMaxMs = 0
-        return line
+        eventCounts.clear()
+        overflowed = 0
+        return if (breakdown.isEmpty()) summary else "$summary\n$breakdown"
+    }
+
+    /**
+     * 本窗口的事件来源分布，按条数降序。
+     *
+     * 只列前面几种：要回答的是"谁在撑着这个分母"，而噪声源通常就一两种。
+     */
+    private fun breakdown(): String {
+        if (eventCounts.isEmpty()) return ""
+        val top = eventCounts.entries.sortedByDescending { it.value }.take(MAX_EVENT_KINDS_IN_LINE)
+        val lines = top.joinToString("\n") { entry ->
+            // 这里不能图省事写 "$it.value× $it.key"：$it 会整个展开成 Map.Entry 的
+            // "键=值"，跟在后头的 ".value" 就变成原样打进日志的字面量。解构之后两个都是简单
+            // 变量，也就不必用花括号去界定边界。
+            val (key, count) = entry
+            "  ev $count× $key"
+        }
+        val rest = eventCounts.size - top.size
+        return if (rest == 0 && overflowed == 0) {
+            lines
+        } else {
+            "$lines\n  ev 其余 $rest 种，溢出 $overflowed 条"
+        }
+    }
+
+    private companion object {
+        /** 每个窗口最多列出几种来源。 */
+        const val MAX_EVENT_KINDS_IN_LINE = 6
+
+        /** 一个窗口最多记住几种来源，超出的只计数。 */
+        const val MAX_EVENT_KINDS = 64
     }
 }
