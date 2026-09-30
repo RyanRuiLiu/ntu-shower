@@ -1,6 +1,6 @@
 # ntu-shower 协议 v1
 
-状态：**草案（待用户最终确认）** · 传输：WSS (TLS 1.2) · 编码：JSON 文本帧
+状态：**v1 已上线** · 传输：WSS (TLS 1.2) · 编码：JSON 文本帧
 
 ## 0. 总则
 
@@ -26,7 +26,9 @@
 
 ### 0.3 Schema 管理
 
-每种 type 一份 JSON Schema（draft 2020-12）存 `protocol/schema/`；前端 TS 类型由 schema 生成；CI 校验样例消息。新增字段 = 加可选字段 + schema 更新，协议不升版；破坏性变更才升 `v`。
+每种 type 一份 JSON Schema（draft 2020-12）存 `protocol/schema/`；CI 校验样例消息，
+并反向断言"schema 文件集合 == 消息清单"（`tests/test_protocol_schemas.py`）。
+新增字段 = 加可选字段 + schema 更新，协议不升版；破坏性变更才升 `v`。
 
 ### 0.4 设备端原则
 
@@ -91,7 +93,8 @@ session.command_result（设备→服务端，reply_to）
   data: {…} }
 ```
 
-- 一期 action：`session.assign`、`session.settle`、`photo.capture`（结果含 base64 图）、`app.restart`、`app.uninstall`、`device.factory_reset`（自管理命令，用户点名要求）；
+- 已实现 action：`session.assign`、`session.settle`、`photo.capture`（结果含 base64 图）、
+  `screen.capture`（同上）、`debug.exec`、`app.restart`、`app.uninstall`；
 - 设备端命令路由为注册制：新功能 = 注册新 handler + 声明能力位；
 - 超时由服务端 `deadline_ts` 控制，设备过时拒绝执行并回 `timeout`。
 
@@ -129,3 +132,7 @@ ota.progress         （设备→服务端）{ stage: "downloading"|"verifying"|
 | session.command_result | 设备→服务端 | — | session.command_result.json |
 | config.update / config.ack | 服务端→设备 / 反向 | — | config.update.json |
 | ota.upgrade_available / ota.progress | 服务端→设备 / 反向 | — | ota.upgrade_available.json |
+| bridge.open | 服务端→设备 | — | bridge.open.json |
+| bridge.close | 服务端→设备 | — | bridge.close.json |
+
+桥接数据帧不走本协议：配对完成后切换至独立二进制 WS（见 ADR-0035）。
