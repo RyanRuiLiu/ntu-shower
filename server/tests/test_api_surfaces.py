@@ -476,7 +476,7 @@ def asyncio_run_command(coroutine: Coroutine[object, object, dict[str, object]])
 def test_device_clock_boundaries() -> None:
     from app.core import device_clock
 
-    assert device_clock.update_skew("dev-clock", "not-a-time") == 0.0
+    assert device_clock.update_skew("dev-clock", "not-a-time", 300.0) == 0.0
     assert device_clock.correct_rfc3339(None, "dev-clock") is None
     assert device_clock.correct_rfc3339("bad", "dev-clock") == "bad"
     corrected = device_clock.correct_rfc3339("2026-09-30T12:00:00.000Z", "dev-clock")
