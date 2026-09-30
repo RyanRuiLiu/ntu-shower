@@ -12,42 +12,59 @@ object RuntimeConfig {
 
     // ── 通信时序 ──
     @Volatile var heartbeatIntervalS = 30
+        private set
 
     @Volatile var reconnectBaseMs = 5000L
+        private set
 
     @Volatile var reconnectMaxMs = 60000L
+        private set
 
     @Volatile var watchdogIntervalS = 60L
+        private set
 
     // ── doors 采集 ──
     @Volatile var reportDebounceMs = 1000L
+        private set
 
     // ── 自动化 ──
     @Volatile var overlayEnabled = true
+        private set
 
     @Volatile var overlayMessage = "自动操作中…"
+        private set
 
     @Volatile var serverResponseTimeoutMs = 10_000L
+        private set
 
     @Volatile var idVerifyWaitMs = 5_000L
+        private set
 
     @Volatile var homeBudgetMs = 10_000L
+        private set
 
     @Volatile var pollIntervalMs = 200L
+        private set
 
     @Volatile var uiClickDelayMs = 200L
+        private set
 
     // ── OTA ──
     @Volatile var otaCheckIntervalS = 3600
+        private set
 
     // ── 浴室 App 崩溃守护 ──
     @Volatile var bathGuardEnabled = true
+        private set
 
     @Volatile var bathExitWindowMs = 30_000L
+        private set
 
     @Volatile var bathExitMaxCount = 3
+        private set
 
     @Volatile var bathExitCooldownMs = 600_000L
+        private set
 
     /** 键 → 应用函数映射表：新增配置键只需加一行（复杂度不随键数增长）。 */
     private val appliers: Map<String, (JSONObject) -> Unit> = mapOf(
@@ -84,4 +101,12 @@ object RuntimeConfig {
             appliers[key]?.invoke(config)
         }
     }
+
+    /**
+     * 支持的配置键集合。
+     *
+     * 暴露出来有两个用途：测试可遍历全部键，确保每条映射都被执行；
+     * 与服务端 DEFAULT_CONFIG 对账时也以此为准（见 docs/PROTOCOL.md §5）。
+     */
+    val supportedKeys: Set<String> get() = appliers.keys
 }

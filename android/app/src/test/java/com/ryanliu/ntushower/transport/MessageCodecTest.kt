@@ -38,4 +38,47 @@ class MessageCodecTest {
         assertNull(MessageCodec.decode("not json"))
         assertNull(MessageCodec.decode("{}"))
     }
+
+    @Test
+    fun decode_rejectsWrongProtocolVersion() {
+        // 版本不匹配必须整帧丢弃：字段语义可能已变，猜测比丢掉更危险
+        assertNull(MessageCodec.decode("""{"v":2,"type":"link.ping","id":"x"}"""))
+        assertNull(MessageCodec.decode("""{"type":"link.ping","id":"x"}"""))
+    }
+
+    @Test
+    fun decode_rejectsMissingTypeOrId() {
+        assertNull(MessageCodec.decode("""{"v":1,"type":"","id":"x"}"""))
+        assertNull(MessageCodec.decode("""{"v":1,"type":"link.ping","id":""}"""))
+    }
+
+    @Test
+    fun decode_treatsNullReplyToAsAbsent() {
+        val env = MessageCodec.decode("""{"v":1,"type":"link.ping","id":"x","reply_to":null}""")
+
+        assertNull(env?.replyTo)
+    }
+
+    @Test
+    fun decode_keepsReplyToWhenPresent() {
+        val env = MessageCodec.decode("""{"v":1,"type":"config.ack","id":"x","reply_to":"cmd-9"}""")
+
+        assertEquals("cmd-9", env?.replyTo)
+    }
+
+    @Test
+    fun decode_defaultsMissingFields() {
+        val env = MessageCodec.decode("""{"v":1,"type":"link.ping","id":"x"}""")
+
+        assertEquals("", env?.ts)
+        assertEquals(0, env?.payload?.length())
+    }
+
+    @Test
+    fun decode_ignoresNonObjectPayload() {
+        // payload 不是对象时按空对象处理，不让整帧失效
+        val env = MessageCodec.decode("""{"v":1,"type":"link.ping","id":"x","payload":"nope"}""")
+
+        assertEquals(0, env?.payload?.length())
+    }
 }

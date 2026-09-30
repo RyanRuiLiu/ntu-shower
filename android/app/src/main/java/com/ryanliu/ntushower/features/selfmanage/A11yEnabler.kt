@@ -10,20 +10,18 @@ import com.ryanliu.ntushower.core.shell.RootShell
 object A11yEnabler {
 
     private const val TAG = "A11yEnabler"
-    private const val COMPONENT = "com.ryanliu.ntushower/.service.A11yService"
+    private const val APP_PACKAGE = "com.ryanliu.ntushower"
+    private const val COMPONENT = "$APP_PACKAGE/.service.A11yService"
 
     fun ensureEnabled(): Boolean {
         val current = RootShell.exec(
             "settings get secure enabled_accessibility_services",
         ).output.trim()
-        if (current.contains("com.ryanliu.ntushower")) {
+        if (A11ySettingsMerge.contains(current, APP_PACKAGE)) {
             return true
         }
-        val merged = if (current.isEmpty() || current == "null" || current == "none") {
-            COMPONENT
-        } else {
-            "$current:$COMPONENT"
-        }
+        val merged = A11ySettingsMerge.mergeSettingsValue(current, COMPONENT)
+
         val result = RootShell.exec(
             "settings put secure enabled_accessibility_services \"$merged\" && " +
                 "settings put secure accessibility_enabled 1",
