@@ -140,6 +140,20 @@ ssh <deploy-host> 'systemctl is-active ntu-shower; journalctl -u ntu-shower -n 4
 - 日志出现 `PydanticUserError` / `ImportError` → 部署了与本机解释器不兼容的代码，
   按 §2 回滚，并补齐第 ④ 步预检。
 
+### 设备能力集（capabilities）
+
+设备在 `link.hello` 中声明自己支持的 action 集合（`transport/SupportedActions.ALL`），
+服务端在下发命令前比对：**声明的范围内**才发，避免把设备不认识的命令发过去。
+
+- 空数组表示**未声明**（升级前的旧版本设备），此时不做拦截——否则升级服务端会把在网设备锁死；
+- 设备升级后 capabilities 会自动带上真实集合，拦截随之生效；
+- 若某命令被拒且 `reason_code=session.unsupported_by_device`，先看设备声明里有没有它：
+
+```bash
+ssh <deploy-host> 'TOKEN=$(grep ADMIN_TOKEN /opt/ntu-shower/server/.env | cut -d= -f2);
+  curl -s -H "X-Admin-Token: $TOKEN" http://127.0.0.1:8001/admin/devices | python3 -m json.tool'
+```
+
 ### 设备离线
 
 ```bash
