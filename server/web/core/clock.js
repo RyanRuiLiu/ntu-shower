@@ -54,24 +54,30 @@ export function fmtServerTimeNow() {
 }
 
 /**
- * RFC 3339 转 `MM-DD HH:MM`；缺值或解析不出来时给占位符。
+ * RFC 3339 转 `MM-DD HH:MM:SS`；缺值或解析不出来时给占位符。
  *
- * 两种粒度并存是刻意的：进行中的会话问的是"今天几点"，`HH:MM:SS` 够用；而"上次使用"
- * 或"最后上报"可能发生在几天前，只给时分看不出是哪天，给完整年份又会把宽度挤掉。
- * 需要年月日的地方（审计、发布）用 [fmtFullDateTime]。
+ * 月日 + 秒。喷头卡片上的"上次使用"与设备面板里的"最后上报"都可能发生在几天前，
+ * 只给时分看不出是哪天；而**秒是这类信息的精度**——"最后上报 3 秒前"与"1 分钟前"
+ * 对判断链路还活着没有是两回事，压到分钟就把那个区别抹掉了。
+ *
+ * 需要年份的地方（审计流水、发布记录）用 [fmtFullDateTime]。
  */
 export function fmtDateTime(value) {
   if (!value) return PLACEHOLDER
   const at = new Date(value)
   if (Number.isNaN(at.getTime())) return PLACEHOLDER
-  return `${pad2(at.getMonth() + 1)}-${pad2(at.getDate())} ${pad2(at.getHours())}:${pad2(at.getMinutes())}`
+  return (
+    `${pad2(at.getMonth() + 1)}-${pad2(at.getDate())} ` +
+    `${pad2(at.getHours())}:${pad2(at.getMinutes())}:${pad2(at.getSeconds())}`
+  )
 }
 
 /**
  * RFC 3339 转 `YYYY-MM-DD HH:MM:SS`；缺值或解析不出来时给占位符。
  *
- * 给要跨天比对的地方用（审计流水、发布记录）。不用 `toLocaleString`：那会随浏览器的
- * 区域设置与版本变化，同一份记录在不同机器上显示成不同样子，而这里要的正是可比对。
+ * 与 [fmtDateTime] 的差别只有年份：审计流水与发布记录要跨月甚至跨年比对，没有年份就
+ * 排不出先后。不用 `toLocaleString`：那会随浏览器的区域设置与版本变化，同一份记录在
+ * 不同机器上显示成不同样子，而这里要的正是可比对。
  */
 export function fmtFullDateTime(value) {
   if (!value) return PLACEHOLDER
