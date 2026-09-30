@@ -3,7 +3,8 @@
 import asyncio
 import uuid
 from dataclasses import dataclass
-from typing import TypedDict
+
+from typing_extensions import TypedDict
 
 from app.core import protocol
 from app.core.clock import rfc3339_after
