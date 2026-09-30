@@ -13,6 +13,7 @@ from app.core.clock import now_rfc3339
 from app.core.problems import ADMIN_UNAUTHORIZED, ApiProblemError
 from app.gateway.manager import ConnectionManager
 from app.modules.doors import service as doors_service
+from app.modules.doors.schemas import DoorState
 from app.modules.sessions import service as sessions_service
 
 
@@ -138,10 +139,10 @@ def test_derive_state_safe_int_and_unknown_status() -> None:
     assert doors_service._safe_int("x", default=3) == 3
     assert doors_service._safe_int(None) == 0
 
-    assert doors_service.derive_state({"status_raw": "1"}) == doors_service.STATE_REPAIR
-    assert doors_service.derive_state({"status_raw": "3"}) == doors_service.STATE_DISABLED
+    assert doors_service.derive_state({"status_raw": "1"}) == DoorState.REPAIR
+    assert doors_service.derive_state({"status_raw": "3"}) == DoorState.DISABLED
     # 占用者标识：acc_no 非零也算占用
-    assert doors_service.derive_state({"status_raw": 0, "card_no": 0, "acc_no": "8"}) == doors_service.STATE_WAITING
+    assert doors_service.derive_state({"status_raw": 0, "card_no": 0, "acc_no": "8"}) == DoorState.WAITING
 
 
 def test_process_snapshot_skips_invalid_and_zero_door_no(client: TestClient) -> None:
