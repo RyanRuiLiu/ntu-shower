@@ -13,6 +13,8 @@
  * 唯一的例外是审计页——那是开发者页面，读它的人正需要拿着 code 去日志里搜。
  */
 
+import { $ } from './dom.js'
+
 /** 状态 → 中文。取值与设备端的回报一致。 */
 export const OUTCOME_STATUS = {
   ok: '成功',
@@ -72,4 +74,18 @@ export function outcomeText(result) {
  */
 export function problemText(error) {
   return `失败 · ${error.message}`
+}
+
+/**
+ * 往某个结果区写一句话。
+ *
+ * 原先概览与设备两个视图各写了一份逐字相同的实现——这类东西一旦有两份，改一处忘另一处
+ * 只是时间问题，而表现是"两个页面对同一件事的说法不一样"。
+ *
+ * `kind` 取 `ok` / `err` / `info`，与样式表的 `.result-*` 对应。
+ */
+export function report(id, text, kind) {
+  const box = $(id)
+  box.className = `result ${kind}`
+  box.textContent = text
 }

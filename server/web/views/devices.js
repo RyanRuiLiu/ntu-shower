@@ -11,15 +11,9 @@
  */
 import { api } from '../core/api.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
-import { outcomeText } from '../core/outcome.js'
+import { outcomeText, problemText, report } from '../core/outcome.js'
 import { refreshDevices, store, subscribe } from '../core/store.js'
 import { toast } from '../core/toast.js'
-
-function report(id, text, kind) {
-  const box = $(id)
-  box.className = `result ${kind}`
-  box.textContent = text
-}
 
 function renderTable() {
   if (store.devices.length === 0) {
@@ -72,7 +66,7 @@ async function rename(deviceId) {
     await refreshDevices()
     toast('已改名')
   } catch (error) {
-    report('maintResult', error.message, 'err')
+    report('maintResult', problemText(error), 'err')
   }
 }
 
@@ -83,14 +77,14 @@ async function toggleTrust(deviceId) {
     await refreshDevices()
     toast(device?.trusted ? '已取消信任' : '已信任')
   } catch (error) {
-    report('maintResult', error.message, 'err')
+    report('maintResult', problemText(error), 'err')
   }
 }
 
 async function runExec() {
   const command = $('inCommand').value.trim()
   if (!command) {
-    report('maintResult', '请输入命令', 'err')
+    report('maintResult', '失败 · 请先填写命令', 'err')
     return
   }
   report('maintResult', '正在执行…', 'info')
@@ -102,7 +96,7 @@ async function runExec() {
     $('execOutput').hidden = false
     report('maintResult', result.status === 'ok' ? '已完成' : outcomeText(result), result.status === 'ok' ? 'ok' : 'err')
   } catch (error) {
-    report('maintResult', error.message, 'err')
+    report('maintResult', problemText(error), 'err')
   }
 }
 
@@ -111,9 +105,9 @@ async function doRestart() {
   report('maintResult', '正在重启…', 'info')
   try {
     await api.restart(store.deviceId)
-    report('maintResult', '已下发重启', 'ok')
+    report('maintResult', '已完成 · 重启指令已下发', 'ok')
   } catch (error) {
-    report('maintResult', error.message, 'err')
+    report('maintResult', problemText(error), 'err')
   }
 }
 
@@ -122,36 +116,46 @@ async function doUninstall() {
   report('maintResult', '正在卸载…', 'info')
   try {
     await api.uninstall(store.deviceId)
-    report('maintResult', '已下发卸载', 'ok')
+    report('maintResult', '已完成 · 卸载指令已下发', 'ok')
   } catch (error) {
-    report('maintResult', error.message, 'err')
+    report('maintResult', problemText(error), 'err')
   }
 }
 
 async function bridgeStatus() {
   try {
     const status = await api.bridgeStatus(store.deviceId)
-    report('bridgeResult', `端口 ${status.port} · 世代 ${status.generation} · ${status.already_open ? '已开启' : '未开启'}`, 'info')
+    // 先判断 open：桥关闭时契约里只有 device_id 与 open，其余字段根本不存在，
+    // 直接读会得到一排 undefined。只有异常项才值得占位置，正常时保持简短。
+    if (!status.open) {
+      report('bridgeResult', '桥未开启', 'info')
+      return
+    }
+    const parts = [`本机 127.0.0.1:${status.port}`, `世代 ${status.generation}`]
+    if (!status.device_connected) parts.push('设备侧未连入')
+    if (!status.adb_client_connected) parts.push('本机 adb 未连接')
+    parts.push(`${status.expires_in_s} 秒后到期`)
+    report('bridgeResult', `桥已开启 · ${parts.join(' · ')}`, 'info')
   } catch (error) {
-    report('bridgeResult', error.message, 'err')
+    report('bridgeResult', problemText(error), 'err')
   }
 }
 
 async function bridgeOpen() {
   try {
     const result = await api.bridgeOpen(store.deviceId)
-    report('bridgeResult', `已开：本机 127.0.0.1:${result.port}（世代 ${result.generation}）`, 'ok')
+    report('bridgeResult', `已完成 · 桥已开：本机 127.0.0.1:${result.port}（世代 ${result.generation}）`, 'ok')
   } catch (error) {
-    report('bridgeResult', error.message, 'err')
+    report('bridgeResult', problemText(error), 'err')
   }
 }
 
 async function bridgeClose() {
   try {
     await api.bridgeClose(store.deviceId)
-    report('bridgeResult', '已关闭', 'ok')
+    report('bridgeResult', '已完成 · 桥已关闭', 'ok')
   } catch (error) {
-    report('bridgeResult', error.message, 'err')
+    report('bridgeResult', problemText(error), 'err')
   }
 }
 
@@ -223,7 +227,7 @@ export const devicesView = {
     dispose.add(subscribe('device', renderCurrent))
     dispose.add(subscribe('view', (id) => { if (id !== 'devices') dispose.dispose() }))
 
-    dispose.add(listen($('btnReload'), 'click', () => refreshDevices().catch((error) => toast(error.message))))
+    dispose.add(listen($('btnReload'), 'click', () => refreshDevices().catch((error) => toast(problemText(error)))))
     dispose.add(listen($('btnExec'), 'click', runExec))
     dispose.add(listen($('btnRestart'), 'click', doRestart))
     dispose.add(listen($('btnUninstall'), 'click', doUninstall))
