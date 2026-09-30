@@ -5,8 +5,7 @@
 进而迫使调用方使用函数内导入——那是症状，不是解法。
 """
 
-from fastapi import HTTPException
-
+from app.core.problems import DEVICE_NOT_FOUND, DEVICE_OFFLINE, UNTRUSTED_DEVICE, ApiProblemError
 from app.core.protocol import JsonObject
 
 from . import service
@@ -15,8 +14,11 @@ from . import service
 def require_trusted_online_device(device_id: str) -> JsonObject:
     """依赖守卫：设备必须存在且已信任、当前在线；否则拒绝进入业务。"""
     device = service.get_device(device_id)
-    if device is None or not device["trusted"]:
-        raise HTTPException(status_code=404, detail="device not found")
+    if device is None:
+        raise ApiProblemError(DEVICE_NOT_FOUND, f"unknown device {device_id}")
+    if not device["trusted"]:
+        # 设备存在但未信任是 403，不是 404：混淆两者会让客户端以为设备不存在
+        raise ApiProblemError(UNTRUSTED_DEVICE, f"device {device_id} is not trusted")
     if not service.is_online(device_id):
-        raise HTTPException(status_code=409, detail="device offline")
+        raise ApiProblemError(DEVICE_OFFLINE, f"device {device_id} has no active connection")
     return device

@@ -6,11 +6,11 @@ import threading
 import uuid
 
 import pytest
-from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.core import device_clock, errors, protocol
 from app.core.clock import now_rfc3339
+from app.core.problems import ADMIN_UNAUTHORIZED, ApiProblemError
 from app.gateway.manager import ConnectionManager
 from app.modules.doors import service as doors_service
 from app.modules.sessions import service as sessions_service
@@ -45,9 +45,11 @@ def test_error_frame_is_flat_payload() -> None:
     assert frame["reply_to"] == "r"
 
 
-def test_problem_title_falls_back_for_unknown_status() -> None:
-    assert errors._title_for(599) == "error"
-    assert errors._title_for(404) == "Not Found"
+def test_unregistered_status_gets_a_generated_problem_type() -> None:
+    """框架抛出的未登记状态码：按状态码生成 type，标题取自标准短语。"""
+    assert errors._unregistered(599).title == "error"
+    assert errors._unregistered(404).title == "Not Found"
+    assert errors._unregistered(404).code == "http-404"
 
 
 # ── 安全原语 ──
@@ -289,10 +291,10 @@ def test_device_untrust_rename_and_exec_guards(client: TestClient) -> None:
     client.post("/admin/devices/dev-mgmt/trust", headers=_admin(client))
     assert client.post("/admin/devices/dev-mgmt/untrust", headers=_admin(client)).json()["trusted"] is False
 
-    # 未信任/离线设备上 exec 被守卫拦截
-    assert (
-        client.post("/admin/devices/dev-mgmt/exec", headers=_admin(client), json={"command": "id"}).status_code == 404
-    )
+    # 未信任设备上的 exec 被守卫拦截：未信任是 403，与"设备不存在"（404）区分开
+    denied = client.post("/admin/devices/dev-mgmt/exec", headers=_admin(client), json={"command": "id"})
+    assert denied.status_code == 403
+    assert denied.json()["type"].endswith("/problems/untrusted-device")
 
 
 def test_rename_unknown_device_returns_not_found(client: TestClient) -> None:
@@ -309,8 +311,9 @@ def test_repository_set_name_unknown_device(client: TestClient) -> None:
 def test_require_admin_rejects_missing_token() -> None:
     from app.core.security import require_admin
 
-    with pytest.raises(HTTPException):
+    with pytest.raises(ApiProblemError) as denied:
         require_admin(x_admin_token=None)
+    assert denied.value.problem is ADMIN_UNAUTHORIZED
 
 
 def test_notify_target_devices_all(monkeypatch: pytest.MonkeyPatch) -> None:

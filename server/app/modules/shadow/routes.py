@@ -1,7 +1,8 @@
 """影子 API：用户面 reported 视图与管理面完整文档。"""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
+from app.core.problems import DEVICE_NOT_FOUND, ApiProblemError
 from app.core.protocol import JsonObject
 from app.core.security import require_admin
 
@@ -17,7 +18,7 @@ def get_device_shadow(device_id: str) -> JsonObject:
     """用户面影子：reported 视图（门状态 + 设备在线/名称）。"""
     reported = service.get_reported(device_id)
     if reported is None:
-        raise HTTPException(status_code=404, detail="device not found")
+        raise ApiProblemError(DEVICE_NOT_FOUND, device_id)
     return {"device_id": device_id, "reported": reported}
 
 
@@ -26,5 +27,5 @@ def get_full_shadow(device_id: str) -> JsonObject:
     """管理面影子：reported + desired + metadata 完整文档。"""
     shadow = service.get_shadow(device_id)
     if shadow is None:
-        raise HTTPException(status_code=404, detail="device not found")
+        raise ApiProblemError(DEVICE_NOT_FOUND, device_id)
     return shadow

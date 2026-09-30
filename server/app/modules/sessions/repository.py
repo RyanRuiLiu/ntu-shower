@@ -25,7 +25,7 @@ def init_tables() -> None:
     )
 
 
-def insert(command_id: str, device_id: str, action: str) -> None:
+def insert_command(command_id: str, device_id: str, action: str) -> None:
     get_conn().execute(
         "INSERT INTO command_audit (command_id, device_id, action, created_at) VALUES (?,?,?,?)",
         (command_id, device_id, action, now_rfc3339()),

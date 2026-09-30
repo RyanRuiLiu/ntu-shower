@@ -227,7 +227,7 @@ def test_ota_manifest_and_download_flow(client: TestClient) -> None:
     ota_service.store_release("0.2.5", b"apk-bytes")
     from app.modules.ota import repository as ota_repository
 
-    ota_repository.insert("0.2.5", 7, "a" * 64, False, False, "dev-ota-1")
+    ota_repository.insert_release("0.2.5", 7, "a" * 64, False, False, "dev-ota-1")
     manifest = client.get("/ota/manifest", params={"device_id": "dev-ota-1", "version_code": 6}).json()
     assert manifest["up_to_date"] is False
     assert manifest["version"] == "0.2.5"

@@ -219,6 +219,6 @@ def test_duplicate_session_rejected(client: TestClient) -> None:
             "/api/v1/sessions/assign", json={"device_id": device_id, "door_no": 1, "cert_no": "A", "password": "P"}
         )
         assert r.status_code == 409
-        assert "active session" in r.json()["detail"]
+        assert r.json()["type"].endswith("/problems/duplicate-session")
     finally:
         ws.__exit__(None, None, None)

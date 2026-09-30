@@ -6,10 +6,11 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Path, UploadFile
 from fastapi.responses import FileResponse
 
 from app.core.config import settings
+from app.core.problems import RELEASE_NOT_FOUND, RELEASE_TOO_LARGE, ApiProblemError
 from app.core.protocol import JsonObject
 from app.core.security import require_admin
 from app.modules.ota import repository, service
@@ -50,7 +51,7 @@ def manifest(device_id: str, version_code: int) -> JsonObject:
 def download(version: ReleaseVersion) -> FileResponse:
     path = service.release_path(version)
     if not path.is_file():
-        raise HTTPException(status_code=404, detail="release not found")
+        raise ApiProblemError(RELEASE_NOT_FOUND, version)
     return FileResponse(
         path,
         media_type="application/vnd.android.package-archive",
@@ -85,9 +86,9 @@ async def upload_release(
     """
     data = await file.read()
     if len(data) > settings.max_ota_bytes:
-        raise HTTPException(status_code=413, detail=f"release file exceeds {settings.max_ota_bytes} bytes")
+        raise ApiProblemError(RELEASE_TOO_LARGE, f"limit {settings.max_ota_bytes} bytes")
     sha256 = service.store_release(version, data)
-    repository.insert(version, version_code, sha256, mandatory, force, target)
+    repository.insert_release(version, version_code, sha256, mandatory, force, target)
     notified = await service.notify_target_devices(version, version_code, mandatory, target)
     return {
         "version": version,
