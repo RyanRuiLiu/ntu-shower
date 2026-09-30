@@ -155,7 +155,8 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         TEXT,
         DEVICE,
         "自动操作中…",
-        "操作遮罩上显示的文字",
+        "操作遮罩文字",
+        "自动操作期间显示在屏幕提示层上的文字",
     ),
     ConfigSpec(
         "server_response_timeout_ms",
