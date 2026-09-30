@@ -37,7 +37,6 @@
  */
 import { api } from '../core/api.js'
 import { $, disposer, esc, listen } from '../core/dom.js'
-import { log } from '../core/log.js'
 import { store, subscribe } from '../core/store.js'
 import { toast } from '../core/toast.js'
 
@@ -306,13 +305,10 @@ async function act(label, run, options = {}) {
     const ok = result.status === 'ok'
     const detail = result.terminal_message || result.reason_code || ''
     report(ok ? `${label} 完成` : `${label} 失败：${detail}`, ok ? 'ok' : 'err')
-    if (ok) log('ok', `界面操作：${label}`)
-    else log('err', `界面操作失败：${label} ${detail}`)
     // 操作改变了界面，画面与树都要跟着更新，否则看的是操作前的样子
     if (options.refresh !== false) refreshBoth()
   } catch (error) {
     report(error.message, 'err')
-    log('err', `界面操作失败：${label} ${error.message}`)
   }
 }
 

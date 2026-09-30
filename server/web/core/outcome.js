@@ -39,18 +39,37 @@ export function statusBadgeClass(status) {
   return OUTCOME_BADGE[status] || 'badge-red'
 }
 
+/** 状态 → 显示前缀。与 [OUTCOME_STATUS] 分开：那个是**状态名**（用在表里），
+ * 这个是**已经发生的事**（用在一句话的开头）。"被拒"当句子前缀不通顺。 */
+const OUTCOME_PREFIX = {
+  ok: '已完成',
+  failed: '失败',
+  rejected: '被拒',
+  timeout: '超时',
+}
+
 /**
  * 一条结果里最该显示给用户的那句话。
  *
- * 成功时**带上"已完成"前缀**。设备的 `terminal_message` 是它从浴室 App 界面上读到的
- * 原文（`请使用1号喷头`、`当前卡余额：51.77元`），那是给站在喷头前的人看的——单看
- * 它分不出这次操作是成功了，还是在提示你去做别的。
+ * 格式统一为 `前缀 · 说明`，**成功与失败都一样**。此前只有成功带前缀，失败直接显示
+ * 设备给的原文——那句话是设备从浴室 App 界面上读来的（"校验失败"、"请使用1号喷头"），
+ * 单看它分不出这次到底成没成，也分不出话是谁说的。
  *
- * 失败时直接用它：设备给的失败说明都是成句的中文（"该位置没有可点击的节点"），
- * 比按状态码套一句通用话有用得多。真为空才退回状态名。
+ * `terminal_message` 为空时只显示前缀。
  */
 export function outcomeText(result) {
+  const prefix = OUTCOME_PREFIX[result.status] || '未完成'
   const message = result.terminal_message
-  if (result.status === 'ok') return message ? `已完成 · ${message}` : '已完成'
-  return message || statusLabel(result.status)
+  return message ? `${prefix} · ${message}` : prefix
+}
+
+/**
+ * HTTP 层失败的文案。
+ *
+ * 与服务端命令结果的格式对齐（`前缀 · 说明`）：两者都会落在同一个结果区里，格式若不同，
+ * 看的人得先猜"这次是哪种失败"。`error.message` 已经是完整的一句（服务端 problem 的
+ * `detail`，如"门 2 当前状态：selected"）。
+ */
+export function problemText(error) {
+  return `失败 · ${error.message}`
 }

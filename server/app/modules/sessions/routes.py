@@ -38,20 +38,20 @@ ops_router = APIRouter(prefix="/ops", dependencies=[Depends(require_ops_token)],
 
 
 def _require_assignable_door(device_id: str, door_no: int) -> None:
-    """分配前的门现态预检。
+    """分配前的喷头现态预检。
 
-    两种失败分开报：门从没被上报过是 **404**（这个门号不存在），状态不对是 **409**
+    两种失败分开报：喷头从没被上报过是 **404**（这个编号不存在），状态不对是 **409**
     （门在，但现在不能分配）。合成一句"不是空闲"会让"喷头 9 不存在"和"喷头 3 里有人"
     看起来是同一回事，而处理方式不同。
 
-    门号范围不在这里硬编码——存在哪些门是设备上报的事实，不是服务端的常量。
+    喷头编号不在这里硬编码——存在哪些喷头是设备上报的事实，不是服务端的常量。
 
     可分配的状态见 [ASSIGNABLE_STATES]：那里是唯一的判定处，本函数只负责把它接上
     HTTP 错误。
     """
     row = doors_repository.get_door_live(device_id, door_no)
     if row is None:
-        raise ApiProblemError(DOOR_NOT_FOUND, f"门 {door_no} 从未被上报")
+        raise ApiProblemError(DOOR_NOT_FOUND, f"喷头 {door_no} 从未被上报")
     raw_state = row["state"]
     try:
         state: DoorState | None = DoorState(raw_state)
@@ -59,7 +59,7 @@ def _require_assignable_door(device_id: str, door_no: int) -> None:
         # 设备上报了本端不认识的状态：不分配，也不去猜它是什么意思
         state = None
     if state not in ASSIGNABLE_STATES:
-        raise ApiProblemError(DOOR_NOT_FREE, f"门 {door_no} 当前状态：{raw_state}")
+        raise ApiProblemError(DOOR_NOT_FREE, f"喷头 {door_no} 当前状态：{raw_state}")
 
 
 def _reject_duplicate_session(device_id: str, cert_no: str) -> None:
@@ -68,7 +68,7 @@ def _reject_duplicate_session(device_id: str, cert_no: str) -> None:
     if active is not None:
         raise ApiProblemError(
             DUPLICATE_SESSION,
-            f"学号 {cert_no} 已在门 {active['door_no']} 有进行中的会话",
+            f"学号 {cert_no} 已在喷头 {active['door_no']} 有进行中的会话",
         )
 
 

@@ -1,14 +1,14 @@
 /**
- * 概览：喷头现状 + 会话操作 + 事件日志。
+ * 概览：喷头现状 + 会话操作。
  *
  * ## 排版照旧状态面板
  *
  * 结构取自 `ntu-remote-shower/apps/shower-server/app/debug/index.html`：
- * KPI 六格（数字分色 + 占比条）→ 门牌墙（三列）→ 控制操作（两列）→ 事件日志。
+ * KPI 六格（数字分色 + 占比条）→ 喷头卡片墙（三列）→ 控制操作（两列）。
  * 样式在 `style/overview.css`。
  *
- * 门牌保留旧版最有用的一处：**按状态决定显示哪些明细行**。占用中的门给出学号、
- * 分配/开阀/关阀时间与各项时长，时长按当前时刻实时算——判断"这扇门是不是卡住了"
+ * 喷头卡片保留旧版最有用的一处：**按状态决定显示哪些明细行**。占用中的喷头给出学号、
+ * 分配/开阀/关阀时间与各项时长，时长按当前时刻实时算——判断"这个喷头是不是卡住了"
  * 全靠它，而只显示一个状态词是判断不出来的。
  *
  * 第一版不做折叠区，也不预置"状态变化历史"那类区块。
@@ -22,7 +22,7 @@ import { api } from '../core/api.js'
 import { serverNowMs } from '../core/clock.js'
 import { DOOR_STATES } from '../core/contract.js'
 import { $, disposer, esc, listen } from '../core/dom.js'
-import { outcomeText } from '../core/outcome.js'
+import { outcomeText, problemText } from '../core/outcome.js'
 import { store, subscribe } from '../core/store.js'
 
 /**
@@ -31,7 +31,7 @@ import { store, subscribe } from '../core/store.js'
  * 在两处看同一件事，各写一套必然漂移。
  *
  * 下面的校验是刻意的：服务端加了状态而这里没加文案时，**启动就失败**，而不是在
- * 门牌上静默显示一个英文单词——那种问题没人会去报。
+ * 喷头卡片上静默显示一个英文单词——那种问题没人会去报。
  */
 const LABELS = {
   free: '空闲',
@@ -47,7 +47,7 @@ for (const state of DOOR_STATES) {
   if (!LABELS[state]) throw new Error(`状态 ${state} 缺中文文案（见 views/overview.js 的 LABELS）`)
 }
 
-/** 占用中的状态：只有这些门牌才展开明细。 */
+/** 占用中的状态：只有这些喷头卡片才展开明细。 */
 const OCCUPIED = new Set(['waiting', 'bathing', 'paused'])
 
 /** KPI 六格，顺序与配色照旧版，文案照小程序。 */
@@ -85,7 +85,7 @@ function fmtTime(value) {
 /**
  * RFC 3339 → `MM-DD HH:MM`。
  *
- * 门牌上的时间有两种粒度：进行中的会话问的是"今天几点"，`HH:MM:SS` 够用；而"上次
+ * 喷头卡片上的时间有两种粒度：进行中的会话问的是"今天几点"，`HH:MM:SS` 够用；而"上次
  * 使用"可能发生在几天前，只给时分看不出是哪天，给完整年份又会把宽度挤掉。
  */
 function fmtDateTime(value) {
@@ -103,7 +103,7 @@ function elapsedSince(from) {
   return Number.isNaN(at) ? 0 : Math.max(0, (serverNowMs() - at) / 1000)
 }
 
-/** 上一次渲染时各门的状态，用于判断"这扇门刚变了"。 */
+/** 上一次渲染时各喷头的状态，用于判断"这个喷头刚变了"。 */
 let previousStates = new Map()
 
 function renderKpi(doors) {
@@ -127,13 +127,13 @@ function renderKpi(doors) {
 }
 
 /**
- * 门牌上显示哪几格，由状态决定。
+ * 喷头卡片上显示哪几格，由状态决定。
  *
- * 只列**进行中的会话**那几项——门空闲时这个网格整个不渲染，门牌只剩头部一行。
+ * 只列**进行中的会话**那几项——喷头空闲时这个网格整个不渲染，喷头卡片只剩头部一行。
  * 上次使用不在这里，它固定在头部右侧（见 [renderDoors]）。
  *
  * 协议里 `open_time` / `in_time` / `close_time` 一直都有（未发生的为空），所以**按需
- * 取**即可：摆六格空位只是噪声，还盖住了"这扇门现在没什么可看的"这个事实。
+ * 取**即可：摆六格空位只是噪声，还盖住了"这个喷头现在没什么可看的"这个事实。
  */
 const DOOR_FIELDS = {
   waiting: ['open_time', 'assigned'],
@@ -154,7 +154,7 @@ const DOOR_LABELS = {
  * 时间与时长同属"有效信息"，用正文色；只有**正在走的**时长带强调色。
  *
  * 旧版把时间压成次要灰（`--dim`），但那个亮度在暗底上看着像失效信息——而"分配
- * 时间"是这扇门分配出去的时刻，和"分配时长"是同一组的两面，一暗一明会让它们看
+ * 时间"是这个喷头分配出去的时刻，和"分配时长"是同一组的两面，一暗一明会让它们看
  * 起来不像一组。要区分的只是"哪个数字在动"，不是"哪个更重要"。
  */
 const FIELD_TONE = {
@@ -186,7 +186,7 @@ function durationOf(door, field) {
   return ''
 }
 
-/** 一扇门从没被真正使用过时，头部右侧显示的文案。 */
+/** 一个喷头从没被真正使用过时，头部右侧显示的文案。 */
 const LAST_USED_NEVER = '从未使用'
 
 /** 头部右侧那一格的文字：上次真正使用（开过阀）的时刻。 */
@@ -219,7 +219,7 @@ function renderDoors(doors) {
       current.set(door.door_no, door.state)
       const changed = previousStates.has(door.door_no) && previousStates.get(door.door_no) !== door.state
       const fields = DOOR_FIELDS[door.state] || []
-      // 学号只在占用中显示：门空闲时设备已把它清零，那一行只会是 `--`
+      // 学号只在占用中显示：喷头空闲时设备已把它清零，那一行只会是 `--`
       const certLine = OCCUPIED.has(door.state) ? `<div class="door-cert mono">${esc(door.cert_no || '--')}</div>` : ''
       const grid = fields.length
         ? `<div class="door-grid">${fields.map((f) => doorCell(door, f)).join('')}</div>`
@@ -305,7 +305,7 @@ async function doAssign() {
   const base = credentials()
   if (!base) return
   if (!doorNo) {
-    report('resAction', '分配需要喷头编号', 'err')
+    report('resAction', '失败 · 请先填写喷头编号', 'err')
     return
   }
   report('resAction', '正在分配…', 'info')
@@ -313,7 +313,7 @@ async function doAssign() {
     const result = await api.assign({ device_id: store.deviceId, door_no: doorNo, ...base })
     report('resAction', outcomeText(result), result.status === 'ok' ? 'ok' : 'err')
   } catch (error) {
-    report('resAction', error.message, 'err')
+    report('resAction', problemText(error), 'err')
   }
 }
 
@@ -325,29 +325,35 @@ async function doSettle() {
     const result = await api.settle({ device_id: store.deviceId, ...base })
     report('resAction', outcomeText(result), result.status === 'ok' ? 'ok' : 'err')
   } catch (error) {
-    report('resAction', error.message, 'err')
+    report('resAction', problemText(error), 'err')
   }
 }
 
 async function doPhoto() {
   if (!store.deviceId) {
-    report('resPhoto', '请先在顶栏选择设备', 'err')
+    report('resPhoto', '失败 · 请先在顶栏选择设备', 'err')
     return
   }
   report('resPhoto', '正在拍照…', 'info')
   try {
     const result = await api.photo({ device_id: store.deviceId })
+    // 先看命令成没成，再看画面在不在。此前只看 `image` 字段，于是命令失败却恰好带回了
+    // data 时会显示成成功——而"拍到了但没图片"本身也是一种失败，不该算成功。
+    if (result.status !== 'ok') {
+      report('resPhoto', outcomeText(result), 'err')
+      return
+    }
     const image = result.data?.image_base64
     if (!image) {
-      report('resPhoto', '设备未返回画面', 'err')
+      report('resPhoto', '失败 · 设备未返回画面', 'err')
       return
     }
     $('photoImg').src = `data:image/jpeg;base64,${image}`
     $('photoImg').hidden = false
     $('photoHint').hidden = true
-    report('resPhoto', '已拍摄', 'ok')
+    report('resPhoto', '已完成 · 画面已返回', 'ok')
   } catch (error) {
-    report('resPhoto', error.message, 'err')
+    report('resPhoto', problemText(error), 'err')
   }
 }
 

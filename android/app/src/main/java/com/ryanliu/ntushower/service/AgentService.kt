@@ -48,7 +48,7 @@ class AgentService : Service() {
      * 维护命令执行器。
      *
      * 独立于 [worker]：`device.exec` 会阻塞到命令结束（上限 25 秒），塞进 [worker]
-     * 会连带把门状态采集与上报停掉同样久；塞进主线程更糟——心跳、看门狗广播、
+     * 会连带把喷头状态采集与上报停掉同样久；塞进主线程更糟——心跳、看门狗广播、
      * 无障碍事件都在那儿排队（见 [dispatchCommand]）。
      */
     private val maintenanceExecutor = Executors.newSingleThreadExecutor()
@@ -120,13 +120,13 @@ class AgentService : Service() {
             syncConfigDependents()
             if (trusted) {
                 worker.execute {
-                    // 服务端的门现态可能已经被清空重建（开发期"删了重建"是常规操作），
+                    // 服务端的喷头现态可能已经被清空重建（开发期"删了重建"是常规操作），
                     // 而设备侧状态可能一直没变。先忘掉指纹，这次采集才会无条件入队，
                     // 把那批门重新推一遍；只补发积压是不够的，那时发件箱多半是空的。
                     sender.forgetLastState()
                     sender.captureAndEnqueue(client)
-                    // 断网期间积压的快照与门状态是否变化无关：重连时必须直接 flush，
-                    // 否则门状态未变时积压数据永远不会重发。
+                    // 断网期间积压的快照与喷头状态是否变化无关：重连时必须直接 flush，
+                    // 否则喷头状态未变时积压数据永远不会重发。
                     sender.flush(client)
                 }
             }

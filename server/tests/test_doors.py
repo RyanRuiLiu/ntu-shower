@@ -235,7 +235,7 @@ def test_last_used_keeps_zero_length_bath(client: TestClient) -> None:
 
 
 def test_last_used_returns_the_most_recent(client: TestClient) -> None:
-    """同一扇门用过多次时，返回**开阀时刻最晚**的那次，而不是最早或最后写入的。"""
+    """同一个喷头用过多次时，返回**开阀时刻最晚**的那次，而不是最早或最后写入的。"""
     device_id = "dev-last-used-3"
 
     for minutes, cert in ((-60, "OLD"), (-10, "NEW")):
@@ -256,7 +256,7 @@ def test_last_used_returns_the_most_recent(client: TestClient) -> None:
 
 
 def test_doors_api_exposes_last_used(client: TestClient) -> None:
-    """管理面的门列表要带上"上次使用"三个字段；从没用过的门给空值与 0。"""
+    """管理面的喷头列表要带上"上次使用"三个字段；从没用过的喷头给空值与 0。"""
     from app.modules.devices import repository as devices_repository
 
     device_id = "dev-last-used-4"
@@ -279,4 +279,4 @@ def test_doors_api_exposes_last_used(client: TestClient) -> None:
     doors = {d["door_no"]: d for d in repository.list_doors(device_id)}
     assert doors[1]["last_used_at"] == opened
     assert doors[1]["last_used_cert"] == "C"
-    assert doors[2]["last_used_at"] == "", "2 号门从没开过阀，不该有上次使用"
+    assert doors[2]["last_used_at"] == "", "2 号喷头从没开过阀，不该有上次使用"
