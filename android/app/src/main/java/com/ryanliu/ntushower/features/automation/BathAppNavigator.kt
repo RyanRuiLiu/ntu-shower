@@ -44,6 +44,13 @@ object BathAppNavigator {
 
     /** 从任意页面回到 HOME；总预算 [budgetMs]。 */
     fun navigateToHome(a11y: A11yService, budgetMs: Long): Boolean {
+        // 已经在 HOME 就直接收工。ensureForeground 要读一次活动窗口的根节点（一次同步 IPC，
+        // 实测 35~70ms），而 HOME 只可能是浴室 App 自己的页面——它在，就说明它在前台。
+        // 每个流程都从"回首页"开始，而绝大多数时候本来就在首页，所以这一下省的是常态开销。
+        //
+        // 两个条件都要：快照可能是旧值（重算只在事件到达时发生），而 bathAppInForeground 由
+        // 窗口状态事件维护，它才是"浴室 App 此刻在前台"的即时依据。
+        if (A11yService.bathAppInForeground && BathAppPage.snapshot().state == PageState.HOME) return true
         ensureForeground(a11y)
         val start = System.currentTimeMillis()
         while (System.currentTimeMillis() - start < budgetMs) {
@@ -148,7 +155,7 @@ object BathAppNavigator {
         for (i in 0 until grid.childCount) {
             val child = grid.getChild(i) ?: continue
             try {
-                val title = findTitleShallow(child)
+                val title = findTitle(child)
                 try {
                     if (title != null && title.text?.toString() == doorNo.toString()) {
                         return AccessibilityNodeInfo.obtain(child)
@@ -164,30 +171,44 @@ object BathAppNavigator {
         return null
     }
 
-    private fun findTitleShallow(parent: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        for (i in 0 until parent.childCount) {
-            val child = parent.getChild(i) ?: continue
-            try {
+    /**
+     * 在喷头项的两层子节点里找标题控件（`RID_TV_TITLE`）。
+     *
+     * **限深两层**而不是全树递归：喷头项的结构是「容器 → 标题容器 → 标题」，写浅了会漏，
+     * 写深了则可能命中别处同名的控件。原先拆成 `findTitleShallow` 与
+     * `findTitleInGrandchildren` 两个方法互相调用，实际表达的就是"先看子、再看孙"这一件事。
+     */
+    private fun findTitle(item: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        for (i in 0 until item.childCount) {
+            val child = item.getChild(i) ?: continue
+            val title = try {
                 if (matches(child.viewIdResourceName ?: "", RID_TV_TITLE)) {
-                    return AccessibilityNodeInfo.obtain(child)
+                    AccessibilityNodeInfo.obtain(child)
+                } else {
+                    findDirectChild(child, RID_TV_TITLE)
                 }
-                findTitleInGrandchildren(child)?.let { return it }
             } finally {
                 child.recycle()
             }
+            if (title != null) return title
         }
         return null
     }
 
-    private fun findTitleInGrandchildren(child: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        for (j in 0 until child.childCount) {
-            val gc = child.getChild(j) ?: continue
+    /**
+     * 在 [parent] 的**直接**子节点里找资源名为 [resId] 的控件。
+     *
+     * 与 [findNode] 的区别是不下钻：标题固定在上面那两层里，搜深了会命中别处同名的控件。
+     */
+    private fun findDirectChild(parent: AccessibilityNodeInfo, resId: String): AccessibilityNodeInfo? {
+        for (i in 0 until parent.childCount) {
+            val child = parent.getChild(i) ?: continue
             try {
-                if (matches(gc.viewIdResourceName ?: "", RID_TV_TITLE)) {
-                    return AccessibilityNodeInfo.obtain(gc)
+                if (matches(child.viewIdResourceName ?: "", resId)) {
+                    return AccessibilityNodeInfo.obtain(child)
                 }
             } finally {
-                gc.recycle()
+                child.recycle()
             }
         }
         return null

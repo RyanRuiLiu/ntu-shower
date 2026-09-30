@@ -37,8 +37,8 @@ object AutomationFlow {
         val trace = AutomationTrace.begin(action.traceLabel)
         // 先让页面状态与当前界面同步一次：缓存只在无障碍事件到达时更新，而"上一次事件"
         // 可能发生在很久以前（比如流程之间的空档）。不刷新就开始判断，读到的可能是
-        // 上一轮残留的状态。
-        BathAppPage.refresh()
+        // 上一轮残留的状态。要的是**等它量完**，而不是"让它去量"——见 refreshAndAwait。
+        BathAppPage.refreshAndAwait()
         trace?.mark("refresh-page")
         // 1 回首页
         if (!BathAppNavigator.navigateToHome(a11y, RuntimeConfig.homeBudgetMs)) {
