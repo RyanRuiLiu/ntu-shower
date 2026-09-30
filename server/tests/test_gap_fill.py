@@ -169,6 +169,6 @@ def test_devices_repository_capabilities_corrupt_json(client: TestClient) -> Non
     from app.modules.devices import repository as devices_repository
 
     devices_repository.register("dev-corrupt", "0.2.5", 7, "4.4.4", [], "127.0.0.1")
-    get_conn().execute("UPDATE devices SET capabilities = '{broken' WHERE device_id = 'dev-corrupt'")
+    get_conn().execute("UPDATE device SET capabilities = '{broken' WHERE device_id = 'dev-corrupt'")
     get_conn().commit()
     assert devices_repository.get("dev-corrupt")["capabilities"] == []
