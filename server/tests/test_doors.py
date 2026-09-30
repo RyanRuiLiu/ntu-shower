@@ -92,8 +92,7 @@ def test_snapshot_flow(client: TestClient) -> None:
     assert live[1]["state"] == DoorState.FREE.value
 
     # 时间戳必须相对当前时刻构造：服务端算"截至此刻的出水时长"用的是**收到快照的
-    # 时刻**减去设备的 inTime，写死一个过去的日期会算出几天几夜，把 end_reason 直接
-    # 顶到 auto_close。
+    # 时刻**减去设备的 inTime，写死一个过去的日期会算出几天几夜。
     assigned = rfc3339_after(-120)
     opened = rfc3339_after(-60)
 

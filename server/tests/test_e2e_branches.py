@@ -276,8 +276,8 @@ def test_gateway_invalid_snapshot_rejected(client: TestClient) -> None:
         ws.__exit__(None, None, None)
 
 
-def test_assign_roundtrip_and_busy_rejection(client: TestClient, ops_headers: dict[str, str]) -> None:
-    """分配成功往返 + 同设备第二条命令被 409 device.busy 拒绝（HTTP 面）。"""
+def test_assign_roundtrip(client: TestClient, ops_headers: dict[str, str]) -> None:
+    """分配成功往返（HTTP 面）。同通道的第二条会排队而不是被拒，那条语义另测。"""
     import threading
 
     from app.modules.doors import service as doors_service
