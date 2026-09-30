@@ -122,7 +122,7 @@ def process_snapshot(device_id: str, payload: JsonObject) -> JsonObject:
         changed.append({"door_no": door_no, "state": state, "card_no": _safe_int(door.get("card_no"))})
         processed += 1
 
-    events.publish("door_update", {"device_id": device_id, "doors": changed, "at": occurred_at})
+    events.publish(events.DOOR_UPDATE, {"device_id": device_id, "doors": changed, "at": occurred_at})
     return {"status": "ok", "processed": processed}
 
 

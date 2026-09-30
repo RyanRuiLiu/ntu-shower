@@ -97,7 +97,7 @@ async def device_gateway(ws: WebSocket) -> None:
             )
         )
 
-        events.publish("device_online", {"device_id": device_id, "trusted": trusted, "at": now_rfc3339()})
+        events.publish(events.DEVICE_UPDATE, await _device_snapshot(device_id))
         ping_task = asyncio.create_task(_server_ping_loop(ws, device_id, pong_seen))
 
         while True:
@@ -121,7 +121,24 @@ async def device_gateway(ws: WebSocket) -> None:
             manager.unregister(device_id, ws)
             await run_in_threadpool(devices_service.set_device_offline, device_id)
             logger.info("device disconnected: id=%s", device_id)
-            events.publish("device_offline", {"device_id": device_id, "at": now_rfc3339()})
+            events.publish(events.DEVICE_UPDATE, await _device_snapshot(device_id))
+
+
+async def _device_snapshot(device_id: str) -> JsonObject:
+    """取设备的完整档案，作为 `device.update` 的 payload。
+
+    **推送的是整条记录，不是一个"上线了/下线了"的状态词。** 设备重连时变的不只是
+    `online`——版本号（OTA 升级后）、来源 IP（换网络后）、开机时刻（重启后）都在服务端
+    这一侧刚被更新过。只推状态词的话，前端收到也没有别的字段可更新，那些变化就永远到不了
+    界面。
+
+    取不到时给一个只含 id 与"不在线"的最小对象：设备刚被删掉的窗口里确实可能查不到，
+    而推送不该因此断掉。
+    """
+    record = await run_in_threadpool(devices_service.get_device, device_id)
+    if record is not None:
+        return dict(record)
+    return {"device_id": device_id, "online": False}
 
 
 async def _handle_frame(
@@ -179,7 +196,7 @@ async def _server_ping_loop(ws: WebSocket, device_id: str, pong_seen: asyncio.Ev
     以为设备在线——界面上的"在线"也就是假的，要等到 TCP 自己超时，那可能是几十分钟后。
 
     所以每轮发 ping 前清掉标记，最多等到下一个 ping 该发的时刻。没等到 pong 就主动断开，
-    让 finally 里的 `device_offline` 正常推出去。等待时长取 ping 间隔本身：设备处理 pong
+    让 finally 里的 `device.update` 正常推出去。等待时长取 ping 间隔本身：设备处理 pong
     是即时的（它的读循环独立于命令通道），一个完整间隔没有回应不是慢，是断了。
 
     连接关闭即正常退出；其他异常记录后退出——静默吞掉会让时钟校准无声失效。

@@ -41,3 +41,9 @@ export const OUTCOME_LABELS = Object.freeze({
   'timeout': '超时',
   'rejected': '被拒',
 })
+
+/** 推送事件类型。取值取自服务端的 core/events.py。 */
+export const EVENT_TYPES = Object.freeze({
+  DEVICE_UPDATE: 'device.update',
+  DOOR_UPDATE: 'door.update',
+})

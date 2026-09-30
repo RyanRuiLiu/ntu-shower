@@ -30,6 +30,7 @@ def _hello(device_id: str, version_code: int = 0) -> str:
                 "version_code": version_code,
                 "os_version": "4.4.4",
                 "capabilities": ["session.assign"],
+                "uptime_s": 45176,
             },
         }
     )
@@ -177,3 +178,59 @@ def test_unexpected_frame_error_is_logged_before_reraise(
     assert any("gateway session failed" in record.getMessage() for record in caplog.records), (
         "未预期的帧处理异常没有留痕"
     )
+
+
+def test_device_update_payload_is_the_whole_record(fresh_db: str) -> None:
+    """上下线推的是**完整档案**，不是一个状态词。
+
+    这条锁的是"前端拿得到版本号、来源 IP、开机时刻"：设备重连时这几个字段在服务端刚被
+    更新过（OTA 升级换了版本号、换网络换了来源 IP、重启换了开机时刻），而 payload 若只剩
+    `device_id`，前端收到也没有别的字段可更新——那些变化就永远到不了界面。此前正是那样：
+    `device_online` 的 payload 只有 id 与 trusted。
+    """
+    import asyncio
+
+    from app.gateway import routes as gateway_routes
+    from app.modules.devices import repository as devices_repository
+
+    device_id = "dev-update-1"
+    devices_repository.register(
+        device_id, "0.3.33", 40, "4.4.4", ["session.assign"], "10.0.0.9", "2026-06-01T08:00:00.000Z"
+    )
+
+    record = asyncio.run(gateway_routes._device_snapshot(device_id))
+
+    assert record["device_id"] == device_id
+    assert record["app_version"] == "0.3.33"
+    assert record["version_code"] == 40
+    assert record["os_version"] == "4.4.4"
+    assert record["capabilities"] == ["session.assign"]
+    assert record["last_ip"] == "10.0.0.9"
+    assert record["booted_at"] == "2026-06-01T08:00:00.000Z"
+
+
+def test_device_update_with_missing_record_keeps_id_and_offline(fresh_db: str) -> None:
+    """设备记录查不到时，推一个只含 id 与"不在线"的最小对象，而不是让推送失败。
+
+    设备刚被删掉的那一瞬确实可能查不到，而订阅者（网页端）该收到一条能落地处理的
+    消息，而不是什么都收不到。
+    """
+    import asyncio
+
+    from app.gateway import routes as gateway_routes
+
+    record = asyncio.run(gateway_routes._device_snapshot("dev-never-registered"))
+
+    assert record == {"device_id": "dev-never-registered", "online": False}
+
+
+def test_event_type_names_use_dots() -> None:
+    """事件名用点号，与设备协议（`link.hello`、`door.snapshot`）一致。
+
+    此前这里用下划线（`device_online`、`door_update`），同一套系统两种分隔符。这条防止
+    有人顺手改回去。
+    """
+    from app.core import events
+
+    assert events.DEVICE_UPDATE == "device.update"
+    assert events.DOOR_UPDATE == "door.update"

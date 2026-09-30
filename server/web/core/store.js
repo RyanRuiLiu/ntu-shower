@@ -83,20 +83,21 @@ export function setOnline(online) {
 }
 
 /**
- * 收到网关的上下线通知。
+ * 收到设备更新：用服务端推来的**完整记录**替换本地那一条。
  *
- * **两处都要改**：`store.online`（当前设备，供顶栏那盏灯）与 `store.devices` 里对应
- * 那台的 `online` 字段（供设备下拉里的"（在线）"）。只改前者，下拉项就会与紧挨着它的
- * 那盏灯互相矛盾——清单是每 30 秒拉一次，两处各说各话最长能持续半分钟，而看的人没有
- * 任何线索能判断该信哪一个。
+ * 为什么整条替换而不只改 `online`：设备重连时变的还有版本号（OTA 升级后）、来源 IP
+ * （换网络后）、开机时刻（重启后）——那些字段服务端刚更新过，只改一个布尔值的话它们
+ * 到不了界面。改名与信任位也走同一个事件，同理。
+ *
+ * **两处都要动**：`store.devices` 里那一条（供设备下拉与列表）与 `store.online`
+ * （当前设备，供顶栏那盏灯）。只改前者，下拉项就会与紧挨着它的那盏灯互相矛盾。
  */
-export function setDeviceOnline(deviceId, online) {
-  const device = store.devices.find((item) => item.device_id === deviceId)
-  if (device && device.online !== online) {
-    device.online = online
-    emit('devices', store.devices)
-  }
-  if (deviceId === store.deviceId) setOnline(online)
+export function upsertDevice(record) {
+  const index = store.devices.findIndex((item) => item.device_id === record.device_id)
+  if (index === -1) store.devices.push(record)
+  else store.devices[index] = record
+  emit('devices', store.devices)
+  if (record.device_id === store.deviceId) setOnline(Boolean(record.online))
 }
 
 export function setStreaming(streaming) {
