@@ -204,7 +204,7 @@ def test_two_planes_share_the_same_precheck(
 
 
 def _seed_door(device_id: str, door_no: int, **fields: object) -> None:
-    """推一份只含一扇门的快照；缺省字段表示空闲。"""
+    """推一份只含一个喷头的快照；缺省字段表示空闲。"""
     from app.modules.doors import service as doors_service
 
     doors_service.process_snapshot(
@@ -233,7 +233,7 @@ def test_assignable_states_are_free_and_selected() -> None:
     """可分配的状态集合本身。
 
     单独锁这个集合而不是只看接口返回：接口那边为了不真的下发命令，只能覆盖被拒的分支。
-    `selected` 必须在内——它表示"有人在浴室 App 上选中了这扇门"，而 `cardno` 仍是 0，
+    `selected` 必须在内——它表示"有人在浴室 App 上选中了这个喷头"，而 `cardno` 仍是 0，
     没有任何人占用，且这个状态会自行消失（真机实测两次，门自己回到了 free）。
     要求必须 free 会把学生点选中的那几秒挡在门外。
 
@@ -282,12 +282,12 @@ def test_assign_reports_unreported_door_as_not_found(
     client: TestClient,
     ops_headers: dict[str, str],
 ) -> None:
-    """门从没被上报过是 404，不是 409。
+    """喷头从没被上报过是 404，不是 409。
 
-    "这个门号不存在"与"门在、但现在不能分配"是两回事——前者说明设备没上报那扇门
-    （门号打错，或设备的采集出了问题），后者说明里面有人。合成一句话会让排查走错方向。
+    "这个编号不存在"与"喷头在、但现在不能分配"是两回事——前者说明设备没上报那个喷头
+    （编号打错，或设备的采集出了问题），后者说明里面有人。合成一句话会让排查走错方向。
 
-    门号范围不硬编码：存在哪些门是设备上报的事实，不是服务端的常量。
+    喷头编号不在这里硬编码：存在哪些喷头是设备上报的事实，不是服务端的常量。
     """
     device_id = "dev-no-such-door"
     with _online_device(client, device_id):
