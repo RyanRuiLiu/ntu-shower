@@ -16,9 +16,16 @@ import com.ryanliu.ntushower.service.A11yService
  * 一并瘫痪。此前的实现只查清单，故障期间每次都判定"正常"而放行，一次都没修。
  *
  * 这两项之外还有**第三个**前提：系统手上那份"已安装无障碍服务"的表里得有本组件。
- * 那是 `PackageManager` 的查询结果，由包变更事件驱动刷新，本身也会过期——OTA 换包
- * 之后系统走了卸载路径，把本组件从表里摘掉却没加回，此时前两项怎么改都不会生效。
- * 那条恢复路径见 [requestRescan]。
+ * 那是 `AccessibilityManagerService` 从 `PackageManager` 查出来的结果，本模块**够不着**：
+ * 它不在 `settings` 里，也不随这两项变化刷新。真机上见过它过期——OTA 换包后系统走了卸载
+ * 路径（`Force stopping ... : uninstall pkg`），把本组件从那张表里摘掉却没加回，于是清单与
+ * 总开关都对、服务就是不绑，`dumpsys accessibility` 的服务清单里也压根没有本应用。
+ *
+ * 那张表恢复正常的实例：**Android 运行时重启**（system_server 重启后会重新扫描）。试过用
+ * 广播 `PACKAGE_CHANGED` 去催它重扫，代价是 system_server 直接崩溃（少了 user handle，
+ * `UsageStatsService` 的接收器抛未捕获异常），整个运行时跟着重启——比它要修的问题更重，
+ * 已撤掉。所以这一项**不在本模块的能力范围内**，`ensureAvailable` 只如实回报失败，真遇到
+ * 该情形由现场按"重启设备"处置。
  *
  * ## 总开关被回写时的可用路径
  *
