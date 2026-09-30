@@ -53,7 +53,7 @@ window.addEventListener('unhandledrejection', (event) => {
   toast(`未处理的失败：${event.reason?.message || event.reason}`)
 })
 
-/** 导航顺序即此数组顺序。 */
+/** 视图注册表：id → 模块。顺序不代表导航顺序，导航见 [NAV_GROUPS]。 */
 const VIEWS = [
   overviewView,
   inspectorView,
@@ -62,6 +62,22 @@ const VIEWS = [
   identitiesView,
   releasesView,
   auditView,
+]
+
+/**
+ * 导航分组。数组的每一项是一组，组内相邻渲染，组间画一条分隔。
+ *
+ * 分的是**作用范围**，不是功能类别：
+ *
+ * - 前一组都作用于**当前选中的那台设备**（它的喷头现状、它的档案与命令、它的界面）；
+ * - 后一组是**全局的**，作用范围跨越所有设备（改配置、管权限、发版本、查流水）。
+ *
+ * 这么分的实际意义在设备选择器上：切了设备，前一组的内容跟着换，后一组不换。七个按钮
+ * 等宽平铺时看不出这条界线，而"我接下来点的东西是不是针对这台设备"，是现场最常要判断的。
+ */
+const NAV_GROUPS = [
+  ['overview', 'devices', 'inspector'],
+  ['config', 'identities', 'releases', 'audit'],
 ]
 
 let active = null
@@ -86,11 +102,24 @@ function showView(id) {
 
 function initNav() {
   const nav = $('nav')
+  const byId = new Map(VIEWS.map((view) => [view.id, view]))
+
+  // 加视图时忘了排进分组，那个页面就永远打不开，而界面上不会有任何提示——
+  // 导航里根本没有它。这里让它在启动时就暴露（与 overview 里那张状态文案表同一个做法）。
+  const grouped = new Set(NAV_GROUPS.flat())
+  const missing = VIEWS.filter((view) => !grouped.has(view.id)).map((view) => view.id)
+  if (missing.length > 0) throw new Error(`导航分组表漏了视图：${missing.join('、')}`)
+
   // 用 innerHTML 而不是 replaceChildren：后者是较新的 API，老一些的浏览器上不存在，
   // 一旦抛错整个导航就是空的，表现成"点了没反应"，很难往 API 兼容性上想
-  nav.innerHTML = VIEWS.map(
-    (view) => `<button type="button" class="bar-nav-item" data-view="${esc(view.id)}">${esc(view.title)}</button>`,
-  ).join('')
+  nav.innerHTML = NAV_GROUPS.map((group) => {
+    const items = group
+      .map((id) => byId.get(id))
+      .filter((view) => view !== undefined)
+      .map((view) => `<button type="button" class="bar-nav-item" data-view="${esc(view.id)}">${esc(view.title)}</button>`)
+      .join('')
+    return `<div class="bar-nav-group">${items}</div>`
+  }).join('')
   for (const btn of nav.querySelectorAll('.bar-nav-item')) {
     listen(btn, 'click', () => showView(btn.dataset.view))
   }
