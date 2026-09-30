@@ -1,0 +1,44 @@
+feat(android): 配置取值兜底、覆盖率门提到 98%，并清理名不副实的测试
+
+## 取值兜底
+
+设备端此前对下发的配置值不设下限。`ReconnectBackoff` 对 shift 做了
+`coerceAtLeast(0)`，但没防护 baseMs 本身——服务端若下发 0 或负数，
+`0 shl n = 0` 会让 `postDelayed(0)` 立即触发，形成重连/心跳风暴。
+
+分工：服务端按 spec.CONFIG_SPECS 做业务范围校验（心跳 5~600 秒），设备端只兜
+"失控"（一律至少 1）。**不重复服务端的业务范围**——两处各写一份必然漂移。
+这一层是纵深防御：配置也可能经旧版服务端或手工干预进来。
+
+## 按风险区分，不搞一刀切
+
+初版对所有时长键统一钳到 1，测试立刻暴露错误：`ui_click_delay_ms = 0`
+（点击后不等待）与 `report_debounce_ms = 0`（不合并上报）**不会导致失控**，
+服务端 spec 给它们的下界也正是 0。钳制它们等于改掉合法配置。现在只钳
+"0 会导致定时任务立即重复触发"的键（心跳、重连、看门狗、轮询、各超时与窗口、
+退出计数）。
+
+## 覆盖率
+
+- 门限 95% → **98%**（当前 98.8%）
+- 实测该门会拦人：临时提到 0.999 后构建失败并报出实际比值
+- `core/threading/**` 加入赦免清单：两个主线程短路分支必须真实 Looper 才走得到，
+  纯 JVM 测不出；等待逻辑本身是 JDK 的 CountDownLatch，无自研分支
+- 效果：指令 95.21% → 98.33%（报告口径）/ 98.8%（门限口径）、行 93.35% → 99.38%、
+  方法 94.23% → 100%、未覆盖行 21 → 2
+
+## 清理
+
+`supportedKeysMatchesServerKeySet` 名不副实地声称"与服务端对账"，实际只断言了
+数量。真正的对账在服务端（server/tests/test_config_spec.py，按名字比对），
+本地改名为 supportedKeys_hasExpectedCount 并说明它只守数量。
+
+## 自查中修正的错误
+
+- 文件路径一度写成 com/ryanliu/tushower（少了 n），创建了错误目录，已删除重建
+- server_response_timeout_ms 的 lambda 曾写成无意义的折行
+
+## 验证
+
+设备端：detekt + 114 个单测 + 覆盖率门全通过（RuntimeConfigTest 8 → 12）
+服务端：ruff / mypy --strict 全通过，210 passed
