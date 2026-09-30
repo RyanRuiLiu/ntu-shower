@@ -12,6 +12,7 @@ import com.ryanliu.ntushower.core.identity.DeviceIdentity
 import com.ryanliu.ntushower.core.net.HttpClientFactory
 import com.ryanliu.ntushower.core.shell.RootShell
 import com.ryanliu.ntushower.features.automation.CommandOutcome
+import com.ryanliu.ntushower.features.automation.CommandResultCache
 import com.ryanliu.ntushower.features.automation.CommandScheduler
 import com.ryanliu.ntushower.features.automation.CommandScheduler.Command
 import com.ryanliu.ntushower.features.automation.CoverOverlay
@@ -45,6 +46,9 @@ class AgentService : Service() {
     private lateinit var overlay: CoverOverlay
     private lateinit var scheduler: CommandScheduler
     private var monitor: DoorMonitor? = null
+
+    /** 已处理命令的结果缓存（幂等接收者，见 CommandResultCache）。 */
+    private val recentOutcomes = CommandResultCache(MAX_REMEMBERED_COMMANDS)
     private var adbBridge: AdbBridge? = null
 
     @Volatile private var trusted = false
@@ -121,6 +125,14 @@ class AgentService : Service() {
 
     private fun dispatchCommand(envelope: Envelope) {
         val commandId = envelope.id
+        // 幂等接收：发送方只发一次，接收方仍可能收到多次（重连重发、网络抖动）。
+        // 分配/结算会真实操作硬件，重复执行必须在这里拦下；且重发结果而非静默忽略——
+        // 服务端可能正是因为没收到结果才重发。
+        recentOutcomes.recall(commandId)?.let { cached ->
+            Log.i(TAG, "duplicate command, resending result: $commandId")
+            sendOutcome(cached)
+            return
+        }
         val payload = envelope.payload
         val action = payload.optString("action", "")
         val params = payload.optJSONObject("params") ?: JSONObject()
@@ -269,6 +281,7 @@ class AgentService : Service() {
     }
 
     private fun sendOutcome(outcome: CommandOutcome) {
+        recentOutcomes.remember(outcome)
         val payload = JSONObject()
             .put("status", outcome.status)
             .put("reason_code", outcome.reasonCode)
@@ -320,5 +333,8 @@ class AgentService : Service() {
 
         /** 首次 OTA 检查的延迟：覆盖安装后尽快对齐版本，之后按配置间隔。 */
         private const val FIRST_OTA_CHECK_DELAY_S = 30L
+
+        /** 幂等去重窗口：只记最近若干条命令结果，不随运行时长增长。 */
+        private const val MAX_REMEMBERED_COMMANDS = 64
     }
 }

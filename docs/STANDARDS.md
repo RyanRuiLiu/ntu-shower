@@ -91,7 +91,50 @@
 **新增豁免必须先证明"不可测"**（列出尝试过的手段），并在本表登记。
 禁止用豁免掩盖"懒得搭测试脚手架"。
 
-## 6. 版本与发布
+## 6. 日志与可观测性
+
+依据 [The Twelve-Factor App §XI Logs](https://12factor.net/logs)：**把日志当作事件流**，
+进程无缓冲写 stdout，由运行环境（journald）负责收集与归档——
+**应用自身不写日志文件、不做日志轮转**。
+
+| 标准 | 执行机制 |
+|---|---|
+| logger 名用点分层级 `ntu-shower.<域>[.<模块>]` | 评审约束（命名与模块路径对应） |
+| 用 `logger.info("event: key=%s", value)` 延迟格式化，不用 f-string | 评审约束（f-string 会无条件求值，且丢失结构化字段边界） |
+| 敏感信息（密码、令牌、ANDROID_ID 全文）**不得进日志** | 评审约束；`session.command` 的参数只在设备端本地使用，不回显 |
+| 关键路径必须留痕（见下表） | 评审约束 + RUNBOOK 的故障处置依赖它 |
+
+**级别约定**（依 Python logging 惯例）：
+
+- `DEBUG`：诊断细节，默认不输出（如心跳循环的正常退出）；
+- `INFO`：**关键业务事件**——连接建立/断开、命令下发/结果、配置变更、发布上线；
+- `WARNING`：**可恢复的异常情况**——设备离线、请求被拒、文件过大、端口占用；
+- `ERROR`：需人工介入（未处理异常，由错误处理器记录）。
+
+**必须留痕的关键路径**（缺任何一条，故障时就得靠猜）：
+
+| 路径 | 记录内容 |
+|---|---|
+| 设备连接/断开 | `device_id`、`trusted`、版本、IP |
+| 命令生命周期 | `command_id`、`device_id`、`action`、`status`、耗时——`command_id` 是贯穿服务端与设备端的关联标识（EIP: Correlation Identifier） |
+| 配置变更 | 修订号、变更键数、推送到的设备数 |
+| OTA 发布/下架 | 版本、体积、`force`/`target`、通知设备数 |
+| ADB 桥开关 | `device_id`、端口、世代 |
+
+## 7. 消息语义
+
+设备命令通道按 [Enterprise Integration Patterns](https://www.enterpriseintegrationpatterns.com)
+的成熟模式实现，不自创语义：
+
+| 模式 | 本项目的落地 |
+|---|---|
+| **Correlation Identifier** | 服务端生成 `command_id` 作为请求标识，设备端在 `reply_to` 中原样回填；日志与审计表都用它关联两端 |
+| **Idempotent Receiver** | 接收方必须能安全处理重复消息。服务端：`resolve(command_id)` 找不到挂起项即忽略；设备端：`CommandResultCache` 按 `command_id` 去重，命中即重发上次结果而不重复执行——分配/结算是**物理操作**，重复执行不是多算一次而是真的再操作一次 |
+| **Request-Reply** | `session.command` ↔ `session.command_result`，配对靠 `reply_to` |
+| **Message Expiration** | 命令带 `deadline_ts`；服务端超时后清理挂起项，设备端过时拒绝执行 |
+| **Guaranteed Delivery** | 设备侧快照走本地发件箱：ack 才删、未 ack 按序重发（断网不丢数据） |
+
+## 8. 版本与发布
 
 - [Semantic Versioning 2.0](https://semver.org)：`MAJOR.MINOR.PATCH`；0.x 阶段 MINOR=功能、PATCH=修复。
 - [Keep a Changelog 1.1](https://keepachangelog.com)：`CHANGELOG.md` 逐版本记录，人写不贴 git log。
@@ -102,13 +145,13 @@
 - [Conventional Commits 1.0](https://www.conventionalcommits.org)：`feat:`/`fix:`/`refactor:`/`docs:`/`chore:`，
   破坏性变更用 `!` 并在正文说明。
 
-## 7. 文档
+## 9. 文档
 
 - 架构决策：[MADR v3](https://adr.github.io)（`docs/decisions/NNNN-slug.md`，只追加不重写）。
 - 协议：`docs/PROTOCOL.md`；架构：`docs/ARCHITECTURE.md`；本册：工程与安全约束。
 - **文档与代码冲突时以代码为准，当场修文档**——不允许把过期文档留在仓库。
 
-## 8. 环境值
+## 10. 环境值
 
 禁止硬编码任何环境值（域名、路径、密钥、超时、端口）：
 
@@ -119,7 +162,7 @@
 例外：JSON Schema 的 `$id` 按规范必须是 URI（draft 2020-12 §9.1），
 使用域名形式是规范要求而非环境耦合。
 
-## 9. 扩展方式
+## 11. 扩展方式
 
 新增能力一律沿以下接缝，不新造模式：
 
