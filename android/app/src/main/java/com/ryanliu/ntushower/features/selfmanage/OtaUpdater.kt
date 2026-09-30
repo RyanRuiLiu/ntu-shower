@@ -109,8 +109,9 @@ class OtaUpdater(
             if (!response.isSuccessful) {
                 throw IllegalStateException("download http ${response.code()}")
             }
+            val body = response.body() ?: throw IllegalStateException("download body empty")
             target.outputStream().use { out ->
-                response.body()!!.byteStream().copyTo(out)
+                body.byteStream().copyTo(out)
             }
         }
     }
