@@ -1,3 +1,7 @@
+// 设备 ROM 冻结在 Android 4.4（API 19）：AccessibilityNodeInfo.recycle/obtain 在新版 SDK
+// 中废弃，但在 19 上不回收会造成节点泄漏，是唯一正确路径。
+@file:Suppress("DEPRECATION")
+
 package com.ryanliu.ntushower.features.automation
 
 import android.graphics.Rect
@@ -23,6 +27,7 @@ enum class PageState {
  * 页面判定与 resId 语义提取自对浴室 App 的实测（见 docs/ARCHITECTURE.md）；
  * 页面检测用单次 DFS 同时匹配全部特征，HOME 命中即短路。
  */
+@Suppress("TooManyFunctions") // 页面导航原语集合：查找/操作/状态三组共享同一套资源 ID 与节点遍历上下文
 object BathAppNavigator {
 
     // ── resId 特征（浴室 App 固定 UI 结构）──

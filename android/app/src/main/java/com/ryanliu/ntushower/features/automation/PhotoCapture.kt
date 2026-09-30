@@ -1,3 +1,7 @@
+// 设备 ROM 冻结在 Android 4.4（API 19）：Camera2 自 API 21 起才有，此处只能用 Camera1；
+// 其 API 虽在新版 SDK 中废弃，但在 19 上是唯一可用路径。
+@file:Suppress("DEPRECATION")
+
 package com.ryanliu.ntushower.features.automation
 
 import android.graphics.Bitmap

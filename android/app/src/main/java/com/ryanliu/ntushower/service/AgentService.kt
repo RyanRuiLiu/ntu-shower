@@ -72,10 +72,10 @@ class AgentService : Service() {
     }
 
     private val callback = object : GatewayClient.Callback {
-        override fun onConnected(isTrusted: Boolean, config: JSONObject, upgrade: JSONObject?) {
-            trusted = isTrusted
+        override fun onConnected(trusted: Boolean, config: JSONObject, upgrade: JSONObject?) {
+            this@AgentService.trusted = trusted
             Log.i(TAG, "gateway connected, trusted=$trusted")
-            if (isTrusted) {
+            if (trusted) {
                 worker.execute { sender.captureAndEnqueue(client) }
             }
             if (upgrade != null) {
