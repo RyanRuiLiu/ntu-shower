@@ -47,6 +47,9 @@ LOGIN_REJECTED = Problem("login-rejected", 401, "Login rejected")
 CAPABILITY_DENIED = Problem("capability-denied", 403, "Insufficient capability")
 UNKNOWN_CAPABILITY = Problem("unknown-capability", 422, "Unknown capability name")
 
+# ── 远程配置 ──
+INVALID_CONFIG = Problem("invalid-config", 422, "Invalid configuration value")
+
 #: 供测试与文档校验的完整清单（新增类型必须登记于此表，否则自查会漏）
 REGISTRY: tuple[Problem, ...] = (
     DEVICE_NOT_FOUND,
@@ -65,6 +68,7 @@ REGISTRY: tuple[Problem, ...] = (
     LOGIN_REJECTED,
     CAPABILITY_DENIED,
     UNKNOWN_CAPABILITY,
+    INVALID_CONFIG,
 )
 
 

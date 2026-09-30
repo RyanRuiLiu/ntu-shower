@@ -29,8 +29,8 @@ def get_shadow(device_id: str) -> DeviceShadow | None:
     reported = get_reported(device_id)
     if reported is None:
         return None
-    global_revision, _global_config = config_store.get_global()
-    override = config_store.get_device_override(device_id)
+    global_revision, _global_overrides = config_store.get_global_overrides()
+    override = config_store.get_device_overrides(device_id)
     desired_revision = override[0] if override else global_revision
     return {
         "reported": reported,

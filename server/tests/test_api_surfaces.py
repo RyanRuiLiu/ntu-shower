@@ -2,7 +2,8 @@
 
 import json
 import uuid
-from collections.abc import Coroutine
+from collections.abc import Coroutine, Iterator
+from contextlib import contextmanager
 
 import pytest
 from fastapi.testclient import TestClient
@@ -40,15 +41,21 @@ def _admin(client: TestClient) -> dict:
     return {"X-Admin-Token": "test-token"}
 
 
-def _connect_trusted(client: TestClient, device_id: str) -> WebSocketTestSession:
+@contextmanager
+def _online_device(client: TestClient, device_id: str) -> Iterator[WebSocketTestSession]:
+    """建档 → 信任 → 重连，产出一个保持在线会话。
+
+    必须是上下文管理器：手动 __enter__/__exit__ 一旦漏掉退出（断言失败时最容易
+    发生），连接就泄漏并让 TestClient 的 portal 挂起，症状是整个测试会话卡死。
+    """
     with client.websocket_connect("/gateway/device") as ws:
         ws.send_text(_hello(device_id))
         _recv_until(ws, "link.hello_ack")
     client.post(f"/admin/devices/{device_id}/trust", headers=_admin(client))
-    ws = client.websocket_connect("/gateway/device").__enter__()
-    ws.send_text(_hello(device_id))
-    _recv_until(ws, "link.hello_ack")
-    return ws
+    with client.websocket_connect("/gateway/device") as ws:
+        ws.send_text(_hello(device_id))
+        _recv_until(ws, "link.hello_ack")
+        yield ws
 
 
 # ── 用户面只读接口 ──
@@ -136,8 +143,35 @@ def test_global_config_get_put(client: TestClient) -> None:
 
     global_cfg = client.get("/admin/config/global", headers=_admin(client)).json()
     assert global_cfg["config"]["heartbeat_interval_s"] == 45
-    # 未知键被丢弃
-    assert "nonexistent_key" not in global_cfg["config"]
+    # 未覆盖的键仍是默认值：只存差异才能让默认值保持可演进
+    assert global_cfg["config"]["ota_check_interval_s"] == 3600
+
+
+def test_unknown_config_key_is_rejected(client: TestClient) -> None:
+    """未知键此前被静默丢弃——调用方以为提交成功，实际什么都没发生。"""
+    r = client.put("/admin/config/global", headers=_admin(client), json={"config": {"nonexistent_key": 1}})
+
+    assert r.status_code == 422
+    assert r.json()["type"].endswith("/problems/invalid-config")
+
+
+def test_out_of_range_config_is_rejected(client: TestClient) -> None:
+    """0 会让设备立刻重发心跳，形成风暴，因此在入口拦下。"""
+    r = client.put("/admin/config/global", headers=_admin(client), json={"config": {"heartbeat_interval_s": 0}})
+
+    assert r.status_code == 422
+
+
+def test_config_spec_endpoint_lists_every_key(client: TestClient) -> None:
+    """客户端据此渲染控件，不必各自硬编码键表。"""
+    spec = client.get("/admin/config/spec", headers=_admin(client)).json()
+
+    assert {item["key"] for item in spec} >= {"heartbeat_interval_s", "overlay_enabled", "auto_settle_threshold_s"}
+    heartbeat = next(item for item in spec if item["key"] == "heartbeat_interval_s")
+    assert heartbeat["kind"] == "int"
+    assert heartbeat["scope"] == "device"
+    assert heartbeat["minimum"] == 5
+    assert heartbeat["unit"] == "秒"
 
 
 def test_device_config_override_lifecycle(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -146,30 +180,32 @@ def test_device_config_override_lifecycle(client: TestClient, monkeypatch: pytes
 
     monkeypatch.setattr(config_module.settings, "config_ack_timeout_s", 0.2)
     device_id = "dev-cfg-1"
-    ws = _connect_trusted(client, device_id)
-    try:
+    with _online_device(client, device_id):
         r = client.put(
-            f"/admin/devices/{device_id}/config", headers=_admin(client), json={"config": {"heartbeat_interval_s": 20}}
+            f"/admin/devices/{device_id}/config",
+            headers=_admin(client),
+            json={"config": {"heartbeat_interval_s": 20}},
         )
-        assert r.json() == {
+        body = r.json()
+        # 推送已送达但设备未确认：notified 为真、applied 为假并带原因
+        assert {k: body[k] for k in ("device_id", "revision", "notified", "applied", "reason")} == {
             "device_id": device_id,
             "revision": 1,
             "notified": True,
             "applied": False,
             "reason": "ack timeout",
         }
+        assert body["config"]["heartbeat_interval_s"] == 20
 
         override = client.get(f"/admin/devices/{device_id}/config", headers=_admin(client)).json()
-        assert override["effective"]["heartbeat_interval_s"] == 20
-        assert override["override"]["revision"] == 1
+        assert override["config"]["heartbeat_interval_s"] == 20
+        assert override["overrides"] == {"heartbeat_interval_s": 20}
 
         removed = client.delete(f"/admin/devices/{device_id}/config", headers=_admin(client))
         assert removed.json()["override_removed"] is True
         after = client.get(f"/admin/devices/{device_id}/config", headers=_admin(client)).json()
-        assert after["override"] is None
-        assert after["effective"]["heartbeat_interval_s"] == 30
-    finally:
-        ws.__exit__(None, None, None)
+        assert after["overrides"] is None
+        assert after["config"]["heartbeat_interval_s"] == 30
 
 
 def test_device_config_rejected_when_offline(client: TestClient) -> None:
