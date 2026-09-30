@@ -42,7 +42,7 @@
 | [0036](decisions/0036-ota-install-tracking.md) | OTA 安装状态跟踪（防 force 死循环） | 2026-09-30 |
 | [0037](decisions/0037-identity-and-capabilities.md) | 用户面访问控制：身份标识 + 能力位 | 2026-09-30 |
 | [0038](decisions/0038-config-registry-and-diff-storage.md) | 远程配置：登记表 + 只存差异 | 2026-09-30 |
-| [0039](decisions/0039-frontend-stack-taro-react-vite.md) | 前端技术栈：Taro + React + Vite，接受 Vite 4 约束 | 2026-09-30 |
+| [0039](decisions/0039-frontend-stack-taro-react-vite.md) | 前端技术栈：Taro + React + Vite，接受 Vite 4 约束 ⚠️ 已取代 | 2026-09-30 |
 
 ## 已取代的决策
 
@@ -53,3 +53,4 @@
 | [0021](decisions/0021-remote-config-14-keys.md) | [0038](decisions/0038-config-registry-and-diff-storage.md) | 键集与存储方式 |
 | [0025](decisions/0025-role-model-rbac.md) | [0034](decisions/0034-user-plane-anonymous-auth.md) → [0037](decisions/0037-identity-and-capabilities.md) | 用户面登录；三级角色改为能力位 |
 | [0034](decisions/0034-user-plane-anonymous-auth.md) | [0037](decisions/0037-identity-and-capabilities.md) | 用户面操作接口匿名 |
+| [0039](decisions/0039-frontend-stack-taro-react-vite.md) | 工程删除（服务端契约保留） | 前端技术选型 |
