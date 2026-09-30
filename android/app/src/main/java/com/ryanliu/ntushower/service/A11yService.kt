@@ -60,12 +60,10 @@ class A11yService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
-            // 顺序有讲究：**先让页面状态跟上，再放行等待者**。等待方被唤醒后会立刻读
-            // BathAppPage.snapshot()，那时状态必须已经是新的——反过来就是它醒来看见旧值、
-            // 白转一圈再等一轮。
+            // 只入队，不在这里算。重算要做同步 IPC，而本回调跑在**主线程**上——真机上正是
+            // 这条路径把主线程按住，让看门狗的广播排不上队、超时后进程被系统以 ANR 杀掉。
+            // 重算线程算完会经 onPageRefreshed 放行等待者。
             BathAppPage.refresh()
-            pageChangeCount.incrementAndGet()
-            synchronized(pageChangeLock) { pageChangeLock.notifyAll() }
         }
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val pkg = event.packageName?.toString() ?: ""
@@ -190,8 +188,24 @@ class A11yService : AccessibilityService() {
 
         private val pageChangeLock = Object()
 
-        /** 页面内容变化的累计次数：配合 [pageChangeMark] / [awaitPageChangeAfter] 用。 */
+        /** 已完成的重算次数：配合 [pageChangeMark] / [awaitPageChangeAfter] 用。 */
         private val pageChangeCount = AtomicLong(0)
+
+        /**
+         * 一次页面重算已完成（由 [BathAppPage] 的重算线程调用）：放行正在等页面变化的调用方。
+         *
+         * 由重算线程调用而不是由事件回调调用，是这次线程模型调整的关键：事件回调跑在主线程，
+         * 那里不能做重算要的同步 IPC；而"放行等待者"必须发生在**状态已经跟上之后**，等待方
+         * 被唤醒就会立刻读 [BathAppPage.snapshot]，反过来就是它醒来看见旧值、白转一圈再等一轮。
+         *
+         * 多次界面变化可能合并成一次重算，所以这个计数不再等于"内容变化次数"，而是"重算次数"
+         * ——对 [awaitPageChangeAfter] 的用法（只比"是否大于动手前那个 mark"）没有影响。
+         */
+        @JvmStatic
+        fun onPageRefreshed() {
+            pageChangeCount.incrementAndGet()
+            synchronized(pageChangeLock) { pageChangeLock.notifyAll() }
+        }
 
         /**
          * 取当前的变化计数。**在动手之前取**——之后拿它判断"这一下有没有让页面变"。

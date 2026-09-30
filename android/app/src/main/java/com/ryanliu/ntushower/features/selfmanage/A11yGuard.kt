@@ -15,6 +15,11 @@ import com.ryanliu.ntushower.service.A11yService
  * 失去无障碍这个自举锚点（`onServiceConnected` 里拉起主服务），同机的旧系统
  * 一并瘫痪。此前的实现只查清单，故障期间每次都判定"正常"而放行，一次都没修。
  *
+ * 这两项之外还有**第三个**前提：系统手上那份"已安装无障碍服务"的表里得有本组件。
+ * 那是 `PackageManager` 的查询结果，由包变更事件驱动刷新，本身也会过期——OTA 换包
+ * 之后系统走了卸载路径，把本组件从表里摘掉却没加回，此时前两项怎么改都不会生效。
+ * 那条恢复路径见 [requestRescan]。
+ *
  * ## 总开关被回写时的可用路径
  *
  * 总开关为 0 时 `settings put secure accessibility_enabled 1` 会被系统**立即回写
@@ -67,13 +72,37 @@ object A11yGuard {
         if (!A11yState.isSwitchOn(switch)) enableSwitch()
         if (!A11ySettingsMerge.contains(readServiceList(), COMPONENT)) appendToServiceList()
 
-        val stillBound = waitForBind()
+        var stillBound = waitForBind()
+        if (!stillBound) {
+            // 设置层全对却仍不绑：系统缓存的那份"已安装无障碍服务"过期了。真机上出过——
+            // OTA 换包时系统走了卸载路径（日志里写着 `Force stopping ... : uninstall pkg`），
+            // 把本组件从那张表里摘掉却没有加回。此后 settings 怎么写它都不认，
+            // `dumpsys accessibility` 里根本没有这个服务，只修设置是修不好的。
+            requestRescan()
+            stillBound = waitForBind()
+        }
         if (stillBound) {
             Log.i(TAG, "accessibility restored")
         } else {
             Log.e(TAG, "accessibility repair failed")
         }
         return stillBound
+    }
+
+    /**
+     * 广播一次包变更，让系统重新扫描已安装的无障碍服务。
+     *
+     * 这是设置层之外的另一条恢复路径，两者管的不是同一件事：`settings` 决定"系统该不该启用
+     * 它"，而那张已安装表决定"系统知不知道有这个组件"。表过期时，设置写得再对也不会触发
+     * 绑定——真机上表现为 `enabled_accessibility_services` 内容完好、总开关为 1，服务却迟迟
+     * 不绑，而 `dumpsys accessibility` 的服务清单里压根没有本应用。
+     *
+     * **脱手发**，不等结果：这条广播会让系统重扫所有包，耗时从几秒到几十秒不等，占住常驻
+     * 通道会把后面那几条真正把开关写对的 `settings` 一起拖住。广播是否成功本身也不重要，
+     * 要的是它触发的重扫，而那是异步发生的。
+     */
+    private fun requestRescan() {
+        RootShell.execDetached("am broadcast -a android.intent.action.PACKAGE_CHANGED -d package:$APP_PACKAGE")
     }
 
     /**
