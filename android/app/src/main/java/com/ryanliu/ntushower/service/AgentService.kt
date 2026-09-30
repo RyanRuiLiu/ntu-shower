@@ -5,6 +5,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.os.IBinder
+import android.os.SystemClock
 import android.util.Log
 import com.ryanliu.ntushower.BuildConfig
 import com.ryanliu.ntushower.core.clock.Clock
@@ -318,7 +319,14 @@ class AgentService : Service() {
         startWatchdog()
     }
 
-    /** 看门狗：按配置间隔拉活服务（对存活服务为幂等 onStartCommand）。 */
+    /**
+     * 看门狗：按配置间隔拉活服务（对存活服务为幂等 onStartCommand）。
+     *
+     * 走 [AlarmManager.ELAPSED_REALTIME_WAKEUP]：间隔的语义是"距上次 tick 过了这么久"，
+     * 而不是"到了某个墙上时刻"。目标设备没有 NTP，系统时间会被运维改动、掉电重启后
+     * 也会跳变——用 RTC 的话，时钟被往回调只会让 tick 静默推迟，自恢复链路整体延后，
+     * 而日志里什么都看不出来。
+     */
     private fun startWatchdog() {
         val alarm = getSystemService(ALARM_SERVICE) as AlarmManager
         val pending = PendingIntent.getBroadcast(
@@ -327,10 +335,11 @@ class AgentService : Service() {
             Intent(this, WatchdogReceiver::class.java),
             0,
         )
+        val intervalMs = RuntimeConfig.watchdogIntervalS * 1000
         alarm.setRepeating(
-            AlarmManager.RTC_WAKEUP,
-            System.currentTimeMillis() + RuntimeConfig.watchdogIntervalS * 1000,
-            RuntimeConfig.watchdogIntervalS * 1000,
+            AlarmManager.ELAPSED_REALTIME_WAKEUP,
+            SystemClock.elapsedRealtime() + intervalMs,
+            intervalMs,
             pending,
         )
     }
