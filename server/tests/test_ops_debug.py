@@ -3,8 +3,8 @@
 动作名是跨端契约（服务端 payload.action ↔ 设备端 AgentService.dispatchCommand），
 因此这里逐个锁定，避免任一侧改名后链路静默失效。
 
-界面操作那一组（ui.*）还会校验参数形态——`index` 与坐标必须有一个，
-否则设备端拿到两条空参数只能返回"缺少 index 或坐标"，白跑一趟往返。
+界面操作那一组（ui.*）还会校验参数形态——触摸只认坐标，`x` 与 `y` 必填；曾经有过的
+`index` 已删除（理由见 `devices/schemas.py` 的 `DeviceUiTouchRequest`）。
 """
 
 from collections.abc import Callable
@@ -261,7 +261,7 @@ _ALL_DEBUG_CALLS: tuple[Callable[..., object], ...] = (
     lambda c, h: c.post(f"/ops/devices/{DEVICE_ID}/restart", headers=h),
     lambda c, h: c.post(f"/ops/devices/{DEVICE_ID}/uninstall", headers=h),
     lambda c, h: c.post(f"/ops/devices/{DEVICE_ID}/dump", headers=h),
-    lambda c, h: c.post(f"/ops/devices/{DEVICE_ID}/touch", headers=h, json={"index": 0}),
+    lambda c, h: c.post(f"/ops/devices/{DEVICE_ID}/touch", headers=h, json={"x": 0, "y": 0}),
     lambda c, h: c.post(f"/ops/devices/{DEVICE_ID}/key", headers=h, json={"key": "home"}),
     lambda c, h: c.post(f"/ops/devices/{DEVICE_ID}/input", headers=h, json={"text": "x"}),
 )
