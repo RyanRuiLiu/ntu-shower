@@ -211,7 +211,7 @@ function renderTree() {
   }
   for (const root of children.get(-1) || []) walk(root)
 
-  $('treeContent').innerHTML = lines.join('') || '<div class="empty">没有节点</div>'
+  $('treeContent').innerHTML = lines.join('') || '<div class="empty">暂无节点</div>'
   $('treeCount').textContent = filtering ? `${hit.size} / ${nodes.length}` : `${nodes.length} nodes`
 }
 
@@ -583,9 +583,9 @@ export const inspectorView = {
               <button type="button" data-act="expand" title="展开全部">[+]</button>
             </span>
           </div>
-          <input type="text" class="tree-search" id="treeSearch" placeholder="搜索  class:Button  text:确认  id:btn  ...">
+          <input type="text" class="tree-search" id="treeSearch" placeholder="搜索  class:Button  text:确认  id:btn  …">
           <div class="breadcrumb" id="breadcrumb"></div>
-          <div class="tree-content" id="treeContent"><div class="empty">点「UI Tree」加载</div></div>
+          <div class="tree-content" id="treeContent"><div class="empty">点击「UI Tree」加载</div></div>
 
           <div class="prop-panel">
             <div class="prop-header">属性</div>
@@ -612,7 +612,7 @@ export const inspectorView = {
           </div>
 
           <div class="input-bar">
-            <input type="text" id="textInput" placeholder="输入文本后按 Enter 发送...">
+            <input type="text" id="textInput" placeholder="输入文本后按 Enter 发送…">
             <button type="button" data-act="send">发送</button>
           </div>
         </div>
