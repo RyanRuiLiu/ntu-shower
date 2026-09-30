@@ -30,7 +30,7 @@ data class PageSnapshot(val state: PageState, val message: String = "")
  * 一次内容变化事件里**不必再问系统**就能拿到的字段。
  *
  * 全是随事件一起送来的本地数据。`AccessibilityEvent.getSource()` 不在其列——那要触发一次
- * IPC 去系统侧取节点，而这类事件每秒来十几次。
+ * IPC 去系统侧取节点，而这类事件每秒来五十来条。
  *
  * 这两个字段是 [PageEventRules] 全部的判据，够了：浴室 App 的界面上，值得算的与不值得算的
  * 事件在这两个维度上分得干干净净。
@@ -122,10 +122,15 @@ internal object PageRules {
  */
 internal object PageEventRules {
 
-    /** `AccessibilityEvent.CONTENT_CHANGE_TYPE_TEXT`。 */
+    /**
+     * `AccessibilityEvent.CONTENT_CHANGE_TYPE_TEXT` 的取值。
+     *
+     * 数字直接写在这里，不去引用那个常量：本文件要能在 JVM 单测里跑，而 `android.jar` 在单测
+     * 环境里是抛异常的桩，引用它会让整个判据测不了。取值本身的正确性由单测守着。
+     */
     private const val TEXT_ONLY = 2
 
-    /** `AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE`。 */
+    /** `AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE` 的取值。同上，不引用常量。 */
     private const val SUBTREE = 1
 
     private const val TEXT_VIEW = "TextView"
