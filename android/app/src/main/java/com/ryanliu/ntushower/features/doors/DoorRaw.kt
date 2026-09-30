@@ -33,6 +33,24 @@ data class DoorRaw(
         return o
     }
 
+    /**
+     * 去重指纹：**不含 `bathTime`**。
+     *
+     * 那个字段在有人洗浴时每秒都在变（浴室 App 每秒写库刷新时长）。把它算进指纹等于没有
+     * 去重——占用期间每秒都会判定为"变了"从而上报一整份快照（7 个喷头约 1.2 KB），
+     * 而接收方并不需要它：
+     *
+     * - 服务端存的 `bath_time_s` 只是那一刻的快照值，它按 `in_time` 与当前时刻自己就能算；
+     * - 网页端显示的"淋浴时长"是前端拿 `in_time` 本地算的（每秒重算），不靠推送推进。
+     *
+     * 真正值得上报的时刻是"谁进来了、阀开了、暂停了、结束了、清零了"——那些都体现在其余
+     * 字段上。排除它之后，占用期从每秒一次降到每个状态迁移一次。
+     *
+     * 用 `data class` 的 `hashCode` 直接比对整行是行不通的，这也是为什么这里要显式列出
+     * 参与比对的那几项，而不是写 `this`。
+     */
+    fun fingerprint(): List<Any> = listOf(doorNo, cardno, certno, accno, openTime, inTime, closeTime, status)
+
     private fun putTime(target: JSONObject, name: String, raw: String) {
         if (raw.isBlank()) return
         val parsed = try {
