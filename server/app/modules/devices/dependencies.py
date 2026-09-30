@@ -7,10 +7,12 @@
 
 from fastapi import HTTPException
 
+from app.core.protocol import JsonObject
+
 from . import service
 
 
-def require_trusted_online_device(device_id: str) -> dict:
+def require_trusted_online_device(device_id: str) -> JsonObject:
     """依赖守卫：设备必须存在且已信任、当前在线；否则拒绝进入业务。"""
     device = service.get_device(device_id)
     if device is None or not device["trusted"]:

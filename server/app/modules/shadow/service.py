@@ -7,10 +7,11 @@
 
 from app.core.clock import now_rfc3339
 from app.core.db import get_conn
+from app.core.protocol import JsonObject
 from app.modules.config import store as config_store
 
 
-def _device_row(device_id: str) -> dict | None:
+def _device_row(device_id: str) -> JsonObject | None:
     row = (
         get_conn()
         .execute(
@@ -23,7 +24,7 @@ def _device_row(device_id: str) -> dict | None:
     return dict(row) if row else None
 
 
-def _doors_reported(device_id: str) -> list[dict]:
+def _doors_reported(device_id: str) -> list[JsonObject]:
     rows = (
         get_conn()
         .execute(
@@ -37,7 +38,7 @@ def _doors_reported(device_id: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def get_reported(device_id: str) -> dict | None:
+def get_reported(device_id: str) -> JsonObject | None:
     """reported：设备最后上报的状态（含在线标志）。"""
     device = _device_row(device_id)
     if device is None:
@@ -45,12 +46,12 @@ def get_reported(device_id: str) -> dict | None:
     return {"device": device, "doors": _doors_reported(device_id)}
 
 
-def get_desired(device_id: str) -> dict:
+def get_desired(device_id: str) -> JsonObject:
     """desired：服务端期望的设备运行配置。"""
     return config_store.effective(device_id)
 
 
-def get_shadow(device_id: str) -> dict | None:
+def get_shadow(device_id: str) -> JsonObject | None:
     """完整影子文档（管理面）：reported + desired + metadata。"""
     reported = get_reported(device_id)
     if reported is None:

@@ -181,7 +181,7 @@ async def push_config_update(
         return ConfigPushResult(notified=True, applied=False, reason="ack timeout")
 
 
-def resolve_config_ack(device_id: str, revision: str) -> bool:
+def resolve_config_ack(device_id: str, revision: int) -> bool:
     """网关收到 config.ack 时回填挂起中的配置推送。"""
     pending = _config_pending.pop(device_id, None)
     if pending is None:

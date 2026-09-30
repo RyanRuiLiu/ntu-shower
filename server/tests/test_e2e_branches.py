@@ -4,7 +4,9 @@ import asyncio
 import json
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
+from starlette.testclient import WebSocketTestSession
 
 from app.core import config as config_module
 from app.gateway import manager as manager_module
@@ -30,7 +32,7 @@ def _hello(device_id: str) -> str:
     )
 
 
-def _recv_until(ws, msg_type: str) -> dict:
+def _recv_until(ws: WebSocketTestSession, msg_type: str) -> dict:
     while True:
         msg = json.loads(ws.receive_text())
         if msg.get("type") == msg_type:
@@ -41,7 +43,7 @@ def _admin(client: TestClient) -> dict:
     return {"X-Admin-Token": "test-token"}
 
 
-def _connect_trusted(client: TestClient, device_id: str):
+def _connect_trusted(client: TestClient, device_id: str) -> WebSocketTestSession:
     with client.websocket_connect("/gateway/device") as ws:
         ws.send_text(_hello(device_id))
         _recv_until(ws, "link.hello_ack")
@@ -85,7 +87,7 @@ def test_gateway_bad_json_and_unknown_result(client: TestClient) -> None:
         ws.__exit__(None, None, None)
 
 
-def test_command_round_trip_success_path(client: TestClient, monkeypatch) -> None:
+def test_command_round_trip_success_path(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """命令完整成功往返（HTTP → 设备 → 回执 → 审计 ok）。"""
     monkeypatch.setattr(config_module.settings, "config_ack_timeout_s", 0.2)
     device_id = "dev-roundtrip"
@@ -124,7 +126,8 @@ def test_command_round_trip_success_path(client: TestClient, monkeypatch) -> Non
         thread.join(timeout=10)
         body = outcome["r"].json()
         assert outcome["r"].status_code == 200
-        assert body["status"] == "ok" and body["terminal_message"] == "已拍照"
+        assert body["status"] == "ok"
+        assert body["terminal_message"] == "已拍照"
 
         audit = client.get("/admin/commands", headers=_admin(client), params={"device_id": device_id}).json()
         assert audit[0]["status"] == "ok"
@@ -132,14 +135,15 @@ def test_command_round_trip_success_path(client: TestClient, monkeypatch) -> Non
         ws.__exit__(None, None, None)
 
 
-def test_ota_notify_target_devices_filters_and_handles_failure(monkeypatch) -> None:
+def test_ota_notify_target_devices_filters_and_handles_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeWS:
         def __init__(self, raise_on_send: bool = False) -> None:
             self.raise_on_send = raise_on_send
 
         async def send_text(self, data: str) -> bool:
             if self.raise_on_send:
-                raise RuntimeError("closed")
+                message = "closed"
+                raise RuntimeError(message)
             return True
 
     connections = {
@@ -156,7 +160,8 @@ def test_ota_notify_target_devices_filters_and_handles_failure(monkeypatch) -> N
 def test_ota_repository_force_release_ignores_version(client: TestClient) -> None:
     ota_repository.insert("9.9.9", 1, "b" * 64, False, True, "dev-force")
     rel = ota_repository.latest_for("dev-force", 999)
-    assert rel is not None and rel["force"] is True
+    assert rel is not None
+    assert rel["force"] is True
 
 
 def test_root_and_admin_redirects(client: TestClient) -> None:
@@ -165,7 +170,7 @@ def test_root_and_admin_redirects(client: TestClient) -> None:
         assert r.status_code in (307, 302)
 
 
-def test_settle_roundtrip_success_path(client: TestClient, monkeypatch) -> None:
+def test_settle_roundtrip_success_path(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """结算成功往返：预检通过（占用中）→ 命令 → 回执 ok。"""
     import threading
 

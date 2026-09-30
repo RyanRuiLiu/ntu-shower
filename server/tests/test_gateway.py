@@ -4,9 +4,10 @@ import json
 import uuid
 
 from fastapi.testclient import TestClient
+from starlette.testclient import WebSocketTestSession
 
 
-def _recv_until(ws, msg_type: str) -> dict:
+def _recv_until(ws: WebSocketTestSession, msg_type: str) -> dict:
     while True:
         msg = json.loads(ws.receive_text())
         if msg.get("type") == msg_type:
@@ -83,7 +84,8 @@ def test_untrusted_device_pends_then_trusted(client: TestClient) -> None:
         r = client.get("/admin/devices", headers={"X-Admin-Token": "test-token"})
         devices = r.json()
         d = next(x for x in devices if x["device_id"] == device_id)
-        assert d["trusted"] is True and d["online"] is True
+        assert d["trusted"] is True
+        assert d["online"] is True
 
 
 def test_ota_upgrade_delivered_in_handshake(client: TestClient) -> None:
@@ -103,7 +105,8 @@ def test_ota_upgrade_delivered_in_handshake(client: TestClient) -> None:
         ws.send_text(_hello(device_id))
         ack = _recv_until(ws, "link.hello_ack")
         upgrade = ack["payload"]["upgrade"]
-        assert upgrade is not None and upgrade["version"] == "0.3.0"
+        assert upgrade is not None
+        assert upgrade["version"] == "0.3.0"
         assert len(upgrade["sha256"]) == 64
 
 

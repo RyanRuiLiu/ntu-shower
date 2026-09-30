@@ -11,11 +11,13 @@ cert_no/password 是浴室系统的业务凭证：随操作参数直传设备，
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from app.core.protocol import JsonObject
 from app.core.security import require_admin
 from app.modules.devices.dependencies import require_trusted_online_device
 from app.modules.doors import repository as doors_repository
 from app.modules.doors import service as doors_service
 from app.modules.sessions import repository
+from app.modules.sessions.service import CommandOutcome
 
 from . import service
 
@@ -59,7 +61,7 @@ def _reject_duplicate_session(device_id: str, cert_no: str) -> None:
         )
 
 
-def _reject_busy(result: dict) -> dict:
+def _reject_busy(result: CommandOutcome) -> CommandOutcome:
     """设备已有在途命令时拒绝本次请求（409），而非排队。"""
     if result.get("status") == "rejected":
         raise HTTPException(status_code=409, detail=f"device busy ({result.get('reason_code')})")
@@ -67,7 +69,7 @@ def _reject_busy(result: dict) -> dict:
 
 
 @router.post("/sessions/assign")
-async def assign(req: AssignRequest) -> dict:
+async def assign(req: AssignRequest) -> CommandOutcome:
     require_trusted_online_device(req.device_id)
     state = _door_state(req.device_id, req.door_no)
     if state != doors_service.STATE_FREE:
@@ -83,7 +85,7 @@ async def assign(req: AssignRequest) -> dict:
 
 
 @router.post("/sessions/settle")
-async def settle(req: SettleRequest) -> dict:
+async def settle(req: SettleRequest) -> CommandOutcome:
     require_trusted_online_device(req.device_id)
     occupied = doors_repository.get_occupied_by_cert(req.device_id, req.cert_no)
     if occupied is None:
@@ -98,7 +100,7 @@ async def settle(req: SettleRequest) -> dict:
 
 
 @router.post("/photos")
-async def take_photo(req: PhotoRequest) -> dict:
+async def take_photo(req: PhotoRequest) -> CommandOutcome:
     require_trusted_online_device(req.device_id)
     result = await service.send_command_and_wait(
         req.device_id,
@@ -110,6 +112,6 @@ async def take_photo(req: PhotoRequest) -> dict:
 
 
 @admin_router.get("/commands")
-def list_commands(device_id: str | None = None, limit: int = 50) -> list[dict]:
+def list_commands(device_id: str | None = None, limit: int = 50) -> list[JsonObject]:
     """命令审计查询：调试与问题追踪。"""
     return repository.list_commands(device_id=device_id, limit=limit)

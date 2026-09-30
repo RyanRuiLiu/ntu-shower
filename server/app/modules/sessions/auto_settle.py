@@ -12,13 +12,18 @@ import logging
 from datetime import datetime, timezone
 
 from app.core.clock import parse_rfc3339
+from app.core.protocol import JsonObject, as_int
 from app.gateway.manager import manager
 from app.modules.config import store as config_store
 from app.modules.doors import repository as doors_repository
 
 logger = logging.getLogger("ntu-shower.auto-settle")
 
-_task: asyncio.Task | None = None
+# 未取到配置项时使用的阈值（秒）：与 config.DEFAULT_CONFIG 的
+# auto_settle_threshold_s 保持一致（19 分钟，沿用旧项目实测取值）
+DEFAULT_SETTLE_THRESHOLD_S = 1140
+
+_task: asyncio.Task[None] | None = None
 SCAN_INTERVAL_S = 30
 
 
@@ -30,15 +35,16 @@ def _duration_s(started_at: str) -> int:
     return int((datetime.now(timezone.utc) - moment).total_seconds())
 
 
-def pick_auto_settle_candidate(config: dict) -> tuple[str, str, int] | None:
-    """从活跃会话中选出（device_id, cert_no, duration_s）超时结算候选；无则 None。
+def pick_auto_settle_candidate(config: JsonObject) -> tuple[str, str, str, int] | None:
+    """选出 (device_id, cert_no, password, duration_s) 超时结算候选；无则 None。
 
-    纯函数，便于单元测试。
+    纯函数，便于单元测试。密码随候选一并取出：调用方无需再解析一次配置，
+    也就不会因为重复解析而引入不可达的防御分支。
     """
     if not config.get("auto_settle_enabled"):
         return None
-    threshold_s = int(config.get("auto_settle_threshold_s", 1140))
-    students = config.get("auto_settle_students") or {}
+    threshold_s = as_int(config.get("auto_settle_threshold_s"), default=DEFAULT_SETTLE_THRESHOLD_S)
+    students = config.get("auto_settle_students")
     if not isinstance(students, dict):
         return None
 
@@ -49,7 +55,7 @@ def pick_auto_settle_candidate(config: dict) -> tuple[str, str, int] | None:
         duration = _duration_s(str(session["started_at"] or ""))
         if duration < threshold_s:
             continue
-        return str(session["device_id"]), cert_no, duration
+        return str(session["device_id"]), cert_no, str(students[cert_no]), duration
     return None
 
 
@@ -73,8 +79,7 @@ async def scan_once() -> bool:
     candidate = pick_auto_settle_candidate(config)
     if candidate is None:
         return False
-    device_id, cert_no, _duration = candidate
-    password = str((config.get("auto_settle_students") or {})[cert_no])
+    device_id, cert_no, password, _duration = candidate
     if not manager.is_online(device_id):
         return False
     return await _settle(device_id, cert_no, password)

@@ -21,6 +21,8 @@ from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.core.protocol import JsonObject
+
 from .core import db
 from .core.config import settings
 from .core.errors import install_error_handlers
@@ -99,7 +101,7 @@ def create_app() -> FastAPI:
         return RedirectResponse("/web/console.html")
 
     @app.get("/healthz", tags=["meta"])
-    def health() -> dict:
+    def health() -> JsonObject:
         return {"status": "ok", "name": "ntu-shower", "version": APP_VERSION}
 
     return app

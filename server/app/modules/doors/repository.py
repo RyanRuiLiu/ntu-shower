@@ -2,8 +2,10 @@
 
 import json
 from sqlite3 import Row
+from typing import cast
 
 from app.core.db import get_conn
+from app.core.protocol import JsonObject
 
 
 def init_tables() -> None:
@@ -61,27 +63,30 @@ def get_all_live(device_id: str) -> dict[int, Row]:
 
 
 def get_door_live(device_id: str, door_no: int) -> Row | None:
-    return (
+    # sqlite3 的 fetchone 声明为 Any，在此收窄为实际返回的行类型
+    return cast(
+        "Row | None",
         get_conn()
         .execute("SELECT * FROM door_live WHERE device_id = ? AND door_no = ?", (device_id, door_no))
-        .fetchone()
+        .fetchone(),
     )
 
 
 def get_occupied_by_cert(device_id: str, cert_no: str) -> Row | None:
     """按证件号查占用中的门（无卡模式下占用者标识记录在 cert_no）。"""
-    return (
+    return cast(
+        "Row | None",
         get_conn()
         .execute(
             "SELECT * FROM door_live WHERE device_id = ? AND cert_no = ?"
             " AND state IN ('waiting','bathing','paused') LIMIT 1",
             (device_id, cert_no),
         )
-        .fetchone()
+        .fetchone(),
     )
 
 
-def upsert_door_live(device_id: str, door_no: int, state: str, door: dict, reported_at: str) -> None:
+def upsert_door_live(device_id: str, door_no: int, state: str, door: JsonObject, reported_at: str) -> None:
     get_conn().execute(
         """
         INSERT INTO door_live (device_id, door_no, state, card_no, cert_no, acc_no,
@@ -111,7 +116,9 @@ def upsert_door_live(device_id: str, door_no: int, state: str, door: dict, repor
     get_conn().commit()
 
 
-def insert_event(occurred_at: str, device_id: str, door_no: int, from_state: str, to_state: str, detail: dict) -> None:
+def insert_event(
+    occurred_at: str, device_id: str, door_no: int, from_state: str, to_state: str, detail: JsonObject
+) -> None:
     get_conn().execute(
         "INSERT INTO door_state_event (occurred_at, device_id, door_no, from_state, to_state, detail)"
         " VALUES (?,?,?,?,?,?)",
@@ -121,14 +128,15 @@ def insert_event(occurred_at: str, device_id: str, door_no: int, from_state: str
 
 
 def get_open_session(device_id: str, door_no: int) -> Row | None:
-    return (
+    return cast(
+        "Row | None",
         get_conn()
         .execute(
             "SELECT * FROM usage_session WHERE device_id = ? AND door_no = ? AND ended_at IS NULL"
             " ORDER BY id DESC LIMIT 1",
             (device_id, door_no),
         )
-        .fetchone()
+        .fetchone(),
     )
 
 
@@ -155,7 +163,7 @@ _DOOR_LIST_SQL = """
 """
 
 
-def list_doors_with_device(device_id: str | None = None) -> list[dict]:
+def list_doors_with_device(device_id: str | None = None) -> list[JsonObject]:
     """喷头现态列表（联设备在线状态与名称）；不指定设备时返回全部设备。"""
     if device_id:
         rows = get_conn().execute(_DOOR_LIST_SQL + " WHERE d.device_id = ? ORDER BY d.door_no", (device_id,)).fetchall()
@@ -166,7 +174,8 @@ def list_doors_with_device(device_id: str | None = None) -> list[dict]:
 
 def get_active_by_cert(device_id: str, cert_no: str) -> Row | None:
     """同设备上该凭证的活跃会话（重复分配拦截依据，对齐旧系统 duplicate_session）。"""
-    return (
+    return cast(
+        "Row | None",
         get_conn()
         .execute(
             "SELECT * FROM usage_session"
@@ -174,7 +183,7 @@ def get_active_by_cert(device_id: str, cert_no: str) -> Row | None:
             " ORDER BY id DESC LIMIT 1",
             (device_id, cert_no),
         )
-        .fetchone()
+        .fetchone(),
     )
 
 
