@@ -18,7 +18,7 @@ _DEVICE_COLUMNS = (
 def init_tables() -> None:
     get_conn().executescript(
         """
-        CREATE TABLE IF NOT EXISTS devices (
+        CREATE TABLE IF NOT EXISTS device (
             device_id    TEXT PRIMARY KEY,
             name         TEXT NOT NULL DEFAULT '',
             trusted      INTEGER NOT NULL DEFAULT 0,
@@ -35,12 +35,12 @@ def init_tables() -> None:
 
 
 def get(device_id: str) -> DeviceRecord | None:
-    row = get_conn().execute(f"SELECT {_DEVICE_COLUMNS} FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+    row = get_conn().execute(f"SELECT {_DEVICE_COLUMNS} FROM device WHERE device_id = ?", (device_id,)).fetchone()
     return _as_device(row) if row is not None else None
 
 
 def list_all() -> list[DeviceRecord]:
-    rows = get_conn().execute(f"SELECT {_DEVICE_COLUMNS} FROM devices ORDER BY last_seen_at DESC").fetchall()
+    rows = get_conn().execute(f"SELECT {_DEVICE_COLUMNS} FROM device ORDER BY last_seen_at DESC").fetchall()
     return [_as_device(row) for row in rows]
 
 
@@ -56,7 +56,7 @@ def register(
     conn = get_conn()
     conn.execute(
         """
-        INSERT INTO devices (device_id, app_version, version_code, os_version,
+        INSERT INTO device (device_id, app_version, version_code, os_version,
             capabilities, online, last_seen_at, last_ip)
         VALUES (?,?,?,?,?,1,?,?)
         ON CONFLICT(device_id) DO UPDATE SET
@@ -76,7 +76,7 @@ def register(
 def set_offline(device_id: str) -> None:
     conn = get_conn()
     conn.execute(
-        "UPDATE devices SET online = 0, last_seen_at = ? WHERE device_id = ?",
+        "UPDATE device SET online = 0, last_seen_at = ? WHERE device_id = ?",
         (now_rfc3339(), device_id),
     )
     conn.commit()
@@ -84,7 +84,7 @@ def set_offline(device_id: str) -> None:
 
 def set_name(device_id: str, name: str) -> bool:
     conn = get_conn()
-    cur = conn.execute("UPDATE devices SET name = ? WHERE device_id = ?", (name, device_id))
+    cur = conn.execute("UPDATE device SET name = ? WHERE device_id = ?", (name, device_id))
     conn.commit()
     return cur.rowcount > 0
 
@@ -93,7 +93,7 @@ def set_trusted(device_id: str, trusted: bool) -> bool:
     """设置信任位；设备不存在时返回 False（信任只能在已有档案上操作）。"""
     conn = get_conn()
     cur = conn.execute(
-        "UPDATE devices SET trusted = ? WHERE device_id = ?",
+        "UPDATE device SET trusted = ? WHERE device_id = ?",
         (1 if trusted else 0, device_id),
     )
     conn.commit()
