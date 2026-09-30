@@ -92,14 +92,14 @@ object AutomationFlow {
         val start = System.currentTimeMillis()
         var relaunched = false
         while (System.currentTimeMillis() - start < RuntimeConfig.serverResponseTimeoutMs) {
-            val (state, text) = BathAppNavigator.detectPage()
-            when (state) {
+            val snapshot = BathAppNavigator.detectPage()
+            when (snapshot.state) {
                 PageState.HOME -> return Terminal(true)
 
                 PageState.ID_VERIFY -> Unit
 
                 // 继续等待
-                PageState.HINT, PageState.VF_RESULT -> return Terminal(true, text)
+                PageState.HINT, PageState.VF_RESULT -> return Terminal(true, snapshot.message)
 
                 PageState.UNKNOWN, PageState.BOOKING, PageState.BOOKING_CODE -> {
                     if (!relaunched && !A11yService.bathAppInForeground) {

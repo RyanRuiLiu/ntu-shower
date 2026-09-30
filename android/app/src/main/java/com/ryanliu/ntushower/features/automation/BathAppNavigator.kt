@@ -58,10 +58,13 @@ object BathAppNavigator {
         var vfResultText: String? = null,
     )
 
-    /** 单次 DFS 同时检测页面状态与提示文本（HINT/VF_RESULT 时附带文本）。 */
-    fun detectPage(): Pair<PageState, String> {
-        val a11y = A11yService.instance ?: return Pair(PageState.UNKNOWN, "")
-        val root = a11y.rootInActiveWindow ?: return Pair(PageState.UNKNOWN, "")
+    /** 页面识别结果：状态，以及该页面的提示文本（仅 HINT/VF_RESULT 非空）。 */
+    data class PageSnapshot(val state: PageState, val message: String = "")
+
+    /** 单次 DFS 同时检测页面状态与提示文本。 */
+    fun detectPage(): PageSnapshot {
+        val a11y = A11yService.instance ?: return PageSnapshot(PageState.UNKNOWN)
+        val root = a11y.rootInActiveWindow ?: return PageSnapshot(PageState.UNKNOWN)
         try {
             val info = PageInfo()
             scanNode(root, info)
@@ -79,7 +82,7 @@ object BathAppNavigator {
                 PageState.VF_RESULT -> info.vfResultText ?: ""
                 else -> ""
             }
-            return Pair(state, text)
+            return PageSnapshot(state, text)
         } finally {
             root.recycle()
         }
@@ -124,7 +127,7 @@ object BathAppNavigator {
         ensureForeground(a11y)
         val start = System.currentTimeMillis()
         while (System.currentTimeMillis() - start < budgetMs) {
-            when (detectPage().first) {
+            when (detectPage().state) {
                 PageState.HOME -> return true
 
                 PageState.ID_VERIFY, PageState.BOOKING, PageState.BOOKING_CODE, PageState.UNKNOWN ->
@@ -173,7 +176,7 @@ object BathAppNavigator {
         val start = System.currentTimeMillis()
         var relaunched = false
         while (System.currentTimeMillis() - start < timeoutMs) {
-            if (detectPage().first == target) return true
+            if (detectPage().state == target) return true
             if (!relaunched && !A11yService.bathAppInForeground) {
                 a11y.launchBathApp()
                 relaunched = true
@@ -207,10 +210,14 @@ object BathAppNavigator {
             val child = grid.getChild(i) ?: continue
             try {
                 val title = findTitleShallow(child)
-                if (title != null && title.text?.toString() == doorNo.toString()) {
-                    return AccessibilityNodeInfo.obtain(child)
+                try {
+                    if (title != null && title.text?.toString() == doorNo.toString()) {
+                        return AccessibilityNodeInfo.obtain(child)
+                    }
+                } finally {
+                    // 匹配成功路径此前漏回收：注释强调过 19 上不回收会泄漏节点
+                    title?.recycle()
                 }
-                title?.recycle()
             } finally {
                 child.recycle()
             }
@@ -323,6 +330,11 @@ object BathAppNavigator {
         return null
     }
 
-    private fun matches(nodeRid: String, resId: String): Boolean =
-        nodeRid == resId || nodeRid.endsWith(":$resId") || nodeRid.endsWith("/$resId")
+    /**
+     * 节点资源名匹配。
+     *
+     * resId 一律是全名（`com.datalook.bath:id/xxx`），与 viewIdResourceName 可直接比较；
+     * 因此不做后缀匹配——给全名再加前缀/后缀的条件永远不会成立。
+     */
+    private fun matches(nodeRid: String, resId: String): Boolean = nodeRid == resId
 }
