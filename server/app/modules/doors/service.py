@@ -11,23 +11,12 @@ from app.core.clock import now_rfc3339
 from app.core.device_clock import correct_rfc3339
 from app.core.protocol import JsonObject
 from app.modules.doors import repository
+from app.modules.doors.schemas import OCCUPIED_STATES, DoorState
 
 # t_doorlist.status 原始值（设备上报的 int，不可靠，仅作辅助判据）
 RAW_STATUS_REPAIR = 1
 RAW_STATUS_SELECTED = 2
 RAW_STATUS_DISABLED = 3
-
-# 派生状态（对外字符串，与 door_live.state 的存储值一致）
-STATE_FREE = "free"
-STATE_WAITING = "waiting"
-STATE_BATHING = "bathing"
-STATE_PAUSED = "paused"
-STATE_SELECTED = "selected"
-STATE_REPAIR = "repair"
-STATE_DISABLED = "disabled"
-
-# 占用中的状态：判据见 derive_state
-OCCUPIED_STATES = frozenset({STATE_WAITING, STATE_BATHING, STATE_PAUSED})
 
 # 会话结束原因推断：达到浴室 App 默认最长洗浴时长视为自动关阀
 MAX_BATH_TIME_DEFAULT_S = 1800
@@ -43,7 +32,7 @@ def _safe_int(value: object, default: int = 0) -> int:
     return default
 
 
-def derive_state(door: JsonObject) -> str:
+def derive_state(door: JsonObject) -> DoorState:
     status = _safe_int(door.get("status_raw"))
     card_no = _safe_int(door.get("card_no"))
     acc_no = str(door.get("acc_no") or "")
@@ -52,20 +41,20 @@ def derive_state(door: JsonObject) -> str:
     bath_time = _safe_int(door.get("bath_time_s"))
 
     if status == RAW_STATUS_REPAIR:
-        return STATE_REPAIR
+        return DoorState.REPAIR
     if status == RAW_STATUS_DISABLED:
-        return STATE_DISABLED
+        return DoorState.DISABLED
 
     occupied = card_no != 0 or acc_no not in ("", "0")
     if occupied:
         if in_time:
-            return STATE_BATHING
+            return DoorState.BATHING
         if bath_time > 0 and close_time:
-            return STATE_PAUSED
-        return STATE_WAITING
+            return DoorState.PAUSED
+        return DoorState.WAITING
     if status == RAW_STATUS_SELECTED:
-        return STATE_SELECTED
-    return STATE_FREE
+        return DoorState.SELECTED
+    return DoorState.FREE
 
 
 def process_snapshot(device_id: str, payload: JsonObject) -> JsonObject:
@@ -105,7 +94,7 @@ def process_snapshot(device_id: str, payload: JsonObject) -> JsonObject:
                 {"card_no": _safe_int(door.get("card_no"))},
             )
 
-        repository.upsert_door_live(device_id, door_no, state, door, occurred_at)
+        repository.upsert_door_live(device_id, door_no, state.value, door, occurred_at)
         _maintain_session(device_id, door_no, state, door, old, occurred_at)
         changed.append({"door_no": door_no, "state": state, "card_no": _safe_int(door.get("card_no"))})
         processed += 1
