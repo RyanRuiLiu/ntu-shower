@@ -27,6 +27,9 @@ object ConfigDefaults {
     /** 上报去抖窗口 */
     const val DOOR_REPORT_DEBOUNCE_MS = 1000L
 
+    /** 发件箱行数上限 */
+    const val OUTBOX_MAX_ROWS = 100000L
+
     /** 显示操作遮罩 */
     const val OVERLAY_ENABLED = true
 
