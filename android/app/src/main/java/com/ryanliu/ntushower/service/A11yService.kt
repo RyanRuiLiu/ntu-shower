@@ -17,6 +17,7 @@ import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.threading.MainThread
 import com.ryanliu.ntushower.features.automation.BathAppGuard
+import com.ryanliu.ntushower.features.automation.BathAppPage
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -59,6 +60,10 @@ class A11yService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+            // 顺序有讲究：**先让页面状态跟上，再放行等待者**。等待方被唤醒后会立刻读
+            // BathAppPage.snapshot()，那时状态必须已经是新的——反过来就是它醒来看见旧值、
+            // 白转一圈再等一轮。
+            BathAppPage.refresh()
             pageChangeCount.incrementAndGet()
             synchronized(pageChangeLock) { pageChangeLock.notifyAll() }
         }
