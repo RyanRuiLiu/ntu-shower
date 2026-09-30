@@ -40,6 +40,13 @@ ADMIN_UNAUTHORIZED = Problem("admin-unauthorized", 401, "Admin authentication re
 UNTRUSTED_DEVICE = Problem("untrusted-device", 403, "Device not trusted")
 DUPLICATE_SESSION = Problem("duplicate-session", 409, "Account already has an active session")
 
+# ── 访问授权 ──
+UNAUTHENTICATED = Problem("unauthenticated", 401, "Authentication required")
+UNKNOWN_IDENTITY = Problem("unknown-identity", 401, "Identity not granted access")
+LOGIN_REJECTED = Problem("login-rejected", 401, "Login rejected")
+CAPABILITY_DENIED = Problem("capability-denied", 403, "Insufficient capability")
+UNKNOWN_CAPABILITY = Problem("unknown-capability", 422, "Unknown capability name")
+
 #: 供测试与文档校验的完整清单（新增类型必须登记于此表，否则自查会漏）
 REGISTRY: tuple[Problem, ...] = (
     DEVICE_NOT_FOUND,
@@ -53,6 +60,11 @@ REGISTRY: tuple[Problem, ...] = (
     ADMIN_UNAUTHORIZED,
     UNTRUSTED_DEVICE,
     DUPLICATE_SESSION,
+    UNAUTHENTICATED,
+    UNKNOWN_IDENTITY,
+    LOGIN_REJECTED,
+    CAPABILITY_DENIED,
+    UNKNOWN_CAPABILITY,
 )
 
 

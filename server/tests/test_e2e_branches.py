@@ -87,7 +87,11 @@ def test_gateway_bad_json_and_unknown_result(client: TestClient) -> None:
         ws.__exit__(None, None, None)
 
 
-def test_command_round_trip_success_path(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_command_round_trip_success_path(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    ops_headers: dict[str, str],
+) -> None:
     """命令完整成功往返（HTTP → 设备 → 回执 → 审计 ok）。"""
     monkeypatch.setattr(config_module.settings, "config_ack_timeout_s", 0.2)
     device_id = "dev-roundtrip"
@@ -99,7 +103,7 @@ def test_command_round_trip_success_path(client: TestClient, monkeypatch: pytest
         outcome: dict = {}
 
         def call() -> None:
-            outcome["r"] = client.post("/api/v1/photos", json={"device_id": device_id})
+            outcome["r"] = client.post("/api/v1/photos", json={"device_id": device_id}, headers=ops_headers)
 
         thread = threading.Thread(target=call)
         thread.start()
@@ -170,7 +174,11 @@ def test_root_and_admin_redirects(client: TestClient) -> None:
         assert r.status_code in (307, 302)
 
 
-def test_settle_roundtrip_success_path(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_settle_roundtrip_success_path(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    ops_headers: dict[str, str],
+) -> None:
     """结算成功往返：预检通过（占用中）→ 命令 → 回执 ok。"""
     import threading
 
@@ -204,7 +212,9 @@ def test_settle_roundtrip_success_path(client: TestClient, monkeypatch: pytest.M
 
         def call() -> None:
             outcome["r"] = client.post(
-                "/api/v1/sessions/settle", json={"device_id": device_id, "cert_no": "S1", "password": "P"}
+                "/api/v1/sessions/settle",
+                json={"device_id": device_id, "cert_no": "S1", "password": "P"},
+                headers=ops_headers,
             )
 
         thread = threading.Thread(target=call)
@@ -252,7 +262,7 @@ def test_gateway_invalid_snapshot_rejected(client: TestClient) -> None:
         ws.__exit__(None, None, None)
 
 
-def test_assign_roundtrip_and_busy_rejection(client: TestClient) -> None:
+def test_assign_roundtrip_and_busy_rejection(client: TestClient, ops_headers: dict[str, str]) -> None:
     """分配成功往返 + 同设备第二条命令被 409 device.busy 拒绝（HTTP 面）。"""
     import threading
 
@@ -286,7 +296,9 @@ def test_assign_roundtrip_and_busy_rejection(client: TestClient) -> None:
 
         def call_first() -> None:
             first["r"] = client.post(
-                "/api/v1/sessions/assign", json={"device_id": device_id, "door_no": 2, "cert_no": "S9", "password": "P"}
+                "/api/v1/sessions/assign",
+                json={"device_id": device_id, "door_no": 2, "cert_no": "S9", "password": "P"},
+                headers=ops_headers,
             )
 
         thread = threading.Thread(target=call_first)
@@ -296,7 +308,9 @@ def test_assign_roundtrip_and_busy_rejection(client: TestClient) -> None:
 
         # 在途期间第二条 assign：服务端拒绝（device.busy），不排队
         busy = client.post(
-            "/api/v1/sessions/assign", json={"device_id": device_id, "door_no": 2, "cert_no": "S8", "password": "P"}
+            "/api/v1/sessions/assign",
+            json={"device_id": device_id, "door_no": 2, "cert_no": "S8", "password": "P"},
+            headers=ops_headers,
         )
         assert busy.status_code == 409
         assert busy.json()["type"].endswith("/problems/device-busy")

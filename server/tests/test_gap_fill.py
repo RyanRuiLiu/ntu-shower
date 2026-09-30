@@ -126,9 +126,13 @@ def test_now_epoch_s() -> None:
     assert isinstance(now_epoch_s(), int)
 
 
-def test_validation_error_problem_json(client: TestClient) -> None:
-    """422 校验错误同样走 problem+json（RFC 9457 覆盖所有错误响应）。"""
-    r = client.post("/api/v1/sessions/assign", json={"door_no": 0})
+def test_validation_error_problem_json(client: TestClient, ops_headers: dict[str, str]) -> None:
+    """422 校验错误同样走 problem+json（RFC 9457 覆盖所有错误响应）。
+
+    带上身份头是为了让请求走到请求体校验：身份守卫先于校验执行，
+    不带标识会先得到 401，就测不到 422 这条路径。
+    """
+    r = client.post("/api/v1/sessions/assign", json={"door_no": 0}, headers=ops_headers)
     assert r.status_code == 422
     assert r.headers["content-type"].startswith("application/problem+json")
     body = r.json()

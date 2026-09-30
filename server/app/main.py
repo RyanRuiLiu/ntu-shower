@@ -30,6 +30,9 @@ from .core.logging import configure_logging
 from .core.security import assert_admin_token_configured
 from .core.version import APP_VERSION
 from .gateway.routes import router as gateway_router
+from .modules.access import repository as access_repository
+from .modules.access.routes import admin_router as access_admin_router
+from .modules.access.routes import router as access_router
 from .modules.bridge.routes import admin_router as bridge_admin_router
 from .modules.bridge.routes import router as bridge_router
 from .modules.config.routes import admin_router as config_admin_router
@@ -54,6 +57,7 @@ def create_app() -> FastAPI:
     devices_repository.init_tables()
     doors_repository.init_tables()
     sessions_repository.init_tables()
+    access_repository.init_tables()
     ota_repository.init_tables()
     from app.modules.config import store as config_store
 
@@ -85,6 +89,8 @@ def create_app() -> FastAPI:
     app.include_router(ota_admin_router)
     app.include_router(bridge_router)
     app.include_router(bridge_admin_router)
+    app.include_router(access_router)
+    app.include_router(access_admin_router)
 
     web_dir = Path(__file__).resolve().parent.parent / "web"
     app.mount("/web", StaticFiles(directory=str(web_dir)), name="web")

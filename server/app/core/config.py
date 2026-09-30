@@ -10,6 +10,12 @@ class Settings(BaseSettings):
     max_ota_bytes: int = 50 * 1024 * 1024  # OTA 上传/存储的单文件上限
     ota_dir: str = "ota_releases"  # APK 发布文件目录（相对 server 工作目录）
 
+    # ── 微信小程序 ──
+    # 用于 wx.login 的 code 换 openid；未配置时登录接口不可用（查看类接口不受影响）
+    wechat_appid: str = ""
+    wechat_secret: str = ""
+    wechat_api_timeout_s: float = 10.0
+
     # ── 日志 ──
     # 应用日志级别（DEBUG/INFO/WARNING/ERROR）；uvicorn 的访问日志级别另由
     # systemd 单元决定（见 deploy/nginx 与 docs/RUNBOOK.md）
