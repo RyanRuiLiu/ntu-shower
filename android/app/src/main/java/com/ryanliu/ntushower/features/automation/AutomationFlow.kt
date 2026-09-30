@@ -28,8 +28,14 @@ object AutomationFlow {
         /** 耗时记录里用作区分的前缀，见 [AutomationTrace]。 */
         val traceLabel: String
 
-        /** 执行命令专属 UI 动作；返回 null 表示成功，返回 [FlowError] 表示失败。 */
-        fun perform(a11y: A11yService): FlowError?
+        /**
+         * 执行命令专属 UI 动作；返回 null 表示成功，返回 [FlowError] 表示失败。
+         *
+         * [trace] 由流程传入（开关关闭时是 null），动作可以往里插自己的分段标记。这一段在
+         * 整条流程里最长，不细分就看不出它的耗时落在哪一步——真机上它在 101ms 与 807ms 之间
+         * 跳，而每一步做了什么只有它自己知道。
+         */
+        fun perform(a11y: A11yService, trace: AutomationTrace.Trace?): FlowError?
     }
 
     fun run(a11y: A11yService, action: Action, overlay: CoverOverlay): FlowOutcome {
@@ -53,7 +59,7 @@ object AutomationFlow {
         trace?.mark("overlay-show")
         try {
             // 3 命令动作
-            action.perform(a11y)?.let {
+            action.perform(a11y, trace)?.let {
                 overlay.hide()
                 trace?.end("action_failed:${it.reasonCode}")
                 return FlowOutcome(error = it)

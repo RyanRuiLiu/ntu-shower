@@ -7,10 +7,11 @@ class SettleAction(override val certNo: String, override val password: String) :
 
     override val traceLabel = "settle"
 
-    override fun perform(a11y: A11yService): FlowError? {
+    override fun perform(a11y: A11yService, trace: AutomationTrace.Trace?): FlowError? {
         if (!BathAppNavigator.clickSettleButton(a11y)) {
             return FlowError("ui.click_no_effect", "无法点击结算按钮")
         }
+        trace?.mark("click-settle")
         return null
     }
 }

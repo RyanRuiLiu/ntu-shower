@@ -1,7 +1,7 @@
 """OTA API：设备面（manifest/下载）与管理面（发布上传）。
 
-版本号在 HTTP 边界即按 VERSION_PATTERN 校验：该参数参与文件路径构造，
-边界校验是第一道防线，service.release_path 是第二道（纵深防御）。
+版本号在 HTTP 边界即按 VERSION_PATTERN 校验，service.release_path 按同一规则
+构造文件名——两处各自成立，不依赖对方先拦。
 """
 
 import logging

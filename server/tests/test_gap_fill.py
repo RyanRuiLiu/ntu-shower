@@ -140,7 +140,7 @@ def test_validation_error_problem_json(client: TestClient, ops_headers: dict[str
 
 
 def test_devices_repository_capabilities_non_list(client: TestClient) -> None:
-    """capabilities 存成非数组时读为空列表（防御坏数据）。"""
+    """capabilities 存成非数组时读为空列表。"""
     from app.modules.devices import repository as devices_repository
 
     devices_repository.register("dev-bad-cap", "0.2.5", 7, "4.4.4", {"not": "a list"}, "x")

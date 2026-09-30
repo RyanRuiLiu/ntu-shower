@@ -121,11 +121,10 @@ def _as_device(row: Row) -> DeviceRecord:
 
 
 def _load_capabilities(raw: str) -> list[str]:
-    """解析 capabilities 列；内容损坏或不是数组时视为空能力集。
+    """解析 capabilities 列；内容不是 JSON 数组时按空能力集处理。
 
-    这是输入健壮性：该列的内容源自设备上报，写库前虽经 json.dumps，
-    但库被手工改动后若在此抛错，会让整台设备的注册流程整体失败；空能力集只会
-    让能力校验按"未声明"处理（见 sessions 的能力预检）。
+    该列的内容源自设备上报，写库前虽经 json.dumps，但库可能被手工改动过；
+    解析不出数组就按空能力集处理，能力校验随之按"未声明"走（见 sessions 的能力预检）。
     """
     try:
         value = json.loads(raw)
