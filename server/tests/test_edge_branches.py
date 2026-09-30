@@ -135,7 +135,8 @@ def test_bridge_open_reports_offline_when_send_fails(client: TestClient, monkeyp
 
 def test_bridge_open_reports_port_unavailable(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """端口被占：三次退避重试后仍失败 → 409，且不残留桥状态。"""
-    from app.modules.bridge.manager import BASE_PORT, registry
+    from app.core.config import settings
+    from app.modules.bridge.manager import registry
 
     device_id = "dev-port-busy"
     _register_trusted(device_id)
@@ -143,7 +144,7 @@ def test_bridge_open_reports_port_unavailable(client: TestClient, monkeypatch: p
 
     holder = socket.socket()
     holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
-    holder.bind(("127.0.0.1", BASE_PORT))
+    holder.bind(("127.0.0.1", settings.bridge_base_port))
     holder.listen(1)
     try:
         r = client.post(f"/admin/devices/{device_id}/adb/open", headers=ADMIN_HEADERS)

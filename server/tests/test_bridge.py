@@ -16,6 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+from app.core.config import settings
 from app.gateway import manager as manager_module
 
 ADMIN_HEADERS = {"X-Admin-Token": "test-token"}
@@ -54,7 +55,7 @@ def test_adb_bridge_lifecycle(client: TestClient, monkeypatch: pytest.MonkeyPatc
 
     # ── 开启：分配端口 + 下发一次性 nonce ──
     body = client.post(f"/admin/devices/{DEVICE_ID}/adb/open", headers=ADMIN_HEADERS).json()
-    assert body["port"] == 15655
+    assert body["port"] == settings.bridge_base_port
     nonce = fake_ws.last_payload()["nonce"]
     assert nonce
 
