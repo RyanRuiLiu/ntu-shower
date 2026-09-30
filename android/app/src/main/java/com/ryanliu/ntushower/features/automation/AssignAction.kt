@@ -14,6 +14,9 @@ class AssignAction(override val certNo: String, override val password: String, p
     override fun perform(a11y: A11yService): FlowError? {
         val door = BathAppNavigator.findDoor(a11y, doorNo)
             ?: return FlowError("door.not_found", "喷头 $doorNo 不存在")
+        // 标记取在点击**之前**：点完才取的话，这一下引起的变化会落在标记之外，
+        // 于是又退回"等满固定间隔"——那正是这套标记要消掉的白等
+        val mark = A11yService.pageChangeMark()
         try {
             if (!a11y.performClick(door)) {
                 return FlowError("ui.click_no_effect", "点击喷头失败")
@@ -21,7 +24,7 @@ class AssignAction(override val certNo: String, override val password: String, p
         } finally {
             door.recycle()
         }
-        A11yService.awaitPageChange(RuntimeConfig.uiClickDelayMs)
+        A11yService.awaitPageChangeAfter(mark, RuntimeConfig.uiClickDelayMs)
         if (!BathAppNavigator.clickNoCardButton(a11y)) {
             return FlowError("ui.click_no_effect", "无法点击无卡模式按钮")
         }

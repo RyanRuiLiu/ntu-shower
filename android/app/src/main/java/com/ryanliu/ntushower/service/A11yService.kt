@@ -17,6 +17,7 @@ import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.threading.MainThread
 import com.ryanliu.ntushower.features.automation.BathAppGuard
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * 无障碍服务实体：UI 操作原语与页面事件流。
@@ -58,6 +59,7 @@ class A11yService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+            pageChangeCount.incrementAndGet()
             synchronized(pageChangeLock) { pageChangeLock.notifyAll() }
         }
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
@@ -183,7 +185,38 @@ class A11yService : AccessibilityService() {
 
         private val pageChangeLock = Object()
 
-        /** 阻塞等待页面内容变化或超时（事件驱动，无人等待时零开销）。 */
+        /** 页面内容变化的累计次数：配合 [pageChangeMark] / [awaitPageChangeAfter] 用。 */
+        private val pageChangeCount = AtomicLong(0)
+
+        /**
+         * 取当前的变化计数。**在动手之前取**——之后拿它判断"这一下有没有让页面变"。
+         */
+        @JvmStatic
+        fun pageChangeMark(): Long = pageChangeCount.get()
+
+        /**
+         * 等到页面内容在 [mark] 之后发生变化，最多等 [timeoutMs]（事件驱动，无人等待时零开销）。
+         *
+         * 为什么要传一个 mark，而不是单纯 `wait`：`Object.wait` 等的是**下一次**通知，
+         * 通知若发生在调用之前就永远等不到，只能等满上限。而"点完按钮页面立刻就变了"恰恰
+         * 是最常见的情形——那一拍纯属白等，一个流程里要发生五六次。
+         *
+         * 拿到锁之后再比一次，是为了盖住"取 mark 到进锁之间"那一小段；`wait` 被无关通知
+         * 唤醒时也会绕回循环再比。
+         */
+        @JvmStatic
+        fun awaitPageChangeAfter(mark: Long, timeoutMs: Long) {
+            synchronized(pageChangeLock) {
+                val deadline = System.currentTimeMillis() + timeoutMs
+                while (pageChangeCount.get() == mark) {
+                    val left = deadline - System.currentTimeMillis()
+                    if (left <= 0) return
+                    pageChangeLock.wait(left)
+                }
+            }
+        }
+
+        /** 阻塞等待下一次页面变化或超时；不关心"此前是否已经变过"的场景用它。 */
         @JvmStatic
         fun awaitPageChange(timeoutMs: Long) {
             synchronized(pageChangeLock) { pageChangeLock.wait(timeoutMs) }

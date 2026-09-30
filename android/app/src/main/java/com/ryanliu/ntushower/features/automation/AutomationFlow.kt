@@ -93,6 +93,7 @@ object AutomationFlow {
         var relaunched = false
         var unknownRounds = 0
         while (System.currentTimeMillis() - start < RuntimeConfig.serverResponseTimeoutMs) {
+            val mark = A11yService.pageChangeMark()
             val snapshot = BathAppNavigator.detectPage()
             when (snapshot.state) {
                 PageState.HOME -> return Terminal(true)
@@ -106,7 +107,7 @@ object AutomationFlow {
                     if (!relaunched && !A11yService.bathAppInForeground) {
                         a11y.launchBathApp()
                         relaunched = true
-                        A11yService.awaitPageChange(RuntimeConfig.pollIntervalMs)
+                        A11yService.awaitPageChangeAfter(mark, RuntimeConfig.pollIntervalMs)
                         continue
                     }
                     // 这三类页面不会自己变成 HOME：预约页要人点，UNKNOWN 多半是启动闪屏或
@@ -122,7 +123,7 @@ object AutomationFlow {
                     }
                 }
             }
-            A11yService.awaitPageChange(RuntimeConfig.pollIntervalMs)
+            A11yService.awaitPageChangeAfter(mark, RuntimeConfig.pollIntervalMs)
         }
         BathAppNavigator.navigateToHome(a11y, RuntimeConfig.homeBudgetMs)
         return Terminal(false, "服务器响应超时")
