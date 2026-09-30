@@ -1,16 +1,20 @@
 """ntu-shower 服务端入口：装配设备网关平面与各领域模块。
 
 - gateway            设备 WS 网关（/gateway/device）
-- modules.doors      用户 API：喷头现态（/api/v1/doors，含 /api/v1/stream 实时推送）
-- modules.sessions   用户 API：分配/结算/拍照（/api/v1/sessions、/api/v1/photos）
-- modules.shadow     用户/管理 API：设备影子（/api/v1 与 /admin 的 shadow 端点）
-- modules.devices    管理 API：设备注册表（/admin/devices）
-- modules.config     管理 API：远程配置（/admin/config、/admin/devices/{id}/config）
-- modules.ota        设备/管理 API：清单下载与发布（/ota/*、/admin/releases）
-- modules.bridge     管理 API：真实 ADB 桥接（/admin/devices/{id}/adb/*，经 443 透传）
-- web                前端页面（/web/*，零构建静态页）
+- modules.doors      喷头现态（/api/v1/doors，含 /api/v1/stream 实时推送）
+- modules.sessions   分配 / 结算 / 拍照（/api/v1/sessions、/api/v1/photos）与命令审计
+- modules.shadow     设备影子（reported / desired / metadata）
+- modules.access     身份与能力位（/api/v1/session、/api/v1/me、/admin/grants）
+- modules.devices    设备注册表（/admin/devices）
+- modules.config     远程配置（/admin/config、/admin/devices/{id}/config）
+- modules.ota        版本清单 / 下载 / 发布（/ota/*、/admin/releases）
+- modules.bridge     真实 ADB 桥接（/admin/devices/{id}/adb/*，经 443 透传）
 
-鉴权语义见 core/security：匿名只读、user 可操作设备、admin 全功能。
+前端是独立工程（仓库根 `web/`，Taro 一套代码编译小程序与 H5），
+静态产物由 nginx 托管，不经过本进程。
+
+访问控制见 core/security 与 modules/access：查看类接口无需凭据，
+操作类需 `X-Identity` 标识 + 能力位，管理面用 `X-Admin-Token`（ADR-0037）。
 """
 
 from collections.abc import AsyncIterator
@@ -18,8 +22,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import RedirectResponse
-from fastapi.staticfiles import StaticFiles
 from typing_extensions import TypedDict
 
 from .core import db
@@ -96,21 +98,6 @@ def create_app() -> FastAPI:
     app.include_router(bridge_admin_router)
     app.include_router(access_router)
     app.include_router(access_admin_router)
-
-    web_dir = Path(__file__).resolve().parent.parent / "web"
-    app.mount("/web", StaticFiles(directory=str(web_dir)), name="web")
-
-    @app.get("/", include_in_schema=False)
-    def root() -> RedirectResponse:
-        return RedirectResponse("/web/index.html")
-
-    @app.get("/app", include_in_schema=False)
-    def app_page() -> RedirectResponse:
-        return RedirectResponse("/web/index.html")
-
-    @app.get("/admin", include_in_schema=False)
-    def admin_page() -> RedirectResponse:
-        return RedirectResponse("/web/console.html")
 
     @app.get("/healthz", tags=["meta"])
     def health() -> HealthStatus:
