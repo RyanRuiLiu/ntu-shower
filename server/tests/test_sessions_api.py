@@ -1,4 +1,4 @@
-"""sessions API 测试：匿名操作、预检与错误路径（命令往返由服务层测试+真机 E2E 覆盖）。"""
+"""sessions API 测试：身份要求、预检与错误路径（命令往返由服务层测试+真机 E2E 覆盖）。"""
 
 import json
 import uuid
@@ -7,6 +7,9 @@ from contextlib import contextmanager
 
 from fastapi.testclient import TestClient
 from starlette.testclient import WebSocketTestSession
+
+#: 操作类接口要求身份标识：不带即 401，带了但不在名单里即 401（unknown-identity）。
+IDENTITY_REQUIRED = "unauthenticated"
 
 
 def _hello(device_id: str) -> str:
@@ -35,11 +38,11 @@ def _recv_until(ws: WebSocketTestSession, msg_type: str) -> dict:
 
 
 @contextmanager
-def _connected_device(client: TestClient, device_id: str) -> Iterator[WebSocketTestSession]:
+def _online_device(client: TestClient, device_id: str) -> Iterator[WebSocketTestSession]:
     """建档 → 信任 → 重连，产出一个保持在线会话。
 
     必须是上下文管理器：手动 __enter__/__exit__ 在断言失败时会漏掉退出，
-    连接随之泄漏并让 TestClient 的 portal 挂起（整个测试会话卡死）。
+    连接随之泄漏并让 TestClient 的 portal 挂起。
     """
     with client.websocket_connect("/gateway/device") as ws:
         ws.send_text(_hello(device_id))
@@ -51,18 +54,45 @@ def _connected_device(client: TestClient, device_id: str) -> Iterator[WebSocketT
         yield ws
 
 
-def test_assign_anonymous_aligned_with_legacy_model(client: TestClient) -> None:
-    """操作接口匿名：鉴权由浴室系统凭证完成（docs/decisions/0034）。"""
+def test_assign_without_identity_is_rejected(client: TestClient) -> None:
+    """操作类接口必须带身份标识：不带即拒绝，且**先于**任何业务校验。"""
     r = client.post(
         "/api/v1/sessions/assign",
         json={"device_id": "dev-unknown", "door_no": 1, "cert_no": "C", "password": "P"},
+    )
+
+    assert r.status_code == 401
+    assert r.json()["type"].endswith(f"/problems/{IDENTITY_REQUIRED}")
+
+
+def test_assign_with_unknown_identity_is_rejected(client: TestClient) -> None:
+    """标识不在名单里：与"没带标识"区分开，便于排查配置遗漏。"""
+    r = client.post(
+        "/api/v1/sessions/assign",
+        json={"device_id": "dev-unknown", "door_no": 1, "cert_no": "C", "password": "P"},
+        headers={"X-Identity": "not-in-any-list"},
+    )
+
+    assert r.status_code == 401
+    assert r.json()["type"].endswith("/problems/unknown-identity")
+
+
+def test_assign_passes_guard_then_hits_device_guard(
+    client: TestClient,
+    ops_headers: dict[str, str],
+) -> None:
+    """过了身份守卫之后才轮到设备存在性检查。"""
+    r = client.post(
+        "/api/v1/sessions/assign",
+        json={"device_id": "dev-unknown", "door_no": 1, "cert_no": "C", "password": "P"},
+        headers=ops_headers,
     )
 
     assert r.status_code == 404
     assert r.json()["type"].endswith("/problems/device-not-found")
 
 
-def test_assign_rejected_when_not_trusted(client: TestClient) -> None:
+def test_assign_rejected_when_not_trusted(client: TestClient, ops_headers: dict[str, str]) -> None:
     """设备存在但未信任是 403（不是 404）：客户端要能区分"不存在"与"未授权"。"""
     device_id = "dev-untrusted-1"
     with client.websocket_connect("/gateway/device") as ws:
@@ -71,15 +101,16 @@ def test_assign_rejected_when_not_trusted(client: TestClient) -> None:
         r = client.post(
             "/api/v1/sessions/assign",
             json={"device_id": device_id, "door_no": 1, "cert_no": "C", "password": "P"},
+            headers=ops_headers,
         )
 
     assert r.status_code == 403
     assert r.json()["type"].endswith("/problems/untrusted-device")
 
 
-def test_assign_blocked_by_precheck_when_door_not_free(client: TestClient) -> None:
+def test_assign_blocked_by_precheck_when_door_not_free(client: TestClient, ops_headers: dict[str, str]) -> None:
     device_id = "dev-precheck-1"
-    with _connected_device(client, device_id):
+    with _online_device(client, device_id):
         from app.modules.doors import service as doors_service
 
         doors_service.process_snapshot(
@@ -105,18 +136,20 @@ def test_assign_blocked_by_precheck_when_door_not_free(client: TestClient) -> No
         r = client.post(
             "/api/v1/sessions/assign",
             json={"device_id": device_id, "door_no": 1, "cert_no": "C", "password": "P"},
+            headers=ops_headers,
         )
 
     assert r.status_code == 409
     assert r.json()["type"].endswith("/problems/door-not-free")
 
 
-def test_settle_rejected_without_occupied_door(client: TestClient) -> None:
+def test_settle_rejected_without_occupied_door(client: TestClient, ops_headers: dict[str, str]) -> None:
     device_id = "dev-settle-1"
-    with _connected_device(client, device_id):
+    with _online_device(client, device_id):
         r = client.post(
             "/api/v1/sessions/settle",
             json={"device_id": device_id, "cert_no": "NOBODY", "password": "P"},
+            headers=ops_headers,
         )
 
     assert r.status_code == 409

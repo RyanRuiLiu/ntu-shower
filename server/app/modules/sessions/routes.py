@@ -15,6 +15,8 @@ from app.core.config import settings
 from app.core.problems import DEVICE_BUSY, DOOR_NOT_FREE, DUPLICATE_SESSION, NO_OCCUPIED_DOOR, ApiProblemError
 from app.core.protocol import JsonObject
 from app.core.security import require_admin
+from app.modules.access.capabilities import Capability
+from app.modules.access.dependencies import require_capability
 from app.modules.devices.dependencies import require_trusted_online_device
 from app.modules.doors import repository as doors_repository
 from app.modules.doors import service as doors_service
@@ -67,7 +69,7 @@ def _reject_busy(result: CommandOutcome) -> CommandOutcome:
     return result
 
 
-@router.post("/sessions/assign")
+@router.post("/sessions/assign", dependencies=[Depends(require_capability(Capability.OPS))])
 async def assign(req: AssignRequest) -> CommandOutcome:
     require_trusted_online_device(req.device_id)
     state = _door_state(req.device_id, req.door_no)
@@ -83,7 +85,7 @@ async def assign(req: AssignRequest) -> CommandOutcome:
     return _reject_busy(result)
 
 
-@router.post("/sessions/settle")
+@router.post("/sessions/settle", dependencies=[Depends(require_capability(Capability.OPS))])
 async def settle(req: SettleRequest) -> CommandOutcome:
     require_trusted_online_device(req.device_id)
     occupied = doors_repository.get_occupied_by_cert(req.device_id, req.cert_no)
@@ -98,7 +100,7 @@ async def settle(req: SettleRequest) -> CommandOutcome:
     return _reject_busy(result)
 
 
-@router.post("/photos")
+@router.post("/photos", dependencies=[Depends(require_capability(Capability.PHOTO))])
 async def take_photo(req: PhotoRequest) -> CommandOutcome:
     require_trusted_online_device(req.device_id)
     result = await service.send_command_and_wait(

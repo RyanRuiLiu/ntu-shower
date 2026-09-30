@@ -150,7 +150,7 @@ def test_scan_once_settles_listed_timeout_session(client: TestClient, monkeypatc
     assert asyncio.run(flow()) is True
 
 
-def test_duplicate_session_rejected(client: TestClient) -> None:
+def test_duplicate_session_rejected(client: TestClient, ops_headers: dict[str, str]) -> None:
     from app.modules.devices import repository as devices_repository
 
     device_id = "dev-dup-1"
@@ -216,7 +216,9 @@ def test_duplicate_session_rejected(client: TestClient) -> None:
 
         # 同一学号尝试分配另一空闲门 → 拒绝（对齐旧系统 duplicate_session）
         r = client.post(
-            "/api/v1/sessions/assign", json={"device_id": device_id, "door_no": 1, "cert_no": "A", "password": "P"}
+            "/api/v1/sessions/assign",
+            json={"device_id": device_id, "door_no": 1, "cert_no": "A", "password": "P"},
+            headers=ops_headers,
         )
         assert r.status_code == 409
         assert r.json()["type"].endswith("/problems/duplicate-session")

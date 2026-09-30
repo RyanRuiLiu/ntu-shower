@@ -46,6 +46,19 @@ def fresh_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
 
 
 @pytest.fixture
+def ops_headers(fresh_db: str) -> dict[str, str]:
+    """已获授 `ops` + `photo` 的调用方请求头。
+
+    操作类接口要求身份标识（`X-Identity`），需要调用它们的用例用这个夹具，
+    不要去探名单表的结构。
+    """
+    from app.modules.access import repository as access_repository
+
+    access_repository.put_grant("test-identity", "token", ["ops", "photo"], "测试用")
+    return {"X-Identity": "test-identity"}
+
+
+@pytest.fixture
 def client(fresh_db: str) -> Iterator[TestClient]:
     """应用客户端：with 上下文持有常驻事件循环（portal）。
 
