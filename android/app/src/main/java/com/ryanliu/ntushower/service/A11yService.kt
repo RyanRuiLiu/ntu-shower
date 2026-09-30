@@ -18,6 +18,7 @@ import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.threading.MainThread
 import com.ryanliu.ntushower.features.automation.BathAppGuard
 import com.ryanliu.ntushower.features.automation.BathAppPage
+import com.ryanliu.ntushower.features.automation.ContentEvent
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -63,7 +64,16 @@ class A11yService : AccessibilityService() {
             // 只入队，不在这里算。重算要做同步 IPC，而本回调跑在**主线程**上——真机上正是
             // 这条路径把主线程按住，让看门狗的广播排不上队、超时后进程被系统以 ANR 杀掉。
             // 重算线程算完会经 onPageRefreshed 放行等待者。
-            BathAppPage.refresh()
+            //
+            // 附带的事件特征只用本地字段（见 ContentEvent）。getSource() 刻意不取：它为拿一个
+            // 节点要发起一次跨进程调用，而这类事件每秒来十几次。
+            BathAppPage.refresh(
+                ContentEvent(
+                    className = event.className?.toString() ?: "",
+                    text = event.text.joinToString(" "),
+                    contentChangeTypes = event.contentChangeTypes,
+                ),
+            )
         }
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val pkg = event.packageName?.toString() ?: ""
