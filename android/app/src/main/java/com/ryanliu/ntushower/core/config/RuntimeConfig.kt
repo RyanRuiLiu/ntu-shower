@@ -51,6 +51,15 @@ object RuntimeConfig {
     @Volatile var reportDebounceMs = ConfigDefaults.DOOR_REPORT_DEBOUNCE_MS
         private set
 
+    /**
+     * 发件箱的行数上限，超出即丢弃最旧的行。
+     *
+     * 默认值来自 [ConfigDefaults]（上游是服务端登记表 `spec.py`），那边刻意给得远超真实
+     * 所需，于是它实际上不触发。**调小它是主动放弃历史**：快照丢了设备不会重发。
+     */
+    @Volatile var outboxMaxRows = ConfigDefaults.OUTBOX_MAX_ROWS
+        private set
+
     // ── 自动化 ──
     @Volatile var overlayEnabled = ConfigDefaults.OVERLAY_ENABLED
         private set
@@ -139,6 +148,7 @@ object RuntimeConfig {
         reconnectMaxMs = ConfigDefaults.RECONNECT_MAX_MS
         watchdogIntervalS = ConfigDefaults.WATCHDOG_INTERVAL_S
         reportDebounceMs = ConfigDefaults.DOOR_REPORT_DEBOUNCE_MS
+        outboxMaxRows = ConfigDefaults.OUTBOX_MAX_ROWS
         overlayEnabled = ConfigDefaults.OVERLAY_ENABLED
         overlayMessage = ConfigDefaults.OVERLAY_MESSAGE
         overlayTextSizeSp = ConfigDefaults.OVERLAY_TEXT_SIZE_SP.toInt()
@@ -176,6 +186,8 @@ object RuntimeConfig {
             { c -> watchdogIntervalS = atLeastOne(c.optLong("watchdog_interval_s", watchdogIntervalS)) },
         "door_report_debounce_ms" to
             { c -> reportDebounceMs = c.optLong("door_report_debounce_ms", reportDebounceMs) },
+        "outbox_max_rows" to
+            { c -> outboxMaxRows = atLeastOne(c.optLong("outbox_max_rows", outboxMaxRows)) },
         "overlay_enabled" to { c -> overlayEnabled = c.optBoolean("overlay_enabled", overlayEnabled) },
         "overlay_message" to { c -> overlayMessage = c.optString("overlay_message", overlayMessage) },
         "overlay_text_size_sp" to
