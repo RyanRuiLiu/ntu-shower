@@ -76,7 +76,20 @@ class RefreshWindowTest {
         window.add(costMs = 4, state = "HOME", changed = false, nowMs = 1_000)
         window.add(costMs = 6, state = "HINT", changed = true, nowMs = 1_100)
         val line = window.add(costMs = 20, state = "HOME", changed = false, nowMs = 1_300)
-        assertEquals("refresh n=3 span=300ms avg=10ms max=20ms changed=1 last=HOME", line)
+        assertEquals("refresh n=3 span=300ms avg=10ms max=20ms qavg=0ms qmax=0ms changed=1 last=HOME", line)
+    }
+
+    @Test
+    fun `query time is averaged and peaked on its own`() {
+        // 查询那一段要单独看：总耗时看不出 53ms 里"取根节点"和"按 ID 查"各占多少，
+        // 而这两笔的可优化空间完全不同
+        val window = RefreshWindow(flushEvery = 2)
+        window.addQuery(3)
+        window.add(costMs = 40, state = "HOME", changed = false, nowMs = 0)
+        window.addQuery(9)
+        val line = window.add(costMs = 50, state = "HOME", changed = false, nowMs = 10)
+
+        assertEquals("refresh n=2 span=10ms avg=45ms max=50ms qavg=6ms qmax=9ms changed=0 last=HOME", line)
     }
 
     @Test
@@ -85,12 +98,12 @@ class RefreshWindowTest {
         val window = RefreshWindow(flushEvery = 2)
         window.add(costMs = 2, state = "HOME", changed = false, nowMs = 0)
         assertEquals(
-            "refresh n=2 span=10ms avg=2ms max=2ms changed=0 last=HOME",
+            "refresh n=2 span=10ms avg=2ms max=2ms qavg=0ms qmax=0ms changed=0 last=HOME",
             window.add(costMs = 2, state = "HOME", changed = false, nowMs = 10),
         )
         window.add(costMs = 4, state = "HOME", changed = false, nowMs = 100)
         assertEquals(
-            "refresh n=2 span=10ms avg=4ms max=4ms changed=0 last=HOME",
+            "refresh n=2 span=10ms avg=4ms max=4ms qavg=0ms qmax=0ms changed=0 last=HOME",
             window.add(costMs = 4, state = "HOME", changed = false, nowMs = 110),
         )
     }
