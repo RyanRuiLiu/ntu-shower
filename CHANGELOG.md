@@ -3,6 +3,49 @@
 本项目所有显著变更记录于此。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)；
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+### 修复
+
+- **OTA force 无限重装循环（0.3.1 线上事故）**：`mark_installed_upto` 定义了却从未被调用，
+  安装确认表恒为空，force 发布因此每次握手都判定"未安装"，设备每约 7 秒重装一次 APK。
+  已接入 hello 流程（且早于 `latest_for`），并补回归测试锁定。
+- **ADB 桥世代判定误杀首次连接**：`bridge.generation >= generation` 把本次 open 刚建立的桥
+  判成"旧世代重放"，使任何桥接连接都被 4409 拒绝。改为严格大于。
+- **OTA 发布路径目录穿越**：`version` 直接参与文件路径拼接，可读写任意路径。
+  改为边界正则校验 + `release_path` 唯一构造点（纵深防御）。
+- **SQLite 连接跨线程共享**：进程内单连接被线程池并发使用，`execute → commit` 之间
+  可被其他线程插入；测试隔离清理也只作用于调用线程。改为每线程独立连接 + 全局登记表。
+- **事件总线跨事件循环投递**：工作线程直接操作订阅者队列；改为
+  `loop.call_soon_threadsafe` 回到订阅者循环，并清理循环已关闭的订阅。
+- **管理令牌**：改用 `secrets.compare_digest` 恒定时间比较；占位令牌在启动自检中被拒绝启动。
+- 测试隔离缺陷：两个用例未请求 `fresh_db`，实际写入默认数据库。
+- 假测试：自动结算"未超时 → 不结算"的断言恒为真（`or short is None`），等于没有测试。
+
+### 变更
+
+- 时间处理收敛为 `core/clock.py` 单一来源（此前格式化 3 处、解析 3 处各写一遍）。
+- 命名统一：派生状态 `STATE_*`、原始值 `RAW_*`、时间单位统一 `_S` 后缀、
+  表名去复数（`releases` → `ota_release`）、`release_install.release_version` → `version`。
+- 依赖守卫移出 `routes.py` 到 `devices/dependencies.py`，消除循环导入（连带去掉函数内导入）。
+- 盲捕获改为 `contextlib.suppress` 或精确异常类型；后台扫描循环保留宽捕获并注明理由。
+- `mypy --strict` 全量启用；ruff 规则集扩展至含命名/类型/异常/pytest 风格等 22 组。
+- 覆盖率门槛 95 → 96（门槛只升不降）。
+
+### 新增
+
+- `bridge.open` / `bridge.close` 协议 schema（此前代码在用，schema 缺失）。
+- `screen.capture` 服务端入口（设备端此前已实现但服务端无调用方）。
+- 设备端 `YuvConverter`：从 `ScreenCapture` 抽出的纯逻辑，纳入 JVM 单测覆盖。
+- 版本号单一来源与跨端一致性测试。
+- `docs/STANDARDS.md` 重写：每条标准绑定执行机制，新增「命名与标识符」「扩展方式」两节。
+
+## [0.3.1] - 2026-09-30
+
+### 变更
+
+- 服务端与设备端 0.3.1 上线；设备端经 OTA 完成 0.2.5 → 0.3.1 升级（真机验证）
+
 ## [0.3.0] - 2026-09-30
 
 ### 新增
