@@ -26,8 +26,8 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * - 点击：ACTION_CLICK（API 19 可用的点击方式）
  * - 输入：剪贴板 + ACTION_PASTE（API 18+；ACTION_SET_TEXT 需 API 21 不可用）
- * - 页面等待：TYPE_WINDOW_CONTENT_CHANGED 事件唤醒，替代固定轮询
- * - 浴室 App 崩溃守护：退出到桌面 30s 内 ≥3 次进入 10 分钟冷却期，冷却期内不自动拉起
+ * - 页面变化：事件原样交给 [BathAppPage]，由它筛掉与页面判定无关的那些再重算
+ * - 浴室 App 退出守护：阈值与冷却时长都是配置项，决策在 [BathAppGuard]
  */
 class A11yService : AccessibilityService() {
 
@@ -66,7 +66,7 @@ class A11yService : AccessibilityService() {
             // 重算线程算完会经 onPageRefreshed 放行等待者。
             //
             // 附带的事件特征只用本地字段（见 ContentEvent）。getSource() 刻意不取：它为拿一个
-            // 节点要发起一次跨进程调用，而这类事件每秒来十几次。
+            // 节点要发起一次跨进程调用，而这类事件每秒来五十来条。
             BathAppPage.refresh(
                 ContentEvent(
                     className = event.className?.toString() ?: "",

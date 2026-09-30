@@ -18,8 +18,9 @@ object CommandFactory {
     /**
      * 解析一条入队执行的命令；不属于此类返回 null。
      *
-     * 参数一律用 `has()` 判断再取：`optInt` 的默认值是 0，而 0 是合法坐标与
-     * 喷头编号，无法与"未提供"区分。
+     * 必填参数直接用 `optInt` 取：它们在服务端的请求模型里就是必填，缺了根本发不下来，设备端
+     * 再判一次只是把同一个结论写两遍。可空参数（`to_x` / `to_y`）必须用 `has()` 判——`optInt`
+     * 的默认值是 0，而 0 是合法坐标，与"未提供"分不开。
      */
     fun create(action: String, params: JSONObject, commandId: String): CommandScheduler.Command? = when (action) {
         SupportedActions.SESSION_ASSIGN -> CommandScheduler.Command.Assign(
