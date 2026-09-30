@@ -15,9 +15,11 @@
  * `mount` 在切入时调用，`unmount` 负责停掉自己起的轮询与监听。
  */
 import { api, getToken, setToken } from './core/api.js'
-import { $, esc, listen } from './core/dom.js'
+import { fmtDateTime } from './core/clock.js'
+import { $, esc, listen, PLACEHOLDER } from './core/dom.js'
 import { toast } from './core/toast.js'
 import {
+  currentDevice,
   emit,
   refreshDevices,
   selectDevice,
@@ -110,6 +112,46 @@ function renderDevicePicker() {
   select.disabled = store.devices.length === 0
 }
 
+/**
+ * 设备信息面板的内容。
+ *
+ * 顺序即重要程度：先认身份（名称、ID），再看它能不能收命令（在线、信任），最后是
+ * 排障要拿去搜日志的那几项（版本、系统、能力、最后上报、来源 IP）。
+ *
+ * 面板里的每一行都会渲染，缺值给占位符——不按有没有值增减行数。行数忽多忽少会让人
+ * 以为"这一项没有了"，而实际情况是"这一项没值"，两者要分得开。
+ */
+function renderDeviceInfo() {
+  const device = currentDevice()
+  const rows = device
+    ? [
+        ['名称', device.name || PLACEHOLDER],
+        ['设备 ID', device.device_id],
+        ['状态', device.online ? '在线' : '离线'],
+        ['信任', device.trusted ? '已信任' : '未信任'],
+        ['应用版本', `${device.app_version}（版本号 ${device.version_code}）`],
+        ['系统版本', device.os_version || PLACEHOLDER],
+        ['能力', `${(device.capabilities || []).length} 项`],
+        ['最后上报', fmtDateTime(device.last_seen_at)],
+        ['来源 IP', device.last_ip || PLACEHOLDER],
+      ]
+    : [['设备', '未选择']]
+
+  $('deviceInfo').innerHTML = rows
+    .map(([key, value]) => `<div class="kv"><span class="k">${esc(key)}</span><span class="v">${esc(value)}</span></div>`)
+    .join('')
+}
+
+/** 开合设备信息面板。按钮的 `aria-expanded` 跟着走，读屏才知道它是收起的还是展开的。 */
+function toggleDeviceInfo(open) {
+  const panel = $('deviceInfo')
+  const btn = $('btnDeviceInfo')
+  const next = open ?? panel.hidden
+  if (next) renderDeviceInfo()
+  panel.hidden = !next
+  btn.setAttribute('aria-expanded', String(next))
+}
+
 function bindTopbar() {
   subscribe('online', (online) => {
     $('deviceDot').className = `bar-dot ${online ? 'on' : 'off'}`
@@ -122,14 +164,30 @@ function bindTopbar() {
     chip.textContent = streaming ? '实时' : '断开'
   })
 
-  subscribe('devices', renderDevicePicker)
+  subscribe('devices', () => {
+    renderDevicePicker()
+    // 面板开着时设备清单变了（改名、信任位、上下线），内容要跟着变，否则看的是旧的
+    if (!$('deviceInfo').hidden) renderDeviceInfo()
+  })
 
   subscribe('device', (id) => {
-    $('deviceId').textContent = id || '未选择'
     $('devicePicker').value = id
+    if (!$('deviceInfo').hidden) renderDeviceInfo()
   })
 
   listen($('devicePicker'), 'change', (event) => selectDevice(event.target.value))
+
+  listen($('btnDeviceInfo'), 'click', (event) => {
+    // 不冒泡到 document，否则紧接着的"点外部关闭"会立刻把它收回去
+    event.stopPropagation()
+    toggleDeviceInfo()
+  })
+
+  listen($('deviceInfo'), 'click', (event) => event.stopPropagation())
+  listen(document, 'click', () => toggleDeviceInfo(false))
+  listen(document, 'keydown', (event) => {
+    if (event.key === 'Escape') toggleDeviceInfo(false)
+  })
 
   // 设备相关的接口都要 X-Ops-Token，没它连清单都读不到——所以入口放在顶栏，
   // 而不是某个视图里（那是全局凭证，不是某个功能的设置）

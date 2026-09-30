@@ -14,13 +14,16 @@
 <body>
 
 <!--
-  顶栏：导航 + 设备选择 + 连接状态。
+  顶栏：导航 + 设备选择 + 连接状态 + 设备信息入口。
 
   导航按钮与设备下拉**都由 app.js 按注册表生成**，这里只留空容器：
   写死在 HTML 里就得两处维护，加一个视图要改两个文件，迟早对不上。
 
   设备选择放在顶栏而不是某个视图里，是因为七个视图都要认"当前设备"——
   它是全局上下文，不是某个视图的局部状态。
+
+  "设备信息"是个按钮而不是常驻显示：里面是设备 ID、IP、版本这些**排障时**才看的
+  字段，常驻会挤掉真正要一直盯着的两样东西（在线状态、令牌）。
 -->
 <div class="bar">
   <nav class="bar-nav" id="nav"></nav>
@@ -37,9 +40,10 @@
 
   <div class="bar-right">
     <span class="badge badge-red" id="streamChip">断开</span>
-    <span id="deviceId" class="bar-mono">未选择</span>
+    <button type="button" class="btn btn-ghost btn-sm" id="btnDeviceInfo" aria-expanded="false">设备信息</button>
     <button type="button" class="btn btn-ghost btn-sm" id="btnToken">令牌</button>
     <span id="clock" class="bar-mono">--:--:--</span>
+    <div class="info-panel" id="deviceInfo" hidden></div>
   </div>
 </div>
 
