@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://<public-domain>/schema/bridge.open.json",
+  "title": "Server request to open the device ADB bridge tunnel",
+  "allOf": [
+    {
+      "$ref": "https://<public-domain>/schema/envelope.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "bridge.open"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "device_id",
+            "nonce"
+          ],
+          "properties": {
+            "device_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "nonce": {
+              "description": "一次性配对凭据；设备以它接入 /gateway/bridge，服务端消费后即失效",
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  ]
+}

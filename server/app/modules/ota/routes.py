@@ -1,17 +1,26 @@
-"""OTA API：设备面（manifest/下载）与管理面（发布上传）。"""
+"""OTA API：设备面（manifest/下载）与管理面（发布上传）。
 
-import os
+版本号在 HTTP 边界即按 VERSION_PATTERN 校验：该参数参与文件路径构造，
+边界校验是第一道防线，service.release_path 是第二道（纵深防御）。
+"""
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, UploadFile
 from fastapi.responses import FileResponse
 
 from app.core.config import settings
 from app.core.security import require_admin
 from app.modules.ota import repository, service
+from app.modules.ota.service import VERSION_PATTERN
 
 router = APIRouter(prefix="/ota", tags=["ota"])
 
 admin_router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)], tags=["ota-admin"])
+
+# 路径/表单中的发布版本号：格式不合规由 FastAPI 返回 422
+ReleaseVersion = Annotated[str, Path(pattern=VERSION_PATTERN)]
+ReleaseVersionForm = Annotated[str, Form(pattern=VERSION_PATTERN)]
 
 
 @router.get("/releases")
@@ -37,12 +46,14 @@ def manifest(device_id: str, version_code: int) -> dict:
 
 
 @router.get("/download/{version}")
-def download(version: str) -> FileResponse:
-    path = os.path.join(settings.ota_dir, f"{version}.apk")
-    if not os.path.isfile(path):
+def download(version: ReleaseVersion) -> FileResponse:
+    path = service.release_path(version)
+    if not path.is_file():
         raise HTTPException(status_code=404, detail="release not found")
     return FileResponse(
-        path, media_type="application/vnd.android.package-archive", filename=f"ntu-shower-{version}.apk"
+        path,
+        media_type="application/vnd.android.package-archive",
+        filename=f"ntu-shower-{version}.apk",
     )
 
 
@@ -60,12 +71,12 @@ def delete_release(version: str) -> dict:
 
 @admin_router.post("/releases")
 async def upload_release(
-    version: str = Form(...),
-    version_code: int = Form(...),
-    mandatory: bool = Form(False),
-    force: bool = Form(False),
-    target: str = Form("all"),
-    file: UploadFile = File(...),
+    version: ReleaseVersionForm,
+    version_code: Annotated[int, Form()],
+    file: Annotated[UploadFile, File()],
+    mandatory: Annotated[bool, Form()] = False,
+    force: Annotated[bool, Form()] = False,
+    target: Annotated[str, Form()] = "all",
 ) -> dict:
     """上传新版本 APK 并注册发布（target='all' 或逗号分隔的 device_id 列表）。
 

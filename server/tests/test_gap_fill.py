@@ -71,7 +71,8 @@ def test_bridge_close_with_active_session(client: TestClient, monkeypatch) -> No
 
 def test_bridge_manager_units() -> None:
     bridge = AdbBridge("dev-u", 15655)
-    assert bridge.ready is False
+    assert bridge.connected is False
+    assert bridge.has_adb_client is False
     asyncio.run(bridge.close())  # 幂等：未开启时 close 不抛
     asyncio.run(bridge.close())
 

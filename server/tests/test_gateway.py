@@ -13,7 +13,7 @@ def _recv_until(ws, msg_type: str) -> dict:
             return msg
 
 
-def _hello(device_id: str) -> str:
+def _hello(device_id: str, version_code: int = 0) -> str:
     return json.dumps(
         {
             "v": 1,
@@ -23,6 +23,7 @@ def _hello(device_id: str) -> str:
             "payload": {
                 "device_id": device_id,
                 "app_version": "0.1.0",
+                "version_code": version_code,
                 "os_version": "4.4.4",
                 "capabilities": ["session.assign"],
             },
@@ -104,3 +105,32 @@ def test_ota_upgrade_delivered_in_handshake(client: TestClient) -> None:
         upgrade = ack["payload"]["upgrade"]
         assert upgrade is not None and upgrade["version"] == "0.3.0"
         assert len(upgrade["sha256"]) == 64
+
+
+def test_force_release_not_repushed_when_device_already_on_that_version(client: TestClient) -> None:
+    """回归：设备已在目标版本时，force 发布不得再次下发（防无限重装循环）。
+
+    事故场景（2026-09-30 真机复现）：force 发布 + release_install 无记录时，
+    每次 hello 都携带 upgrade → 设备下载→安装→重启→重连→再下载，约 7 秒一轮。
+    根因是 mark_installed_upto 定义了却从未被调用；本用例锁定调用点存在且
+    早于 latest_for 执行。
+    """
+    import io
+
+    from app.modules.ota import repository as ota_repository
+
+    device_id = "dev-loop-guard"
+    files = {"file": ("ntu-shower-0.3.1.apk", io.BytesIO(b"PKx34fake"), "application/octet-stream")}
+    client.post(
+        "/admin/releases",
+        headers={"X-Admin-Token": "test-token"},
+        data={"version": "0.3.1", "version_code": 8, "mandatory": "false", "force": "true", "target": device_id},
+        files=files,
+    )
+
+    with client.websocket_connect("/gateway/device") as ws:
+        ws.send_text(_hello(device_id, version_code=8))
+        ack = _recv_until(ws, "link.hello_ack")
+        assert ack["payload"]["upgrade"] is None, "设备已在该版本，force 发布不得再推送"
+
+    assert ota_repository.is_installed(device_id, "0.3.1") is True

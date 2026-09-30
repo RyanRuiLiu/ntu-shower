@@ -166,7 +166,7 @@ def list_doors_with_device(device_id: str | None = None) -> list[dict]:
 
 def get_active_by_cert(device_id: str, cert_no: str) -> Row | None:
     """同设备上该凭证的活跃会话（重复分配拦截依据，对齐旧系统 duplicate_session）。"""
-    row = (
+    return (
         get_conn()
         .execute(
             "SELECT * FROM usage_session"
@@ -176,7 +176,6 @@ def get_active_by_cert(device_id: str, cert_no: str) -> Row | None:
         )
         .fetchone()
     )
-    return row
 
 
 def list_open_sessions() -> list[Row]:

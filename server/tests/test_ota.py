@@ -5,7 +5,7 @@ import pytest
 from app.modules.ota import repository
 
 
-@pytest.fixture()
+@pytest.fixture
 def repo(fresh_db):
     repository.init_tables()
     return repository

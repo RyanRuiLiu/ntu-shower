@@ -5,18 +5,20 @@
 - STF/DeviceFarmer 模式：控制连接多路复用，ADB 会话按需建立、用毕回收——
   服务器同时承载其他服务，空闲不占连接；
 - nginx WS 代理 read timeout 默认 60s：设备桥 WS 走 3600s 配置（deploy/nginx），
-  另以空闲超时（BRIDGE_IDLE_TIMEOUT）在应用层回收真正空闲的 adb 会话；
+  另以空闲超时（BRIDGE_IDLE_TIMEOUT_S）在应用层回收真正空闲的 adb 会话；
 - 世代令牌：每次 open 推进 generation，旧会话的异步回调按世代丢弃
   （杜绝旧项目 "stale state 强制重启" 补丁）。
 """
+
 import asyncio
+import contextlib
 import uuid
 from dataclasses import dataclass, field
 
 from fastapi import WebSocket
 
 BRIDGE_BUFFER_SIZE = 65536
-BRIDGE_IDLE_TIMEOUT = 300  # 秒：adb 会话空闲上限（5 分钟，长于任何 adb 交互间隔）
+BRIDGE_IDLE_TIMEOUT_S = 300  # 秒：adb 会话空闲上限（5 分钟，长于任何 adb 交互间隔）
 PENDING_MAX = 1024 * 1024  # 对端未就绪时的有界缓冲
 BASE_PORT = 15655  # 避开旧系统 bridge-server 占用的 127.0.0.1:15555
 
@@ -32,7 +34,7 @@ class AdbBridge:
     tcp_writer: asyncio.StreamWriter | None = None
     tcp_reader: asyncio.StreamReader | None = None
     server: asyncio.AbstractServer | None = None
-    pump_task: asyncio.Task | None = None
+    pump_task: asyncio.Task[None] | None = None
     pending_to_device: bytearray = field(default_factory=bytearray)
     pending_to_tcp: bytearray = field(default_factory=bytearray)
 
@@ -56,10 +58,9 @@ class AdbBridge:
             self.pump_task.cancel()
         self.pump_task = None
         if self.tcp_writer is not None:
-            try:
+            # 对端可能已消失，关闭动作会抛；清理路径必须继续走完
+            with contextlib.suppress(Exception):
                 self.tcp_writer.close()
-            except Exception:
-                pass
         self.tcp_writer = None
         self.tcp_reader = None
         self.pending_to_tcp.clear()
@@ -69,16 +70,13 @@ class AdbBridge:
         await self.close_stream()
         if self.server is not None:
             self.server.close()
-            try:
+            with contextlib.suppress(Exception):
                 await self.server.wait_closed()
-            except Exception:
-                pass
             self.server = None
         if self.device_ws is not None:
-            try:
+            # 连接可能已经断了，关闭动作失败不影响回收流程
+            with contextlib.suppress(Exception):
                 await self.device_ws.close()
-            except Exception:
-                pass
             self.device_ws = None
         self.pending_to_device.clear()
 
@@ -88,13 +86,13 @@ class BridgeRegistry:
 
     def __init__(self) -> None:
         self.pending: dict[str, tuple[int, str]] = {}  # device_id -> (generation, nonce)
-        self.active: dict[str, AdbBridge] = {}          # device_id -> 桥接
-        self.ports: dict[str, int] = {}                 # device_id -> 本地端口
+        self.active: dict[str, AdbBridge] = {}  # device_id -> 桥接
+        self.ports: dict[str, int] = {}  # device_id -> 本地端口
         self._generation_by_device: dict[str, int] = {}
 
     def open_session(self, device_id: str) -> tuple[int, int, str]:
         """开一个新会话世代：世代严格递增（同设备跨会话可比较）、端口稳定、nonce 一次性。"""
-        port = self.ports.setdefault(device_id, BASE_PORT + self.ports.__len__())
+        port = self.ports.setdefault(device_id, BASE_PORT + len(self.ports))
         generation = self._generation_by_device.get(device_id, 0) + 1
         self._generation_by_device[device_id] = generation
         nonce = uuid.uuid4().hex

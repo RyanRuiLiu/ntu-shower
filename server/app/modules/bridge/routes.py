@@ -8,8 +8,9 @@
 - 空闲 300s 应用层回收（服务器同时跑其他服务，不留死连接）；
 - open/close 全量审计留痕（command_audit 单一来源）。
 """
+
 import asyncio
-import json
+import contextlib
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
@@ -17,12 +18,12 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from app.core import protocol
 from app.core.security import require_admin
 from app.gateway.manager import manager
-from app.modules.devices.routes import require_trusted_online_device
+from app.modules.devices.dependencies import require_trusted_online_device
 from app.modules.sessions import repository as command_audit
 
 from .manager import (
     BRIDGE_BUFFER_SIZE,
-    BRIDGE_IDLE_TIMEOUT,
+    BRIDGE_IDLE_TIMEOUT_S,
     PENDING_MAX,
     AdbBridge,
     registry,
@@ -42,12 +43,13 @@ def _append(buffer: bytearray, data: bytes) -> None:
 
 
 async def _drain_and_close(ws: WebSocket, code: int) -> None:
-    """拒绝路径的规范关闭：服务端先发 close，再排掉客户端回执帧，避免握手竞态。"""
+    """拒绝路径的规范关闭：服务端先发 close，再排掉客户端回执帧，避免握手竞态。
+
+    客户端可能不回执（或已消失），排水失败不影响关闭语义，故整体忽略。
+    """
     await ws.close(code=code)
-    try:
+    with contextlib.suppress(Exception):
         await asyncio.wait_for(ws.receive(), timeout=2)
-    except (Exception, asyncio.TimeoutError):
-        pass
 
 
 @router.websocket("/gateway/bridge")
@@ -68,8 +70,9 @@ async def device_bridge(ws: WebSocket) -> None:
     if bridge is None or bridge.port != port:
         bridge = AdbBridge(device_id, port, generation)
         registry.active[device_id] = bridge
-    elif bridge.generation >= generation:
-        # 旧世代重放：直接拒绝，不影响现役会话
+    elif bridge.generation > generation:
+        # 旧世代重放：已有更新的世代在册，拒绝本帧（不影响现役会话）。
+        # 判定必须是严格大于——相等表示本次 open 刚建立的桥正等待设备接管。
         await _drain_and_close(ws, code=4409)
         return
     else:
@@ -82,22 +85,21 @@ async def device_bridge(ws: WebSocket) -> None:
 
     # 冲缓冲：pending_to_device 是"发往设备"的字节（TCP 先收、设备 WS 未就绪）
     if bridge.pending_to_device:
-        try:
+        with contextlib.suppress(Exception):
             await ws.send_bytes(bytes(bridge.pending_to_device))
-        except Exception:
-            pass
         bridge.pending_to_device.clear()
 
     try:
         while bridge.device_ws is ws and bridge.generation == generation:
-            data = await asyncio.wait_for(ws.receive_bytes(), timeout=BRIDGE_IDLE_TIMEOUT)
+            data = await asyncio.wait_for(ws.receive_bytes(), timeout=BRIDGE_IDLE_TIMEOUT_S)
             tcp_writer = bridge.tcp_writer
             if tcp_writer is None:
                 _append(bridge.pending_to_tcp, data)
                 continue
             tcp_writer.write(data)
             await tcp_writer.drain()
-    except (WebSocketDisconnect, asyncio.TimeoutError, TimeoutError):
+    except (WebSocketDisconnect, asyncio.TimeoutError):
+        # 设备断开或空闲超时：桥的正常结束路径，收尾走 finally
         pass
     finally:
         # 只摘设备 WS 侧；server/TCP 的回收归 adb/close（避免与门户循环关闭竞态，
@@ -121,7 +123,7 @@ async def _pump_tcp_to_ws(bridge: AdbBridge, reader: asyncio.StreamReader) -> No
     """
     try:
         while True:
-            data = await asyncio.wait_for(reader.read(BRIDGE_BUFFER_SIZE), timeout=BRIDGE_IDLE_TIMEOUT)
+            data = await asyncio.wait_for(reader.read(BRIDGE_BUFFER_SIZE), timeout=BRIDGE_IDLE_TIMEOUT_S)
             if not data:
                 break
             device_ws = bridge.device_ws
@@ -129,15 +131,15 @@ async def _pump_tcp_to_ws(bridge: AdbBridge, reader: asyncio.StreamReader) -> No
                 _append(bridge.pending_to_device, data)
                 continue
             await device_ws.send_bytes(data)
-    except (asyncio.TimeoutError, TimeoutError, Exception):
+    except (OSError, asyncio.TimeoutError, WebSocketDisconnect, RuntimeError):
+        # 本端流结束：对端断开、空闲超时或设备 WS 已消失；收尾交 finally。
+        # 刻意不捕获 Exception——未预料的异常应暴露到 asyncio 日志而不是被吞掉。
         pass
     finally:
         writer = bridge.tcp_writer
         if writer is not None:
-            try:
+            with contextlib.suppress(Exception):
                 writer.close()
-            except Exception:
-                pass
         bridge.tcp_writer = None
         bridge.tcp_reader = None
 

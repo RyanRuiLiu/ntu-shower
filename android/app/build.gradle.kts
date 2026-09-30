@@ -98,6 +98,7 @@ val frameworkBoundClasses = listOf(
     "**/core/config/AppConfig*",
     "**/features/automation/*",
     "**/features/remote/AdbBridge*",
+    "**/features/remote/ScreenCapture*",
     "**/features/doors/DoorMonitor*",
     "**/features/doors/DoorSnapshotReader*",
     "**/features/doors/DoorSnapshotSender*",

@@ -1,6 +1,7 @@
 """设备连接注册表：一个 device_id 一条活动连接，重连顶替旧连接。"""
 
 from fastapi import WebSocket
+from starlette.websockets import WebSocketDisconnect
 
 
 class ConnectionManager:
@@ -26,15 +27,19 @@ class ConnectionManager:
         return list(self._connections.items())
 
     async def send_to(self, device_id: str, data: str) -> bool:
-        """向指定设备的活动连接发送文本帧；连接不存在或发送异常返回 False。"""
+        """向指定设备的活动连接发送文本帧；连接不存在或已断开返回 False。
+
+        调用方据返回值降级（例如把命令标为 device.offline），因此这里不抛异常。
+        """
         ws = self._connections.get(device_id)
         if ws is None:
             return False
         try:
             await ws.send_text(data)
-            return True
-        except Exception:
+        except (WebSocketDisconnect, RuntimeError):
+            # 连接在发送瞬间断开：Starlette 抛 RuntimeError 的语义即"连接不可用"
             return False
+        return True
 
 
 # 模块级单例。注意：消费方应使用 `from app.gateway.manager import manager`

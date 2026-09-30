@@ -33,6 +33,8 @@ KNOWN_TYPES = [
     "config.ack",
     "ota.upgrade_available",
     "ota.progress",
+    "bridge.open",
+    "bridge.close",
 ]
 
 SAMPLES: dict[str, dict] = {
@@ -73,6 +75,8 @@ SAMPLES: dict[str, dict] = {
         "payload": {"version": "0.2.4", "version_code": 6, "url": "/ota/download/0.2.4", "mandatory": False}
     },
     "ota.progress": {"payload": {"version": "0.2.4", "stage": "downloading", "detail": ""}},
+    "bridge.open": {"payload": {"device_id": "<device-id>", "nonce": "8f14e45fceea167a"}},
+    "bridge.close": {"payload": {}},
 }
 
 
