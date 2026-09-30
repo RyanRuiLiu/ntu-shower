@@ -1,4 +1,4 @@
-"""设备远程配置：全局默认 + 设备级覆盖（docs/PROTOCOL.md §5）。
+"""设备远程配置：全局默认 + 设备级覆盖（protocol/schema/）。
 
 ## 存储什么
 
@@ -152,9 +152,7 @@ def put_global_overrides(values: ConfigValues) -> tuple[int, ConfigValues]:
 
 
 def get_device_overrides(device_id: str) -> tuple[int, ConfigValues] | None:
-    row = get_conn().execute(
-        "SELECT revision, config FROM device_config WHERE device_id = ?", (device_id,)
-    ).fetchone()
+    row = get_conn().execute("SELECT revision, config FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
     return (int(row["revision"]), json.loads(row["config"])) if row else None
 
 
@@ -206,7 +204,7 @@ def device_effective(device_id: str) -> ConfigValues:
 
 
 def describe() -> list[ConfigSpecView]:
-    """配置登记表的外部描述，供 `GET /admin/config/spec`（客户端据此渲染控件）。"""
+    """配置登记表的外部描述，供 `GET /ops/config/spec`（客户端据此渲染控件）。"""
     return [
         {
             "key": spec.key,

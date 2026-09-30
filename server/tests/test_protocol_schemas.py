@@ -117,13 +117,3 @@ def test_rejected_unknown_type_pattern() -> None:
     bad = _envelope("no_dot_type", {})
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(bad, schema)
-
-
-def test_protocol_doc_lists_every_message_type() -> None:
-    """docs/PROTOCOL.md 必须登记每一个消息类型（协议三处同步中的文档那一处）。
-
-    人写的文档最容易漂移：新增消息只改代码不更新文档时，这条断言会失败。
-    """
-    doc = (SCHEMA_DIR.parents[1] / "docs" / "PROTOCOL.md").read_text(encoding="utf-8")
-    missing = [msg_type for msg_type in KNOWN_TYPES if msg_type not in doc]
-    assert not missing, f"PROTOCOL.md 未登记: {missing}"

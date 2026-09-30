@@ -8,14 +8,14 @@ from typing_extensions import TypedDict
 
 from app.core.protocol import JsonObject
 from app.modules.devices.schemas import DeviceRecord
-from app.modules.doors.schemas import DoorDetail
+from app.modules.doors.schemas import DoorView
 
 
 class ShadowReported(TypedDict):
     """设备上报态：档案 + 全部喷头的完整现态。"""
 
     device: DeviceRecord
-    doors: list[DoorDetail]
+    doors: list[DoorView]
 
 
 class ShadowDesired(TypedDict):

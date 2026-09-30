@@ -3,7 +3,7 @@
 ## 为什么必须显式配置
 
 uvicorn 启动时只配置它自己的 logger，应用的 logger 没有 handler。Python 的
-logging 对"没有 handler 的 logger"只在 WARNING 及以上经 `lastResort` 兜底输出，
+logging 对"没有 handler 的 logger"只在 WARNING 及以上经 `lastResort` 输出，
 于是 `logger.info(...)` 会被静默丢弃——日志写了却看不到，等于没写。
 
 ## 落点

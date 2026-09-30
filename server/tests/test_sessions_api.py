@@ -47,7 +47,7 @@ def _online_device(client: TestClient, device_id: str) -> Iterator[WebSocketTest
     with client.websocket_connect("/gateway/device") as ws:
         ws.send_text(_hello(device_id))
         _recv_until(ws, "link.hello_ack")
-    client.post(f"/admin/devices/{device_id}/trust", headers={"X-Admin-Token": "test-token"})
+    client.patch(f"/ops/devices/{device_id}", headers={"X-Ops-Token": "test-token"}, json={"trusted": True})
     with client.websocket_connect("/gateway/device") as ws:
         ws.send_text(_hello(device_id))
         _recv_until(ws, "link.hello_ack")
@@ -154,3 +154,46 @@ def test_settle_rejected_without_occupied_door(client: TestClient, ops_headers: 
 
     assert r.status_code == 409
     assert r.json()["type"].endswith("/problems/no-occupied-door")
+
+
+#: 管理面的会话操作路径与各自的请求体。
+OPS_SESSION_PATHS = {
+    "/ops/sessions/assign": {"device_id": "dev-ops-1", "door_no": 1, "cert_no": "C", "password": "P"},
+    "/ops/sessions/settle": {"device_id": "dev-ops-1", "cert_no": "C", "password": "P"},
+    "/ops/sessions/photo": {"device_id": "dev-ops-1"},
+}
+
+
+def test_ops_session_endpoints_authenticate_by_token(client: TestClient) -> None:
+    """管理面的会话操作凭**令牌**授权，不要求 `X-Identity`。
+
+    网页端是运维代操作，不代表某个终端用户。让它去借一个用户身份来通过能力位检查
+    是别扭的：那个身份的每一次使用都会被算成"该用户的操作"，审计里就分不清是谁干的。
+    """
+    for path, payload in OPS_SESSION_PATHS.items():
+        # 两个头都不带 → 401。这条只证明它要授权，不区分要哪一种
+        missing = client.post(path, json=payload)
+        assert missing.status_code == 401, path
+
+        # 只带令牌、不带身份 → 必须越过授权进入业务校验（设备未注册，所以不是 401）
+        authed = client.post(path, json=payload, headers={"X-Ops-Token": "test-token"})
+        assert authed.status_code != 401, f"{path} 不该再因缺少身份被拒"
+
+
+def test_two_planes_share_the_same_precheck(
+    client: TestClient,
+    ops_headers: dict[str, str],
+) -> None:
+    """两面对同一台设备的同一请求给出**同一个**错误。
+
+    校验逻辑只有一份（`perform_assign` 等），两面只是授权方式不同。若哪天有人往
+    其中一面单独加了校验，这条会立刻发现——那正是"逻辑被复制成两份"的开始。
+    """
+    device_id = "dev-shared-1"
+    payload = {"device_id": device_id, "door_no": 1, "cert_no": "C", "password": "P"}
+    with _online_device(client, device_id):
+        user_plane = client.post("/api/v1/sessions/assign", json=payload, headers=ops_headers)
+        ops_plane = client.post("/ops/sessions/assign", json=payload, headers={"X-Ops-Token": "test-token"})
+
+    assert user_plane.status_code == ops_plane.status_code
+    assert user_plane.json()["type"] == ops_plane.json()["type"]

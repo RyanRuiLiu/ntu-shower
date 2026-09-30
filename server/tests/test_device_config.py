@@ -31,14 +31,12 @@ def test_defaults_come_from_spec_registry(store: ModuleType) -> None:
     effective = store.global_effective()
     assert effective["heartbeat_interval_s"] == 30
     assert effective["overlay_enabled"] is True
-    assert "bath_guard_enabled" in effective  # 后加的键同样在有效配置里
+    assert "bath_app_guard_enabled" in effective  # 后加的键同样在有效配置里
 
 
 def test_put_global_stores_only_differences(store: ModuleType) -> None:
     """提交整个表单也只留下真正的差异，未改动的键继续跟随默认值。"""
-    revision, overrides = store.put_global_overrides(
-        {"heartbeat_interval_s": 15, "ota_check_interval_s": 3600}
-    )
+    revision, overrides = store.put_global_overrides({"heartbeat_interval_s": 15, "ota_check_interval_s": 3600})
 
     assert revision == 2
     assert overrides == {"heartbeat_interval_s": 15}  # 3600 与默认相同，不固化
@@ -90,7 +88,7 @@ def test_device_effective_excludes_server_only_keys(store: ModuleType) -> None:
     device_view = store.device_effective("dev-1")
 
     assert "auto_settle_threshold_s" not in device_view
-    assert "server_ping_interval_s" not in device_view
+    assert "ping_interval_s" not in device_view
     assert "heartbeat_interval_s" in device_view
 
 

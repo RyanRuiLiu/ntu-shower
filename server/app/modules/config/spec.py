@@ -86,7 +86,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         unit="秒",
     ),
     ConfigSpec(
-        "server_ping_interval_s",
+        "ping_interval_s",
         INT,
         SERVER,
         60,
@@ -131,7 +131,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
     ),
     # ── 喷头状态采集 ──
     ConfigSpec(
-        "report_debounce_ms",
+        "door_report_debounce_ms",
         INT,
         DEVICE,
         1000,
@@ -159,7 +159,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "自动操作期间显示在屏幕提示层上的文字",
     ),
     ConfigSpec(
-        "server_response_timeout_ms",
+        "bath_response_timeout_ms",
         INT,
         DEVICE,
         10000,
@@ -170,7 +170,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         unit="毫秒",
     ),
     ConfigSpec(
-        "id_verify_wait_ms",
+        "cert_verify_wait_ms",
         INT,
         DEVICE,
         5000,
@@ -181,7 +181,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         unit="毫秒",
     ),
     ConfigSpec(
-        "home_budget_ms",
+        "home_timeout_ms",
         INT,
         DEVICE,
         10000,
@@ -192,7 +192,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         unit="毫秒",
     ),
     ConfigSpec(
-        "poll_interval_ms",
+        "ui_poll_interval_ms",
         INT,
         DEVICE,
         200,
@@ -213,6 +213,50 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         maximum=5000,
         unit="毫秒",
     ),
+    ConfigSpec(
+        "ui_dump_max_nodes",
+        INT,
+        DEVICE,
+        2000,
+        "节点导出上限",
+        "单次导出界面节点树的最大节点数，超出即截断。上限同时决定回传体积，按实测的协议帧容量调整",
+        minimum=100,
+        maximum=20000,
+        unit="个",
+    ),
+    ConfigSpec(
+        "ui_operation_timeout_s",
+        INT,
+        SERVER,
+        30,
+        "界面操作超时",
+        "服务端等待一次界面操作（点击 / 按键 / 输入 / 导出节点树）回执的上限；设备端另有更短的命令超时",
+        minimum=5,
+        maximum=300,
+        unit="秒",
+    ),
+    ConfigSpec(
+        "ui_swipe_duration_ms",
+        INT,
+        DEVICE,
+        300,
+        "滑动默认时长",
+        "滑动手势从按下到抬起的时长；过短会被识别成快速抛掷而非拖动",
+        minimum=50,
+        maximum=5000,
+        unit="毫秒",
+    ),
+    ConfigSpec(
+        "device_exec_max_output_bytes",
+        INT,
+        DEVICE,
+        32768,
+        "命令输出上限",
+        "device.exec 单次回传的最大字节数，超出即截断",
+        minimum=1024,
+        maximum=1048576,
+        unit="字节",
+    ),
     # ── 自更新 ──
     ConfigSpec(
         "ota_check_interval_s",
@@ -227,7 +271,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
     ),
     # ── 浴室 App 崩溃守护 ──
     ConfigSpec(
-        "bath_guard_enabled",
+        "bath_app_guard_enabled",
         BOOL,
         DEVICE,
         True,
@@ -235,7 +279,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "浴室 App 异常退出时是否自动重新拉起",
     ),
     ConfigSpec(
-        "bath_exit_window_ms",
+        "bath_app_exit_window_ms",
         INT,
         DEVICE,
         30000,
@@ -246,7 +290,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         unit="毫秒",
     ),
     ConfigSpec(
-        "bath_exit_max_count",
+        "bath_app_exit_max_count",
         INT,
         DEVICE,
         3,
@@ -257,7 +301,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         unit="次",
     ),
     ConfigSpec(
-        "bath_exit_cooldown_ms",
+        "bath_app_exit_cooldown_ms",
         INT,
         DEVICE,
         600000,
@@ -266,6 +310,40 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=1000,
         maximum=3600000,
         unit="毫秒",
+    ),
+    # ── 调试通道 ──
+    ConfigSpec(
+        "bridge_idle_timeout_s",
+        INT,
+        SERVER,
+        300,
+        "调试通道空闲超时",
+        "无数据往来达到该时长即关闭。服务器同时承担其他服务，不留死连接",
+        minimum=30,
+        maximum=3600,
+        unit="秒",
+    ),
+    ConfigSpec(
+        "bridge_max_lifetime_s",
+        INT,
+        SERVER,
+        3600,
+        "调试通道最长开启时长",
+        "从打开算起的最长存活时长，到点强制关闭。空闲超时只覆盖「没人用」的情况，一直有流量时它不会触发",
+        minimum=300,
+        maximum=86400,
+        unit="秒",
+    ),
+    ConfigSpec(
+        "bridge_pair_timeout_s",
+        INT,
+        SERVER,
+        30,
+        "调试通道配对超时",
+        "下发 bridge.open 后等待设备建立隧道的时间；超时即作废本次会话，不留待配对状态",
+        minimum=5,
+        maximum=300,
+        unit="秒",
     ),
     # ── 自动结算（服务端侧）──
     ConfigSpec(

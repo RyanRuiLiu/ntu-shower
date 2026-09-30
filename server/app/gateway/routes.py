@@ -13,7 +13,7 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.concurrency import run_in_threadpool
 
-from ..core import events, protocol
+from ..core import events, protocol, reason_codes
 from ..core.clock import now_rfc3339
 from ..core.device_clock import ping_payload, update_skew
 from ..core.protocol import JsonObject, as_int, list_of, payload_of, text_of
@@ -39,7 +39,7 @@ async def device_gateway(ws: WebSocket) -> None:
         hello = protocol.parse(await ws.receive_text())
         if hello is None or hello.get("type") != "link.hello":
             logger.warning("rejected connection: first frame is not link.hello")
-            await ws.send_text(protocol.error("proto.hello_required", "first frame must be link.hello"))
+            await ws.send_text(protocol.error(reason_codes.HELLO_REQUIRED.code, "首帧必须是 link.hello"))
             await ws.close()
             return
 
@@ -92,7 +92,7 @@ async def device_gateway(ws: WebSocket) -> None:
         while True:
             msg = protocol.parse(await ws.receive_text())
             if msg is None:
-                await ws.send_text(protocol.error("proto.bad_json", "frame is not a valid JSON object"))
+                await ws.send_text(protocol.error(reason_codes.BAD_JSON.code, "收到的帧不是合法 JSON 对象"))
                 continue
             # 未知类型只回错不断开：这是协议的前向扩展点
             await _handle_frame(ws, msg, device_id, trusted)
@@ -146,9 +146,11 @@ async def _handle_frame(ws: WebSocket, msg: JsonObject, device_id: str, trusted:
         if not sessions_service.resolve(text_of(msg, "reply_to"), payload):
             # 回执找不到对应的在途命令（多半是命令已超时收尾）：回错误帧保持
             # 协议完整性反馈，设备端只记日志，不产生副作用。
-            await ws.send_text(protocol.error("command.unknown_id", "no pending command for result", reply_to=frame_id))
+            await ws.send_text(
+                protocol.error(reason_codes.UNKNOWN_COMMAND_ID.code, "没有与该结果对应的待办命令", reply_to=frame_id)
+            )
     else:
-        await ws.send_text(protocol.error("proto.unknown_type", f"unknown type: {mtype}"))
+        await ws.send_text(protocol.error(reason_codes.UNKNOWN_TYPE.code, f"不认识的消息类型：{mtype}"))
 
 
 async def _server_ping_loop(ws: WebSocket, device_id: str) -> None:
@@ -158,7 +160,7 @@ async def _server_ping_loop(ws: WebSocket, device_id: str) -> None:
     """
     while True:
         config = await run_in_threadpool(config_store.effective, device_id)
-        await asyncio.sleep(as_int(config.get("server_ping_interval_s"), default=60))
+        await asyncio.sleep(as_int(config.get("ping_interval_s"), default=60))
         try:
             await ws.send_text(ping_payload())
         except (WebSocketDisconnect, RuntimeError) as exc:

@@ -5,6 +5,7 @@
 package com.ryanliu.ntushower.service
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -20,7 +21,7 @@ import com.ryanliu.ntushower.features.automation.BathAppGuard
 /**
  * 无障碍服务实体：UI 操作原语与页面事件流。
  *
- * - 点击：ACTION_CLICK（API 19 兼容）
+ * - 点击：ACTION_CLICK（API 19 可用的点击方式）
  * - 输入：剪贴板 + ACTION_PASTE（API 18+；ACTION_SET_TEXT 需 API 21 不可用）
  * - 页面等待：TYPE_WINDOW_CONTENT_CHANGED 事件唤醒，替代固定轮询
  * - 浴室 App 崩溃守护：退出到桌面 30s 内 ≥3 次进入 10 分钟冷却期，冷却期内不自动拉起
@@ -31,12 +32,27 @@ class A11yService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         Log.i(TAG, "connected")
+        enableViewIdReporting()
         bathAppInForeground = isBathAppInForeground()
         // 自举主服务：无障碍绑定是本设备上唯一可靠的开机拉起锚点——
         // DS83X ROM 不投递 BOOT_COMPLETED（真机实测 + 旧项目同结论），
         // 系统开机后主动重绑已启用的无障碍服务（不受 stopped 状态影响）。
         // 设置变更/崩溃后重绑同样走到这里；旧系统真机验证过的模式。
         startService(Intent(this, AgentService::class.java))
+    }
+
+    /**
+     * 开启控件 ID 上报。
+     *
+     * API 18 起 `AccessibilityNodeInfo.viewIdResourceName` 默认不填——不设这个标志
+     * 它恒为 null。控件的资源 ID 是定位元素最稳的依据（文本会因语言与状态变化，
+     * 坐标会因布局变化），缺了它远端的节点树只能靠文本匹配。
+     */
+    private fun enableViewIdReporting() {
+        val info = serviceInfo ?: return
+        info.flags = info.flags or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
+        serviceInfo = info
+        Log.i(TAG, "view id reporting enabled")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {

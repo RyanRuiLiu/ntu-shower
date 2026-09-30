@@ -92,15 +92,24 @@ class OtaUpdater(
         }
 
         onProgress(version, "installing", "")
-        // 安装是长命令（写入 /data 并触发包管理器），显式放宽超时
-        val result = RootShell.exec("pm install -r ${target.absolutePath}", timeoutMs = INSTALL_TIMEOUT_MS)
-        Log.i(TAG, "pm install: success=${result.success} output=${result.output.take(200)}")
-        if (result.success) {
-            onProgress(version, "done", "")
-            // 安装提交后系统将重启本应用（MY_PACKAGE_REPLACED，真机验证过）
-        } else {
-            onProgress(version, "failed", result.output.take(200))
-        }
+        installDetached(target)
+    }
+
+    /**
+     * 脱手安装。
+     *
+     * 不能用常驻通道，也不能用一次性进程：`pm install -r` 会为了替换 APK 而杀掉本
+     * 进程，而那条进程是本进程的子进程，会跟着一起死——脚本跑到一半就断，结果也
+     * 永远读不回来。独立进程会成为孤儿被 init 收养，把脚本跑完。
+     *
+     * 代价是**拿不到安装结果**：成败写进日志，升级是否生效由服务端核对设备重连时
+     * 上报的版本号判断（`link.hello` 带版本），那比脚本的返回值更接近事实。
+     */
+    private fun installDetached(apk: File) {
+        val log = File(AppConfig.WORK_DIR, INSTALL_LOG_NAME).absolutePath
+        RootShell.execDetached(
+            "echo OTA_START > $log; pm install -r ${apk.absolutePath} >> $log 2>&1; echo OTA_END >> $log",
+        )
     }
 
     private fun download(url: String, target: File) {
@@ -133,11 +142,8 @@ class OtaUpdater(
     companion object {
         private const val TAG = "OtaUpdater"
 
-        /**
-         * pm install 的等待上限：安装要写入 /data 并触发包管理器，
-         * 远长于普通 shell 命令的默认超时。
-         */
-        private const val INSTALL_TIMEOUT_MS = 120_000L
+        /** 安装日志文件名（位于 `AppConfig.WORK_DIR`）。安装是脱手执行的，成败只在这里留痕。 */
+        private const val INSTALL_LOG_NAME = "ota-install.log"
 
         /** 与服务端 `ota/service.py` 的 VERSION_PATTERN 保持一致的版本号形状。 */
         private val VERSION_PATTERN = Regex("""^\d+\.\d+\.\d+$""")

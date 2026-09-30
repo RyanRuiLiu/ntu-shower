@@ -4,6 +4,8 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.util.Log
+import com.ryanliu.ntushower.core.clock.Clock
+import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.transport.GatewayClient
 import org.json.JSONArray
 import org.json.JSONObject
@@ -22,12 +24,18 @@ class DoorSnapshotSender(context: Context) {
     private data class PendingSnapshot(val snapshotId: String, val payload: JSONObject)
 
     private val db: SQLiteDatabase =
-        context.openOrCreateDatabase("door_outbox.db", Context.MODE_PRIVATE, null).also {
+        context.openOrCreateDatabase(AppConfig.OUTBOX_DB_FILE, Context.MODE_PRIVATE, null).also {
+            // 表名与库同名（库里只有这一张表）；字段命名与服务端一致——主键叫 `id`
+            // 不叫 `seq`，时间字段带 `_at` 后缀。
+            //
+            // `created_at` 不是可有可无的：排查"快照积压了多久"只能靠它，而积压时长
+            // 决定了是网络问题还是服务端没回 ack。
             it.execSQL(
-                "CREATE TABLE IF NOT EXISTS outbox (" +
-                    "seq INTEGER PRIMARY KEY AUTOINCREMENT, " +
+                "CREATE TABLE IF NOT EXISTS ${AppConfig.OUTBOX_TABLE} (" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
                     "snapshot_id TEXT NOT NULL UNIQUE, " +
-                    "payload TEXT NOT NULL)",
+                    "payload TEXT NOT NULL, " +
+                    "created_at TEXT NOT NULL)",
             )
         }
 
@@ -51,11 +59,12 @@ class DoorSnapshotSender(context: Context) {
             .put("source", "db_watch")
             .put("doors", JSONArray().apply { doors.forEach { put(it.toPayload()) } })
         db.insertWithOnConflict(
-            "outbox",
+            AppConfig.OUTBOX_TABLE,
             null,
             ContentValues().apply {
                 put("snapshot_id", snapshotId)
                 put("payload", payload.toString())
+                put("created_at", Clock.nowRfc3339())
             },
             SQLiteDatabase.CONFLICT_REPLACE,
         )
@@ -65,23 +74,25 @@ class DoorSnapshotSender(context: Context) {
 
     /** 按序发送最旧的一条未确认快照（等待 ack 后再发下一条）。幂等，可随时调用。 */
     fun flush(gateway: GatewayClient) {
-        val oldest = db.query("outbox", null, null, null, null, null, "seq ASC", "1").use { c ->
-            if (c.moveToFirst()) {
-                PendingSnapshot(
-                    snapshotId = c.getString(c.getColumnIndexOrThrow("snapshot_id")),
-                    payload = JSONObject(c.getString(c.getColumnIndexOrThrow("payload"))),
-                )
-            } else {
-                null
-            }
-        } ?: return
+        val oldest = db
+            .query(AppConfig.OUTBOX_TABLE, null, null, null, null, null, "id ASC", "1")
+            .use { c ->
+                if (c.moveToFirst()) {
+                    PendingSnapshot(
+                        snapshotId = c.getString(c.getColumnIndexOrThrow("snapshot_id")),
+                        payload = JSONObject(c.getString(c.getColumnIndexOrThrow("payload"))),
+                    )
+                } else {
+                    null
+                }
+            } ?: return
         Log.d(TAG, "sending snapshot ${oldest.snapshotId}")
         gateway.send("door.snapshot", oldest.payload)
     }
 
     /** 收到 ack：删除对应快照，继续发下一条。 */
     fun onAcked(snapshotId: String, gateway: GatewayClient) {
-        db.delete("outbox", "snapshot_id = ?", arrayOf(snapshotId))
+        db.delete(AppConfig.OUTBOX_TABLE, "snapshot_id = ?", arrayOf(snapshotId))
         Log.i(TAG, "snapshot acked: $snapshotId")
         flush(gateway)
     }

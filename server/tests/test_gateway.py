@@ -1,8 +1,11 @@
 """网关闭环测试：待认领 → 信任 → 上线正常；心跳回路；未知类型报错。"""
 
+import contextlib
 import json
+import logging
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 from starlette.testclient import WebSocketTestSession
 
@@ -68,12 +71,12 @@ def test_untrusted_device_pends_then_trusted(client: TestClient) -> None:
         assert err["payload"]["code"] == "proto.unknown_type"
 
     # 4) 后台信任（需令牌）
-    r = client.post(f"/admin/devices/{device_id}/trust", headers={"X-Admin-Token": "test-token"})
+    r = client.patch(f"/ops/devices/{device_id}", headers={"X-Ops-Token": "test-token"}, json={"trusted": True})
     assert r.status_code == 200
     assert r.json()["trusted"] is True
 
     # 5) 错误令牌被拒
-    r = client.get("/admin/devices", headers={"X-Admin-Token": "wrong"})
+    r = client.get("/ops/devices", headers={"X-Ops-Token": "wrong"})
     assert r.status_code == 401
 
     # 6) 重新连接：trusted=true，出现在设备列表
@@ -81,7 +84,7 @@ def test_untrusted_device_pends_then_trusted(client: TestClient) -> None:
         ws.send_text(_hello(device_id))
         ack = json.loads(ws.receive_text())
         assert ack["payload"]["trusted"] is True
-        r = client.get("/admin/devices", headers={"X-Admin-Token": "test-token"})
+        r = client.get("/ops/devices", headers={"X-Ops-Token": "test-token"})
         devices = r.json()
         d = next(x for x in devices if x["device_id"] == device_id)
         assert d["trusted"] is True
@@ -95,8 +98,8 @@ def test_ota_upgrade_delivered_in_handshake(client: TestClient) -> None:
     device_id = "dev-ota-1"
     files = {"file": ("ntu-shower-0.3.0.apk", io.BytesIO(b"PKx34fake"), "application/octet-stream")}
     client.post(
-        "/admin/releases",
-        headers={"X-Admin-Token": "test-token"},
+        "/ops/releases",
+        headers={"X-Ops-Token": "test-token"},
         data={"version": "0.3.0", "version_code": 6, "mandatory": "false", "force": "false", "target": device_id},
         files=files,
     )
@@ -125,8 +128,8 @@ def test_force_release_not_repushed_when_device_already_on_that_version(client: 
     device_id = "dev-loop-guard"
     files = {"file": ("ntu-shower-0.3.1.apk", io.BytesIO(b"PKx34fake"), "application/octet-stream")}
     client.post(
-        "/admin/releases",
-        headers={"X-Admin-Token": "test-token"},
+        "/ops/releases",
+        headers={"X-Ops-Token": "test-token"},
         data={"version": "0.3.1", "version_code": 8, "mandatory": "false", "force": "true", "target": device_id},
         files=files,
     )
@@ -137,3 +140,40 @@ def test_force_release_not_repushed_when_device_already_on_that_version(client: 
         assert ack["payload"]["upgrade"] is None, "设备已在该版本，force 发布不得再推送"
 
     assert ota_repository.is_installed(device_id, "0.3.1") is True
+
+
+def test_unexpected_frame_error_is_logged_before_reraise(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """帧处理里的未预期异常必须记录后重新抛出。
+
+    静默吞掉会让「设备莫名掉线」无从追查——日志里什么都没有，只能靠猜。而
+    `WebSocketDisconnect` 是常态（移动网络、重启），不该按异常处理，所以两类
+    要分开：这个用例锁的是「其他异常必须有痕迹」。
+    """
+    from app.gateway import routes as gateway_routes
+
+    # 消息走变量：ruff 的 EM101 禁止异常里直接用字符串字面量
+    boom_message = "frame handler exploded"
+
+    async def boom(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError(boom_message)
+
+    monkeypatch.setattr(gateway_routes, "_handle_frame", boom)
+
+    device_id = "dev-gw-boom"
+    # 异常会穿透到 TestClient，这里只关心它有没有被记下来
+    with (
+        caplog.at_level(logging.WARNING, logger="ntu-shower.gateway"),
+        contextlib.suppress(Exception),
+        client.websocket_connect("/gateway/device") as ws,
+    ):
+        ws.send_text(_hello(device_id))
+        ws.send_text(_envelope("link.ping", {"sender_time": "2026-09-29T12:00:01.000Z"}))
+        ws.receive_text()
+
+    assert any("gateway session failed" in record.getMessage() for record in caplog.records), (
+        "未预期的帧处理异常没有留痕"
+    )

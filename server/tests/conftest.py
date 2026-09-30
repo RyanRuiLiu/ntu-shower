@@ -33,7 +33,7 @@ def fresh_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     db_module.close_all_connections()
     path = str(tmp_path / "test.db")
     monkeypatch.setattr(config_module.settings, "db_path", path)
-    monkeypatch.setattr(config_module.settings, "admin_token", "test-token")
+    monkeypatch.setattr(config_module.settings, "ops_token", "test-token")
     # 桥接端口基址换成测试段：默认段是生产环境值，本机 SSH 隧道/其他实例
     # 占用该端口时会让桥接用例失败（已发生过两次）
     monkeypatch.setattr(config_module.settings, "bridge_base_port", 25655)
@@ -55,7 +55,7 @@ def ops_headers(fresh_db: str) -> dict[str, str]:
     from app.modules.access import repository as access_repository
     from app.modules.access.identity import IdentityKind
 
-    access_repository.put_grant("test-identity", IdentityKind.WEB, ["ops", "photo"], "测试用")
+    access_repository.put_identity("test-identity", IdentityKind.WEB, ["ops", "photo"], "测试用")
     return {"X-Identity": "test-identity"}
 
 

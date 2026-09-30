@@ -15,7 +15,7 @@ import javax.net.ssl.X509TrustManager
  * 最小现代化 TLS 配置（真机实测通过的组合，见 docs/ARCHITECTURE.md）：
  * - 强制 TLSv1.2：设备默认只启用 TLS 1.0，会被现代服务端拒绝
  * - 保持默认密码套件：实测可完成 ECDHE-ECDSA 握手，不需要旧系统的"启用全部套件"
- * - 系统信任库缺 ISRG 根：打包 ISRG X1/X2 双根，先系统信任库后回退
+ * - 系统信任库缺 ISRG 根：两条信任链合并成一个 KeyStore，两者同权
  */
 class SecureTls(context: Context) {
 

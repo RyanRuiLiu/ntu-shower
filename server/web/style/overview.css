@@ -1,0 +1,321 @@
+/* 概览样式。
+ *
+ * 排版照 `ntu-remote-shower/apps/shower-server/app/debug/index.html`：
+ * KPI 六格（数字分色 + 占比条）→ 门牌墙（三列，编号 + 状态标签 + 学号 + 明细行）→
+ * 控制操作（两列卡片）→ 事件日志。色值取统一令牌。
+ *
+ * 第一版不做折叠区：内容本就不多，折叠省不下多少地方，却多出一次点击；
+ * 状态变化历史那种"以后再补"的区块也不预置。
+ */
+
+/* ── KPI ────────────────────────────────────────────────── */
+
+.kpi {
+  display: grid;
+  /* 每格至少 150px，宽度够了就多排一格。
+     写死 `repeat(6, 1fr)` 是强制等分容器：宽屏上每格被拉到 250px 以上，
+     一个两位数孤零零占那么大地方，看着就是不对 */
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.kpi-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.kpi-label {
+  color: var(--dim);
+  font-size: var(--fs-small);
+  font-weight: 500;
+}
+
+/* 数字与占比条共用卡片上的 `--tone`，一处声明两处生效 */
+.kpi-num {
+  color: var(--tone, var(--text));
+  font: 700 26px var(--font-mono);
+  line-height: 1;
+}
+
+.kpi-bar {
+  height: 3px;
+  margin-top: 4px;
+  overflow: hidden;
+  background: var(--elevated);
+  border-radius: 2px;
+}
+
+.kpi-fill {
+  height: 100%;
+  background: var(--tone, var(--muted));
+  border-radius: 2px;
+  transition: width 0.4s;
+}
+
+.kpi-card.tone-green {
+  --tone: var(--green);
+}
+
+.kpi-card.tone-blue {
+  --tone: var(--blue);
+}
+
+.kpi-card.tone-amber {
+  --tone: var(--amber);
+}
+
+.kpi-card.tone-orange {
+  --tone: var(--orange);
+}
+
+.kpi-card.tone-purple {
+  --tone: var(--purple);
+}
+
+.kpi-card.tone-red {
+  --tone: var(--red);
+}
+
+.kpi-card.tone-gray {
+  --tone: var(--dim);
+}
+
+/* ── 门牌墙 ─────────────────────────────────────────────── */
+
+.doors {
+  display: grid;
+  /* 每张至少 320px：门牌内容是"编号 + 状态标签 + 最多六行明细"，320px 刚好容得下
+     两列文字不折行。写死 `repeat(3, 1fr)` 时宽屏上每张能到 500px 以上，空闲的门
+     只有一行字，剩下的全是空白 */
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 10px;
+}
+
+.door {
+  position: relative;
+  overflow: hidden;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.door:hover {
+  border-color: var(--dim);
+}
+
+/* 状态一变闪一下：轮询/推送带来的变化不留神就错过了 */
+.door.flash {
+  animation: door-flash 1s ease-out;
+}
+
+@keyframes door-flash {
+  0% {
+    border-color: var(--accent);
+    box-shadow: 0 0 12px var(--accent-bg-strong);
+  }
+
+  100% {
+    border-color: var(--border);
+    box-shadow: none;
+  }
+}
+
+.door-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.door-no {
+  font: 700 18px var(--font-mono);
+  line-height: 1;
+}
+
+/* 状态标签：浅底 + 同色文字，与 KPI 用同一套色 */
+.door-tag {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: var(--fs-chip);
+  font-weight: 600;
+}
+
+.door-tag.free {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.door-tag.waiting {
+  background: var(--blue-bg);
+  color: var(--blue);
+}
+
+.door-tag.bathing {
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+
+.door-tag.paused {
+  background: var(--orange-bg);
+  color: var(--orange);
+}
+
+.door-tag.selected {
+  background: var(--purple-bg);
+  color: var(--purple);
+}
+
+.door-tag.repair {
+  background: var(--red-bg);
+  color: var(--red);
+}
+
+.door-tag.disabled {
+  background: var(--gray-bg);
+  color: var(--gray);
+}
+
+.door-cert {
+  padding-bottom: 6px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-body);
+  word-break: break-all;
+}
+
+/**
+ * 门牌上的六格：时间与时长成对，两列排布。
+ *
+ * 位置固定、始终渲染（空的就是 `--`），所以每张卡片一样高、每格里该有什么一目了然。
+ * 早先按状态增减行数，同一行被拉齐后满是空白，也看不出缺了哪一项。
+ */
+.door-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px 12px;
+}
+
+.door-cell {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--fs-small);
+  line-height: 1.6;
+}
+
+.door-cell .k {
+  flex-shrink: 0;
+  color: var(--dim);
+}
+
+.door-cell .v {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 时间用正文色：它是有效信息，不是次要的注脚 */
+.door-cell .v.time {
+  color: var(--text);
+}
+
+/* 分配时长与淋浴时长都在走，用同一个强调色 */
+.door-cell .v.live,
+.door-cell .v.running {
+  color: var(--accent);
+}
+
+/* 暂停计时单独一色：它在走的是"暂停了多久"，与出水时长不是一回事 */
+.door-cell .v.warn {
+  color: var(--amber);
+}
+
+/* ── 控制操作 ───────────────────────────────────────────── */
+
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.act-card {
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.act-title {
+  margin-bottom: 12px;
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.fld {
+  margin-bottom: 10px;
+}
+
+.fld label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--dim);
+  font-size: var(--fs-small);
+  font-weight: 500;
+}
+
+.fld input {
+  width: 100%;
+  padding: 8px 12px;
+  font: 14px var(--font-mono);
+}
+
+/* ── 拍照结果 ───────────────────────────────────────────── */
+
+/* 贴着图片的方框：旧版就是一张带边框的图，没有黑底也没有固定高度。
+   设备拍出来是 640×480（4:3），给个上限免得在大屏上撑得比画面本身还大 */
+.photo-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  margin-top: 12px;
+  text-align: center;
+}
+
+.photo-box img {
+  display: block;
+  max-width: 100%;
+  max-height: 420px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+/* ── 响应式 ─────────────────────────────────────────────── */
+
+/* KPI 与门牌自己按最小宽度决定列数，不需要在这里逐档写死；
+   只有操作区在窄屏下要放弃并排——两张卡片挤在半屏宽里谁都读不清 */
+@media (width <= 1024px) {
+  .actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 窄屏下把最小宽度降下来，否则一列都放不下，会横向溢出 */
+@media (width <= 640px) {
+  .kpi {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  }
+
+  .doors {
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  }
+}

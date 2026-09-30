@@ -22,9 +22,10 @@
               "enum": [
                 "ok",
                 "failed",
-                "blocked",
-                "timeout"
-              ]
+                "timeout",
+                "rejected"
+              ],
+              "description": "结果状态。ok=做完了；failed=动手了但没成；timeout=超过时限没有结论（不知成没成）；rejected=根本没动手（前置条件不满足，没有副作用，重试安全）。唯一来源是服务端的 core/outcomes.py。"
             },
             "reason_code": {
               "type": "string"

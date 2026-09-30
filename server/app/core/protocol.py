@@ -1,4 +1,4 @@
-"""协议信封单一来源（docs/PROTOCOL.md）。
+"""协议信封单一来源（protocol/schema/）。
 
 所有 WebSocket 帧的组装与解析只在此模块进行，与 protocol/schema 保持一一对应：
 - v：协议版本（当前 1）；

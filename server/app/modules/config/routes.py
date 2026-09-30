@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from app.core.problems import INVALID_CONFIG, ApiProblemError
-from app.core.security import require_admin
+from app.core.security import require_ops_token
 from app.gateway.manager import manager
 from app.modules.devices.dependencies import require_trusted_online_device
 from app.modules.sessions import service as sessions_service
@@ -37,7 +37,7 @@ from .schemas import (
 
 logger = logging.getLogger("ntu-shower.config")
 
-admin_router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)], tags=["config-admin"])
+ops_router = APIRouter(prefix="/ops", dependencies=[Depends(require_ops_token)], tags=["config-ops"])
 
 
 class ConfigUpdateRequest(BaseModel):
@@ -54,7 +54,7 @@ def _validated(values: ConfigValues) -> ConfigValues:
         raise ApiProblemError(INVALID_CONFIG, exc.reason) from exc
 
 
-@admin_router.get("/config/spec")
+@ops_router.get("/config/spec")
 def get_config_spec() -> list[ConfigSpecView]:
     """配置登记表：每个键的类型、范围、默认值、归属与说明。
 
@@ -64,14 +64,14 @@ def get_config_spec() -> list[ConfigSpecView]:
     return store.describe()
 
 
-@admin_router.get("/config/global")
+@ops_router.get("/config/global")
 def get_global_config() -> GlobalConfigView:
     """全局配置的当前有效值（默认值叠加全局覆盖）。"""
     revision, _overrides = store.get_global_overrides()
     return {"revision": revision, "config": store.global_effective()}
 
 
-@admin_router.put("/config/global")
+@ops_router.put("/config/global")
 async def put_global_config(req: ConfigUpdateRequest) -> GlobalConfigUpdateReport:
     """更新全局覆盖，并把新的有效配置推送给所有在线设备。"""
     revision, overrides = store.put_global_overrides(_validated(req.config))
@@ -95,11 +95,11 @@ async def put_global_config(req: ConfigUpdateRequest) -> GlobalConfigUpdateRepor
     return {"revision": revision, "config": store.global_effective(), "notified": notified}
 
 
-@admin_router.get("/devices/{device_id}/config")
+@ops_router.get("/devices/{device_id}/config")
 def get_device_config(device_id: str) -> DeviceConfigView:
     """该设备的有效配置与它自己的覆盖项。
 
-    `overrides` 单独给出：管理员需要区分"这台设备被特殊设置过"与"它跟随全局"。
+    `overrides` 单独给出：需要区分"这台设备被特殊设置过"与"它跟随全局"。
     """
     override = store.get_device_overrides(device_id)
     revision = override[0] if override else store.get_global_overrides()[0]
@@ -110,7 +110,7 @@ def get_device_config(device_id: str) -> DeviceConfigView:
     }
 
 
-@admin_router.put("/devices/{device_id}/config")
+@ops_router.put("/devices/{device_id}/config")
 async def put_device_config(device_id: str, req: ConfigUpdateRequest) -> DeviceConfigUpdateReport:
     """设置设备级覆盖并推送给该设备。"""
     require_trusted_online_device(device_id)
@@ -127,7 +127,7 @@ async def put_device_config(device_id: str, req: ConfigUpdateRequest) -> DeviceC
     }
 
 
-@admin_router.delete("/devices/{device_id}/config")
+@ops_router.delete("/devices/{device_id}/config")
 def delete_device_config(device_id: str) -> DeviceConfigRemovalReport:
     """删除设备级覆盖，该设备回落为跟随全局。"""
     removed = store.delete_device_overrides(device_id)

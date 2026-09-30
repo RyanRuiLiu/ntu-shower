@@ -32,6 +32,7 @@ class BridgeStatus(TypedDict, total=False):
 
     `open` 恒存在；为真时其余字段才有意义。
     `device_connected` 指设备侧连入，`adb_client_connected` 指本机 adb 客户端连入。
+    `expires_in_s` 是距**绝对寿命**到点的秒数——桥有硬上限，不会一直开着。
     """
 
     device_id: str
@@ -40,3 +41,4 @@ class BridgeStatus(TypedDict, total=False):
     generation: int
     device_connected: bool
     adb_client_connected: bool
+    expires_in_s: int

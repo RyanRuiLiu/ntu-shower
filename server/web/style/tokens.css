@@ -1,0 +1,73 @@
+/* 设计令牌 —— 全站唯一一份，视图样式只允许引用这里的变量。
+ *
+ * 色值取自旧系统的两个网页端（同一套 GitHub 暗色主题，但当时各写一份变量、
+ * 色值彼此不一致，例如绿色一处 #22c55e 一处 #3fb950）。合并时以 **GitHub 官方
+ * 色值**为准，因为主题本身就是它。观感保持原样，这是"风格不变"的落点。
+ */
+:root {
+  /* 层次：背景 → 面板 → 浮起 */
+  --bg: #0d1117;
+  --surface: #161b22;
+  --elevated: #1c2129;
+  --border: #30363d;
+
+  /* 文字：正文 → 次要 → 静默 */
+  --text: #e6edf3;
+  --dim: #8b949e;
+  --muted: #6e7681;
+
+  /* 强调色 */
+  --accent: #58a6ff;
+  --accent-on: #000;
+  /* 强调色的浅底：悬停与选中态用它，避免各处再手写 rgb()。
+     手写就等于把 `--accent` 的值抄了一份，改令牌时抄的那份不会跟着变 */
+  --accent-bg: rgb(88 166 255 / 6%);
+  --accent-bg-strong: rgb(88 166 255 / 12%);
+  /* 表格与长列表的隔行底色，只求看出行界，不求有颜色 */
+  --row-alt: rgb(255 255 255 / 1.2%);
+
+  /* 状态色：与喷头的七个状态一一对应（见 AGENTS.md）。
+     色值取自旧版状态面板（`shower-server/app/debug`），**不是** GitHub 官方色——
+     概览页的门牌与 KPI 一直用这一套，换成官方色观感就变了，那是"照旧"的意思。 */
+  --green: #22c55e;
+  --blue: #3b82f6;
+  --amber: #f59e0b;
+  --orange: #f97316;
+  --purple: #a855f7;
+  --red: #ef4444;
+  --gray: #6b7280;
+
+  /* 状态色的浅底：标签与徽章的背景 */
+  --green-bg: rgb(34 197 94 / 12%);
+  --blue-bg: rgb(59 130 246 / 12%);
+  --amber-bg: rgb(245 158 11 / 12%);
+  --orange-bg: rgb(249 115 22 / 12%);
+  --purple-bg: rgb(168 85 247 / 12%);
+  --red-bg: rgb(239 68 68 / 12%);
+  --gray-bg: rgb(107 114 128 / 12%);
+
+  /* 字体：界面用系统栈，数字与标识用等宽 */
+  --font-ui: -apple-system, blinkmacsystemfont, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'SF Mono', 'Cascadia Code', Consolas, Monaco, monospace;
+
+  /* 字号：11 徽标 / 12 次要 / 13 正文 / 15 面板标题 / 24 KPI */
+  --fs-chip: 11px;
+  --fs-small: 12px;
+  --fs-body: 13px;
+  --fs-title: 15px;
+  --fs-kpi: 24px;
+
+  /* 间距，8 的倍数 */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+
+  --radius: 8px;
+  --radius-sm: 6px;
+  --bar-height: 40px;
+
+  /* 旧系统用的是 .15s，保留 */
+  --transition: 0.15s ease;
+}

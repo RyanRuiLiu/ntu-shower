@@ -1,8 +1,9 @@
-"""边界分支补测：安全自检、协议降级、事件总线清理、桥接失败路径。"""
+"""边界分支补测：安全自检、协议异常输入、事件总线清理、桥接失败路径。"""
 
 import asyncio
 import io
 import socket
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,7 +12,7 @@ from starlette.websockets import WebSocketDisconnect
 from app.core import protocol, security
 from app.gateway import manager as manager_module
 
-ADMIN_HEADERS = {"X-Admin-Token": "test-token"}
+OPS_HEADERS = {"X-Ops-Token": "test-token"}
 
 
 class FakeGatewayWS:
@@ -26,7 +27,7 @@ class FakeGatewayWS:
 
 
 class DeadGatewayWS:
-    """发送即失败的设备连接：验证网关的失败降级。"""
+    """发送即失败的设备连接：验证网关的失败处理路径。"""
 
     async def send_text(self, data: str) -> bool:
         message = "connection gone"
@@ -43,28 +44,28 @@ def _register_trusted(device_id: str) -> None:
 # ── 安全自检 ──────────────────────────────────────────────
 
 
-def test_placeholder_admin_token_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_placeholder_ops_token_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     """占位令牌必须让启动自检失败（OWASP ASVS V2.1 禁止默认凭证）。"""
     from app.core import config as config_module
 
-    monkeypatch.setattr(config_module.settings, "admin_token", "change-me")
-    with pytest.raises(security.AdminTokenNotConfiguredError):
-        security.assert_admin_token_configured()
+    monkeypatch.setattr(config_module.settings, "ops_token", "change-me")
+    with pytest.raises(security.OpsTokenNotConfiguredError):
+        security.assert_ops_token_configured()
 
 
-def test_real_admin_token_passes_check(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_real_ops_token_passes_check(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.core import config as config_module
 
-    monkeypatch.setattr(config_module.settings, "admin_token", "a-real-ops-token")
-    security.assert_admin_token_configured()  # 不抛即通过
+    monkeypatch.setattr(config_module.settings, "ops_token", "a-real-ops-token")
+    security.assert_ops_token_configured()  # 不抛即通过
 
 
-def test_admin_guard_rejects_missing_and_wrong_token(client: TestClient) -> None:
-    assert client.get("/admin/devices").status_code == 401
-    assert client.get("/admin/devices", headers={"X-Admin-Token": "wrong"}).status_code == 401
+def test_ops_guard_rejects_missing_and_wrong_token(client: TestClient) -> None:
+    assert client.get("/ops/devices").status_code == 401
+    assert client.get("/ops/devices", headers={"X-Ops-Token": "wrong"}).status_code == 401
 
 
-# ── 协议辅助：外部输入一律降级不抛 ─────────────────────────
+# ── 协议辅助：外部输入一律不抛 ─────────────────────────
 
 
 def test_protocol_helpers_tolerate_malformed_frames() -> None:
@@ -126,7 +127,7 @@ def test_bridge_open_reports_offline_when_send_fails(client: TestClient, monkeyp
     _register_trusted(device_id)
     monkeypatch.setattr(manager_module.manager, "_connections", {device_id: DeadGatewayWS()})
 
-    r = client.post(f"/admin/devices/{device_id}/adb/open", headers=ADMIN_HEADERS)
+    r = client.post(f"/ops/devices/{device_id}/bridge/open", headers=OPS_HEADERS)
 
     assert r.status_code == 409
     assert device_id not in registry.pending
@@ -147,7 +148,7 @@ def test_bridge_open_reports_port_unavailable(client: TestClient, monkeypatch: p
     holder.bind(("127.0.0.1", settings.bridge_base_port))
     holder.listen(1)
     try:
-        r = client.post(f"/admin/devices/{device_id}/adb/open", headers=ADMIN_HEADERS)
+        r = client.post(f"/ops/devices/{device_id}/bridge/open", headers=OPS_HEADERS)
     finally:
         holder.close()
 
@@ -167,14 +168,14 @@ def test_bridge_rejects_stale_generation(client: TestClient, monkeypatch: pytest
     _register_trusted(device_id)
     monkeypatch.setattr(manager_module.manager, "_connections", {device_id: FakeGatewayWS()})
 
-    client.post(f"/admin/devices/{device_id}/adb/open", headers=ADMIN_HEADERS)
+    client.post(f"/ops/devices/{device_id}/bridge/open", headers=OPS_HEADERS)
     bridge = registry.active[device_id]
 
     # 人为构造"旧世代 nonce"：把在册世代推进一格，pending 记录退回一世代
     stale_nonce = "stale-nonce"
     monkeypatch.setattr(bridge_routes.registry, "_generation_by_device", {device_id: bridge.generation + 1})
     monkeypatch.setattr(bridge, "generation", bridge.generation + 1)
-    registry.pending[device_id] = (bridge.generation - 1, stale_nonce)
+    registry.pending[device_id] = (bridge.generation - 1, stale_nonce, time.monotonic())
 
     with (
         pytest.raises(WebSocketDisconnect) as stale,
@@ -193,10 +194,10 @@ def test_bridge_open_is_idempotent_while_connected(client: TestClient, monkeypat
     _register_trusted(device_id)
     monkeypatch.setattr(manager_module.manager, "_connections", {device_id: FakeGatewayWS()})
 
-    first = client.post(f"/admin/devices/{device_id}/adb/open", headers=ADMIN_HEADERS).json()
+    first = client.post(f"/ops/devices/{device_id}/bridge/open", headers=OPS_HEADERS).json()
     registry.active[device_id].device_ws = object()  # 模拟设备 WS 已接入
 
-    second = client.post(f"/admin/devices/{device_id}/adb/open", headers=ADMIN_HEADERS).json()
+    second = client.post(f"/ops/devices/{device_id}/bridge/open", headers=OPS_HEADERS).json()
 
     assert second["already_open"] is True
     assert second["port"] == first["port"]
@@ -282,14 +283,14 @@ def test_ota_rearm_and_delete_release(client: TestClient) -> None:
     """rearm 无确认记录时返回 False；下架返回 True，重复下架返回 False。"""
     files = {"file": ("ntu-shower-0.3.1.apk", io.BytesIO(b"PK"), "application/octet-stream")}
     client.post(
-        "/admin/releases",
-        headers=ADMIN_HEADERS,
+        "/ops/releases",
+        headers=OPS_HEADERS,
         data={"version": "0.3.1", "version_code": 8, "mandatory": "false", "force": "false", "target": "all"},
         files=files,
     )
 
-    rearm = client.post("/admin/releases/0.3.1/rearm/dev-none", headers=ADMIN_HEADERS).json()
+    rearm = client.post("/ops/releases/0.3.1/rearm/dev-none", headers=OPS_HEADERS).json()
     assert rearm["rearmed"] is False
 
-    assert client.delete("/admin/releases/0.3.1", headers=ADMIN_HEADERS).json()["deleted"] is True
-    assert client.delete("/admin/releases/0.3.1", headers=ADMIN_HEADERS).json()["deleted"] is False
+    assert client.delete("/ops/releases/0.3.1", headers=OPS_HEADERS).json()["deleted"] is True
+    assert client.delete("/ops/releases/0.3.1", headers=OPS_HEADERS).json()["deleted"] is False

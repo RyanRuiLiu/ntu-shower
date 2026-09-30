@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 
 from app.core.config import settings
 from app.core.problems import RELEASE_NOT_FOUND, RELEASE_TOO_LARGE, ApiProblemError
-from app.core.security import require_admin
+from app.core.security import require_ops_token
 from app.modules.ota import repository, service
 from app.modules.ota.schemas import (
     OtaManifest,
@@ -27,7 +27,7 @@ logger = logging.getLogger("ntu-shower.ota")
 
 router = APIRouter(prefix="/ota", tags=["ota"])
 
-admin_router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)], tags=["ota-admin"])
+ops_router = APIRouter(prefix="/ops", dependencies=[Depends(require_ops_token)], tags=["ota-ops"])
 
 # 路径/表单中的发布版本号：格式不合规由 FastAPI 返回 422
 ReleaseVersion = Annotated[str, Path(pattern=VERSION_PATTERN)]
@@ -68,13 +68,13 @@ def download(version: ReleaseVersion) -> FileResponse:
     )
 
 
-@admin_router.post("/releases/{version}/rearm/{device_id}")
+@ops_router.post("/releases/{version}/rearm/{device_id}")
 def rearm_release(version: str, device_id: str) -> ReleaseRearmed:
     """清除安装确认：force 发布对该设备重新生效（调试重推）。"""
     return {"version": version, "device_id": device_id, "rearmed": repository.rearm(device_id, version)}
 
 
-@admin_router.delete("/releases/{version}")
+@ops_router.delete("/releases/{version}")
 def delete_release(version: str) -> ReleaseRemoved:
     """下架发布（紧急止损，如终止 OTA 循环）。"""
     deleted = repository.delete_release(version)
@@ -83,7 +83,7 @@ def delete_release(version: str) -> ReleaseRemoved:
     return {"version": version, "deleted": deleted}
 
 
-@admin_router.post("/releases")
+@ops_router.post("/releases")
 async def upload_release(
     version: ReleaseVersionForm,
     version_code: Annotated[int, Form()],
