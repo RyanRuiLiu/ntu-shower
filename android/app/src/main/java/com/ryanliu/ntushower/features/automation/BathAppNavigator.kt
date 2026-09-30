@@ -23,20 +23,6 @@ import com.ryanliu.ntushower.service.A11yService
 @Suppress("TooManyFunctions") // 页面导航原语集合：查找/操作/状态三组共享同一套资源 ID 与节点遍历上下文
 object BathAppNavigator {
 
-    // ── resId 特征（浴室 App 固定 UI 结构）──
-
-    private const val RID_TV_BACKPREPAGE = "com.datalook.bath:id/tv_backprepage"
-    private const val RID_TV_TITLE = "com.datalook.bath:id/tv_title"
-    private const val RID_TV_BUTTON_NOCARD = "com.datalook.bath:id/tv_button_nocard"
-    private const val RID_TV_BUTTON_NOCARD_STRIKE = "com.datalook.bath:id/tv_button_nocard_strike"
-    private const val RID_ET_ID_CODE = "com.datalook.bath:id/et_id_code"
-    private const val RID_ET_ID_PWD = "com.datalook.bath:id/et_id_pwd"
-    private const val RID_TVB_ID_OK = "com.datalook.bath:id/tvb_id_ok"
-    private const val RID_TV_NOWDATE = "com.datalook.bath:id/tv_nowdate"
-
-    /** 喷头网格的容器。定位单个喷头要从它开始。 */
-    private const val RID_GV_SPRINKLER = "com.datalook.bath:id/gv_sprinkler"
-
     // ── 导航 ──
 
     /** 从任意页面回到 HOME；总预算 [budgetMs]。 */
@@ -107,7 +93,7 @@ object BathAppNavigator {
     private fun clickBack(a11y: A11yService) {
         val root = a11y.rootInActiveWindow ?: return
         try {
-            val back = findNode(root, RID_TV_BACKPREPAGE)
+            val back = findNode(root, BathAppResIds.BACK_TO_PREVIOUS)
             if (back != null) {
                 a11y.performClick(back)
                 back.recycle()
@@ -150,7 +136,7 @@ object BathAppNavigator {
     fun findDoor(a11y: A11yService, doorNo: Int): AccessibilityNodeInfo? {
         val root = a11y.rootInActiveWindow ?: return null
         try {
-            val grid = findNode(root, RID_GV_SPRINKLER) ?: return null
+            val grid = findNode(root, BathAppResIds.SPRINKLER_GRID) ?: return null
             try {
                 return findDoorInGrid(grid, doorNo)
             } finally {
@@ -182,7 +168,7 @@ object BathAppNavigator {
     }
 
     /**
-     * 在喷头项的两层子节点里找标题控件（`RID_TV_TITLE`）。
+     * 在喷头项的两层子节点里找标题控件（[BathAppResIds.DOOR_TITLE]）。
      *
      * **限深两层**而不是全树递归：喷头项的结构是「容器 → 标题容器 → 标题」，写浅了会漏，
      * 写深了则可能命中别处同名的控件。原先拆成 `findTitleShallow` 与
@@ -192,10 +178,10 @@ object BathAppNavigator {
         for (i in 0 until item.childCount) {
             val child = item.getChild(i) ?: continue
             val title = try {
-                if (matches(child.viewIdResourceName ?: "", RID_TV_TITLE)) {
+                if (matches(child.viewIdResourceName ?: "", BathAppResIds.DOOR_TITLE)) {
                     AccessibilityNodeInfo.obtain(child)
                 } else {
-                    findDirectChild(child, RID_TV_TITLE)
+                    findDirectChild(child, BathAppResIds.DOOR_TITLE)
                 }
             } finally {
                 child.recycle()
@@ -225,10 +211,10 @@ object BathAppNavigator {
     }
 
     /** 点击无卡模式按钮（分配）。 */
-    fun clickNoCardButton(a11y: A11yService): Boolean = clickInActiveWindow(a11y, RID_TV_BUTTON_NOCARD)
+    fun clickNoCardButton(a11y: A11yService): Boolean = clickInActiveWindow(a11y, BathAppResIds.NOCARD_BUTTON)
 
     /** 点击结算按钮。 */
-    fun clickSettleButton(a11y: A11yService): Boolean = clickInActiveWindow(a11y, RID_TV_BUTTON_NOCARD_STRIKE)
+    fun clickSettleButton(a11y: A11yService): Boolean = clickInActiveWindow(a11y, BathAppResIds.SETTLE_BUTTON)
 
     /**
      * 验证页输入账号密码并确认。
@@ -261,13 +247,16 @@ object BathAppNavigator {
         // 三个控件一趟收齐：原先是三个 findNode 各走一遍整棵树，而同一棵树走三遍是白花的
         // ——每次 getChild 都是一次跨进程调用。真机上这一段量到 211ms，其中约 90ms 花在这
         // 三遍遍历上。
-        val fields = findNodes(root, setOf(RID_ET_ID_CODE, RID_ET_ID_PWD, RID_TVB_ID_OK))
+        val fields = findNodes(
+            root,
+            setOf(BathAppResIds.ID_CODE_FIELD, BathAppResIds.ID_PWD_FIELD, BathAppResIds.ID_CONFIRM_BUTTON),
+        )
         try {
-            val idField = fields[RID_ET_ID_CODE] ?: return false
+            val idField = fields[BathAppResIds.ID_CODE_FIELD] ?: return false
             if (!a11y.performSetText(idField, certNo)) return false
-            val pwdField = fields[RID_ET_ID_PWD] ?: return false
+            val pwdField = fields[BathAppResIds.ID_PWD_FIELD] ?: return false
             if (!a11y.performSetText(pwdField, password)) return false
-            val ok = fields[RID_TVB_ID_OK] ?: return false
+            val ok = fields[BathAppResIds.ID_CONFIRM_BUTTON] ?: return false
             return a11y.performClick(ok)
         } finally {
             fields.values.forEach { it.recycle() }
@@ -307,7 +296,7 @@ object BathAppNavigator {
     fun getDateViewCenter(a11y: A11yService): Pair<Int, Int>? {
         val root = a11y.rootInActiveWindow ?: return null
         try {
-            val node = findNode(root, RID_TV_NOWDATE) ?: return null
+            val node = findNode(root, BathAppResIds.DATE_VIEW) ?: return null
             try {
                 val rect = Rect()
                 node.getBoundsInScreen(rect)

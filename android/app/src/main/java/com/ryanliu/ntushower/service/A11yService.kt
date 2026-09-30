@@ -70,7 +70,6 @@ class A11yService : AccessibilityService() {
             BathAppPage.refresh(
                 ContentEvent(
                     className = event.className?.toString() ?: "",
-                    text = event.text.joinToString(" "),
                     contentChangeTypes = event.contentChangeTypes,
                 ),
             )
