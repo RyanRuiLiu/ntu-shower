@@ -6,15 +6,18 @@ import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.shell.RootShell
 
 /**
- * 界面操作的 root shell 实现：点击、滑动、滚动、按键、输入。
+ * 界面操作的 root shell 实现：点击、滑动、滚动、按键。
  *
- * ## 什么时候用这一条
+ * ## 什么时候走这一条
  *
- * 与无障碍通道（[A11yUiChannel]）各自完整，由 [UiChannel] 按**无障碍是否可用**
- * 选路：无障碍在时优先用它（正规接口、命中节点、不 spawn 进程），不在时这些
- * 操作经由本通道仍然能做到。真机上出现过无障碍**整体**失效（总开关被系统置 0
- * 且拒绝写回，恢复办法见 `com.ryanliu.ntushower.features.selfmanage.A11yGuard`），
- * 那时若没有这一条，远程就完全失去了操作设备界面的手段。
+ * 界面检视的这几样**只有这一条通道**：它们是坐标语义，而远程操作的人本来就是指着截图上的
+ * 位置点下去的——坐标天然对应，不必绕到节点树上。无障碍那侧只保留文本输入
+ * （[A11yUiChannel]），因为中文必须走剪贴板粘贴。分工见
+ * `com.ryanliu.ntushower.features.automation.CommandScheduler` 的 `executeUiAction`。
+ *
+ * 真机上出现过无障碍**整体**失效（总开关被系统置 0 且拒绝写回，恢复办法见
+ * `com.ryanliu.ntushower.features.selfmanage.A11yGuard`）：那时这几项照常工作，是远程
+ * 唯一还能碰到设备界面的手段。
  *
  * ## 命令在本 ROM 上的实测结论
  *
