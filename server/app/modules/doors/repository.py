@@ -166,18 +166,6 @@ def get_open_session(device_id: str, door_no: int) -> Row | None:
     )
 
 
-def get_session(session_id: int) -> Row | None:
-    """按 id 取一次会话。
-
-    结束流程要用：`touch_session` 推进完里程碑之后，`opened_at` / `flow_s` 的最终值
-    只有重新读一次才知道（判定结束原因依赖它们）。
-    """
-    return cast(
-        "Row | None",
-        get_conn().execute("SELECT * FROM usage_session WHERE id = ?", (session_id,)).fetchone(),
-    )
-
-
 def open_session(device_id: str, door_no: int, card_no: int, cert_no: str, assigned_at: str) -> int:
     """开一次新会话，返回会话 id。
 
