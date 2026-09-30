@@ -14,7 +14,6 @@
 （docs/STANDARDS.md §7 禁止硬编码环境值）。
 """
 
-from http import HTTPStatus
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -22,7 +21,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .config import settings
-from .problems import ApiProblemError, Problem
+from .problems import VALIDATION_FAILED, ApiProblemError, Problem
 
 PROBLEM_MEDIA_TYPE = "application/problem+json"
 PROBLEM_TYPE_PATH = "/problems/"
@@ -57,14 +56,15 @@ def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(RequestValidationError)
     async def validation_exception(_request: Request, exc: RequestValidationError) -> JSONResponse:
         detail = "; ".join(f"{'.'.join(str(loc) for loc in error['loc'])}: {error['msg']}" for error in exc.errors())
-        return _problem(Problem("validation-failed", 422, "Validation failed"), detail)
+        return _problem(VALIDATION_FAILED, detail)
 
 
 def _unregistered(status: int) -> Problem:
-    """框架/第三方抛出的问题：按状态码生成 type，无可分支语义。"""
-    try:
-        title = HTTPStatus(status).phrase
-    except ValueError:
-        title = "error"
+    """框架/第三方抛出的问题：按状态码生成 type，无可分支语义。
+
+    文案不区分状态码——这类问题（404 路径不存在、405 方法不对）都是"请求本身
+    打错了"，对使用者没有可操作的区别，而逐个状态码维护中文短语只是复刻
+    HTTP 标准表。具体状态码在 `status` 成员里，需要时看得到。
+    """
     code = f"http-{status}"
-    return Problem(code, status, title)
+    return Problem(code, status, "请求失败")

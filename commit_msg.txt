@@ -1,0 +1,39 @@
+chore: 删除前端工程（web/），保留其中独立有价值的服务端改进
+
+## 删除内容
+
+- `web/` 整个目录（58 个被跟踪文件）：Taro + React + Vite 工程
+- `server/scripts/export_openapi.py`：为前端生成 TypeScript 类型而存在，无前端即无用
+
+## 为什么删
+
+技术选型本身没走到需要推翻的一步，但**投入产出不成比例**：跨端框架的接入成本
+（Vite 版本被 Taro 锁在 4、组件库与测试环境的摩擦、两端构建差异、NutUI 的
+存储 API 在 H5 下不落盘）相对于本项目所需的两个页面而言过高。
+
+用户端沿用既有的零构建静态页即可，不必为此维护一套跨端工程。
+
+## 保留的服务端改进
+
+这次尝试的产出里有几项**独立于前端**，不回滚：
+
+- **`DoorState` 枚举**（`modules/doors/schemas.py`）：喷头状态从裸 `str` 变成受约束的
+  类型，OpenAPI 据此生成联合类型。这是契约质量的提升，任何客户端都受益；
+  同时它把原先散在 `service.py` 的状态常量统一到契约层
+- **`Problem.title` 中文**（`core/problems.py`）：服务端直接返回可展示的文案，
+  不再需要调用方做一层翻译。已部署验证
+- **`VALIDATION_FAILED` 登记**：此前它在 `errors.py` 里临时构造，未进 `REGISTRY`，
+  违反"新增类型必须登记"
+- **`docs/CONTENT.md`**：设备端与服务端的术语统一（喷头 / 分配 / 结算 / 权限 / 版本发布）
+
+## 文档同步
+
+- `AGENTS.md`、`README.md`、`CONTRIBUTING.md`、`docs/ARCHITECTURE.md`、`docs/CONTENT.md`
+  移除对前端代码的描述
+- **保留**服务端对小程序 / openid 的支持描述——那是服务端能力，不随前端删除失效
+- ADR-0039 标注 superseded，并在文末记录删除原因与保留项，避免将来重新评估时
+  再踩一遍 Vite 版本约束与组件库接入的坑
+
+## 验证
+
+服务端 ruff / mypy --strict / 210 passed，未受影响。
