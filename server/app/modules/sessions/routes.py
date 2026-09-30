@@ -51,7 +51,7 @@ def _require_assignable_door(device_id: str, door_no: int) -> None:
     """
     row = doors_repository.get_door_live(device_id, door_no)
     if row is None:
-        raise ApiProblemError(DOOR_NOT_FOUND, f"door {door_no} has never been reported")
+        raise ApiProblemError(DOOR_NOT_FOUND, f"门 {door_no} 从未被上报")
     raw_state = row["state"]
     try:
         state: DoorState | None = DoorState(raw_state)
@@ -59,7 +59,7 @@ def _require_assignable_door(device_id: str, door_no: int) -> None:
         # 设备上报了本端不认识的状态：不分配，也不去猜它是什么意思
         state = None
     if state not in ASSIGNABLE_STATES:
-        raise ApiProblemError(DOOR_NOT_FREE, f"door {door_no} state={raw_state}")
+        raise ApiProblemError(DOOR_NOT_FREE, f"门 {door_no} 当前状态：{raw_state}")
 
 
 def _reject_duplicate_session(device_id: str, cert_no: str) -> None:
@@ -68,7 +68,7 @@ def _reject_duplicate_session(device_id: str, cert_no: str) -> None:
     if active is not None:
         raise ApiProblemError(
             DUPLICATE_SESSION,
-            f"cert {cert_no} already active on door {active['door_no']}",
+            f"学号 {cert_no} 已在门 {active['door_no']} 有进行中的会话",
         )
 
 
@@ -80,7 +80,7 @@ def _reject_overload(result: CommandOutcome) -> CommandOutcome:
     后者说明积压已多、该换个时间再来。
     """
     if result.get("status") == outcomes.REJECTED.value:
-        raise ApiProblemError(SERVER_OVERLOADED, f"reason={result.get('reason_code')}")
+        raise ApiProblemError(SERVER_OVERLOADED, f"原因码：{result.get('reason_code')}")
     return result
 
 
@@ -107,7 +107,7 @@ async def perform_settle(req: SettleRequest) -> CommandOutcome:
     require_trusted_online_device(req.device_id)
     occupied = doors_repository.get_occupied_by_cert(req.device_id, req.cert_no)
     if occupied is None:
-        raise ApiProblemError(NO_OCCUPIED_DOOR, f"cert {req.cert_no}")
+        raise ApiProblemError(NO_OCCUPIED_DOOR, f"学号 {req.cert_no} 没有正在使用的喷头")
     result = await service.send_command_and_wait(
         req.device_id,
         actions.SESSION_SETTLE,
