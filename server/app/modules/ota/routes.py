@@ -4,6 +4,7 @@
 边界校验是第一道防线，service.release_path 是第二道（纵深防御）。
 """
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Path, UploadFile
@@ -15,6 +16,8 @@ from app.core.protocol import JsonObject
 from app.core.security import require_admin
 from app.modules.ota import repository, service
 from app.modules.ota.service import VERSION_PATTERN
+
+logger = logging.getLogger("ntu-shower.ota")
 
 router = APIRouter(prefix="/ota", tags=["ota"])
 
@@ -68,7 +71,10 @@ def rearm_release(version: str, device_id: str) -> JsonObject:
 @admin_router.delete("/releases/{version}")
 def delete_release(version: str) -> JsonObject:
     """下架发布（紧急止损，如终止 OTA 循环）。"""
-    return {"version": version, "deleted": repository.delete_release(version)}
+    deleted = repository.delete_release(version)
+    if deleted:
+        logger.warning("release withdrawn: version=%s", version)
+    return {"version": version, "deleted": deleted}
 
 
 @admin_router.post("/releases")
@@ -86,10 +92,20 @@ async def upload_release(
     """
     data = await file.read()
     if len(data) > settings.max_ota_bytes:
+        logger.warning("release rejected, too large: version=%s size=%d", version, len(data))
         raise ApiProblemError(RELEASE_TOO_LARGE, f"limit {settings.max_ota_bytes} bytes")
     sha256 = service.store_release(version, data)
     repository.insert_release(version, version_code, sha256, mandatory, force, target)
     notified = await service.notify_target_devices(version, version_code, mandatory, target)
+    logger.info(
+        "release published: version=%s code=%d size=%d force=%s target=%s notified=%d",
+        version,
+        version_code,
+        len(data),
+        force,
+        target,
+        len(notified),
+    )
     return {
         "version": version,
         "version_code": version_code,

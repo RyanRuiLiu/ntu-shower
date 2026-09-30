@@ -38,6 +38,7 @@ async def device_gateway(ws: WebSocket) -> None:
     try:
         hello = protocol.parse(await ws.receive_text())
         if hello is None or hello.get("type") != "link.hello":
+            logger.warning("rejected connection: first frame is not link.hello")
             await ws.send_text(protocol.error("proto.hello_required", "first frame must be link.hello"))
             await ws.close()
             return
@@ -63,6 +64,15 @@ async def device_gateway(ws: WebSocket) -> None:
         # 会因此形成「下发→下载→安装→重启→再下发」的无限重装循环（真机实测复现）。
         await run_in_threadpool(ota_repository.mark_installed_upto, device_id, version_code)
         manager.register(device_id, ws)
+        logger.info(
+            "device connected: id=%s trusted=%s version=%s os=%s capabilities=%d ip=%s",
+            device_id,
+            trusted,
+            text_of(hello_payload, "app_version"),
+            text_of(hello_payload, "os_version"),
+            len(list_of(hello_payload, "capabilities")),
+            ip,
+        )
         await ws.send_text(
             protocol.envelope(
                 "link.hello_ack",
@@ -89,12 +99,17 @@ async def device_gateway(ws: WebSocket) -> None:
     except WebSocketDisconnect:
         # 设备离线是常态（移动网络/重启），不作为异常处理
         pass
+    except Exception as exc:
+        # 其他异常必须留痕：静默会让"设备莫名掉线"无从追查
+        logger.warning("gateway session failed: id=%s error=%s", device_id or "<unknown>", exc)
+        raise
     finally:
         if ping_task is not None:
             ping_task.cancel()
         if device_id:
             manager.unregister(device_id, ws)
             await run_in_threadpool(devices_service.set_device_offline, device_id)
+            logger.info("device disconnected: id=%s", device_id)
             events.publish("device_offline", {"device_id": device_id, "at": now_rfc3339()})
 
 

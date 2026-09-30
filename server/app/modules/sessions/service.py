@@ -1,6 +1,7 @@
 """命令下发与结果等待：asyncio Future + 超时（单 worker 语义下安全）。"""
 
 import asyncio
+import logging
 import uuid
 from dataclasses import dataclass
 
@@ -12,6 +13,8 @@ from app.core.config import settings
 from app.core.protocol import JsonObject
 from app.gateway.manager import manager
 from app.modules.sessions import repository
+
+logger = logging.getLogger("ntu-shower.sessions")
 
 DEFAULT_TIMEOUT_S = 30.0
 
@@ -109,6 +112,7 @@ async def send_command_and_wait(
         }
     if device_id in _device_pending:
         repository.insert_command(command_id, device_id, action)
+        logger.info("command rejected: id=%s device=%s action=%s reason=device.busy", command_id, device_id, action)
         repository.finish(command_id, "rejected", "device.busy", "")
         return {
             "status": "rejected",
@@ -137,6 +141,7 @@ async def send_command_and_wait(
         _device_pending.pop(device_id, None)
         _pending.pop(command_id, None)
         repository.finish(command_id, "timeout", "device.offline", "device offline")
+        logger.warning("command dropped, device offline: id=%s device=%s action=%s", command_id, device_id, action)
         return {
             "status": "timeout",
             "reason_code": "device.offline",
@@ -144,6 +149,8 @@ async def send_command_and_wait(
             "data": None,
         }
 
+    logger.info("command sent: id=%s device=%s action=%s timeout_s=%s", command_id, device_id, action, timeout_s)
+    started_at = asyncio.get_running_loop().time()
     try:
         result = await asyncio.wait_for(pending.future, timeout=timeout_s)
         outcome = CommandOutcome(
@@ -163,6 +170,16 @@ async def send_command_and_wait(
         _device_pending.pop(device_id, None)
         _pending.pop(command_id, None)
 
+    elapsed_ms = int((asyncio.get_running_loop().time() - started_at) * 1000)
+    logger.info(
+        "command finished: id=%s device=%s action=%s status=%s reason=%s elapsed_ms=%d",
+        command_id,
+        device_id,
+        action,
+        outcome["status"],
+        outcome["reason_code"] or "-",
+        elapsed_ms,
+    )
     repository.finish(command_id, outcome["status"], outcome["reason_code"], outcome["terminal_message"])
     return outcome
 
