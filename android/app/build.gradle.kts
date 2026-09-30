@@ -38,8 +38,8 @@ android {
         applicationId = "com.ryanliu.ntushower"
         minSdk = 19          // 设备 ROM 固定 Android 4.4，运行时下限不可动
         targetSdk = 19       // 目标设备冻结在 4.4，无升级路径
-        versionCode = 39
-        versionName = "0.3.32"
+        versionCode = 40
+        versionName = "0.3.33"
         buildConfigField("String", "SERVER_DOMAIN", "\"${providers.gradleProperty("serverDomain").get()}\"")
         buildConfigField("String", "APP_VERSION", "\"$versionName\"")
         buildConfigField("int", "VERSION_CODE", "$versionCode")
@@ -136,6 +136,11 @@ val frameworkBoundClasses = listOf(
     "**/features/doors/DoorMonitor*",
     "**/features/doors/DoorSnapshotReader*",
     "**/features/doors/DoorSnapshotSender*",
+    // 应用私有库：两个类拿的都是 android.database 的 SQLiteDatabase 与 Cursor，JVM 里只有桩。
+    // 它们做的事就是建表与两条 SQL，没有可以独立验证的算法——抽一层"行与 JSON 的转换"出来
+    // 只会为了被测而存在。
+    "**/core/storage/**",
+    "**/core/config/ConfigCache*",
     // 自管理：依赖 root shell 与包管理器（A11ySettingsMerge / A11yState 是纯逻辑，已纳入覆盖）
     "**/features/selfmanage/A11yGuard*",
     "**/features/selfmanage/OtaUpdater*",

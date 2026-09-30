@@ -48,6 +48,9 @@ object ConfigDefaults {
     /** 记录自动化耗时 */
     const val AUTOMATION_TRACE_ENABLED = false
 
+    /** 命令去重窗口 */
+    const val COMMAND_DEDUP_MAX_COUNT = 1024L
+
     /** 等待服务端响应 */
     const val BATH_RESPONSE_TIMEOUT_MS = 10000L
 

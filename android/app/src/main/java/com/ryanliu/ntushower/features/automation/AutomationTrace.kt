@@ -3,6 +3,7 @@ package com.ryanliu.ntushower.features.automation
 import android.util.Log
 import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.config.RuntimeConfig
+import com.ryanliu.ntushower.core.logfile.CappedLogFile
 import java.io.File
 
 /**
@@ -102,17 +103,9 @@ object AutomationTrace {
     }
 
     private fun append(text: String) {
-        // 整段包在 try 里：记录跑在自动化流程的关键路径上，它自己把流程搞挂就本末倒置了。
-        // 写文件会失败（路径不可写、存储满），日志调用在单测里也会失败。
-        try {
-            Log.d(TAG, text)
-            val dir = File(AppConfig.WORK_DIR).apply { mkdirs() }
-            val file = File(dir, FILE_NAME)
-            if (file.length() > MAX_BYTES) file.delete()
-            file.appendText("[${System.nanoTime() / 1_000_000}] $text\n")
-        } catch (_: Exception) {
-            // 记录是"顺便"的，失败了不该影响主流程
-        }
+        Log.d(TAG, text)
+        val dir = File(AppConfig.WORK_DIR).apply { mkdirs() }
+        CappedLogFile.append(File(dir, FILE_NAME), "[${System.nanoTime() / 1_000_000}] $text\n", MAX_BYTES)
     }
 }
 

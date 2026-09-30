@@ -79,8 +79,40 @@ class CommandResultCacheTest {
         assertNull(cache.recall("cmd-1"))
     }
 
+    @Test
+    fun `shrinking the capacity trims immediately`() {
+        // 上限是配置项、可以在运行中变小；removeEldestEntry 只在写入时被调用，
+        // 不主动裁的话"窗口已经调小"要等下一次写入才成立
+        val cache = CommandResultCache(capacity = 8)
+        repeat(8) { cache.remember(outcome("cmd-$it")) }
+
+        cache.setCapacity(3)
+
+        assertEquals(3, cache.size())
+        assertNull("超出新窗口的应当已被淘汰", cache.recall("cmd-0"))
+        assertEquals("最近的必须留着", "ok", cache.recall("cmd-7")?.status)
+    }
+
+    @Test
+    fun `growing the capacity keeps existing entries`() {
+        val cache = CommandResultCache(capacity = 2)
+        cache.remember(outcome("cmd-1"))
+        cache.remember(outcome("cmd-2"))
+
+        cache.setCapacity(16)
+
+        assertEquals(2, cache.size())
+        assertEquals("ok", cache.recall("cmd-1")?.status)
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun `rejects non-positive capacity`() {
         CommandResultCache(capacity = 0)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `setCapacity rejects non-positive values`() {
+        // 0 会让每次写入都清空去重表，等于关掉幂等
+        CommandResultCache(capacity = 4).setCapacity(0)
     }
 }
