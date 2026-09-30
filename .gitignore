@@ -40,6 +40,10 @@ Thumbs.db
 # ── 临时文件 ──────────────────────────────────────────────
 *.log
 *.tmp
-# 本地质量门输出（报告随 CI 产生，不入库）
+# 本地质量门输出（报告随 CI 产生，不入库）。
+# 用 *quality*.txt 而非 quality_*.txt：实际文件名是 android_quality.txt，
+# 前缀式规则匹配不到，该文件因此被误入库并跟了很久。
+*quality*.txt
 *_check.txt
-quality_*.txt
+# 部署包：由 server/ 现打包产生，入库等于存一份代码副本
+*.tar.gz

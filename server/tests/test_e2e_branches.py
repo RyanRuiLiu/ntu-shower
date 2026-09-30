@@ -168,10 +168,15 @@ def test_ota_repository_force_release_ignores_version(client: TestClient) -> Non
     assert rel["force"] is True
 
 
-def test_root_and_admin_redirects(client: TestClient) -> None:
+def test_only_healthz_is_served_at_root_level(client: TestClient) -> None:
+    """服务端不再托管前端：前端是独立工程，静态产物由 nginx 服务。
+
+    根路径与旧的重定向（`/`、`/app`、`/admin`）一并移除——留着它们会让
+    "前端由谁服务"这件事出现两个答案。
+    """
+    assert client.get("/healthz").status_code == 200
     for path in ("/", "/app", "/admin"):
-        r = client.get(path, follow_redirects=False)
-        assert r.status_code in (307, 302)
+        assert client.get(path, follow_redirects=False).status_code == 404
 
 
 def test_settle_roundtrip_success_path(
