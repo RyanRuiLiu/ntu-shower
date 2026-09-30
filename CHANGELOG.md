@@ -3,6 +3,24 @@
 本项目所有显著变更记录于此。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)；
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.3.4] - 2026-09-30
+
+### 修复
+
+- 设备端 `AgentService.onDestroy` 未关闭 worker / otaScheduler 线程池与定时任务，
+  服务销毁后这些线程继续存活并执行任务
+- 设备端 `BathAppNavigator.findDoorInGrid` 匹配成功路径漏回收节点
+  （同文件另两处都在 `finally` 里，只有这处漏了）
+- 设备端 `OtaUpdater` 自行实现 deviceId 且与 `DeviceIdentity` 行为不一致
+- `CoverOverlay` 的主线程等待无超时（主线程繁忙时调用方线程永久阻塞）
+
+### 变更
+
+- 抽出 `core/threading/MainThread`：`CoverOverlay` 与 `A11yService` 各写了一遍
+  「投递主线程 + 同步等待」，且超时行为不一致
+- `BathAppNavigator.detectPage` 返回具名 `PageSnapshot` 而非 `Pair`
+- 移除 `matches()` 中永远不会成立的后缀匹配条件
+
 ## [未发布]
 
 ### 修复
