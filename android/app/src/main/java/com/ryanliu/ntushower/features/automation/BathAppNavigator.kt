@@ -37,9 +37,6 @@ object BathAppNavigator {
     /** 喷头网格的容器。定位单个喷头要从它开始。 */
     private const val RID_GV_SPRINKLER = "com.datalook.bath:id/gv_sprinkler"
 
-    /** 通知栏与最近任务面板的表面：它们压在最上层，热切前台拗不过，必须先关掉。 */
-    private const val SYSTEM_UI_PACKAGE = "com.android.systemui"
-
     // ── 导航 ──
 
     /** 从任意页面回到 HOME；总预算 [budgetMs]。 */
@@ -70,19 +67,25 @@ object BathAppNavigator {
     }
 
     /**
-     * 确保浴室 App 在前台，并且没有系统面板压在它上面。
+     * 确保浴室 App 在前台，并且没有系统窗口压在它上面。
      *
-     * **SystemUI 要单独处理**：学生拉下通知栏或按了最近任务键时，前台包名是
-     * `com.android.systemui`。这时直接 `launchBathApp`（走 `REORDER_TO_FRONT`）只会把
-     * 浴室 App 的任务热切到前台，**通知栏窗口仍压在最上层**——于是自动化全程正常跑完，
-     * 屏幕却始终是通知栏，全屏遮盖层也盖不住它（那是系统窗口，不归我们的图层管）。
-     * 现场学生看到的不是「网络异常」提示图，而是一张没划上去的通知栏。
+     * ## 为什么不能只热切前台
      *
-     * `ACTION_CLOSE_SYSTEM_DIALOGS` 是 API 19 上不需要 root 的关闭手段。关掉之后要等
-     * 一拍再拉起：广播是异步的，紧接着热切前台会把还没收起的面板又留在那里。
+     * 学生拉下通知栏、按了最近任务键，或者系统弹出自己的对话框（低电量、无响应、权限请求）
+     * 时，前台都不是浴室 App。这时直接 `launchBathApp`（走 `REORDER_TO_FRONT`）只会把浴室
+     * App 的任务热切到前台，**那些窗口仍压在最上层**——于是自动化全程正常跑完，屏幕却始终
+     * 是它们，全屏遮盖层也盖不住（那是系统窗口，不归我们的图层管）。现场学生看到的不是
+     * 「网络异常」提示图，而是一张没划上去的通知栏。
      *
-     * 这不是"看见弹窗就找确定键点一下"那类试探：关面板与拉前台都是系统给出的确定动作，
-     * 而认不出的页面一律走失败回报，不去猜它是什么、更不去点它上面的任何东西。
+     * `ACTION_CLOSE_SYSTEM_DIALOGS` 是 API 19 上不需要 root 的关闭手段，关的是通知栏、
+     * 最近任务、电源菜单这一类系统对话框，对普通应用没有影响。关掉之后要等一拍再拉起：广播
+     * 是异步的，紧接着热切前台会把还没收起的面板又留在那里。
+     *
+     * 判据按"是不是浴室 App"而不是"是不是某个具体系统包"：系统窗口不止 SystemUI 一家，
+     * 逐个列举必然漏。而关系统对话框这个动作本身就是幂等的——没有可关的时候它什么都不做。
+     *
+     * 这不是"看见弹窗就找确定键点一下"那类试探：关面板与拉前台都是系统给出的确定动作，而
+     * 认不出的页面一律走失败回报，不去猜它是什么、更不去点它上面的任何东西。
      */
     fun ensureForeground(a11y: A11yService) {
         val root = a11y.rootInActiveWindow
@@ -95,13 +98,10 @@ object BathAppNavigator {
         } finally {
             root.recycle()
         }
-        if (pkg == SYSTEM_UI_PACKAGE) {
-            a11y.sendBroadcast(Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS))
-            A11yService.awaitPageChange(RuntimeConfig.pollIntervalMs)
-        }
-        if (pkg != AppConfig.BATH_APP_PACKAGE) {
-            a11y.launchBathApp()
-        }
+        if (pkg == AppConfig.BATH_APP_PACKAGE) return
+        a11y.sendBroadcast(Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS))
+        A11yService.awaitPageChange(RuntimeConfig.pollIntervalMs)
+        a11y.launchBathApp()
     }
 
     private fun clickBack(a11y: A11yService) {
@@ -120,21 +120,22 @@ object BathAppNavigator {
     // ── 等待 ──
 
     /**
-     * 等待页面到达指定状态；期间检测到浴室 App 离开前台就把它拉回来。
+     * 等待页面到达指定状态；期间只要浴室 App 不在前台就把它拉回来。
      *
-     * 拉回来走 [ensureForeground] 而不是裸的 `launchBathApp`：离开前台的常见起因是学生拉下了
-     * 通知栏或进了最近任务，那时前台是 SystemUI——热切前台拗不过压在最上面的系统面板，只有
-     * 先把面板关掉才回得来。
+     * 拉回来走 [ensureForeground]（含关系统面板），不是裸的 `launchBathApp`：离开前台的常见
+     * 起因是学生拉下了通知栏或进了最近任务，那时前台是 SystemUI——热切前台拗不过压在最上面
+     * 的系统面板，只有先把面板关掉才回得来。
+     *
+     * **不限制恢复次数**：反复拉面板的场面这套流程该扛住，而它本来就有总超时兜底；[ensureForeground]
+     * 在浴室 App 已在前台时什么都不做，重试不会空转。
      */
     fun waitForPage(a11y: A11yService, target: PageState, timeoutMs: Long): Boolean {
         val start = System.currentTimeMillis()
-        var relaunched = false
         while (System.currentTimeMillis() - start < timeoutMs) {
             val mark = A11yService.pageChangeMark()
             if (BathAppPage.snapshot().state == target) return true
-            if (!relaunched && !A11yService.bathAppInForeground) {
+            if (!A11yService.bathAppInForeground) {
                 ensureForeground(a11y)
-                relaunched = true
                 A11yService.awaitPageChangeAfter(mark, RuntimeConfig.pollIntervalMs)
                 continue
             }

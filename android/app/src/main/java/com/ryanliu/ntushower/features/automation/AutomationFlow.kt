@@ -138,7 +138,6 @@ object AutomationFlow {
      */
     private fun awaitTerminal(a11y: A11yService): Terminal {
         val start = System.currentTimeMillis()
-        var relaunched = false
         var leftForeground = false
         var rebuiltAfterLeave = false
         var unknownRounds = 0
@@ -164,9 +163,11 @@ object AutomationFlow {
                 PageState.HINT, PageState.VF_RESULT -> return Terminal(true, snapshot.message)
 
                 PageState.UNKNOWN, PageState.BOOKING, PageState.BOOKING_CODE -> {
-                    if (!relaunched && !inForeground) {
+                    // 不在浴室 App 里的时候认不出页面是必然的（活动窗口是别人的），把它拉回来
+                    // 再说。恢复次数不设上限：这轮宽限计数只在浴室 App 位于前台时才累加，所以
+                    // 反复被切走不会被误判成"落在无法识别的页面"。
+                    if (!inForeground) {
                         BathAppNavigator.ensureForeground(a11y)
-                        relaunched = true
                         A11yService.awaitPageChangeAfter(mark, RuntimeConfig.pollIntervalMs)
                         continue
                     }
