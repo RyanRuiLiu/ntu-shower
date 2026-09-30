@@ -20,8 +20,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
-
-from app.core.protocol import JsonObject
+from typing_extensions import TypedDict
 
 from .core import db
 from .core.config import settings
@@ -35,6 +34,7 @@ from .modules.access.routes import admin_router as access_admin_router
 from .modules.access.routes import router as access_router
 from .modules.bridge.routes import admin_router as bridge_admin_router
 from .modules.bridge.routes import router as bridge_router
+from .modules.config import store as config_store
 from .modules.config.routes import admin_router as config_admin_router
 from .modules.devices import repository as devices_repository
 from .modules.devices.routes import admin_router as devices_admin_router
@@ -43,11 +43,20 @@ from .modules.doors.routes import router as doors_router
 from .modules.ota import repository as ota_repository
 from .modules.ota.routes import admin_router as ota_admin_router
 from .modules.ota.routes import router as ota_router
+from .modules.sessions import auto_settle
 from .modules.sessions import repository as sessions_repository
 from .modules.sessions.routes import admin_router as sessions_admin_router
 from .modules.sessions.routes import router as sessions_router
 from .modules.shadow.routes import admin_router as shadow_admin_router
 from .modules.shadow.routes import router as shadow_router
+
+
+class HealthStatus(TypedDict):
+    """存活探针的应答；`version` 让运维能一眼确认线上跑的是哪一版。"""
+
+    status: str
+    name: str
+    version: str
 
 
 def create_app() -> FastAPI:
@@ -59,8 +68,6 @@ def create_app() -> FastAPI:
     sessions_repository.init_tables()
     access_repository.init_tables()
     ota_repository.init_tables()
-    from app.modules.config import store as config_store
-
     config_store.init_tables()
     Path(settings.ota_dir).mkdir(parents=True, exist_ok=True)
 
@@ -68,8 +75,6 @@ def create_app() -> FastAPI:
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # 启动自检：配置不合法时拒绝启动，而非带着占位密钥对外服务
         assert_admin_token_configured()
-        from app.modules.sessions import auto_settle
-
         auto_settle.start()
         yield
         auto_settle.stop()
@@ -108,7 +113,7 @@ def create_app() -> FastAPI:
         return RedirectResponse("/web/console.html")
 
     @app.get("/healthz", tags=["meta"])
-    def health() -> JsonObject:
+    def health() -> HealthStatus:
         return {"status": "ok", "name": "ntu-shower", "version": APP_VERSION}
 
     return app

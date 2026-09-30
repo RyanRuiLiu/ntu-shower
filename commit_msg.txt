@@ -1,0 +1,46 @@
+feat(server): 补全管理面契约，全端点响应类型覆盖率达到 100%
+
+## 结果
+
+```
+端点总数 35：显式类型 35，开放式 0
+```
+
+此前是 16/34——用户面有类型，管理面与设备面全是开放式 object。现在 35 个端点
+的响应都能从 OpenAPI 生成客户端类型，44 个组件 schema。
+
+## 新增的契约
+
+- devices：DeviceTrustResult、DeviceRenameResult
+- config：ConfigSpecView（从 store 移来，契约归契约层）、ConfigValues、
+  ConfigPushNotice、GlobalConfigView、GlobalConfigUpdateReport、
+  DeviceConfigView、DeviceConfigUpdateReport、DeviceConfigRemovalReport
+- ota：ReleaseRecord、OtaManifest、ReleasePublished、ReleaseRearmed、ReleaseRemoved
+- bridge：BridgeOpened、BridgeClosed、BridgeStatus
+- healthz：HealthStatus（就地定义：元端点不属于任何领域）
+
+两个形状本就可选的地方用 total=False 表达，而不是让客户端去猜：
+OtaManifest（有更新时才带版本字段）与 BridgeStatus（桥打开时才带端口与连接标志）。
+
+## 连带修正
+
+- ota.repository.list_releases 的字段转换从未做过类型标注，改为 _as_release
+  统一转换（与 devices/doors 的写法一致）
+- main.py 的两处函数内 import 提到模块顶部：它们不构成循环依赖（已由测试证实），
+  没有理由藏在函数体里
+- config 路由的 notified 列表改为逐字段构造：展开 TypedDict 会让类型检查器
+  推断成 dict[str, object]
+
+## 自查中发现并修正的错误
+
+- 一度新建 modules/devices/admin_schemas.py：项目约定是每模块一个 schemas.py，
+  管理面类型并入同一文件即可
+- 又一次写无意义的 re-export（from .schemas import DeviceRecord  # noqa: F401）
+- DeviceConfigUpdateReport 一度继承 ConfigPushNotice，而那是 total=False 的，
+  继承会让 revision 与 config 也变成可选
+- HealthStatus 一度被插在 import 块中间，与之前 dependencies.py 犯的是同一个错
+
+## 验证
+
+ruff / mypy --strict 全通过；210 passed；覆盖率 97.23%（提升）；
+八个 schemas.py 全部 100%。
