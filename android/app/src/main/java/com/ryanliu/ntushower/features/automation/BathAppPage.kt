@@ -131,15 +131,6 @@ object BathAppPage {
     /** 是否已有一次待办的重算。 */
     private val pending = AtomicBoolean(false)
 
-    /**
-     * [refreshAndAwait] 的默认等待上限。
-     *
-     * 一次重算实测约 100ms（取根节点约 70ms + 走一遍树约 30ms），给到 1 秒是留给设备过载的
-     * 余量——真机 loadavg 长期在 8 附近（八核满载）。必须 internal：默认参数在**调用方**求值，
-     * 引用私有成员编译不过。
-     */
-    internal const val REFRESH_AWAIT_MS = 1_000L
-
     @Volatile
     private var cached = PageSnapshot(PageState.UNKNOWN)
 
@@ -160,21 +151,6 @@ object BathAppPage {
     fun refresh() {
         if (pending.getAndSet(true)) return
         signal.offer(Unit)
-    }
-
-    /**
-     * 请求一次重算并等它完成。
-     *
-     * 流程起点处需要的是"读到的状态是刚量的"，而不是"我让它去量了"——[refresh] 现在是
-     * 异步入队的，调完就读 [snapshot] 拿到的还是上一个事件留下的值。
-     *
-     * 等的是"重算次数增加过"，与"这次请求是否被合并进了别人触发的那一轮"无关：两种情况下
-     * 页面状态都已经重算过了，这正是调用方要的。
-     */
-    fun refreshAndAwait(timeoutMs: Long = REFRESH_AWAIT_MS) {
-        val mark = A11yService.pageChangeMark()
-        refresh()
-        A11yService.awaitPageChangeAfter(mark, timeoutMs)
     }
 
     /** 重算线程的主循环：取信号 → 重算 → 放行等待者。 */

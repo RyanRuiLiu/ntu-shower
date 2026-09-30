@@ -35,10 +35,12 @@ object AutomationFlow {
     fun run(a11y: A11yService, action: Action, overlay: CoverOverlay): FlowOutcome {
         // 开关关闭时 trace 为 null，各标记点退化成空操作——两条路径跑的是同一套代码
         val trace = AutomationTrace.begin(action.traceLabel)
-        // 先让页面状态与当前界面同步一次：缓存只在无障碍事件到达时更新，而"上一次事件"
-        // 可能发生在很久以前（比如流程之间的空档）。不刷新就开始判断，读到的可能是
-        // 上一轮残留的状态。要的是**等它量完**，而不是"让它去量"——见 refreshAndAwait。
-        BathAppPage.refreshAndAwait()
+        // 让状态尽快重算一次，但**不等它**。原先是同步重算，这一版重算移到了自己的线程上，
+        // 于是"等"就成了这笔账：真机上量过，等一次要 165ms，而它换来的是"起点处的快照最多
+        // 100ms 旧"变成"刚量的"——而浴室 App 首页的跑马灯与时钟每秒产生约十次内容变化，快照
+        // 本来就只有几十毫秒旧。真正决定要不要走导航的是 bathAppInForeground（由窗口状态事件
+        // 维护，本身即时），快照旧顶多让导航多走一圈，结果不变。
+        BathAppPage.refresh()
         trace?.mark("refresh-page")
         // 1 回首页
         if (!BathAppNavigator.navigateToHome(a11y, RuntimeConfig.homeBudgetMs)) {
