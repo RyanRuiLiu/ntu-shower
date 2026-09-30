@@ -91,9 +91,47 @@ class RuntimeConfigTest {
     }
 
     @Test
-    fun supportedKeysMatchesServerKeySet() {
-        // 键集合是与服务端 DEFAULT_CONFIG 对账的单一来源：数量变化必须是有意的
+    fun supportedKeys_hasExpectedCount() {
+        // 真正的键集合对账在服务端（server/tests/test_config_spec.py，按名字比对）。
+        // 这里只守住数量：设备端键凭空变少或变多都该是有意的改动。
         assertEquals(17, RuntimeConfig.supportedKeys.size)
+    }
+
+    @Test
+    fun apply_clampsZeroDurationToAvoidRunawayTimers() {
+        // 0 秒心跳会让 postDelayed 立即重发，形成心跳风暴；
+        // 服务端已按 spec 拦下越界值，这一层防的是配置经其它路径进来
+        RuntimeConfig.apply(JSONObject("{\"heartbeat_interval_s\": 0}"))
+
+        assertEquals(1, RuntimeConfig.heartbeatIntervalS)
+    }
+
+    @Test
+    fun apply_clampsNegativeDurationToAvoidRunawayTimers() {
+        RuntimeConfig.apply(JSONObject("{\"reconnect_base_ms\": -1000, \"poll_interval_ms\": -5}"))
+
+        assertEquals(1L, RuntimeConfig.reconnectBaseMs)
+        assertEquals(1L, RuntimeConfig.pollIntervalMs)
+    }
+
+    @Test
+    fun apply_clampsZeroCountKeys() {
+        // 窗口内最多退出 0 次会让守护逻辑判定每次退出都超限
+        RuntimeConfig.apply(JSONObject("{\"bath_exit_max_count\": 0}"))
+
+        assertEquals(1, RuntimeConfig.bathExitMaxCount)
+    }
+
+    @Test
+    fun apply_keepsLegitimateValuesUntouched() {
+        // 钳制只兜下限，不得把正常值改掉
+        RuntimeConfig.apply(
+            JSONObject("{\"heartbeat_interval_s\": 45, \"ui_click_delay_ms\": 0, \"bath_exit_max_count\": 5}"),
+        )
+
+        assertEquals(45, RuntimeConfig.heartbeatIntervalS)
+        assertEquals(0L, RuntimeConfig.uiClickDelayMs) // 点击延迟允许为 0
+        assertEquals(5, RuntimeConfig.bathExitMaxCount)
     }
 
     @Test
