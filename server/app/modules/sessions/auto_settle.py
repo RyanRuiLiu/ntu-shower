@@ -11,7 +11,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from app.core import actions
+from app.core import actions, outcomes
 from app.core.clock import parse_rfc3339
 from app.core.protocol import JsonObject, as_int
 from app.gateway.manager import manager
@@ -71,7 +71,7 @@ async def _settle(device_id: str, cert_no: str, password: str) -> bool:
         {"cert_no": cert_no, "password": password},
         timeout_s=60.0,
     )
-    ok = result.get("status") == "ok"
+    ok = result.get("status") == outcomes.OK.value
     logger.info("auto-settle %s/%s: %s", device_id, cert_no, result.get("status"))
     return ok
 
