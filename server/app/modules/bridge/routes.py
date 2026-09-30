@@ -126,11 +126,26 @@ async def device_bridge(ws: WebSocket) -> None:
         # 设备断开、空闲超时或寿命到点：桥的正常结束路径，收尾走 finally
         pass
     finally:
-        # 只摘设备 WS 侧；server/TCP 的回收归 adb/close（避免与门户循环关闭竞态，
-        # Windows proactor 上在 WS 处理协程内同步关 server 会挂住事件循环）
+        # 只摘设备 WS 侧；server/TCP 的回收归 adb/close
         if bridge.device_ws is ws and bridge.generation == generation:
             bridge.device_ws = None
             await bridge.close_stream()
+            # 监听套接字必须在这里关掉。
+            #
+            # 只把它从注册表摘掉是不够的——摘掉之后 `POST bridge/close` 就再也找不到这个桥
+            # （`registry.active.get` 返回 None，走"本来就没开"分支直接返回），于是端口永久
+            # 泄漏。而端口是按设备固定分配的，下次开桥必然 `Errno 98 address already in use`，
+            # 表现为"开桥返回 409"，而设备侧此时明明已经连上来了（`/gateway/bridge` 有 accepted
+            # 日志）。真实发生过。
+            #
+            # 用 `close()`（同步，只是停止 accept）而不 `await wait_closed()`：后者要等存活
+            # 连接自然结束，而这里正处在 WS 处理协程内，等它会在某些事件循环实现上挂住
+            # （Windows proactor）。套接字本身由 asyncio 的关闭回调回收。
+            #
+            # 判据用 `is_serving()`：`close()` 不是幂等的，重复调用会撞上内部已清空的成员。
+            if bridge.server is not None and bridge.server.is_serving():
+                bridge.server.close()
+            bridge.server = None
             registry.remove(device_id)
             audit_id = f"bridge-{uuid.uuid4()}"
             command_audit.insert_command(audit_id, device_id, "bridge.session_end")
@@ -214,13 +229,25 @@ async def adb_open(device_id: str) -> BridgeOpened:
 
     server = None
     last_error: OSError | None = None
-    for attempt in range(3):  # 关闭后立刻重开有内核端口释放竞态，退避重试
+    # 关闭后立刻重开有内核端口释放竞态。
+    #
+    # 端口是**按设备固定分配**的（运维的 adb connect 脚本因此可以写死，见 manager 的
+    # open_session），所以每次重开必然撞上同一个端口。而上一个监听关闭后，它的连接会
+    # 在 TIME_WAIT 里待一会儿，`SO_REUSEADDR` 也压不住——实测关桥后立刻再开必定
+    # `Errno 98`，而原定的三次退避总共只有 1.2 秒，不够。
+    #
+    # 放到五次、退避 0.3 递增（合计约 4.5 秒）。重开桥是罕见操作，等几秒可以接受；
+    # 而失败一次的代价是运维得手动重试，还会看到"设备明明连上了却开不了桥"这种怪现象。
+    #
+    # 上限压在 5 秒以内是刻意的：那是本项目的单例超时约定（见 AGENTS.md），超过它说明
+    # 这段代码在等一个不会到来的事件。再长就该去查端口为什么没放，而不是继续等。
+    for attempt in range(5):
         try:
             server = await asyncio.start_server(handle_client, "127.0.0.1", port)
             break
         except OSError as exc:
             last_error = exc
-            await asyncio.sleep(0.2 * (attempt + 1))
+            await asyncio.sleep(0.3 * (attempt + 1))
     if server is None:
         registry.pending.pop(device_id, None)
         registry.remove(device_id)
