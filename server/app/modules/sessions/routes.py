@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends
 from app.core import actions, outcomes
 from app.core.config import settings
 from app.core.problems import (
+    DOOR_NOT_FOUND,
     DOOR_NOT_FREE,
     DUPLICATE_SESSION,
     NO_OCCUPIED_DOOR,
@@ -25,7 +26,7 @@ from app.modules.access.capabilities import Capability
 from app.modules.access.dependencies import require_capability
 from app.modules.devices.dependencies import require_trusted_online_device
 from app.modules.doors import repository as doors_repository
-from app.modules.doors.schemas import DoorState
+from app.modules.doors.schemas import ASSIGNABLE_STATES, DoorState
 from app.modules.sessions import repository
 from app.modules.sessions.schemas import AssignRequest, CommandOutcome, PhotoRequest, SettleRequest
 
@@ -36,9 +37,29 @@ router = APIRouter(prefix="/api/v1", tags=["sessions"])
 ops_router = APIRouter(prefix="/ops", dependencies=[Depends(require_ops_token)], tags=["sessions-ops"])
 
 
-def _door_state(device_id: str, door_no: int) -> str | None:
+def _require_assignable_door(device_id: str, door_no: int) -> None:
+    """分配前的门现态预检。
+
+    两种失败分开报：门从没被上报过是 **404**（这个门号不存在），状态不对是 **409**
+    （门在，但现在不能分配）。合成一句"不是空闲"会让"喷头 9 不存在"和"喷头 3 里有人"
+    看起来是同一回事，而处理方式不同。
+
+    门号范围不在这里硬编码——存在哪些门是设备上报的事实，不是服务端的常量。
+
+    可分配的状态见 [ASSIGNABLE_STATES]：那里是唯一的判定处，本函数只负责把它接上
+    HTTP 错误。
+    """
     row = doors_repository.get_door_live(device_id, door_no)
-    return row["state"] if row is not None else None
+    if row is None:
+        raise ApiProblemError(DOOR_NOT_FOUND, f"door {door_no} has never been reported")
+    raw_state = row["state"]
+    try:
+        state: DoorState | None = DoorState(raw_state)
+    except ValueError:
+        # 设备上报了本端不认识的状态：不分配，也不去猜它是什么意思
+        state = None
+    if state not in ASSIGNABLE_STATES:
+        raise ApiProblemError(DOOR_NOT_FREE, f"door {door_no} state={raw_state}")
 
 
 def _reject_duplicate_session(device_id: str, cert_no: str) -> None:
@@ -70,9 +91,7 @@ async def perform_assign(req: AssignRequest) -> CommandOutcome:
     函数里会逼出第二份拷贝，那种拷贝迟早会分叉。
     """
     require_trusted_online_device(req.device_id)
-    state = _door_state(req.device_id, req.door_no)
-    if state != DoorState.FREE.value:
-        raise ApiProblemError(DOOR_NOT_FREE, f"door {req.door_no} state={state}")
+    _require_assignable_door(req.device_id, req.door_no)
     _reject_duplicate_session(req.device_id, req.cert_no)
     result = await service.send_command_and_wait(
         req.device_id,

@@ -52,6 +52,20 @@ class DoorState(str, Enum):
 # 与旧系统 `t_doorlist` 里 `openTime <> ''` 的语义等价。
 OCCUPIED_STATES = frozenset({DoorState.WAITING, DoorState.BATHING, DoorState.PAUSED})
 
+#: 可以被分配的状态。
+#
+# **允许 `SELECTED`**：它表示"有人在浴室 App 上选中了这扇门"，但 `cardno` 仍是 0——
+# 没有任何人占用，而这个状态会自行消失（真机实测两次，门自己回到了 free）。旧系统
+# 正是这么放行的：它只拒 [OCCUPIED_STATES] 那三种。若在这里要求必须 `FREE`，学生
+# 点了选中的那几秒内远程就分配不了，而那不是"有人"。
+#
+# **拒绝 `REPAIR` 与 `DISABLED`**：旧系统把它们也放行了，那是它的疏漏——维修中与
+# 被停用的喷头不该能被分配。这一处与旧系统的差异是有意保留的。
+#
+# 正着列（可分配的）而不是反着列（`!= FREE`）：将来新增状态时默认落到"不可分配"
+# 那一侧，而不是悄悄变成可分配。
+ASSIGNABLE_STATES = frozenset({DoorState.FREE, DoorState.SELECTED})
+
 
 class DoorView(TypedDict):
     """一扇喷头的现态：`door_live` 全列 + 所属设备 + 上次使用。

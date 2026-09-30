@@ -24,7 +24,7 @@ function report(id, text, kind) {
 
 function renderTable() {
   if (store.devices.length === 0) {
-    $('deviceTable').innerHTML = '<div class="empty">还没有设备接入</div>'
+    $('deviceTable').innerHTML = '<div class="empty">暂无设备接入</div>'
     return
   }
   const rows = store.devices

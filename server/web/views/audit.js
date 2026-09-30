@@ -33,7 +33,7 @@ function duration(row) {
 
 function render(rows) {
   if (rows.length === 0) {
-    $('auditTable').innerHTML = '<div class="empty">没有匹配的记录</div>'
+    $('auditTable').innerHTML = '<div class="empty">暂无匹配记录</div>'
     return
   }
   $('auditTable').innerHTML = `<table class="table"><thead><tr>
