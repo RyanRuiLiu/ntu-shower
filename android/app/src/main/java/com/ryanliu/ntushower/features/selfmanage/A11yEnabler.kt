@@ -28,7 +28,7 @@ object A11yEnabler {
             "settings put secure enabled_accessibility_services \"$merged\" && " +
                 "settings put secure accessibility_enabled 1",
         )
-        Log.i(TAG, "a11y enable: ${'$'}{result.success} -> $merged")
+        Log.i(TAG, "a11y enable: ${result.success} -> $merged")
         return result.success
     }
 }

@@ -64,12 +64,18 @@ class OtaUpdater(
                 Log.w(TAG, "manifest http ${response.code()}")
                 return null
             }
-            return JSONObject(response.body()!!.string())
+            val body = response.body() ?: return null
+            return JSONObject(body.string())
         }
     }
 
     private fun applyUpdate(manifest: JSONObject) {
         val version = manifest.getString("version")
+        if (!VERSION_PATTERN.matches(version)) {
+            // 版本号参与文件名构造：服务端已校验，此处为纵深防御——设备虽只连自家服务端，
+            // 但一旦服务端配置出错，路径穿越的代价是写入任意路径
+            throw IllegalStateException("unexpected version format: $version")
+        }
         val url = "https://${BuildConfig.SERVER_DOMAIN}${manifest.getString("url")}"
         val expectedSha256 = manifest.getString("sha256")
 
@@ -132,5 +138,8 @@ class OtaUpdater(
          * 远长于普通 shell 命令的默认超时。
          */
         private const val INSTALL_TIMEOUT_MS = 120_000L
+
+        /** 与服务端 `ota/service.py` 的 VERSION_PATTERN 保持一致的版本号形状。 */
+        private val VERSION_PATTERN = Regex("""^\d+\.\d+\.\d+$""")
     }
 }
