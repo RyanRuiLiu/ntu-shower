@@ -7,13 +7,11 @@ package com.ryanliu.ntushower.features.automation
 import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
-import android.os.Handler
-import android.os.Looper
 import android.view.Gravity
 import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
-import java.util.concurrent.CountDownLatch
+import com.ryanliu.ntushower.core.threading.MainThread
 
 /**
  * 自动化遮盖层：分配/结算操作期间覆盖屏幕，防止人为误触。
@@ -23,7 +21,6 @@ import java.util.concurrent.CountDownLatch
  */
 class CoverOverlay(context: Context) {
 
-    private val mainHandler = Handler(Looper.getMainLooper())
     private val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val view: LinearLayout = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
@@ -42,23 +39,7 @@ class CoverOverlay(context: Context) {
     }
 
     private fun runOnMain(op: () -> Unit) {
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            op()
-            return
-        }
-        val latch = CountDownLatch(1)
-        mainHandler.post {
-            try {
-                op()
-            } finally {
-                latch.countDown()
-            }
-        }
-        try {
-            latch.await()
-        } catch (e: InterruptedException) {
-            Thread.currentThread().interrupt()
-        }
+        MainThread.runAndWait(op)
     }
 
     private fun addInternal(message: String) {

@@ -1,10 +1,10 @@
 package com.ryanliu.ntushower.features.selfmanage
 
 import android.content.Context
-import android.provider.Settings
 import android.util.Log
 import com.ryanliu.ntushower.BuildConfig
 import com.ryanliu.ntushower.core.config.AppConfig
+import com.ryanliu.ntushower.core.identity.DeviceIdentity
 import com.ryanliu.ntushower.core.shell.RootShell
 import com.ryanliu.ntushower.service.A11yService
 import okhttp3.OkHttpClient
@@ -128,8 +128,7 @@ class OtaUpdater(
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
-    private fun deviceId(): String = Settings.Secure.getString(appContext.contentResolver, Settings.Secure.ANDROID_ID)
-        ?: "unknown"
+    private fun deviceId(): String = DeviceIdentity.deviceId(appContext)
 
     companion object {
         private const val TAG = "OtaUpdater"
