@@ -51,6 +51,10 @@ async def stream(ws: WebSocket) -> None:
         pass
     finally:
         client_frame.cancel()
+        # 取走它的结果：探测断连的那一帧可能以异常收场，而 asyncio.wait 不消费异常——
+        # 不取走会在事件循环里留下 "Task exception was never retrieved"。
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await client_frame
         events.unsubscribe(sid)
         with contextlib.suppress(Exception):
             await ws.close()
