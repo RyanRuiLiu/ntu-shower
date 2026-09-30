@@ -161,4 +161,29 @@ class DoorRawTest {
 
         assertTrue(payload.keys().asSequence().toList().isNotEmpty())
     }
+
+    // ── fingerprint ──
+
+    @Test
+    fun fingerprint_ignoresBathTime() {
+        // 只有 bathTime 不同的两行，指纹必须相同：那个字段在有人洗浴时每秒都变，
+        // 算进指纹等于没有去重，占用期间会每秒上报一整份快照（约 1.2 KB）。
+        val a = DoorRaw.parseRow("1|0|c|a|20260930003029|20260930003100|20260930004000|10|1")
+        val b = DoorRaw.parseRow("1|0|c|a|20260930003029|20260930003100|20260930004000|11|1")
+
+        assertEquals(a?.fingerprint(), b?.fingerprint())
+    }
+
+    @Test
+    fun fingerprint_seesEveryStateTransition() {
+        // 真正值得上报的那几件事必须被指纹看见，否则会漏报（比多报严重得多）
+        val fingerprints = listOf(
+            "1|0|c|a||||0|0", // 空闲
+            "1|1001|c|a|20260930003029|||0|0", // 有人进来
+            "1|1001|c|a|20260930003029|20260930003100||30|1", // 阀开了
+            "1|1001|c|a|20260930003029|20260930003100|20260930004000|600|1", // 阀关了
+        ).map { DoorRaw.parseRow(it)?.fingerprint() }
+
+        assertEquals(4, fingerprints.distinct().size)
+    }
 }

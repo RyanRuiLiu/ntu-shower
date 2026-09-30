@@ -18,8 +18,8 @@ import java.util.UUID
  * 快照发件箱：本地 SQLite 按序保存未确认快照，收到 door.snapshot_ack 才删除；
  * 未确认的按序重发（断网不丢数据，恢复后续传）。
  *
- * 去重：hashCode 比对喷头状态列表，内容未变化不上报（浴室 App 占用期每秒写库，
- * 无去重会造成每秒一次的无效快照，旧系统同款设计）。
+ * 去重：逐扇喷头取 [DoorRaw.fingerprint] 再比对，内容未变化不上报。指纹刻意不含
+ * `bath_time_s`——它每秒都变，含进去等于没有去重（见那个函数的说明）。
  */
 class DoorSnapshotSender(context: Context) {
 
@@ -45,7 +45,7 @@ class DoorSnapshotSender(context: Context) {
     fun captureAndEnqueue(gateway: GatewayClient) {
         val doors = DoorSnapshotReader.readAll()
         if (doors.isEmpty()) return
-        val hash = doors.hashCode()
+        val hash = doors.map { it.fingerprint() }.hashCode()
         if (hash == lastHash) return
         lastHash = hash
         val snapshotId = UUID.randomUUID().toString()
