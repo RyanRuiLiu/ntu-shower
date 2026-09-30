@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://<public-domain>/schema/ota.progress.json",
+  "title": "Device self-update progress report",
+  "allOf": [
+    {
+      "$ref": "https://<public-domain>/schema/envelope.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "ota.progress"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "version",
+            "stage"
+          ],
+          "properties": {
+            "version": {
+              "type": "string"
+            },
+            "stage": {
+              "enum": [
+                "downloading",
+                "verifying",
+                "installing",
+                "done",
+                "failed"
+              ]
+            },
+            "detail": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

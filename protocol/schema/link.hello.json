@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://<public-domain>/schema/link.hello.json",
+  "title": "Device hello (first message after connect)",
+  "allOf": [
+    {
+      "$ref": "https://<public-domain>/schema/envelope.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "link.hello"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "device_id",
+            "app_version",
+            "os_version",
+            "capabilities"
+          ],
+          "properties": {
+            "device_id": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 64
+            },
+            "app_version": {
+              "type": "string"
+            },
+            "os_version": {
+              "type": "string"
+            },
+            "capabilities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "version_code": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    }
+  ]
+}

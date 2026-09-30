@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://<public-domain>/schema/link.error.json",
+  "title": "Link-level error (may be followed by disconnect)",
+  "allOf": [
+    {
+      "$ref": "https://<public-domain>/schema/envelope.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "link.error"
+        },
+        "payload": {
+          "$ref": "https://<public-domain>/schema/envelope.json#/$defs/error"
+        }
+      }
+    }
+  ]
+}

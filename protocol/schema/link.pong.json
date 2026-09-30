@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://<public-domain>/schema/link.pong.json",
+  "title": "Heartbeat pong (reply to link.ping)",
+  "allOf": [
+    {
+      "$ref": "https://<public-domain>/schema/envelope.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "link.pong"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "sender_time"
+          ],
+          "properties": {
+            "sender_time": {
+              "$ref": "https://<public-domain>/schema/envelope.json#/$defs/rfc3339"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
