@@ -6,10 +6,14 @@ import java.util.Locale
 import java.util.TimeZone
 
 /**
- * 设备侧的 RFC 3339 时间：格式化与解析的唯一入口。
+ * 设备侧的 RFC 3339 时间格式化。
  *
- * 与协议信封的 `ts`、`session.command` 的 `deadline_ts` 对应。两端的时间字符串
- * 都经由此处，格式不会各自漂移。
+ * 对应协议信封的 `ts`——两端的时间字符串都经由此处，格式不会各自漂移。
+ *
+ * **只有格式化，没有解析**：设备一旦需要"判断某个时刻过了没有"就会依赖两台机器的
+ * 时钟一致，而这台设备没有 NTP。命令的有效期因此改用相对时长下发（见
+ * `protocol/schema/session.command.json` 的 `timeout_ms`），设备侧不再有解析对端时刻
+ * 的需求。留着解析只会诱使后来者再去比绝对时刻。
  */
 object Clock {
 
@@ -22,34 +26,4 @@ object Clock {
     }
 
     fun nowRfc3339(): String = formatter.get()!!.format(Date())
-
-    /**
-     * 解析 RFC 3339 字符串为 epoch 毫秒；无法解析时返回 null。
-     *
-     * 入参可能是服务端给的任何东西（`deadline_ts` 来自对端），所以格式不合法必须
-     * 在这一层吸收成 null，而不是抛到调用栈上。
-     */
-    fun parseRfc3339(text: String): Long? {
-        if (text.isEmpty()) return null
-        return try {
-            formatter.get()!!.parse(text)?.time
-        } catch (e: Exception) {
-            // 格式不符（时区偏移写法、秒以下位数不同等）一律视为不可解析
-            null
-        }
-    }
-
-    /**
-     * 给定时刻是否已经过去超过 `toleranceMs`。
-     *
-     * 容差是必须的：那个时刻是对端按**它的**时钟算出来的，网络往返加上两端时钟偏差，
-     * 一条其实还来得及的命令会落在边界外。
-     *
-     * 无法解析时返回 false（当作"还没过期"）：那说明对端给了个不认识的格式，宁可
-     * 继续处理，也不要因为解析失败就把正常请求全丢掉。
-     */
-    fun isPast(text: String, toleranceMs: Long): Boolean {
-        val at = parseRfc3339(text) ?: return false
-        return System.currentTimeMillis() - at > toleranceMs
-    }
 }

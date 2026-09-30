@@ -6,7 +6,6 @@ import uuid
 from dataclasses import dataclass
 
 from app.core import actions, outcomes, protocol, reason_codes
-from app.core.clock import rfc3339_after
 from app.core.config import settings
 from app.core.protocol import JsonObject
 from app.gateway.manager import manager
@@ -227,7 +226,11 @@ async def _dispatch(
             {
                 "action": action,
                 "params": params,
-                "deadline_ts": rfc3339_after(timeout_s),
+                # 相对时长而不是绝对时刻：设备没有 NTP，两边的墙上时钟可能差几秒甚至几分钟。
+                # 传绝对时刻会让「设备时钟走得快」这一件事直接导致所有命令被判为已过期——
+                # 而那与命令本身还值不值得执行毫无关系。设备按「从收到算起」判定，能挡住
+                # 的主要是「排在自己队列里等太久」这种情形，那正是这条限制想管的事。
+                "timeout_ms": int(timeout_s * 1000),
             },
             frame_id=command_id,
         )
