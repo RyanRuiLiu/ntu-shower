@@ -8,6 +8,8 @@
  * 对时取自 HTTP 响应的 `Date` 头：它由服务端产生，不需要为此加接口。精度到秒，
  * 而这里要消除的偏差以分钟计，够用。
  */
+import { PLACEHOLDER } from './dom.js'
+
 let skewMs = 0
 
 /** 用一次响应对时。任何一次请求都会顺带刷新，不需要专门去调。 */
@@ -21,4 +23,27 @@ export function syncClock(response) {
 /** 服务端此刻的时间戳（毫秒）。 */
 export function serverNowMs() {
   return Date.now() - skewMs
+}
+
+/** RFC 3339 转 `HH:MM:SS`；缺值或解析不出来时给占位符。 */
+export function fmtTime(value) {
+  if (!value) return PLACEHOLDER
+  const at = new Date(value)
+  if (Number.isNaN(at.getTime())) return PLACEHOLDER
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`
+}
+
+/**
+ * RFC 3339 转 `MM-DD HH:MM`；缺值或解析不出来时给占位符。
+ *
+ * 两种粒度并存是刻意的：进行中的会话问的是"今天几点"，`HH:MM:SS` 够用；而"上次使用"
+ * 或"最后上报"可能发生在几天前，只给时分看不出是哪天，给完整年份又会把宽度挤掉。
+ */
+export function fmtDateTime(value) {
+  if (!value) return PLACEHOLDER
+  const at = new Date(value)
+  if (Number.isNaN(at.getTime())) return PLACEHOLDER
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`
 }

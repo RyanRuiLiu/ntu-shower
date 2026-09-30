@@ -1,4 +1,4 @@
-/* 组件：按钮、字段、结果区、徽标、表格、喷头卡片、KPI、节点树。
+/* 组件：按钮、字段、结果区、徽标、标签值、信息面板、表格、喷头卡片、KPI、节点树。
  *
  * 命名一律用 `.块` 与 `.块-元素`，状态用 `.is-*` 或语义化后缀。七个视图共用这一份，
  * 视图里不得再自造按钮或表格样式。
@@ -140,6 +140,71 @@
   color: var(--blue);
   border-color: var(--blue);
   background: var(--blue-bg);
+}
+
+/* ── 标签 + 值的一行 ────────────────────────────────────── */
+
+/*
+ * 喷头卡片里的六格与设备信息面板里的各行是同一个视觉结构：左边一个次要色的标签，
+ * 右边一个等宽字体的值。写两遍就会分叉——事实上已经分叉过一次，喷头卡片里那格
+ * 少了等宽字体，读起来像另一类信息。所以只留这一份。
+ */
+.kv {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  font-size: var(--fs-small);
+  line-height: 1.6;
+}
+
+.kv .k {
+  flex-shrink: 0;
+  color: var(--dim);
+}
+
+.kv .v {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── 设备信息面板 ───────────────────────────────────────── */
+
+/*
+ * 顶栏那个按钮点开的浮层。放设备 ID、IP、版本这些**排障时才看**的字段——它们常驻
+ * 显示会挤掉真正需要一直盯着的东西（在线状态、令牌）。
+ */
+.info-panel {
+  position: absolute;
+  top: calc(100% + var(--sp-2));
+  right: 0;
+  z-index: 10;
+  display: grid;
+  gap: 6px;
+  min-width: 340px;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--elevated);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 45%);
+}
+
+/* `hidden` 属性的默认 `display: none` 会被上面那条 `display: grid` 盖掉 */
+.info-panel[hidden] {
+  display: none;
+}
+
+/*
+ * 面板里的值允许换行。设备 ID 与 IP 是定长串，用省略号截掉它们，这个面板就没有
+ * 存在的意义了——那些字符正是要拿去搜日志的东西。
+ */
+.info-panel .v {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: break-all;
 }
 
 /* ── 表格：设备、身份、发布、审计都用它 ─────────────────── */
