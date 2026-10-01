@@ -180,16 +180,55 @@
   white-space: nowrap;
 }
 
-/* ── 配置页：卡片式分模块 ──────────────────────────────── */
+/* ── 配置页：小卡片分模块网格 + 主辅视图 ───────────────── */
 
-/* 分组卡片：每张卡是同一件事的参数；卡片内键与键之间用细分隔线 */
-.cfg-card {
-  margin-bottom: var(--sp-3);
+/* 主辅切换标签（全部设备/单台设备），样式与审计页标签同族 */
+.cfg-tab {
+  padding: 4px 10px;
+  border-bottom: 2px solid transparent;
+  color: var(--dim);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--transition);
 }
 
-.cfg-sep {
-  margin: var(--sp-2) 0;
-  border-top: 1px solid var(--row-alt);
+.cfg-tab:hover {
+  color: var(--text);
+}
+
+.cfg-tab.is-active {
+  border-bottom-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 小卡片网格：一模块一小卡，auto-fill 自动多列；卡内键少，一眼看完一个模块 */
+.cfg-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--sp-3);
+  align-items: start;
+}
+
+.cfg-card {
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.cfg-card-title {
+  margin-bottom: var(--sp-2);
+  color: var(--dim);
+  font-size: var(--fs-chip);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.cfg-card .field {
+  margin-bottom: var(--sp-2);
 }
 
 /* 键的说明文字：次要色小字，跟在控件下方 */
@@ -201,8 +240,7 @@
 }
 
 /* 继承/覆盖徽标：键处于哪一级一目了然（业界设置继承模式） */
-.cfg-inherit,
-.cfg-override {
+.cfg-badge {
   display: inline-block;
   margin-left: 6px;
   padding: 0 5px;
