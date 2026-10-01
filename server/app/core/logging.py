@@ -23,11 +23,10 @@ logging 对"没有 handler 的 logger"只在 WARNING 及以上经 `lastResort` �
   `api_call` 审计行互通
 - 其余 `**attrs` 逐键并入顶层（只允许标量，见 [log_event]）
 
-## 什么不许进日志
+## 记录原则（2026-10-01 用户决定）
 
-令牌、学号密码、身份全量值——记录前先脱敏（core.audit.mask_actor），这是
-OWASP Logging Cheat Sheet 的硬规则。本模块不做脱敏：调用方给什么写什么，
-所以调用方必须先脱敏。
+**如实记录，不脱敏**：本系统是单运维者工具，日志与审计的价值就在于如实——
+令牌、标识、参数原文都可以落。字段名照 OTel，内容由调用方给什么写什么。
 """
 
 import contextvars

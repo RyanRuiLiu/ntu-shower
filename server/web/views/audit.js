@@ -4,7 +4,13 @@
  * ## 交互：标签切换 + 选中行看详情
  *
  * 两个数据源是**两种审计**，用标签切换而不是上下堆两张表——堆叠会把页面撑得很长，
- * 且看一个表时另一个在视野里纯属干扰。表格只放关键列；**点行 = 选中**（高亮），
+ * 且看一个表时另一个在视野里纯属干扰：
+ * - **接口调用**：每一次后台请求——谁、从哪个 IP、调了什么、结果如何。查"有人
+ *   动过什么、从哪里动的"来这里；
+ * - **命令流水**：每条发到设备的命令——参数、结果、设备回报。查"设备执行得
+ *   怎么样"来这里。
+ *
+ * 表格只放关键列；**点行 = 选中**（高亮），
  * 右侧详情面板随即显示该行的全部字段——详情在右栏**常驻**而不是页面底部：
  * 比对几行时眼睛不用上下跑。不做"点行展开/再点收起"——那个交互点击
  * 目标小、表格忽长忽短、字段藏在点击之后，连续比对几行会非常累。
@@ -31,10 +37,10 @@ import { problemText, report, statusBadgeClass, statusLabel } from '../core/outc
 import { store, subscribe } from '../core/store.js'
 import { toast } from '../core/toast.js'
 
-/** 标签定义：单一事实来源——按钮、标题、取数都从这里走。 */
+/** 标签定义：单一事实来源——按钮、标题（各自记什么）、取数都从这里走。 */
 const TABS = {
-  api: { label: '接口调用' },
-  command: { label: '命令流水' },
+  api: { label: '接口调用', title: '每一次后台请求：谁、从哪个 IP、调了什么、结果如何' },
+  command: { label: '命令流水', title: '每条发到设备的命令：参数、结果、设备回报' },
 }
 
 function statusBadge(status) {
@@ -93,7 +99,7 @@ function renderApiRows(rows, deviceNames, selectedIndex) {
         return `<tr class="audit-row${selected}" data-row="${index}">
         <td class="mono">${esc(fmtFullDateTime(row.requested_at))}</td>
         <td>${kindBadge}</td>
-        <td class="mono">${esc(row.actor_kind)}</td>
+        <td class="mono">${esc(row.actor_kind)}${row.client_ip ? `<div class="muted" title="来源 IP">${esc(row.client_ip)}</div>` : ''}</td>
         <td title="${esc(row.device_id || '')}">${esc(device)}</td>
         <td class="mono">${esc(row.method)} ${esc(row.path)}${row.query ? `<span class="muted">?${esc(row.query)}</span>` : ''}</td>
         <td class="mono">${row.status_code}</td>
@@ -198,7 +204,7 @@ export const auditView = {
             ${Object.entries(TABS)
               .map(
                 ([key, tab]) =>
-                  `<span class="audit-tab${key === state.tab ? ' is-active' : ''}" data-tab="${key}">${esc(tab.label)}</span>`,
+                  `<span class="audit-tab${key === state.tab ? ' is-active' : ''}" data-tab="${key}" title="${esc(tab.title)}">${esc(tab.label)}</span>`,
               )
               .join('')}
             <span class="panel-note">点行看详情</span>
