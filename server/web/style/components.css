@@ -207,6 +207,13 @@
   overflow: auto;
 }
 
+/* 详情面板内容区同样受限滚动：条目多了在面板内滚，不撑破分栏 */
+#detailPanel > .panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
 @media (width <= 1100px) {
   .audit-split {
     grid-template-columns: minmax(0, 1fr);
