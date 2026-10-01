@@ -9,17 +9,15 @@
 所有返回标识的函数都返回同一个 `IdentityRecord`，形状与名单一致。
 """
 
-import logging
 import secrets
 
 from app.core.audit import mask_actor
+from app.core.logging import log_event
 from app.core.wechat import WeChatNotConfiguredError, code_to_openid
 
 from . import repository
 from .identity import IdentityKind
 from .schemas import IdentityRecord
-
-logger = logging.getLogger("ntu-shower.access")
 
 #: 网页标识的随机字节数。32 字节 = 256 位，不可枚举。
 WEB_IDENTITY_BYTES = 32
@@ -41,11 +39,13 @@ def put_identity(
     """
     identity = openid if kind is IdentityKind.OPENID else secrets.token_urlsafe(WEB_IDENTITY_BYTES)
     record = repository.put_identity(identity, kind, capabilities, label)
-    logger.info(
-        "identity put: kind=%s identity=%s capabilities=%s",
-        kind.value,
-        mask_actor(identity),
-        ",".join(capabilities),
+    log_event(
+        "INFO",
+        "access.identity-put",
+        "身份已登记",
+        kind=kind.value,
+        identity=mask_actor(identity),
+        capabilities=",".join(capabilities),
     )
     return record
 
@@ -62,14 +62,14 @@ def login_with_wx_code(code: str) -> IdentityRecord | None:
     try:
         openid = code_to_openid(code)
     except WeChatNotConfiguredError:
-        logger.warning("wx login attempted but appid/secret not configured")
+        log_event("WARNING", "access.wx-not-configured", "微信登录未配置 appid/secret")
         return None
     if openid is None:
         return None
 
     record = repository.find_identity(openid)
     if record is None:
-        logger.info("login rejected, not granted: openid=%s", mask_actor(openid))
+        log_event("INFO", "access.login-rejected", "登录被拒：未获授权", identity=mask_actor(openid))
     return record
 
 
@@ -82,7 +82,7 @@ def revoke_identity(identity: str) -> bool:
     """撤销授权；该标识立即失去全部能力。"""
     removed = repository.delete_identity(identity)
     if removed:
-        logger.info("identity revoked: identity=%s", mask_actor(identity))
+        log_event("INFO", "access.identity-revoked", "身份已吊销", identity=mask_actor(identity))
     return removed
 
 

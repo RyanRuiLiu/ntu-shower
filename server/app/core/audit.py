@@ -28,11 +28,10 @@
 """
 
 import asyncio
-import contextvars
 import hashlib
-import logging
 import re
 import time
+import traceback
 import uuid
 from collections.abc import Awaitable, Callable
 
@@ -45,14 +44,14 @@ from starlette.responses import Response
 from . import db
 from .clock import now_rfc3339
 from .config import settings
-from .logging import ROOT_LOGGER_NAME
+from .logging import log_event, request_id_var, trace_id_var
 from .protocol import JsonObject
 
-_logger = logging.getLogger(ROOT_LOGGER_NAME)
 
-#: 当前请求的关联标识。中间件置位，路由与服务层读取（命令审计回填 trace_id 用）。
-request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="")
-trace_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("trace_id", default="")
+def exc_info_text() -> str:
+    """当前异常的单行摘要：给结构化日志的 error 属性，多行堆栈压成一行可检索。"""
+    return traceback.format_exc(limit=8).replace("\n", " | ")
+
 
 #: 需要审计的路径前缀。静态资源与 /healthz 不审计：无安全语义的噪音。
 _AUDITED_PREFIXES = ("/api", "/ops", "/ota")
@@ -209,11 +208,22 @@ async def _prune_loop() -> None:
         try:
             removed = prune(settings.audit_retention_days)
             if removed:
-                _logger.info("audit pruned: rows=%d retention_days=%d", removed, settings.audit_retention_days)
+                log_event(
+                    "INFO",
+                    "audit.pruned",
+                    "审计过期行已清理",
+                    rows=removed,
+                    retention_days=settings.audit_retention_days,
+                )
         except asyncio.CancelledError:
             raise
         except Exception:
-            _logger.exception("audit prune failed")
+            log_event(
+                "ERROR",
+                "audit.prune-failed",
+                "审计清理失败，等下一轮重试",
+                error=exc_info_text(),
+            )
         await asyncio.sleep(_PRUNE_INTERVAL_S)
 
 

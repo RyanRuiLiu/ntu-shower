@@ -12,11 +12,10 @@
 因此宁可在此失败。
 """
 
-import logging
-
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+from app.core.logging import log_event
 from app.core.problems import INVALID_CONFIG, ApiProblemError
 from app.core.security import require_ops_token
 from app.gateway.manager import manager
@@ -34,8 +33,6 @@ from .schemas import (
     GlobalConfigUpdateReport,
     GlobalConfigView,
 )
-
-logger = logging.getLogger("ntu-shower.config")
 
 ops_router = APIRouter(prefix="/ops", dependencies=[Depends(require_ops_token)], tags=["config-ops"])
 
@@ -86,11 +83,13 @@ async def put_global_config(req: ConfigUpdateRequest) -> GlobalConfigUpdateRepor
                 "reason": result.get("reason", ""),
             }
         )
-    logger.info(
-        "global config updated: revision=%d changed=%d notified=%d",
-        revision,
-        len(overrides),
-        len(notified),
+    log_event(
+        "INFO",
+        "config.global-updated",
+        "全局配置已更新并推送",
+        revision=revision,
+        changed=len(overrides),
+        notified=len(notified),
     )
     return {"revision": revision, "config": store.global_effective(), "notified": notified}
 
@@ -116,7 +115,14 @@ async def put_device_config(device_id: str, req: ConfigUpdateRequest) -> DeviceC
     require_trusted_online_device(device_id)
     revision, overrides = store.put_device_overrides(device_id, _validated(req.config))
     result = await sessions_service.push_config_update(device_id, revision, store.device_effective(device_id))
-    logger.info("device config updated: device=%s revision=%d changed=%d", device_id, revision, len(overrides))
+    log_event(
+        "INFO",
+        "config.device-updated",
+        "设备配置已更新并推送",
+        device_id=device_id,
+        revision=revision,
+        changed=len(overrides),
+    )
     return {
         "device_id": device_id,
         "revision": revision,
@@ -132,5 +138,5 @@ def delete_device_config(device_id: str) -> DeviceConfigRemovalReport:
     """删除设备级覆盖，该设备回落为跟随全局。"""
     removed = store.delete_device_overrides(device_id)
     if removed:
-        logger.info("device config override removed: device=%s", device_id)
+        log_event("INFO", "config.device-override-removed", "设备覆盖配置已移除", device_id=device_id)
     return {"device_id": device_id, "override_removed": removed, "config": store.effective(device_id)}
