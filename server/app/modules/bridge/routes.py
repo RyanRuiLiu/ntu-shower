@@ -249,6 +249,9 @@ async def adb_close(device_id: str) -> BridgeClosed:
             return {"device_id": device_id, "closed": False}
         await bridge.recycle()
         command_audit.finish(audit_id, outcomes.OK.value, "", "")
+        # 通知设备停掉 adbd 的返回值**故意不看**：本地这一侧已经收干净了（上面的 recycle），
+        # 而设备没收到这条也只是它的 adbd 多开一会儿——下一次开桥会重新下发。为一个不影响
+        # 本地状态的通知去改关桥的成败，会让"关没关掉"变成两个问题。
         await manager.send_to(device_id, protocol.envelope(actions.BRIDGE_CLOSE, {}))
         return {"device_id": device_id, "closed": True}
 
