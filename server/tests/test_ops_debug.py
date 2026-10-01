@@ -173,13 +173,20 @@ def test_scroll_dispatches_direction(client: TestClient, monkeypatch: pytest.Mon
     assert captured["params"] == {"direction": "backward"}
 
 
-def test_scroll_defaults_to_forward(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_scroll_direction_is_required_and_dispatched_verbatim(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """方向是必填的闭集：缺了在路由层被拒，给了就原样下发。"""
     captured = _ready(monkeypatch)
 
     r = client.post(f"/ops/devices/{DEVICE_ID}/scroll", headers=OPS_HEADERS, json={})
+    assert r.status_code == 422
 
-    assert r.status_code == 200
-    assert captured["params"] == {"direction": "forward"}
+    for direction in ("forward", "backward"):
+        r = client.post(f"/ops/devices/{DEVICE_ID}/scroll", headers=OPS_HEADERS, json={"direction": direction})
+        assert r.status_code == 200
+        assert captured["params"] == {"direction": direction}
 
 
 def test_scroll_rejects_unknown_direction(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
