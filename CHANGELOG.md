@@ -3,6 +3,16 @@
 本项目所有显著变更记录于此。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)；
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.4.5] - 2026-10-01
+
+### 变更
+
+- `api_call` 审计表增加 `kind` 列（http / gateway）：网关生命周期行的连接与
+  断开此前把事件语义塞进 path 字段（"/gateway/device connect"），现在 kind
+  归类、path 干净、status 约定 0=连接 1=断开；`GET /ops/audit` 支持 kind 过滤
+- RUNBOOK 新增「痕迹取回」：三层痕迹的取回命令与保留期说明；小节交叉引用
+  改为按名称（小节重编号不再破坏引用）
+
 ## [0.4.4] - 2026-10-01
 
 ### 新增
