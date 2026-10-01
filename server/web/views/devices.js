@@ -321,7 +321,9 @@ export const devicesView = {
     dispose.add(subscribe('device', renderCurrent))
     dispose.add(subscribe('view', (id) => { if (id !== 'devices') dispose.dispose() }))
 
-    dispose.add(listen($('btnReload'), 'click', () => refreshDevices().catch((error) => toast(problemText(error)))))
+    dispose.add(
+      listen(root.querySelector('#btnReload'), 'click', () => refreshDevices().catch((error) => toast(problemText(error)))),
+    )
     dispose.add(listen($('btnExec'), 'click', runExec))
     dispose.add(listen($('btnRestart'), 'click', doRestart))
     dispose.add(listen($('btnUninstall'), 'click', doUninstall))

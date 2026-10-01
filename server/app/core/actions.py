@@ -37,30 +37,33 @@ HTTP 路径遵循同一套词：集合用复数无动词（`/devices`），对�
 `ui.*` 与 `device.exec` 是两条同权通路：前者用无障碍 API，后者用 root shell，
 调用方按 `via` 参数选（见下）。
 
-## 两条通道怎么选（`ui.*`）
+## `ui.*` 动作各走哪条后端
 
-无障碍与 root shell 两条后端**各自完整**，由设备端按**无障碍是否可用**选路，
-**不是请求参数**——调用方无需也无法指定：
+无障碍与 root shell 两条后端**按动作固定**，不是运行时选路，也**不是请求参数**
+（`ui.input` 的 `channel` 除外，见下）：
 
-| 动作 | 默认 | 无障碍不可用时 |
-|---|---|---|
-| `ui.dump` | 无障碍 | **无替代**：如实失败 |
-| `ui.touch` 点击 | 无障碍 | `input tap` |
-| `ui.touch` 滑动 | root shell | 同左 |
-| `ui.scroll` | 无障碍 | 一次竖直滑动 |
-| `ui.key` | 无障碍 | `input keyevent` |
-| `ui.input` | 无障碍 | `input text`（仅 ASCII） |
+| 动作 | 后端 |
+|---|---|
+| `ui.touch` 点击/滑动 | root shell `input tap/swipe` |
+| `ui.scroll` | root shell `input swipe`（竖直滑动） |
+| `ui.key` | root shell `input keyevent` |
+| `ui.input` | 调用方选：`channel="keys"` shell 注入（仅 ASCII）；`channel="clipboard"` 无障碍粘贴（中文） |
+| `ui.dump` | 无障碍 |
 
-`ui.touch` 的滑动一直走 shell：`dispatchGesture` 需 API 24，本设备是 19，
-无障碍**做不到**合成任意坐标手势——这是运行时下限，不是取舍。
+touch/scroll/key 没有"无障碍那条"：`dispatchGesture` 需 API 24，本设备是 19，
+无障碍做不到合成任意坐标手势——运行时下限，不是取舍；按键的
+`performGlobalAction` 已撤，坐标语义统一走 shell。
+
+`ui.input` 是**唯一由调用方选路的动作**：粘贴在 ROM 上第二次插入会带出空格，
+按键写不了非 ASCII，两条并列，网页端给使用者选择。
 
 `ui.dump` 没有第二条通道：shell 侧的 `uiautomator dump` 会经 `UiAutomation`
 接管系统无障碍会话，真机上出现过用它取过几次节点后整机无障碍失效的情况
 （因果未坐实，但风险远大于便利），因此不采用。
 
 无障碍**整体**失效是真机上发生过的事（总开关被系统置 0 且拒绝写回，恢复办法见
-`android/.../features/selfmanage/A11yGuard.kt`）。那时若没有 shell 那条，`ui.*`
-会全部失败，远程就完全失去了操作设备界面的手段。
+`android/.../features/selfmanage/A11yGuard.kt`）。那时 touch/scroll/key 这些
+shell 操作照常工作，输入切 `keys` 通道，远程并没有完全失去操作设备界面的手段。
 
 ## API 19 的硬约束
 
