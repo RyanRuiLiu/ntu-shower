@@ -255,25 +255,26 @@ export const devicesView = {
             <span class="panel-note">作用于 <b id="currentDevice">未选择</b></span>
           </div>
           <div class="panel-body">
-            <div class="field">
-              <label for="inCommand">在设备上执行的命令<span class="muted"> · 以 root 身份，回车执行</span></label>
-              <div class="field-row">
-                <input id="inCommand" class="mono" type="text" autocomplete="off" spellcheck="false"
-                       placeholder="例：ls -l /sdcard/ntu-shower">
-                <button type="button" class="btn btn-sm" id="btnExec">执行</button>
-              </div>
+            <!-- 设备自身的动作放在上面：下面那条命令的输出区会随输出长度撑开，
+                 排在它后面的东西每次执行都会往下跳，按钮跑掉就不好点了。 -->
+            <div class="panel-split-label">设备自身</div>
+            <div class="btn-row">
+              <button type="button" class="btn btn-ghost btn-sm" id="btnRestart">重启设备端程序</button>
+              <button type="button" class="btn btn-danger btn-sm" id="btnUninstall">卸载设备端程序</button>
             </div>
-            <pre class="code" id="execOutput" hidden></pre>
-            <div class="result" id="execResult"></div>
+            <div class="result" id="maintResult"></div>
 
-            <!-- 设备自身的动作走另一条通路（即时执行、不进命令通道），结果也另记一处 -->
             <div class="panel-split">
-              <div class="panel-split-label">设备自身</div>
-              <div class="btn-row">
-                <button type="button" class="btn btn-ghost btn-sm" id="btnRestart">重启设备端程序</button>
-                <button type="button" class="btn btn-danger btn-sm" id="btnUninstall">卸载设备端程序</button>
+              <div class="field">
+                <label for="inCommand">在设备上执行的命令<span class="muted"> · 以 root 身份，回车执行</span></label>
+                <div class="field-row">
+                  <input id="inCommand" class="mono" type="text" autocomplete="off" spellcheck="false"
+                         placeholder="例：ls -l /sdcard/ntu-shower">
+                  <button type="button" class="btn btn-sm" id="btnExec">执行</button>
+                </div>
               </div>
-              <div class="result" id="maintResult"></div>
+              <pre class="code" id="execOutput" hidden></pre>
+              <div class="result" id="execResult"></div>
             </div>
           </div>
         </section>
