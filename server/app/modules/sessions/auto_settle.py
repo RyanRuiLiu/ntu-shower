@@ -8,18 +8,16 @@
 """
 
 import asyncio
-import logging
 from datetime import datetime, timezone
 
 from app.core import actions, outcomes
 from app.core.clock import parse_rfc3339
+from app.core.logging import log_event
 from app.core.protocol import JsonObject, as_int
 from app.gateway.manager import manager
 from app.modules.config import store as config_store
 from app.modules.doors import repository as doors_repository
 from app.modules.sessions import service as sessions_service
-
-logger = logging.getLogger("ntu-shower.sessions.auto_settle")
 
 _task: asyncio.Task[None] | None = None
 SCAN_INTERVAL_S = 30
@@ -72,7 +70,14 @@ async def _settle(device_id: str, cert_no: str, password: str) -> bool:
         timeout_s=60.0,
     )
     ok = result.get("status") == outcomes.OK.value
-    logger.info("auto-settle %s/%s: %s", device_id, cert_no, result.get("status"))
+    log_event(
+        "INFO",
+        "auto-settle.settled",
+        "自动结算执行完成",
+        device_id=device_id,
+        cert_no=cert_no,
+        status=str(result.get("status")),
+    )
     return ok
 
 
@@ -93,7 +98,7 @@ async def _loop() -> None:
         try:
             await scan_once()
         except Exception as exc:  # noqa: BLE001 —— 扫描循环必须存活：单次失败不得终止后续扫描，且已记录日志
-            logger.warning("auto-settle scan failed: %s", exc)
+            log_event("WARNING", "auto-settle.scan-failed", "自动结算扫描失败", error=str(exc))
         await asyncio.sleep(SCAN_INTERVAL_S)
 
 

@@ -4,13 +4,13 @@
 构造文件名——两处各自成立，不依赖对方先拦。
 """
 
-import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Path, UploadFile
 from fastapi.responses import FileResponse
 
 from app.core.config import settings
+from app.core.logging import log_event
 from app.core.problems import RELEASE_NOT_FOUND, RELEASE_TOO_LARGE, ApiProblemError
 from app.core.security import require_ops_token
 from app.modules.ota import repository, service
@@ -22,8 +22,6 @@ from app.modules.ota.schemas import (
     ReleaseRemoved,
 )
 from app.modules.ota.service import VERSION_PATTERN
-
-logger = logging.getLogger("ntu-shower.ota")
 
 router = APIRouter(prefix="/ota", tags=["ota"])
 
@@ -49,7 +47,7 @@ def manifest(device_id: str, version_code: int) -> OtaManifest:
     if not path.is_file():
         # 库里有记录、文件却不在（手工清理过目录之类）：当作没有更新，而不是给设备一个
         # 下不动的地址——它那边会在下载时失败，而失败的原因与服务端实情对不上。
-        logger.warning("release file missing: version=%s", rel["version"])
+        log_event("WARNING", "ota.release-file-missing", "发布文件缺失", version=str(rel["version"]))
         return {"up_to_date": True}
     return {
         "up_to_date": False,
@@ -88,7 +86,7 @@ def delete_release(version: str) -> ReleaseRemoved:
     """下架发布（紧急止损，如终止 OTA 循环）。"""
     deleted = repository.delete_release(version)
     if deleted:
-        logger.warning("release withdrawn: version=%s", version)
+        log_event("WARNING", "ota.release-file-missing", "发布文件缺失（删除接口探测到）", version=version)
     return {"version": version, "deleted": deleted}
 
 
@@ -107,19 +105,21 @@ async def upload_release(
     """
     data = await file.read()
     if len(data) > settings.max_ota_bytes:
-        logger.warning("release rejected, too large: version=%s size=%d", version, len(data))
+        log_event("WARNING", "ota.release-too-large", "发布被拒：超出单文件上限", version=version, size=len(data))
         raise ApiProblemError(RELEASE_TOO_LARGE, f"上限 {settings.max_ota_bytes} 字节")
     sha256 = service.store_release(version, data)
     repository.insert_release(version, version_code, sha256, mandatory, force, target)
     notified = await service.notify_target_devices(version, version_code, mandatory, target)
-    logger.info(
-        "release published: version=%s code=%d size=%d force=%s target=%s notified=%d",
-        version,
-        version_code,
-        len(data),
-        force,
-        target,
-        len(notified),
+    log_event(
+        "INFO",
+        "ota.release-published",
+        "发布已登记并推送目标设备",
+        version=version,
+        version_code=version_code,
+        size=len(data),
+        force=force,
+        target=target,
+        notified=len(notified),
     )
     return {
         "version": version,
