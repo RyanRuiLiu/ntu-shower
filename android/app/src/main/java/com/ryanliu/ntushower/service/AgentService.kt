@@ -8,6 +8,8 @@ import android.os.IBinder
 import android.os.SystemClock
 import android.util.Log
 import com.ryanliu.ntushower.BuildConfig
+import com.ryanliu.ntushower.core.audit.CommandAuditLog
+import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.config.ConfigCache
 import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.identity.DeviceIdentity
@@ -29,6 +31,7 @@ import com.ryanliu.ntushower.transport.GatewayClient
 import com.ryanliu.ntushower.transport.OutcomeStatus
 import com.ryanliu.ntushower.transport.ReasonCodes
 import org.json.JSONObject
+import java.io.File
 import java.util.concurrent.Executors
 
 /**
@@ -75,6 +78,9 @@ class AgentService : Service() {
 
     /** 已处理命令的结果缓存（幂等接收者，见 CommandResultCache）。 */
     private val recentOutcomes = CommandResultCache(RuntimeConfig.commandDedupMaxCount.toInt())
+
+    /** 命令痕迹落盘（见 core.audit.CommandAuditLog）：与服务端 command_audit 呼应。 */
+    private val commandAudit = CommandAuditLog(File(AppConfig.WORK_DIR))
     private var adbBridge: AdbBridge? = null
 
     @Volatile private var trusted = false
@@ -110,6 +116,7 @@ class AgentService : Service() {
     private val callback = object : GatewayClient.Callback {
         override fun onConnected(trusted: Boolean, config: JSONObject, upgrade: JSONObject?) {
             this@AgentService.trusted = trusted
+            commandAudit.gateway(connected = true, detail = "trusted=$trusted")
             Log.i(TAG, "gateway connected, trusted=$trusted")
             // hello_ack 里的配置已经由 GatewayClient 写进 RuntimeConfig，这里做两件事：
             // 落到依赖配置的组件上，以及存一份供下次启动直接用。
@@ -135,6 +142,7 @@ class AgentService : Service() {
 
         override fun onDisconnected(reason: String) {
             trusted = false
+            commandAudit.gateway(connected = false, detail = reason)
             Log.w(TAG, "gateway disconnected: $reason")
         }
 
@@ -187,12 +195,14 @@ class AgentService : Service() {
         // 分配/结算会真实操作硬件，重复执行必须在这里拦下；且重发结果而非静默忽略——
         // 服务端可能正是因为没收到结果才重发。
         recentOutcomes.recall(commandId)?.let { cached ->
+            commandAudit.received(commandId, "(重复接收，重发既有结果)", duplicate = true)
             Log.i(TAG, "duplicate command, resending result: $commandId")
             sendOutcome(cached)
             return
         }
         val payload = envelope.payload
         val action = payload.optString("action", "")
+        commandAudit.received(commandId, action)
         val params = payload.optJSONObject("params") ?: JSONObject()
 
         Log.i(TAG, "command: $action ($commandId)")
@@ -352,6 +362,7 @@ class AgentService : Service() {
 
     private fun sendOutcome(outcome: CommandOutcome) {
         recentOutcomes.remember(outcome)
+        commandAudit.result(outcome.commandId, outcome.status, outcome.reasonCode)
         val payload = JSONObject()
             .put("status", outcome.status)
             .put("reason_code", outcome.reasonCode)
