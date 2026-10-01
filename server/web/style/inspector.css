@@ -17,6 +17,7 @@
 /* 高度链必须一路撑到底：中间断一节，右列面板会被内容顶开、画面区随之塌掉。
    这是工具型布局与卡片式布局最大的区别——它靠 flex 分配空间，不靠内容撑高 */
 #view-inspector {
+  position: relative; /* 恢复把手（.tree-restore）的定位基准 */
   height: calc(100vh - var(--bar-height));
   max-width: none;
   padding: 0;
@@ -319,6 +320,43 @@
   background: var(--surface);
   border-left: 1px solid var(--border);
   resize: horizontal;
+}
+
+/* hidden 属性被 display:flex 覆盖，收起状态要显式声明 */
+.tree-panel[hidden] {
+  display: none;
+}
+
+/* 右面板收起后的恢复把手：贴在画面区右缘竖着挂一块 */
+.tree-restore {
+  position: absolute;
+  top: 72px;
+  right: 0;
+  z-index: 20;
+  padding: 8px 6px;
+  border: 1px solid var(--border);
+  border-right: none;
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  background: var(--elevated);
+  color: var(--dim);
+  font: var(--fs-chip) var(--font-ui);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.tree-restore:hover {
+  color: var(--text);
+  background: var(--bg);
+}
+
+/* 面板标题可点击：整块收起右侧面板的入口 */
+.panel-title-btn {
+  cursor: pointer;
+  user-select: none;
+}
+
+.panel-title-btn:hover {
+  color: var(--text);
 }
 
 @media (width <= 1100px) {
@@ -655,6 +693,35 @@
   padding: 6px 10px;
   background: var(--surface);
   border-top: 1px solid var(--border);
+}
+
+/* 文本注入通道：两条并列通路的选择器，点谁用谁（粘贴支持中文 / 按键无空格仅 ASCII） */
+.input-channel {
+  display: flex;
+  flex-shrink: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.input-channel button {
+  padding: 5px 9px;
+  border: none;
+  background: var(--elevated);
+  color: var(--dim);
+  font: var(--fs-chip) var(--font-ui);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.input-channel button + button {
+  border-left: 1px solid var(--border);
+}
+
+.input-channel button.is-active {
+  background: var(--accent-bg-strong);
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .input-bar input {
