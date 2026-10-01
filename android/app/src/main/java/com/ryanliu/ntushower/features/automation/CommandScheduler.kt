@@ -276,22 +276,7 @@ class CommandScheduler(
                     outcome(command.id, ok, ReasonCodes.UI_NO_TARGET_AT_POINT, "该位置没有可点击的节点")
                 }
 
-                is Command.UiScroll -> when (command.direction) {
-                    "forward" -> {
-                        val ok = ShellUiChannel.scroll(forward = true)
-                        outcome(command.id, ok, ReasonCodes.UI_NO_SCROLLABLE_CONTAINER, "界面上没有可滚动的容器")
-                    }
-                    "backward" -> {
-                        val ok = ShellUiChannel.scroll(forward = false)
-                        outcome(command.id, ok, ReasonCodes.UI_NO_SCROLLABLE_CONTAINER, "界面上没有可滚动的容器")
-                    }
-                    else -> CommandOutcome(
-                        command.id,
-                        OutcomeStatus.FAILED,
-                        ReasonCodes.UI_UNKNOWN_DIRECTION,
-                        "未知的滚动方向：${command.direction}",
-                    )
-                }
+                is Command.UiScroll -> executeScroll(command)
 
                 is Command.UiKey -> {
                     val key = UiKey.parse(command.key)
@@ -304,37 +289,7 @@ class CommandScheduler(
                     outcome(command.id, ShellUiChannel.key(key), ReasonCodes.UI_KEY_REJECTED, "系统拒绝了该按键")
                 }
 
-                // 输入有两条并列通道：剪贴板粘贴支持中文，但本 ROM 的粘贴在第二次
-                // 插入时会带出空格；按键注入没有空格问题却只走得通 ASCII——所以
-                // 按键通道在设备端再守一次 ASCII，守不住就明确拒绝，不把写坏的内容
-                // 静默落进输入框。选哪条由网页端的使用者定；通道值缺失或不认识
-                // 直接拒绝，不做静默回落。
-                is Command.UiInput -> when (command.channel) {
-                    "keys" -> {
-                        if (!command.text.all { it.code in 32..126 }) {
-                            return CommandOutcome(
-                                command.id,
-                                OutcomeStatus.FAILED,
-                                ReasonCodes.UI_KEYS_ASCII_ONLY,
-                                "按键通道仅支持英文、数字与符号，中文请用粘贴通道",
-                            )
-                        }
-                        val ok = ShellUiChannel.typeText(command.text)
-                        outcome(command.id, ok, ReasonCodes.UI_TEXT_REJECTED, "系统拒绝了文本注入")
-                    }
-
-                    "clipboard" -> {
-                        val ok = a11y != null && A11yUiChannel.typeIntoFocus(a11y, command.text)
-                        outcome(command.id, ok, ReasonCodes.UI_NO_EDITABLE_FIELD, "没有可输入的控件，或无障碍服务不可用")
-                    }
-
-                    else -> CommandOutcome(
-                        command.id,
-                        OutcomeStatus.FAILED,
-                        ReasonCodes.UI_UNKNOWN_CHANNEL,
-                        "未知的输入通道：${command.channel}",
-                    )
-                }
+                is Command.UiInput -> executeInput(command, a11y)
 
                 is Command.UiDump -> exportTree(command)
 
@@ -349,6 +304,63 @@ class CommandScheduler(
         CommandOutcome(id, OutcomeStatus.OK, "", "")
     } else {
         CommandOutcome(id, OutcomeStatus.FAILED, failCode, failMessage)
+    }
+
+    /**
+     * 滚动：方向是必填的闭集，缺失或不认识直接拒绝，不做静默回落。
+     */
+    private fun executeScroll(command: Command.UiScroll): CommandOutcome = when (command.direction) {
+        "forward" -> {
+            val ok = ShellUiChannel.scroll(forward = true)
+            outcome(command.id, ok, ReasonCodes.UI_NO_SCROLLABLE_CONTAINER, "界面上没有可滚动的容器")
+        }
+
+        "backward" -> {
+            val ok = ShellUiChannel.scroll(forward = false)
+            outcome(command.id, ok, ReasonCodes.UI_NO_SCROLLABLE_CONTAINER, "界面上没有可滚动的容器")
+        }
+
+        else -> CommandOutcome(
+            command.id,
+            OutcomeStatus.FAILED,
+            ReasonCodes.UI_UNKNOWN_DIRECTION,
+            "未知的滚动方向：${command.direction}",
+        )
+    }
+
+    /**
+     * 输入有两条并列通道：剪贴板粘贴支持中文，但本 ROM 的粘贴在第二次插入时会带出
+     * 空格；按键注入没有空格问题却只走得通 ASCII——所以按键通道在这里再守一次
+     * ASCII，守不住就明确拒绝，不把写坏的内容静默落进输入框。选哪条由网页端的
+     * 使用者定；通道值缺失或不认识直接拒绝，不做静默回落。
+     */
+    private fun executeInput(command: Command.UiInput, a11y: A11yService?): CommandOutcome {
+        when (command.channel) {
+            "keys" -> {
+                if (!command.text.all { it.code in 32..126 }) {
+                    return CommandOutcome(
+                        command.id,
+                        OutcomeStatus.FAILED,
+                        ReasonCodes.UI_KEYS_ASCII_ONLY,
+                        "按键通道仅支持英文、数字与符号，中文请用粘贴通道",
+                    )
+                }
+                val ok = ShellUiChannel.typeText(command.text)
+                return outcome(command.id, ok, ReasonCodes.UI_TEXT_REJECTED, "系统拒绝了文本注入")
+            }
+
+            "clipboard" -> {
+                val ok = a11y != null && A11yUiChannel.typeIntoFocus(a11y, command.text)
+                return outcome(command.id, ok, ReasonCodes.UI_NO_EDITABLE_FIELD, "没有可输入的控件，或无障碍服务不可用")
+            }
+
+            else -> return CommandOutcome(
+                command.id,
+                OutcomeStatus.FAILED,
+                ReasonCodes.UI_UNKNOWN_CHANNEL,
+                "未知的输入通道：${command.channel}",
+            )
+        }
     }
 
     private fun captureImage(command: Command): CommandOutcome {
