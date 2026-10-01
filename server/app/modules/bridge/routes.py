@@ -87,7 +87,6 @@ async def device_bridge(ws: WebSocket) -> None:
     nonce = ws.query_params.get("nonce") or ""
     await ws.accept()
 
-    idle_s = _bridge_timeout_s("bridge_idle_timeout_s")
     lifetime_s = _bridge_timeout_s("bridge_max_lifetime_s")
     pair_s = _bridge_timeout_s("bridge_pair_timeout_s")
     loop = asyncio.get_running_loop()
@@ -104,24 +103,29 @@ async def device_bridge(ws: WebSocket) -> None:
             await ws.send_bytes(bytes(bridge.pending_to_device))
         bridge.pending_to_device.clear()
 
+    reason = "tunnel closed"
     try:
         while bridge.device_ws is ws:
-            # 绝对寿命是硬上限：空闲超时只覆盖「没人用」，一直有字节往来时它不会触发，
-            # 而调试通道不该无限期开着。取两者中先到的那个，到点即结束循环。
             remaining = lifetime_s - (loop.time() - bridge.opened_at)
             if remaining <= 0:
+                reason = "lifetime reached"
                 logger.info("bridge lifetime reached: device=%s generation=%d", device_id, bridge.generation)
                 break
-            data = await asyncio.wait_for(ws.receive_bytes(), timeout=min(idle_s, remaining))
+            # **这里不设空闲超时。** 设备侧的隧道连进来之后、我们这边还没执行
+            # `adb connect` 之前，它一个字节都不会发——而那不是"没人用"，是"还没开始用"。
+            # 早先按 300 秒空闲收尾，于是开桥五分钟后就自己关了，人还以为它在。
+            # 调试的节奏由人定（中途停下来想事情、去装 adb 都正常），唯一的时间上限
+            # 是绝对寿命。
+            data = await ws.receive_bytes()
             tcp_writer = bridge.tcp_writer
             if tcp_writer is None:
                 _append(bridge.pending_to_tcp, data)
                 continue
             tcp_writer.write(data)
             await tcp_writer.drain()
-    except (WebSocketDisconnect, asyncio.TimeoutError):
-        # 设备断开、空闲超时或寿命到点：桥的正常结束路径
-        pass
+    except WebSocketDisconnect:
+        # 设备断开：桥的正常结束路径之一
+        reason = "device disconnected"
     finally:
         # 设备 WS 断了就意味着这条通道的两端之一消失，整条桥到此为止。
         #
@@ -129,24 +133,28 @@ async def device_bridge(ws: WebSocket) -> None:
         # `device_ws is ws` 那层判断挡的是"新世代已经接管"的情况：那时本协程是旧世代的
         # 残留，收尾会把新桥一起拆掉。
         if bridge.device_ws is ws:
-            await bridge.recycle()
+            await bridge.recycle(reason)
             audit_id = f"bridge-{uuid.uuid4()}"
             command_audit.insert_command(audit_id, device_id, "bridge.session_end")
-            command_audit.finish(audit_id, outcomes.OK.value, "", "")
+            command_audit.finish(audit_id, outcomes.OK.value, "", reason)
 
 
-async def _pump_tcp_to_ws(bridge: AdbBridge, reader: asyncio.StreamReader, idle_s: float) -> None:
+async def _pump_tcp_to_ws(bridge: AdbBridge, reader: asyncio.StreamReader) -> None:
     """本地 TCP（adb 客户端侧）→ 设备 WS。
 
     TCP 客户端断开只释放该连接（回到"等待下一个 adb 连接"，对齐旧系统隧道语义）；
-    整桥回收由设备 WS 断开、'POST bridge/close' 或超时触发。
+    整桥回收由设备 WS 断开、'POST bridge/close' 或寿命到点触发。
+
+    **这里不设空闲超时。** adb 客户端连着而暂时没敲命令是常态（人在看输出、在想下一步），
+    按空闲切断会把人手里的会话掐掉。桥的绝对寿命已经限制了它的总时长，而这条任务在桥
+    被回收时会被 `detach_client` 取消，不会一直挂着。
 
     泵退出时只关自己的 TCP 写端，**不调 `detach_client()`**：那会 cancel 当前任务，
     而自己取消自己会与 WS 循环的清理形成相互等待——真机上表现为桥挂死不释放。
     """
     try:
         while True:
-            data = await asyncio.wait_for(reader.read(BRIDGE_BUFFER_SIZE), timeout=idle_s)
+            data = await reader.read(BRIDGE_BUFFER_SIZE)
             if not data:
                 break
             device_ws = bridge.device_ws
@@ -154,8 +162,8 @@ async def _pump_tcp_to_ws(bridge: AdbBridge, reader: asyncio.StreamReader, idle_
                 _append(bridge.pending_to_device, data)
                 continue
             await device_ws.send_bytes(data)
-    except (OSError, asyncio.TimeoutError, WebSocketDisconnect, RuntimeError):
-        # 本端流结束：对端断开、空闲超时或设备 WS 已消失。
+    except (OSError, WebSocketDisconnect, RuntimeError):
+        # 本端流结束：对端断开或设备 WS 已消失。
         # 刻意不捕获 Exception——未预料的异常应暴露到 asyncio 日志而不是被吞掉。
         pass
     finally:
@@ -179,7 +187,7 @@ async def _serve_client(bridge: AdbBridge, reader: asyncio.StreamReader, writer:
         writer.write(bytes(bridge.pending_to_tcp))
         await writer.drain()
         bridge.pending_to_tcp.clear()
-    await _pump_tcp_to_ws(bridge, reader, _bridge_timeout_s("bridge_idle_timeout_s"))
+    await _pump_tcp_to_ws(bridge, reader)
 
 
 @ops_router.post("/devices/{device_id}/bridge/open")
@@ -247,7 +255,7 @@ async def adb_close(device_id: str) -> BridgeClosed:
         if bridge is None:
             command_audit.finish(audit_id, outcomes.OK.value, "", "already closed")
             return {"device_id": device_id, "closed": False}
-        await bridge.recycle()
+        await bridge.recycle("requested")
         command_audit.finish(audit_id, outcomes.OK.value, "", "")
         # 通知设备停掉 adbd 的返回值**故意不看**：本地这一侧已经收干净了（上面的 recycle），
         # 而设备没收到这条也只是它的 adbd 多开一会儿——下一次开桥会重新下发。为一个不影响
@@ -262,15 +270,19 @@ async def adb_status(device_id: str) -> BridgeStatus:
 
     `expires_in_s` 给出距离**绝对寿命**到点的秒数——运维据此判断还来不来得及做完
     手上的事，而不是等到连接莫名断开再回头看日志。
+
+    `ssh_target` 与桥开没开无关，所以关着时也给：网页端要靠它拼出本机那条连接命令。
     """
+    ssh_target = str(config_store.global_effective()["bridge_ssh_target"])
     bridge = registry.get(device_id)
     if bridge is None:
-        return {"device_id": device_id, "open": False}
+        return {"device_id": device_id, "open": False, "ssh_target": ssh_target}
     lifetime_s = _bridge_timeout_s("bridge_max_lifetime_s")
     remaining = max(0.0, lifetime_s - (asyncio.get_running_loop().time() - bridge.opened_at))
     return {
         "device_id": device_id,
         "open": True,
+        "ssh_target": ssh_target,
         "port": bridge.port,
         "generation": bridge.generation,
         "device_connected": bridge.connected,

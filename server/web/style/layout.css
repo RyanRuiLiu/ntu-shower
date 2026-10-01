@@ -187,6 +187,21 @@
   padding: var(--sp-3);
 }
 
+/* 面板内的分区：同一张卡片里两组性质不同的东西，用一条线分开。
+   比如"远程命令"里上半是执行任意命令、下半是重启与卸载这类设备自身的动作——
+   它们的结果各说各话，混成一片会看不清哪句话对应哪次操作。 */
+.panel-split {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+
+.panel-split-label {
+  margin-bottom: var(--sp-2);
+  font-size: var(--fs-chip);
+  color: var(--muted);
+}
+
 .panel-body.flush {
   padding: 0;
 }

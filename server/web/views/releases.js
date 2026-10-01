@@ -13,16 +13,11 @@
  * 下架是紧急止损：发出去才发现有问题时，用它终止后续设备继续安装。
  */
 import { api } from '../core/api.js'
+import { problemText, report } from '../core/outcome.js'
 import { fmtFullDateTime } from '../core/clock.js'
 import { $, disposer, esc, listen } from '../core/dom.js'
 import { store } from '../core/store.js'
 import { toast } from '../core/toast.js'
-
-function report(id, text, kind) {
-  const box = $(id)
-  box.className = `result ${kind}`
-  box.textContent = text
-}
 
 function render(list) {
   if (list.length === 0) {
@@ -57,7 +52,7 @@ async function reload() {
   try {
     render(await api.releases())
   } catch (error) {
-    report('releaseResult', error.message, 'err')
+    report('releaseResult', problemText(error), 'err')
   }
 }
 
@@ -66,7 +61,7 @@ async function upload() {
   const version = $('inVersion').value.trim()
   const versionCode = Number($('inVersionCode').value)
   if (!file || !version || !Number.isFinite(versionCode)) {
-    report('releaseResult', '请选择 APK 文件，并填写版本名与版本号', 'err')
+    report('releaseResult', '失败 · 请选择 APK 文件，并填写版本名与版本号', 'err')
     return
   }
   const form = new FormData()
@@ -82,7 +77,7 @@ async function upload() {
     report('releaseResult', `已发布 ${result.version}，通知 ${result.notified_devices.length} 台`, 'ok')
     await reload()
   } catch (error) {
-    report('releaseResult', error.message, 'err')
+    report('releaseResult', problemText(error), 'err')
   }
 }
 
@@ -148,7 +143,7 @@ export const releasesView = {
         try {
           if (button.dataset.act === 'rearm') {
             if (!store.deviceId) {
-              report('releaseResult', '请先在顶栏选择设备', 'err')
+              report('releaseResult', '失败 · 请先在顶栏选择设备', 'err')
               return
             }
             const result = await api.rearmRelease(version, store.deviceId)
@@ -160,7 +155,7 @@ export const releasesView = {
             await reload()
           }
         } catch (error) {
-          report('releaseResult', error.message, 'err')
+          report('releaseResult', problemText(error), 'err')
         }
       }),
     )

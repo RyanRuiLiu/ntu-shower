@@ -13,17 +13,11 @@
 import { api } from '../core/api.js'
 import { fmtFullDateTime } from '../core/clock.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
-import { statusBadgeClass, statusLabel } from '../core/outcome.js'
+import { problemText, report, statusBadgeClass, statusLabel } from '../core/outcome.js'
 import { store, subscribe } from '../core/store.js'
 
 function statusBadge(status) {
   return `<span class="badge ${statusBadgeClass(status)}">${esc(statusLabel(status))}</span>`
-}
-
-function report(text, kind) {
-  const box = $('auditResult')
-  box.className = `result ${kind}`
-  box.textContent = text
 }
 
 function duration(row) {
@@ -71,7 +65,7 @@ async function reload() {
     render(rows)
     report(`共 ${rows.length} 条`, 'info')
   } catch (error) {
-    report(error.message, 'err')
+    report('auditResult', problemText(error), 'err')
   }
 }
 

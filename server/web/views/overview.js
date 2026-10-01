@@ -251,7 +251,7 @@ function credentials() {
   const certNo = $('inSid').value.trim()
   const password = $('inPwd').value
   if (!certNo || !password) {
-    report('resAction', '请填写学号与密码', 'err')
+    report('resAction', '失败 · 请填写学号与密码', 'err')
     return null
   }
   return { cert_no: certNo, password }
