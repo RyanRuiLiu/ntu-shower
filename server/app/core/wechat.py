@@ -4,14 +4,12 @@
 """
 
 import json
-import logging
 import urllib.error
 import urllib.parse
 import urllib.request
 
 from .config import settings
-
-logger = logging.getLogger("ntu-shower.wechat")
+from .logging import log_event
 
 JSCODE2SESSION_URL = "https://api.weixin.qq.com/sns/jscode2session"
 
@@ -44,11 +42,11 @@ def code_to_openid(code: str) -> str | None:
         with urllib.request.urlopen(f"{JSCODE2SESSION_URL}?{query}", timeout=settings.wechat_api_timeout_s) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, ValueError) as exc:
-        logger.warning("jscode2session failed: %s", exc)
+        log_event("WARNING", "wechat.jscode-failed", "jscode2session 调用失败", error=str(exc))
         return None
 
     openid = payload.get("openid")
     if not openid:
-        logger.info("jscode2session rejected: errcode=%s", payload.get("errcode"))
+        log_event("INFO", "wechat.jscode-rejected", "jscode2session 被拒", errcode=str(payload.get("errcode")))
         return None
     return str(openid)

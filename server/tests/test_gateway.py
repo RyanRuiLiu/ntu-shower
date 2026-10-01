@@ -176,7 +176,7 @@ def test_unexpected_frame_error_is_logged_before_reraise(
         while True:
             ws.receive_text()
 
-    assert any("gateway session failed" in record.getMessage() for record in caplog.records), (
+    assert any(getattr(record, "event", "") == "gateway.session-failed" for record in caplog.records), (
         "未预期的帧处理异常没有留痕"
     )
 

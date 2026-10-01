@@ -21,12 +21,12 @@ bug 都要改多处，漏掉一处就是端口泄漏——真实发生过，表�
 
 import asyncio
 import contextlib
-import logging
 import uuid
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
 from app.core import actions, outcomes, protocol, reason_codes
+from app.core.logging import log_event
 from app.core.problems import DEVICE_OFFLINE, ApiProblemError
 from app.core.security import require_ops_token
 from app.gateway.manager import manager
@@ -41,8 +41,6 @@ from .manager import (
     AdbBridge,
     registry,
 )
-
-logger = logging.getLogger("ntu-shower.bridge")
 
 router = APIRouter(tags=["bridge"])
 
@@ -109,7 +107,13 @@ async def device_bridge(ws: WebSocket) -> None:
             remaining = lifetime_s - (loop.time() - bridge.opened_at)
             if remaining <= 0:
                 reason = "lifetime reached"
-                logger.info("bridge lifetime reached: device=%s generation=%d", device_id, bridge.generation)
+                log_event(
+                    "INFO",
+                    "bridge.lifetime-reached",
+                    "ADB 桥达到最长寿命，开始回收",
+                    device_id=device_id,
+                    generation=bridge.generation,
+                )
                 break
             # **这里不设空闲超时。** 设备侧的隧道连进来之后、我们这边还没执行
             # `adb connect` 之前，它一个字节都不会发——而那不是"没人用"，是"还没开始用"。
@@ -240,7 +244,14 @@ async def adb_open(device_id: str) -> BridgeOpened:
             command_audit.finish(audit_id, outcomes.FAILED.value, "port.bind_failed", str(exc))
             raise
         command_audit.finish(audit_id, outcomes.OK.value, "", f"port {port} gen {generation}")
-        logger.info("bridge opened: device=%s port=%d generation=%d", device_id, bridge.port, bridge.generation)
+        log_event(
+            "INFO",
+            "bridge.opened",
+            "ADB 桥已建立",
+            device_id=device_id,
+            port=bridge.port,
+            generation=bridge.generation,
+        )
         # 只返回结构化字段：连接指引属于文档职责（见 docs/RUNBOOK.md §4）
         return {"device_id": device_id, "port": bridge.port, "already_open": False, "generation": bridge.generation}
 

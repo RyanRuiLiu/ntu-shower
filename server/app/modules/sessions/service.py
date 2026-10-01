@@ -1,21 +1,18 @@
 """命令下发与结果等待：asyncio Future + 超时（单 worker 语义下安全）。"""
 
 import asyncio
-import logging
 import uuid
 from dataclasses import dataclass
 
 from app.core import actions, outcomes, protocol, reason_codes
-from app.core.audit import trace_id_var
 from app.core.config import settings
+from app.core.logging import log_event, trace_id_var
 from app.core.protocol import JsonObject
 from app.gateway.manager import manager
 from app.modules.devices import service as devices_service
 from app.modules.sessions import repository
 
 from .schemas import CommandOutcome, ConfigPushResult
-
-logger = logging.getLogger("ntu-shower.sessions")
 
 DEFAULT_TIMEOUT_S = 30.0
 
@@ -160,12 +157,14 @@ async def _send_and_wait(
     key = (device_id, channel)
     if _channel_waiting.get(key, 0) >= CHANNEL_QUEUE_MAX:
         repository.insert_command(command_id, device_id, action, trace_id_var.get())
-        logger.info(
-            "command rejected: id=%s device=%s action=%s channel=%s reason=server.overloaded",
-            command_id,
-            device_id,
-            action,
-            channel,
+        log_event(
+            "INFO",
+            "command.rejected",
+            "命令被拒：通道待处理已满",
+            command_id=command_id,
+            device_id=device_id,
+            action=action,
+            channel=channel,
         )
         repository.finish(command_id, outcomes.REJECTED.value, reason_codes.SERVER_OVERLOADED.code, "")
         return {
@@ -237,11 +236,13 @@ async def _dispatch(
         )
         repository.insert_command(command_id, device_id, action, trace_id_var.get())
         if not await manager.send_to(device_id, envelope):
-            logger.warning(
-                "command dropped, device offline: id=%s device=%s action=%s",
-                command_id,
-                device_id,
-                action,
+            log_event(
+                "WARNING",
+                "command.dropped-offline",
+                "设备离线，命令未投出",
+                command_id=command_id,
+                device_id=device_id,
+                action=action,
             )
             outcome = CommandOutcome(
                 status=outcomes.TIMEOUT.value,
@@ -251,7 +252,15 @@ async def _dispatch(
             )
             return outcome
 
-        logger.info("command sent: id=%s device=%s action=%s timeout_s=%s", command_id, device_id, action, timeout_s)
+        log_event(
+            "INFO",
+            "command.sent",
+            "命令已投出",
+            command_id=command_id,
+            device_id=device_id,
+            action=action,
+            timeout_s=timeout_s,
+        )
         try:
             result = await asyncio.wait_for(pending.future, timeout=timeout_s)
         except asyncio.TimeoutError:
@@ -275,14 +284,16 @@ async def _dispatch(
         # 挂起项会一直留着。
         _pending.pop(command_id, None)
         elapsed_ms = int((loop.time() - started_at) * 1000)
-        logger.info(
-            "command finished: id=%s device=%s action=%s status=%s reason=%s elapsed_ms=%d",
-            command_id,
-            device_id,
-            action,
-            outcome["status"],
-            outcome["reason_code"] or "-",
-            elapsed_ms,
+        log_event(
+            "INFO",
+            "command.finished",
+            "命令收尾",
+            command_id=command_id,
+            device_id=device_id,
+            action=action,
+            status=str(outcome["status"]),
+            reason_code=str(outcome["reason_code"] or "-"),
+            elapsed_ms=elapsed_ms,
         )
         repository.finish(command_id, outcome["status"], outcome["reason_code"], outcome["terminal_message"])
 

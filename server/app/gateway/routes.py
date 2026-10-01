@@ -9,7 +9,6 @@
 
 import asyncio
 import contextlib
-import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.concurrency import run_in_threadpool
@@ -17,6 +16,7 @@ from starlette.concurrency import run_in_threadpool
 from ..core import audit, events, outcomes, protocol, reason_codes
 from ..core.clock import now_rfc3339, rfc3339_ago
 from ..core.device_clock import load_skew, ping_payload, update_skew
+from ..core.logging import log_event
 from ..core.protocol import JsonObject, as_int, list_of, payload_of, text_of
 from ..modules.config import store as config_store
 from ..modules.devices import repository as devices_repository
@@ -25,8 +25,6 @@ from ..modules.doors import service as doors_service
 from ..modules.ota import repository as ota_repository
 from ..modules.sessions import service as sessions_service
 from .manager import manager
-
-logger = logging.getLogger("ntu-shower.gateway")
 
 router = APIRouter()
 
@@ -45,7 +43,7 @@ async def device_gateway(ws: WebSocket) -> None:
     try:
         hello = protocol.parse(await ws.receive_text())
         if hello is None or hello.get("type") != "link.hello":
-            logger.warning("rejected connection: first frame is not link.hello")
+            log_event("WARNING", "gateway.hello-required", "首帧必须是 link.hello，连接被拒")
             await ws.send_text(protocol.error(reason_codes.HELLO_REQUIRED.code, "首帧必须是 link.hello"))
             await ws.close()
             return
@@ -77,14 +75,16 @@ async def device_gateway(ws: WebSocket) -> None:
         await run_in_threadpool(ota_repository.mark_installed_upto, device_id, version_code)
         manager.register(device_id, ws)
         await run_in_threadpool(audit.record_gateway, device_id, "connect")
-        logger.info(
-            "device connected: id=%s trusted=%s version=%s os=%s capabilities=%d ip=%s",
-            device_id,
-            trusted,
-            text_of(hello_payload, "app_version"),
-            text_of(hello_payload, "os_version"),
-            len(list_of(hello_payload, "capabilities")),
-            ip,
+        log_event(
+            "INFO",
+            "gateway.device-connected",
+            "设备接入",
+            device_id=device_id,
+            trusted=trusted,
+            version=text_of(hello_payload, "app_version"),
+            os=text_of(hello_payload, "os_version"),
+            capabilities=len(list_of(hello_payload, "capabilities")),
+            ip=ip,
         )
         await ws.send_text(
             protocol.envelope(
@@ -123,7 +123,13 @@ async def device_gateway(ws: WebSocket) -> None:
         pass
     except Exception as exc:
         # 其他异常必须留痕：静默会让"设备莫名掉线"无从追查
-        logger.warning("gateway session failed: id=%s error=%s", device_id or "<unknown>", exc)
+        log_event(
+            "WARNING",
+            "gateway.session-failed",
+            "网关会话异常",
+            device_id=device_id or "<unknown>",
+            error=str(exc),
+        )
         raise
     finally:
         if ping_task is not None:
@@ -132,7 +138,7 @@ async def device_gateway(ws: WebSocket) -> None:
             manager.unregister(device_id, ws)
             await run_in_threadpool(devices_service.set_device_offline, device_id)
             await run_in_threadpool(audit.record_gateway, device_id, "disconnect")
-            logger.info("device disconnected: id=%s", device_id)
+            log_event("INFO", "gateway.device-disconnected", "设备断开", device_id=device_id)
             events.publish(events.DEVICE_UPDATE, await _device_snapshot(device_id))
 
 
@@ -229,12 +235,24 @@ async def _server_ping_loop(ws: WebSocket, device_id: str, pong_seen: asyncio.Ev
         try:
             await ws.send_text(ping_payload())
         except (WebSocketDisconnect, RuntimeError) as exc:
-            logger.debug("server ping loop ended for %s: %s", device_id, exc)
+            log_event(
+                "DEBUG",
+                "gateway.ping-loop-ended",
+                "服务端 ping 循环结束（链路已断）",
+                device_id=device_id,
+                error=str(exc),
+            )
             return
         try:
             await asyncio.wait_for(pong_seen.wait(), timeout=interval)
         except asyncio.TimeoutError:
-            logger.warning("device %s gave no pong within %ss, closing the link", device_id, interval)
+            log_event(
+                "WARNING",
+                "gateway.pong-timeout",
+                "设备一个周期内没有应答 pong，关闭链路",
+                device_id=device_id,
+                interval_s=int(interval),
+            )
             with contextlib.suppress(RuntimeError):
                 await ws.close(code=CLOSE_GOING_AWAY)
             return
