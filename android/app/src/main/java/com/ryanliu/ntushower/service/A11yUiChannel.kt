@@ -60,14 +60,16 @@ object A11yUiChannel {
      * 找可写入的节点：优先带焦点的可编辑控件，退而取第一个可编辑节点。
      *
      * 调用方负责 recycle 返回值。`getChild` 返回的是独立对象，回收 child 不会让
-     * 子树里的命中项失效。
+     * 子树里的命中项失效——**命中项是 child 自己的除外**：那种情况先回收就是把要
+     * 返回的节点废掉，调用方随后在已回收节点上 performAction 会直接抛
+     * IllegalStateException（4.4 对已回收节点不宽容），整个命令落进内部错误。
      */
     private fun findFocusOrEditable(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
         if (node.isFocused && node.isEditable) return node
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
             val hit = findFocusOrEditable(child)
-            child.recycle()
+            if (hit !== child) child.recycle()
             if (hit != null) return hit
         }
         return if (node.isEditable) node else null
