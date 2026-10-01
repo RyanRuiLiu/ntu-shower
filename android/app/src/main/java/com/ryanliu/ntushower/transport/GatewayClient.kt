@@ -85,7 +85,16 @@ class GatewayClient(context: Context, private val callback: Callback) {
     private var reconnectAttempt = 0
     private var reconnectScheduled = false
 
+    /**
+     * 显式停用标志：[disconnect] 之后不再自动重连，直到下一次 [connect]。
+     *
+     * 没有它时，Service 销毁（onDestroy → disconnect）触发的 onClosed 仍会排一次重连——
+     * 进程活着而服务已死，一个孤儿客户端从此永远重连、永远没人消费它的回调。
+     */
+    @Volatile private var stopped = false
+
     fun connect() {
+        stopped = false
         if (connected) return
         val url = "wss://${BuildConfig.SERVER_DOMAIN}/gateway/device"
         Log.i(TAG, "connecting $url (device_id=$deviceId)")
@@ -94,9 +103,11 @@ class GatewayClient(context: Context, private val callback: Callback) {
     }
 
     fun disconnect() {
+        stopped = true
         connected = false
         authenticated = false
         handshakeRunnable = null
+        heartbeatRunnable = null
         reconnectScheduled = false
         handler.removeCallbacksAndMessages(null)
         webSocket?.close(CLOSE_NORMAL, "service stopped")
@@ -240,7 +251,7 @@ class GatewayClient(context: Context, private val callback: Callback) {
     }
 
     private fun scheduleReconnect() {
-        if (reconnectScheduled || connected) return
+        if (stopped || reconnectScheduled || connected) return
         reconnectScheduled = true
         reconnectAttempt++
         val delay = ReconnectBackoff.delayMs(
