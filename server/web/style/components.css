@@ -180,7 +180,43 @@
   white-space: nowrap;
 }
 
-/* ── 审计页：标签、行选中与详情卡 ──────────────────────── */
+/* ── 审计页：标签、行选中、详情卡与主从分栏 ────────────── */
+
+/*
+ * 主从分栏：左列表右详情，**视口高度内各自滚动**。详情放右栏常驻而不是页面底部，
+ * 比对几行时眼睛不用上下跑。窄屏退化为上下堆叠（此时详情回到下方是可接受的，
+ * 因为屏幕本来就得滚动）。
+ */
+.audit-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 460px);
+  gap: var(--sp-4);
+  height: calc(100vh - var(--bar-height) - var(--sp-4) * 2);
+  align-items: stretch;
+}
+
+.audit-split > .panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.audit-split > .panel > .panel-body.flush {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+@media (width <= 1100px) {
+  .audit-split {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+
+  .audit-split > .panel > .panel-body.flush {
+    max-height: 60vh;
+  }
+}
 
 /* 标签：面板头里的两组数据源切换，激活项用主色下边线标出 */
 .audit-tab {
@@ -216,10 +252,11 @@ tr.audit-row.is-selected td {
   background: var(--accent-bg-strong);
 }
 
-/* 详情卡：标签 + 全量折行的值（长值省略号一截就失去了可比对性），点卡复制 */
-.detail-grid {
+/* 详情卡：标签 + 全量折行的值（长值省略号一截就失去了可比对性），点卡复制。
+   详情面板在右栏，列宽窄，卡片改单列纵向排 */
+#detailPanel .detail-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sp-2);
 }
 
