@@ -3,6 +3,29 @@
 本项目所有显著变更记录于此。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)；
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.4.4] - 2026-10-01
+
+### 新增
+
+- **接口调用审计**：`api_call` 表一行一个 API 调用（/api、/ops、/ota），含脱敏
+  调用方（令牌只落 sha256 指纹）、耗时、路径可识别的设备、RFC 9457 problem type；
+  认证失败 / 授权失败 / 参数不合法 / 服务端错误天然落表（OWASP 必记事件类）。
+  查询走 `GET /ops/audit`，本身也被审计。不记请求体与响应体
+- **命令级与 HTTP 级审计互通**：W3C `traceparent`（沿用或生成 trace-id）、
+  `X-Request-ID` 响应头、`command_audit.trace_id`——三层（HTTP 审计 / 命令审计 /
+  设备端 audit.log）以 command_id 与 trace_id 贯通
+- **stdout 结构化 JSON 日志**：字段照 OpenTelemetry Log Data Model，稳定事件
+  代号（`event`）与中文消息分离，属性只收标量；全部 30 处调用迁移
+- **设备端命令痕迹**：`/sdcard/ntu-shower/audit.log`（JSONL，256KB 封顶）记录
+  命令受理 / 幂等重复 / 结果回报与网关生命周期，`device.exec` 直接 `cat` 取回
+- **保留期执行**：`api_call` 按 `audit_retention_days`（默认 90 天）每日清理；
+  OTA 发布按 `ota_release_keep`（默认 5 个）裁剪，`DELETE /ops/releases` 补上
+  此前缺失的 APK 文件删除
+
+### 修复
+
+- 网关帧处理异常的留痕改走结构化事件（原 %-format 文案被测试锁定）
+
 ## [0.4.3] - 2026-10-01
 
 ### 新增
