@@ -25,8 +25,11 @@ import java.nio.ByteBuffer
  * - JPEG q50：实测 q95 体积为其 2.8 倍而 PSNR 36.2dB 不可辨，验收场景够用。
  *
  * 对齐与裁剪：编码器要求宽度 16 像素对齐，1366 被编码为 1376。实测带与不带
- * `--size 1376x768` 输出完全一致（均为 1376x768），故不传 --size；多出的 10 像素
- * 不属于画面，在 JPEG 编码阶段（compressToJpeg 的 Rect）直接裁掉，不做 Bitmap 中转。
+ * `--size 1376x768` 输出完全一致（均为 1376x768），故不传 --size。合成器把 1366 宽的
+ * 画面**右对齐**放进 1376 宽的编码面——实测两段录屏左侧均为 10 列对齐填充、内容直达
+ * 右边缘，因此 JPEG 编码阶段（compressToJpeg 的 Rect）从**右侧锚定**取内容列
+ * （`width - 内容宽` 起），裁掉的是左侧对齐列；若从 0 起裁会把黑边留下、把右侧真实
+ * 内容（状态栏时钟的末位数字）裁掉。
  */
 object ScreenCapture {
 
@@ -161,8 +164,11 @@ object ScreenCapture {
         val nv21 = YuvConverter.toNv21(yuv, width, height, colorFormat)
         val image = YuvImage(nv21, ImageFormat.NV21, width, height, null)
         val output = ByteArrayOutputStream()
+        // 对齐列在左侧（见类注释），内容从右锚定；width 已含对齐列时 cropLeft 即对齐列数
+        val contentWidth = minOf(width, DISPLAY_WIDTH)
+        val contentHeight = minOf(height, DISPLAY_HEIGHT)
         image.compressToJpeg(
-            Rect(0, 0, minOf(width, DISPLAY_WIDTH), minOf(height, DISPLAY_HEIGHT)),
+            Rect(width - contentWidth, 0, width, contentHeight),
             SCREENSHOT_JPEG_QUALITY,
             output,
         )
