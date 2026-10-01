@@ -100,7 +100,9 @@ class DeviceUiScrollRequest(BaseModel):
     方向是闭集，写错在路由层被 422 挡下，不发给设备。
     """
 
-    direction: Literal["forward", "backward"] = Field(default="forward", description="滚动方向")
+    direction: Literal["forward", "backward"] = Field(
+        description="滚动方向。必填，无默认：调用方必须明确表达往哪边滚",
+    )
 
 
 class DeviceUiKeyRequest(BaseModel):
@@ -131,5 +133,5 @@ class DeviceUiTextRequest(BaseModel):
 
     text: str = Field(min_length=1)
     channel: Literal["clipboard", "keys"] = Field(
-        description="注入通路：clipboard 粘贴（支持中文）；keys 按键注入（仅 ASCII）。必填，无缺省",
+        description="注入通路：clipboard 粘贴（支持中文）；keys 按键注入（仅 ASCII）。必填，调用方必须显式选择",
     )

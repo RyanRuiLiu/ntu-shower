@@ -112,7 +112,7 @@ function initNav() {
   if (missing.length > 0) throw new Error(`导航分组表漏了视图：${missing.join('、')}`)
 
   // 用 innerHTML 而不是 replaceChildren：后者是较新的 API，老一些的浏览器上不存在，
-  // 一旦抛错整个导航就是空的，表现成"点了没反应"，很难往 API 兼容性上想
+  // 一旦抛错整个导航就是空的，表现成"点了没反应"，很难往接口行为差异上想
   nav.innerHTML = NAV_GROUPS.map((group) => {
     const items = group
       .map((id) => byId.get(id))
