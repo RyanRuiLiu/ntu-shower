@@ -56,13 +56,23 @@ def test_device_call_records_device_and_problem_type(client: TestClient) -> None
     assert row["problem_type"]
 
 
-def test_validation_failure_records_problem_type(client: TestClient) -> None:
+def test_validation_failure_records_problem_type_and_detail(client: TestClient) -> None:
+    """失败行的 detail 是给审计人看的中文答案——只有 type 代号等于没记。"""
     r = client.post("/ops/devices/dev-audit-1/input", headers=OPS_HEADERS, json={"text": "hi"})
     assert r.status_code == 422
 
     row = _calls(client)[0]
     assert row["status_code"] == 422
     assert row["problem_type"] == "validation-failed"
+    assert row["detail"]
+
+
+def test_query_string_is_recorded(client: TestClient) -> None:
+    r = client.get("/ops/devices", headers=OPS_HEADERS, params={"limit": 7})
+    assert r.status_code == 200
+
+    row = _calls(client)[0]
+    assert "limit=7" in row["query"]
 
 
 def test_traceparent_is_honored_and_request_id_returned(client: TestClient) -> None:
