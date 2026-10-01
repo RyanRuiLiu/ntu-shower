@@ -83,10 +83,11 @@ def rearm_release(version: str, device_id: str) -> ReleaseRearmed:
 
 @ops_router.delete("/releases/{version}")
 def delete_release(version: str) -> ReleaseRemoved:
-    """下架发布（紧急止损，如终止 OTA 循环）。"""
+    """下架发布（紧急止损，如终止 OTA 循环）。注册行与 APK 文件一起删。"""
     deleted = repository.delete_release(version)
-    if deleted:
-        log_event("WARNING", "ota.release-file-missing", "发布文件缺失（删除接口探测到）", version=version)
+    file_removed = service.remove_release_file(version)
+    if deleted or file_removed:
+        log_event("INFO", "ota.release-deleted", "发布已下架", version=version, file_removed=file_removed)
     return {"version": version, "deleted": deleted}
 
 
@@ -110,6 +111,15 @@ async def upload_release(
     sha256 = service.store_release(version, data)
     repository.insert_release(version, version_code, sha256, mandatory, force, target)
     notified = await service.notify_target_devices(version, version_code, mandatory, target)
+    pruned = service.prune_releases(settings.ota_release_keep)
+    if pruned:
+        log_event(
+            "INFO",
+            "ota.release-pruned",
+            "旧发布已按保留个数裁剪",
+            pruned=",".join(pruned),
+            keep=settings.ota_release_keep,
+        )
     log_event(
         "INFO",
         "ota.release-published",

@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     # api_call 审计行的保留天数，过期行由每日清理任务删除
     audit_retention_days: int = 90
 
+    # ── OTA 发布保留 ──
+    # 磁盘上至多保留最近 N 个发布（新版登记时裁旧）。0.4.2 这类上一版要留作回滚点，
+    # 因此 N 不能是 1；发布文件一个 ~1MB，无上限的积累没有意义。
+    ota_release_keep: int = 5
+
     # ── 对外地址 ──
     public_base_url: str = ""  # 对外基址（RFC 9457 问题 type 等绝对引用用）；留空则输出相对引用
 
