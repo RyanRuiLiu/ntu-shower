@@ -26,6 +26,7 @@ def init_tables() -> None:
             identity     TEXT PRIMARY KEY,
             kind         TEXT NOT NULL,
             capabilities TEXT NOT NULL,
+            device_scope TEXT NOT NULL,
             label        TEXT NOT NULL DEFAULT '',
             created_at   TEXT NOT NULL
         );
@@ -38,16 +39,23 @@ def put_identity(
     kind: IdentityKind,
     capabilities: list[str],
     label: str = "",
+    device_scope: list[str] | None = None,
 ) -> IdentityRecord:
-    """登记或更新一条标识（同一标识重复登记即更新其能力集）。
+    """登记或更新一条标识（同一标识重复登记即更新其能力集与作用域）。
 
     返回登记后的完整记录。`created_at` 在冲突走 UPDATE 时保持原值，因此回查一次
     取值——调用方拿到的是与名单视图完全一致的形状，不必再自己拼一个子集模型。
+    `device_scope` 缺省按 ["*"]（全部设备）落库；UPDATE 时传 None 保持原作用域
+    不变（编辑能力位不必连带提交作用域）。
     """
+    scope_json = json.dumps(device_scope if device_scope is not None else ["*"])
     get_conn().execute(
-        "INSERT INTO access_identity (identity, kind, capabilities, label, created_at) VALUES (?,?,?,?,?)"
-        " ON CONFLICT(identity) DO UPDATE SET capabilities = excluded.capabilities, label = excluded.label",
-        (identity, kind.value, json.dumps(capabilities), label, now_rfc3339()),
+        "INSERT INTO access_identity (identity, kind, capabilities, device_scope, label, created_at)"
+        " VALUES (?,?,?,?,?,?)"
+        " ON CONFLICT(identity) DO UPDATE SET capabilities = excluded.capabilities,"
+        " device_scope = COALESCE(excluded.device_scope, access_identity.device_scope),"
+        " label = excluded.label",
+        (identity, kind.value, json.dumps(capabilities), scope_json, label, now_rfc3339()),
     )
     get_conn().commit()
     record = find_identity(identity)
@@ -86,6 +94,7 @@ def _as_identity(row: Row) -> IdentityRecord:
         "identity": row["identity"],
         "kind": IdentityKind(row["kind"]),
         "capabilities": json.loads(row["capabilities"]),
+        "device_scope": json.loads(row["device_scope"]),
         "label": row["label"],
         "created_at": row["created_at"],
     }

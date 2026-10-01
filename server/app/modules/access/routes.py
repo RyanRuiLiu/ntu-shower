@@ -23,7 +23,7 @@ from app.core.problems import LOGIN_REJECTED, UNKNOWN_CAPABILITY, VALIDATION_FAI
 from app.core.security import require_ops_token
 
 from . import service
-from .capabilities import ALL_CAPABILITIES
+from .capabilities import ALL_CAPABILITIES, Capability
 from .dependencies import require_identity
 from .identity import IdentityKind
 from .schemas import IdentityRecord, IdentityRequest, WxLoginRequest
@@ -55,6 +55,24 @@ def get_my_identity(caller: IdentityRecord = Depends(require_identity)) -> Ident
     return caller
 
 
+@router.get("/capabilities")
+def list_capabilities() -> list[dict[str, str]]:
+    """能力位清单（公开）：前端登记/编辑表单据此渲染勾选项。
+
+    登记表（Capability 枚举）是唯一来源——新增能力位这里自动出现，
+    前端不需要硬编码第二份。
+    """
+    return [{"key": cap.value, "label": cap_label(cap)} for cap in Capability]
+
+
+def cap_label(cap: Capability) -> str:
+    """能力位的中文名（单一来源：枚举成员的文档行）。"""
+    return {
+        Capability.OPS: "会话操作（分配/结算）",
+        Capability.PHOTO: "拍照/截图",
+    }[cap]
+
+
 @ops_router.get("/identities")
 def list_identities() -> list[IdentityRecord]:
     """名单。"""
@@ -74,7 +92,27 @@ def put_identity(req: IdentityRequest) -> IdentityRecord:
     if req.kind is IdentityKind.OPENID and not req.openid:
         # 请求格式问题，不是能力名问题——用 validation-failed 才对得上语义
         raise ApiProblemError(VALIDATION_FAILED, "kind=openid 时必须提供 openid")
-    return service.put_identity(req.kind, req.capabilities, req.label, req.openid)
+    _reject_unknown_devices(req.device_scope)
+    return service.put_identity(req.kind, req.capabilities, req.label, req.openid, req.device_scope)
+
+
+def _reject_unknown_devices(device_scope: list[str]) -> None:
+    """作用域里的设备必须真实存在：写错 device_id 的身份永远执行不了，事后难查。"""
+    from app.modules.devices import repository as devices_repository
+
+    known = {d["device_id"] for d in devices_repository.list_all()}
+    unknown = sorted(set(device_scope) - known - {"*"})
+    if unknown:
+        raise ApiProblemError(VALIDATION_FAILED, f"作用域含未知设备：{unknown}")
+
+
+@ops_router.put("/identities/{identity}")
+def update_identity(identity: str, req: IdentityRequest) -> IdentityRecord:
+    """编辑一个既有标识：能力位、设备作用域与备注。**下一次请求即生效**（实时查库）。"""
+    _reject_unknown_capabilities(req.capabilities)
+    # 标识由路径给出：编辑不改身份本身，body 里的 openid 字段忽略
+    _reject_unknown_devices(req.device_scope)
+    return service.put_identity(req.kind, req.capabilities, req.label, identity, req.device_scope)
 
 
 @ops_router.delete("/identities/{identity}", status_code=204)
