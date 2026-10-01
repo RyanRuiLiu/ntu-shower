@@ -14,7 +14,32 @@
 | 服务单元 | `ntu-shower.service`（uvicorn，Type=simple，Restart=always） |
 | 备份单元 | `ntu-shower-backup.timer`（每日 00:00，`Persistent=true`） |
 
-## 2. 部署
+## 2. 痕迹取回（出问题时按设备 + 时间段还原现场）
+
+三层痕迹，以 `command_id` 与 `trace_id` 贯通（标准见 docs/DECISIONS.md「可观测性」）：
+
+```bash
+# ① HTTP/网关审计（谁、何时、调了什么、结果）：本机直连后端
+TOKEN=$(grep "^OPS_TOKEN=" /opt/ntu-shower/server/.env | cut -d= -f2)
+curl -s -H "X-Ops-Token: $TOKEN"   "http://127.0.0.1:8001/ops/audit?device_id=<设备>&limit=100"
+
+# ② 命令级审计（trace_id 与 ① 互通）
+curl -s -H "X-Ops-Token: $TOKEN" "http://127.0.0.1:8001/ops/commands?device_id=<设备>"
+
+# ③ 设备端命令痕迹（与 ② 同一 command_id 呼应）
+#    经 ops 页设备面板的命令执行，或 bridge shell：
+tail -n 50 /sdcard/ntu-shower/audit.log      # JSONL：受理/重复/结果/网关生命周期
+tail -n 50 /sdcard/ntu-shower/automation.log # 自动化性能采样
+tail -n 50 /sdcard/ntu-shower/crash.log      # 崩溃现场
+
+# ④ 应用 stdout（journald，JSON 事件流，含 trace_id 可与 ① 对上）
+journalctl -u ntu-shower --since "-1h" | grep '"trace_id":"<trace-id>"'
+```
+
+保留期：`api_call` 90 天（`audit_retention_days`）每日自动清理；OTA 发布保留
+最近 5 个（`ota_release_keep`）。设备端各落盘文件全部有界，无需人工清理。
+
+## 3. 部署
 
 ```bash
 # ① 本地：门禁必须全绿（与 CI 同一组命令，见 README「质量门」）
@@ -79,7 +104,7 @@ ssh iseekdream.com 'systemctl stop ntu-shower \
   仅改业务代码则不需要。
 - `deploy/` 是配置唯一事实来源，不要在服务器上直接改 nginx/systemd 配置。
 
-## 3. 备份与恢复
+## 4. 备份与恢复
 
 ### 自动备份（数据库）
 
@@ -132,7 +157,7 @@ PY
 keystore 的可用性验证：从备份副本执行 `gradlew assembleRelease` 能签名成功
 即证明副本可用（签名不匹配的 APK 无法覆盖安装在网设备）。
 
-## 4. 故障处置
+## 5. 故障处置
 
 ### OTA 反复下载同一个版本（已发生过一次）
 
@@ -213,7 +238,7 @@ curl -X POST -H "X-Ops-Token: $TOKEN" http://127.0.0.1:8001/ops/devices/<id>/bri
 两个上限都可配（`bridge_idle_timeout_s` 默认 300 秒、`bridge_max_lifetime_s` 默认 3600 秒）。
 **空闲超时管不到"一直有流量"的情况**，所以要寿命上限兜着——调试通道不该无限期开着。
 
-## 5. 日常任务
+## 6. 日常任务
 
 ### 发布新 APK
 

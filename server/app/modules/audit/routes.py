@@ -18,7 +18,8 @@ ops_router = APIRouter(prefix="/ops")
 def list_audit(
     device_id: Annotated[str | None, Query(description="按设备过滤")] = None,
     actor_kind: Annotated[str | None, Query(description="按调用方过滤：ops / identity / device / anonymous")] = None,
+    kind: Annotated[str | None, Query(description="按类别过滤：http / gateway")] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> JsonObject:
     """接口调用审计（不含命令级明细——那在 /ops/commands，两者以 trace_id 关联）。"""
-    return {"calls": list_calls(device_id=device_id, actor_kind=actor_kind, limit=limit)}
+    return {"calls": list_calls(device_id=device_id, actor_kind=actor_kind, kind=kind, limit=limit)}

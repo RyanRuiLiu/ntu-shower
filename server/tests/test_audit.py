@@ -96,6 +96,20 @@ def test_static_and_health_are_not_audited(client: TestClient) -> None:
     assert [row["path"] for row in calls if row["path"] == "/healthz"] == []
 
 
+def test_gateway_lifecycle_rows_use_gateway_kind(client: TestClient) -> None:
+    """网关行 kind=gateway、path 干净（事件语义在 kind/status，不塞进 path）。"""
+    from app.core.audit import record_gateway
+
+    record_gateway("dev-x", "connect")
+    record_gateway("dev-x", "disconnect")
+
+    rows = _calls(client, kind="gateway")
+    # 倒序：最新在前——断开行(1)先于连接行(0)
+    assert [row["status_code"] for row in rows] == [1, 0]
+    assert all(row["path"] == "/gateway/device" for row in rows)
+    assert all(row["actor_kind"] == "device" for row in rows)
+
+
 def test_audit_query_filters(client: TestClient) -> None:
     assert client.get("/ops/devices", headers=OPS_HEADERS).status_code == 200
     assert client.get("/ops/audit", headers=OPS_HEADERS).status_code == 200

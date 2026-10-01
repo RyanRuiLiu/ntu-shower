@@ -252,7 +252,7 @@ async def adb_open(device_id: str) -> BridgeOpened:
             port=bridge.port,
             generation=bridge.generation,
         )
-        # 只返回结构化字段：连接指引属于文档职责（见 docs/RUNBOOK.md §4）
+        # 只返回结构化字段：连接指引属于文档职责（见 docs/RUNBOOK.md「故障处置」）
         return {"device_id": device_id, "port": bridge.port, "already_open": False, "generation": bridge.generation}
 
 
