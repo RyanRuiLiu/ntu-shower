@@ -180,6 +180,31 @@
   white-space: nowrap;
 }
 
+/* ── 审计行的展开详情 ──────────────────────────────────── */
+
+/* 展开区的值全量折行展示：trace_id、失败说明这类长值省略号一截就失去了可比对性 */
+.detail-block {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.detail-block .kv .v {
+  overflow-wrap: anywhere;
+  text-align: left;
+  white-space: normal;
+}
+
+.detail-block .btn {
+  margin-top: var(--sp-2);
+}
+
+tr.detail-row > td {
+  padding: 4px 8px 10px;
+  background: var(--elevated);
+}
+
 /* ── 设备信息面板 ───────────────────────────────────────── */
 
 /*
