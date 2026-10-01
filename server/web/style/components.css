@@ -77,7 +77,8 @@
   align-items: center;
 }
 
-.field-row input,
+/* 勾选框不吃 flex:1：被拉伸的勾选框会把方块悬在行中间、文字推到右边 */
+.field-row input:not([type='checkbox']),
 .field-row select {
   flex: 1;
   min-width: 0;

@@ -99,6 +99,18 @@
   margin-left: auto;
 }
 
+/* 自动刷新开关：勾选框本体用 components.css 的全站组件样式，这里只管排版 */
+.tb-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--dim);
+  font: var(--fs-chip) var(--font-ui);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
 .tb-status {
   padding: 3px 10px;
   border: 1px solid var(--border);
@@ -190,16 +202,23 @@
 .crosshair {
   position: absolute;
   inset: 0;
+  /* SVG 是替换元素：仅凭 inset:0 拉伸不生效，会取固有尺寸 300×150——
+     十字线只在左上角一块小矩形里可见，超出去被视口裁掉。必须显式给满宽高 */
+  width: 100%;
+  height: 100%;
   z-index: 4;
   pointer-events: none;
   opacity: 0;
   transition: opacity var(--transition);
 }
 
-/* 拖动时画方向箭头：不画出来就不知道这一下会从哪儿滑到哪儿 */
+/* 拖动时画方向箭头：不画出来就不知道这一下会从哪儿滑到哪儿。
+   与十字线同理，SVG 不给满宽高就只有 300×150 的绘制区 */
 .swipe-layer {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
   z-index: 6;
   pointer-events: none;
 }
@@ -518,9 +537,15 @@
 
 /* ── 属性面板 ───────────────────────────────────────────── */
 
+/*
+ * 高度按内容撑（不设死像素上限），空间不够时由树区让位（.tree-content 是 flex:1、
+ * min-height:0，先收缩）——"Tap Element"按钮在面板最底部，若面板被压出内部滚动，
+ * 按钮就藏到滚动区下面，看不见还得滑一下。max-height 只在最矮的窗口下生效，
+ * 那时宁可面板内部滚，也不能把输入栏挤出面板外。
+ */
 .prop-panel {
   flex-shrink: 0;
-  max-height: 280px;
+  max-height: 55%;
   overflow: auto;
   border-top: 1px solid var(--border);
   background: var(--elevated);
