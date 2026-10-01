@@ -110,6 +110,9 @@ object ReasonCodes {
     /** 未知的输入通道 */
     const val UI_UNKNOWN_CHANNEL = "ui.unknown_channel"
 
+    /** 未知的滚动方向 */
+    const val UI_UNKNOWN_DIRECTION = "ui.unknown_direction"
+
     /** 拍照失败 */
     const val CAMERA_CAPTURE_FAILED = "camera.capture_failed"
 
