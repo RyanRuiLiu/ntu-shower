@@ -6,6 +6,7 @@ import uuid
 from dataclasses import dataclass
 
 from app.core import actions, outcomes, protocol, reason_codes
+from app.core.audit import trace_id_var
 from app.core.config import settings
 from app.core.protocol import JsonObject
 from app.gateway.manager import manager
@@ -146,7 +147,7 @@ async def _send_and_wait(
     supported = _supported_actions(device_id)
     # 空能力集表示设备未声明（旧版本）：不据此拦截，否则升级服务端会锁死在网设备
     if supported and action not in supported:
-        repository.insert_command(command_id, device_id, action)
+        repository.insert_command(command_id, device_id, action, trace_id_var.get())
         repository.finish(command_id, outcomes.FAILED.value, reason_codes.DEVICE_UNSUPPORTED_ACTION.code, "")
         return {
             "status": outcomes.FAILED.value,
@@ -158,7 +159,7 @@ async def _send_and_wait(
     channel = actions.ACTION_CHANNELS[action]
     key = (device_id, channel)
     if _channel_waiting.get(key, 0) >= CHANNEL_QUEUE_MAX:
-        repository.insert_command(command_id, device_id, action)
+        repository.insert_command(command_id, device_id, action, trace_id_var.get())
         logger.info(
             "command rejected: id=%s device=%s action=%s channel=%s reason=server.overloaded",
             command_id,
@@ -183,7 +184,7 @@ async def _send_and_wait(
         async with _lock_for(device_id, channel):
             remaining = deadline - loop.time()
             if remaining <= 0:
-                repository.insert_command(command_id, device_id, action)
+                repository.insert_command(command_id, device_id, action, trace_id_var.get())
                 repository.finish(command_id, outcomes.TIMEOUT.value, reason_codes.DEADLINE_EXCEEDED.code, "")
                 return CommandOutcome(
                     status=outcomes.TIMEOUT.value,
@@ -234,7 +235,7 @@ async def _dispatch(
             },
             frame_id=command_id,
         )
-        repository.insert_command(command_id, device_id, action)
+        repository.insert_command(command_id, device_id, action, trace_id_var.get())
         if not await manager.send_to(device_id, envelope):
             logger.warning(
                 "command dropped, device offline: id=%s device=%s action=%s",

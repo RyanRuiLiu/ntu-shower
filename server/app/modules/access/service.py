@@ -12,6 +12,7 @@
 import logging
 import secrets
 
+from app.core.audit import mask_actor
 from app.core.wechat import WeChatNotConfiguredError, code_to_openid
 
 from . import repository
@@ -43,7 +44,7 @@ def put_identity(
     logger.info(
         "identity put: kind=%s identity=%s capabilities=%s",
         kind.value,
-        _mask_identity(identity),
+        mask_actor(identity),
         ",".join(capabilities),
     )
     return record
@@ -68,7 +69,7 @@ def login_with_wx_code(code: str) -> IdentityRecord | None:
 
     record = repository.find_identity(openid)
     if record is None:
-        logger.info("login rejected, not granted: openid=%s", _mask_identity(openid))
+        logger.info("login rejected, not granted: openid=%s", mask_actor(openid))
     return record
 
 
@@ -81,17 +82,10 @@ def revoke_identity(identity: str) -> bool:
     """撤销授权；该标识立即失去全部能力。"""
     removed = repository.delete_identity(identity)
     if removed:
-        logger.info("identity revoked: identity=%s", _mask_identity(identity))
+        logger.info("identity revoked: identity=%s", mask_actor(identity))
     return removed
 
 
 def list_identities() -> list[IdentityRecord]:
     """名单。"""
     return repository.list_identities()
-
-
-def _mask_identity(identity: str) -> str:
-    """日志不写全量标识：它是可直接用于冒充的凭据。"""
-    if len(identity) <= 8:
-        return "***"
-    return f"{identity[:4]}...{identity[-4:]}"
