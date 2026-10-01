@@ -80,6 +80,37 @@
 
 - 服务端与设备端 0.3.1 上线；设备端经 OTA 完成 0.2.5 → 0.3.1 升级（真机验证）
 
+## [0.4.0] - 2026-10-01
+
+### 新增
+- 设备界面远程操作（/ops/devices/{id}/dump、touch、scroll、key、input）：
+  节点树导出与 `uiautomator dump` 同格式；坐标语义走 root shell `input`，
+  中文输入走剪贴板粘贴（shell 通道只支持 ASCII，实测确认）
+- 全屏截图命令 screen.capture 与 /ops/devices/{id}/capture（每步经对照实验验证：
+  screencap 在本机不可用、无需 --size 手算对齐、无黑边可裁、JPEG q50 足够）
+- ADB 桥会话审计（adb.open/close/session_end 全量留痕，复用 command_audit）
+- ADB 桥状态可观测（/ops/devices/{id}/bridge/status：世代/两端连接状态/剩余寿命）
+- 设备身份与能力位体系（/api/v1/identity、/ops/identities；微信 openid 与网页标识，
+  能力位 ops/photo，X-Identity 判定）
+- ops 管理面整体启用 X-Ops-Token（占位令牌拒绝启动，OWASP ASVS V2.1）
+
+### 修复
+- ADB 桥死锁：设备 WS 断开与 TCP 泵收尾互相等待（泵退出不再回调清理，只关自己的写端）
+- ADB 桥四条结束路径各自收尾导致的端口泄漏（收敛为 open/recycle 两个生命周期入口）
+- OTA force 死循环（安装确认表 + rearm，见 ADR-0036）；重启不再清空发布表
+- 网关存活探针：一个 ping 间隔收不到 pong 即断链，杜绝半开连接假在线
+- 设备时钟偏差持久化与跳变检测（EMA 平滑 + 超限直接取新值）
+- GatewayClient 销毁后的孤儿重连循环（停用标志）
+- 握手超时（20 秒收不到 hello_ack 主动断链，消除"链路连着会话没建立"的停滞）
+
+### 变更
+- 管理面 /admin → /ops，鉴权 X-Admin-Token → X-Ops-Token
+- 命令按通道排队（同通道串行、队满拒绝），通道划分见 core/actions.py
+- 命令超时改传相对时长（设备无 NTP，绝对时刻会被时钟偏差判死）
+- 网页端挂根路径，静态资源 no-cache
+- 设备配置缓存落盘：重启后先用上次配置，不再回落编译期默认
+- BathAppGuard 阈值改运行时取值：远程配置改动即时生效
+
 ## [0.3.0] - 2026-09-30
 
 ### 新增
