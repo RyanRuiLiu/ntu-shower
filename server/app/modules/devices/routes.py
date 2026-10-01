@@ -202,12 +202,16 @@ async def send_key(device_id: str, req: DeviceUiKeyRequest) -> CommandOutcome:
 
 @ops_router.post("/devices/{device_id}/input")
 async def input_text(device_id: str, req: DeviceUiTextRequest) -> CommandOutcome:
-    """向设备的当前焦点控件输入文本。"""
+    """向设备的当前焦点控件输入文本。
+
+    `channel` 选注入通路：`clipboard`（粘贴，支持中文）或 `keys`（按键注入，仅
+    ASCII、无空格问题）。两条是并列通路，见 `DeviceUiTextRequest`。
+    """
     require_trusted_online_device(device_id)
     return await sessions_service.send_command_and_wait(
         device_id,
         actions.UI_INPUT,
-        {"text": req.text},
+        {"text": req.text, "channel": req.channel},
         timeout_s=_ui_timeout_s(device_id),
     )
 

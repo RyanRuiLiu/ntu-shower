@@ -104,12 +104,32 @@ class DeviceUiScrollRequest(BaseModel):
 
 
 class DeviceUiKeyRequest(BaseModel):
-    """系统按键。"""
+    """系统按键。方向键组与 Enter/Del 服务于焦点导航（对照旧项目 viewer 的按钮栏）。"""
 
-    key: Literal["back", "home", "recents", "notifications"] = Field(description="按键名")
+    key: Literal[
+        "back",
+        "home",
+        "recents",
+        "notifications",
+        "dpad_up",
+        "dpad_down",
+        "dpad_left",
+        "dpad_right",
+        "dpad_center",
+        "enter",
+        "del",
+    ] = Field(description="按键名")
 
 
 class DeviceUiTextRequest(BaseModel):
-    """向当前焦点控件输入文本。"""
+    """向当前焦点控件输入文本。
+
+    channel 是**并列的两条通路**而非主备：`clipboard` 粘贴支持中文，但本 ROM 的
+    粘贴在同一字段第二次插入时会带出空格；`keys` 按键注入（仅 ASCII）无空格问题，
+    与旧项目行为一致。选哪条由网页端的使用者定。
+    """
 
     text: str = Field(min_length=1)
+    channel: Literal["clipboard", "keys"] = Field(
+        description="注入通路：clipboard 粘贴（支持中文）；keys 按键注入（仅 ASCII）。必填，无缺省",
+    )
