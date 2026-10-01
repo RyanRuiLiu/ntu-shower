@@ -74,9 +74,14 @@ def test_trace_id_and_request_id_join_the_entry(output: io.StringIO) -> None:
     assert entry["request_id"] == "req-1"
 
 
+def _boom(message: str) -> None:
+    raise ValueError(message)
+
+
 def test_exception_is_formatted_into_the_entry(output: io.StringIO) -> None:
+    boom_message = "boom"
     try:
-        raise ValueError("boom")
+        _boom(boom_message)
     except ValueError:
         logging.getLogger(ROOT_LOGGER_NAME).exception("出事了")
 

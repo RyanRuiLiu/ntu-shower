@@ -217,7 +217,7 @@ async def _prune_loop() -> None:
                 )
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception:  # noqa: BLE001 清理失败不能带垮服务，下一轮重试
             log_event(
                 "ERROR",
                 "audit.prune-failed",

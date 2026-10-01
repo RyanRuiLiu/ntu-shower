@@ -92,16 +92,18 @@ def configure_logging(level: str = "INFO") -> None:
     root.addHandler(handler)
 
 
-def log_event(level: str, event: str, message: str, /, **attrs: Any) -> None:
+def log_event(level: str, event: str, message: str, /, **attrs: Any) -> None:  # noqa: ANN401
     """按稳定事件名写一条结构化日志。
 
     `level` 是标准级别名（INFO/WARNING/ERROR/...）；`event` 是给机器检索的
     稳定代号（kebab-case），`message` 是给人读的中文——两者分开，改文案不能
     破坏检索。属性必须全是标量，容器类型直接拒收：嵌套结构会让人检索不到
-    任何键，展开成平铺的键值才查得动。
+    任何键，展开成平铺的键值才查得动。签名收 `Any` 是设计本身——约束在
+    运行时执行（见下面的校验），不是不设防。
     """
     for key, value in attrs.items():
         if not isinstance(value, _SCALARS):
-            raise TypeError(f"log attribute {key!r} must be a scalar, got {type(value).__name__}")
+            detail = f"log attribute {key!r} must be a scalar, got {type(value).__name__}"
+            raise TypeError(detail)
     logger = logging.getLogger(ROOT_LOGGER_NAME)
     logger.log(logging.getLevelName(level.upper()), message, extra={"event": event, "attrs": attrs})
