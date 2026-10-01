@@ -35,12 +35,12 @@ def _message_types() -> set[str]:
 def _device_codes() -> set[str]:
     """设备端源码里出现过、且既不是动作名也不是消息类型的原因码。
 
-    排除 core/audit：那里写的是**事件名**（command.received 这类痕迹代号，与
+    排除 core/log：那里写的是**事件名**（command.received 这类痕迹代号，与
     服务端 log_event 的事件同一套命名），不是原因码——形状相同、语义不同。
     """
     found: set[str] = set()
     for path in ANDROID_SRC.rglob("*.kt"):
-        if path.parent.name == "audit":
+        if path.parent.name in ("audit", "log"):
             continue
         found |= set(_CODE.findall(path.read_text(encoding="utf-8")))
     return found - set(ALL_ACTIONS) - _message_types()
