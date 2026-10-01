@@ -2,6 +2,7 @@
 
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core import audit
@@ -70,6 +71,38 @@ def test_validation_failure_records_problem_type_and_detail(client: TestClient) 
     assert row["detail"]
 
 
+def test_response_body_is_stored_for_json(client: TestClient) -> None:
+    """成功响应的 JSON 体全文入库——审计要有问也有答。"""
+    r = client.get("/ops/devices", headers=OPS_HEADERS)
+    assert r.status_code == 200
+
+    row = _calls(client)[0]
+    assert row["response_body"]
+    assert isinstance(json.loads(row["response_body"]), list)
+
+
+def test_data_heavy_endpoints_skip_response_body(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """截图/UI 树这类数据重型且可重取的响应不落库（与媒体同一处理）。"""
+    from app.gateway.manager import manager as gateway_manager
+    from app.modules.devices import repository as devices_repository
+    from app.modules.devices import routes as devices_routes
+
+    devices_repository.register(GHOST_ID, "0.4.8", 52, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
+    devices_repository.set_trusted(GHOST_ID, True)
+    monkeypatch.setattr(gateway_manager, "_connections", {GHOST_ID: object()})
+
+    async def _fake_wait(*_args: object, **_kwargs: object) -> dict:
+        return {"status": "ok", "reason_code": "", "terminal_message": "", "data": {"xml": "<hierarchy/>"}}
+
+    monkeypatch.setattr(devices_routes.sessions_service, "send_command_and_wait", _fake_wait)
+
+    r = client.post(f"/ops/devices/{GHOST_ID}/dump", headers=OPS_HEADERS)
+    assert r.status_code == 200
+
+    row = _calls(client)[0]
+    assert row["response_body"] is None
+
+
 def test_query_string_is_recorded(client: TestClient) -> None:
     r = client.get("/ops/devices", headers=OPS_HEADERS, params={"limit": 7})
     assert r.status_code == 200
@@ -98,6 +131,30 @@ def test_invalid_traceparent_falls_back_to_generated(client: TestClient) -> None
 
     row = _calls(client)[0]
     assert len(row["trace_id"]) == 32
+
+
+def test_device_id_is_resolved_from_all_three_sources(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """设备列的取值规则（锁定）："本次调用作用于哪台设备就记哪台"。
+
+    三种落点各自解析：路径段（设备动作）、query（列表类）、JSON 体（动作类，
+    如 assign）。都没有（设备清单本身）为空——这是规则，不是漏提取。
+    """
+    # ① 路径段
+    client.post(f"/ops/devices/{GHOST_ID}/exec", headers=OPS_HEADERS, json={"command": "id"})
+    assert _calls(client)[0]["device_id"] == GHOST_ID
+
+    # ② query
+    client.get("/ops/doors", headers=OPS_HEADERS, params={"device_id": "dev-from-query"})
+    assert _calls(client)[0]["device_id"] == "dev-from-query"
+
+    # ③ JSON 体（assign 对不存在的设备报 404，但审计照记 body 里的 device_id）
+    client.post("/ops/sessions/assign", headers=OPS_HEADERS, json={"device_id": "dev-from-body", "door_no": 1})
+    assign_row = next(row for row in _calls(client, limit=500) if row["path"] == "/ops/sessions/assign")
+    assert assign_row["device_id"] == "dev-from-body"
+
+    # 无设备：设备清单本身
+    client.get("/ops/devices", headers=OPS_HEADERS)
+    assert _calls(client)[0]["device_id"] is None
 
 
 def test_static_and_health_are_not_audited(client: TestClient) -> None:

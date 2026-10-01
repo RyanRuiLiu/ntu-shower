@@ -3,6 +3,28 @@
 本项目所有显著变更记录于此。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)；
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.4.8] - 2026-10-01
+
+### 修复
+
+- **设备列时有时无**：此前只从路径提取 device_id——设备动作（`/ops/devices/{id}/…`）
+  有、列表类（`/ops/doors?device_id=`）与动作类（`/ops/sessions/assign` 的请求体）
+  没有。定死取值规则（"本次调用作用于哪台设备就记哪台"）并按三种落点解析：
+  路径段 → query 的 device_id → JSON 体的 device_id；都不针对设备（如清单本身）
+  为空。三源各有测试锁定
+
+### 新增
+
+- **响应体入库**：JSON 响应全文随审计行落 `response_body` 列——审计有问也有答。
+  全有或全无、绝不截断：超 256KB 的（截图/拍照 base64）记占位说明；UI 树 XML
+  与媒体同一处理不落库（数据重型且可重取）
+
+### 新增
+
+- **响应体入库**：JSON 响应全文随审计行落 `response_body` 列——审计有问也有答。
+  全有或全无、绝不截断：超 256KB 的（截图/拍照 base64）记占位说明；UI 树 XML
+  与媒体同一处理不落库（数据重型且可重取）
+
 ## [0.4.7] - 2026-10-01
 
 ### 变更

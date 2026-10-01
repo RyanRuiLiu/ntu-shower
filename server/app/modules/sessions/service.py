@@ -319,9 +319,9 @@ def audit_data(action: str, data: object) -> str | None:
     - `device.exec` 的输出是排障最有价值、且**不可重现**的运维事实（设备此刻
       在干什么的最直接答案），必须留痕；输出体积有配置上限（`max_output_bytes`），
       增长有界。
-    - 其余一律不落：媒体（截图/拍照的 base64）体积巨大且可重取；`ui.dump` 的
-      XML 随界面变化时效即逝、也可重取；涉及凭证的动作（分配/结算）参数与结果
-      从进审计的那一刻就被排除（OWASP：凭证不落库）。
+    - 其余一律不落：媒体（截图/拍照的 base64）与 `ui.dump` 的 XML 同属"数据重型
+      且可重取"（2026-10-01 用户决定：与媒体同一处理）；分配/结算走 HTTP 审计的
+      请求体留痕（如实不脱敏），命令审计只记结果。
     """
     if action != actions.DEVICE_EXEC or not isinstance(data, dict):
         return None
