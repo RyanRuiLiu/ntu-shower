@@ -94,7 +94,14 @@ class A11yService : AccessibilityService() {
     private fun handleBathAppExit(leftToPackage: String) {
         if (!RuntimeConfig.bathGuardEnabled) return
         val now = Uptime.nowMs()
-        when (guard.onBackground(now)) {
+        // 阈值每次从 RuntimeConfig 现取：远程配置改动即时生效，
+        // 不必等服务因故重绑重建这个守护（构造期固化是曾经的缺陷）
+        val params = BathAppGuard.Params(
+            windowMs = RuntimeConfig.bathExitWindowMs,
+            maxCount = RuntimeConfig.bathExitMaxCount,
+            cooldownMs = RuntimeConfig.bathExitCooldownMs,
+        )
+        when (guard.onBackground(now, params)) {
             BathAppGuard.Action.RELAUNCH ->
                 if (!automationInProgress) {
                     Log.i(TAG, "bath app exited to $leftToPackage, relaunching")
@@ -108,11 +115,7 @@ class A11yService : AccessibilityService() {
         }
     }
 
-    private val guard = BathAppGuard(
-        windowMs = RuntimeConfig.bathExitWindowMs,
-        maxCount = RuntimeConfig.bathExitMaxCount,
-        cooldownMs = RuntimeConfig.bathExitCooldownMs,
-    )
+    private val guard = BathAppGuard()
 
     override fun onInterrupt() {
         // 系统中断无障碍服务：系统会自行重连，无恢复动作
