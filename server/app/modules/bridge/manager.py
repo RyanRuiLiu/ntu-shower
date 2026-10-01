@@ -19,6 +19,7 @@
 
 import asyncio
 import contextlib
+import logging
 import uuid
 from collections.abc import Awaitable, Callable
 
@@ -26,6 +27,8 @@ from fastapi import WebSocket
 
 from app.core.config import settings
 from app.core.problems import PORT_UNAVAILABLE, ApiProblemError
+
+logger = logging.getLogger("ntu-shower.bridge")
 
 BRIDGE_BUFFER_SIZE = 65536
 PENDING_MAX = 1024 * 1024  # 对端未就绪时的有界缓冲
@@ -145,15 +148,26 @@ class AdbBridge:
         self.tcp_reader = None
         self.pending_to_tcp.clear()
 
-    async def recycle(self) -> None:
+    async def recycle(self, reason: str) -> None:
         """拆掉这条桥，并把自己从注册表摘除。**幂等**。
 
-        幂等不是可选的：四条结束路径可能同时想关同一条桥，谁先谁后不确定，而
+        `reason` 只用于日志，但它是必需的：此前四条结束路径都不留痕，于是"这条桥怎么
+        没了"只能靠猜——日志里只有 `bridge opened`，没有任何一条说它何时、为何被关。
+        真出过"开桥后过一阵再查就是未开启"这种问题，而当时查不出来。
+
+        幂等不是可选的：多条结束路径可能同时想关同一条桥，谁先谁后不确定，而
         `asyncio.Server.close()` 重复调用会撞上内部已清空的成员（`NoneType._stop_serving`）。
         """
         if self.recycled:
             return
         self.recycled = True
+        logger.info(
+            "bridge recycled: device=%s port=%d generation=%d reason=%s",
+            self.device_id,
+            self.port,
+            self.generation,
+            reason,
+        )
 
         await self.detach_client()
         if self.device_ws is not None:
