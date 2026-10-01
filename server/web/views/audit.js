@@ -132,6 +132,9 @@ const state = {
   selected: { api: -1, command: -1 },
 }
 
+/** device_id → 设备名。数据来自 store.devices（顶栏每 30 秒刷新的共享状态）。 */
+const deviceNames = new Map()
+
 function rerenderTable() {
   const table = $('auditTable')
   if (state.tab === 'api') {
