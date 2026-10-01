@@ -39,6 +39,10 @@ import java.util.concurrent.Executors
  * 多路径并发拉起经 onStartCommand 一次性初始化守卫收敛，无冲突。
  * 职责：网关长连接 + doors 采集 + 命令调度；后续功能在 features/ 中扩展并在此注册。
  */
+// TooManyFunctions：拉起/配置/销毁三条生命周期路径合在一个类里是有意的——
+// 它们操作同一组必须按序初始化与销毁的成员（连接、监视器、执行器、闹钟），
+// 拆开反而要互相暴露状态。
+@Suppress("TooManyFunctions")
 class AgentService : Service() {
 
     private val worker = Executors.newSingleThreadExecutor()
@@ -93,14 +97,7 @@ class AgentService : Service() {
             scheduler = CommandScheduler(overlay, onOutcome = { outcome -> sendOutcome(outcome) })
             client = GatewayClient(this, callback)
             client.connect()
-            monitor = DoorMonitor {
-                if (trusted) {
-                    worker.execute {
-                        sender.captureAndEnqueue(client)
-                        sender.flush(client)
-                    }
-                }
-            }.also { it.startWatching() }
+            startDoorMonitor()
             startWatchdog()
             scheduleOtaCheck()
             Log.i(TAG, "service started")
@@ -254,15 +251,7 @@ class AgentService : Service() {
         scheduleOtaCheck()
         // 看门狗间隔变更：重建监视器与看门狗
         startWatchdog()
-        monitor?.stopWatching()
-        monitor = DoorMonitor {
-            if (trusted) {
-                worker.execute {
-                    sender.captureAndEnqueue(client)
-                    sender.flush(client)
-                }
-            }
-        }.also { it.startWatching() }
+        restartDoorMonitor()
         client.send("config.ack", JSONObject().put("revision", revision), replyTo = envelope.id)
         Log.i(TAG, "config applied revision=$revision heartbeat=${RuntimeConfig.heartbeatIntervalS}s")
     }
@@ -335,6 +324,30 @@ class AgentService : Service() {
     private fun closeAdbBridge(reason: String) {
         adbBridge?.close(reason)
         adbBridge = null
+    }
+
+    /**
+     * 启动喷头状态监视器。**回调只有这一份**：onStartCommand 与 applyConfig（配置变更
+     * 重建监视器）都用它——那是同一种职责（"数据库变了就采集并上报"），写两份迟早分叉。
+     */
+    private fun startDoorMonitor() {
+        monitor?.stopWatching()
+        monitor = DoorMonitor {
+            if (trusted) {
+                worker.execute {
+                    sender.captureAndEnqueue(client)
+                    // 断网期间积压的快照与喷头状态是否变化无关：重连时必须直接 flush，
+                    // 否则喷头状态未变时积压数据永远不会重发。
+                    sender.flush(client)
+                }
+            }
+        }.also { it.startWatching() }
+    }
+
+    /** 配置变更后重建监视器（防抖窗口等值可能已变），拉起逻辑与首次启动完全一致。 */
+    private fun restartDoorMonitor() {
+        monitor?.stopWatching()
+        startDoorMonitor()
     }
 
     private fun sendOutcome(outcome: CommandOutcome) {
