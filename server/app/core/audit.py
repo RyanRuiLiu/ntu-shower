@@ -68,6 +68,7 @@ def init_tables() -> None:
         """
         CREATE TABLE IF NOT EXISTS api_call (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind         TEXT    NOT NULL,
             requested_at TEXT    NOT NULL,
             request_id   TEXT    NOT NULL,
             trace_id     TEXT    NOT NULL,
@@ -123,10 +124,11 @@ def record(
     与命令审计的关联靠 trace_id：本行与 command_audit 各带一份，查两边即得全链路。
     """
     db.get_conn().execute(
-        "INSERT INTO api_call (requested_at, request_id, trace_id, actor_kind, actor,"
+        "INSERT INTO api_call (kind, requested_at, request_id, trace_id, actor_kind, actor,"
         " method, path, status_code, duration_ms, device_id, problem_type)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         (
+            "http",
             now_rfc3339(),
             request_id_var.get(),
             trace_id_var.get(),
@@ -144,21 +146,22 @@ def record(
 
 
 def record_gateway(device_id: str, event: str) -> None:
-    """网关生命周期一行（连接/断开）。method 固定 WS，status 约定 0=在线 1=离线。"""
-    status = 0 if event == "connect" else 1
+    """网关生命周期一行（connect/disconnect）。kind='gateway'，status 约定 0=连接 1=断开。"""
+    status_code = 0 if event == "connect" else 1
     db.get_conn().execute(
-        "INSERT INTO api_call (requested_at, request_id, trace_id, actor_kind, actor,"
+        "INSERT INTO api_call (kind, requested_at, request_id, trace_id, actor_kind, actor,"
         " method, path, status_code, duration_ms, device_id, problem_type)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         (
+            "gateway",
             now_rfc3339(),
             uuid.uuid4().hex,
             "",
             "device",
             device_id,
             "WS",
-            f"/gateway/device {event}",
-            status,
+            "/gateway/device",
+            status_code,
             0,
             device_id,
             None,
@@ -171,11 +174,12 @@ def list_calls(
     *,
     device_id: str | None = None,
     actor_kind: str | None = None,
+    kind: str | None = None,
     limit: int = 100,
 ) -> list[JsonObject]:
     """按时间倒序取审计记录（/ops/audit）。"""
     sql = (
-        "SELECT requested_at, request_id, trace_id, actor_kind, actor, method, path,"
+        "SELECT kind, requested_at, request_id, trace_id, actor_kind, actor, method, path,"
         " status_code, duration_ms, device_id, problem_type FROM api_call"
     )
     params: list[object] = []
@@ -186,6 +190,9 @@ def list_calls(
     if actor_kind:
         clauses.append("actor_kind = ?")
         params.append(actor_kind)
+    if kind:
+        clauses.append("kind = ?")
+        params.append(kind)
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
     sql += " ORDER BY id DESC LIMIT ?"
