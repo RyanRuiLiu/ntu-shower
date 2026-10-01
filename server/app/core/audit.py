@@ -29,7 +29,6 @@
 
 import asyncio
 import contextlib
-import hashlib
 import json
 import re
 import time
@@ -77,9 +76,12 @@ def init_tables() -> None:
             trace_id     TEXT    NOT NULL,
             actor_kind   TEXT    NOT NULL,
             actor        TEXT    NOT NULL,
+            client_ip    TEXT,
+            user_agent   TEXT,
             method       TEXT    NOT NULL,
             path         TEXT    NOT NULL,
             query        TEXT,
+            request_body TEXT,
             status_code  INTEGER NOT NULL,
             duration_ms  INTEGER NOT NULL,
             device_id    TEXT,
@@ -106,11 +108,16 @@ def resolve_trace_id(traceparent: str | None) -> str:
     return uuid.uuid4().hex
 
 
-def mask_actor(actor: str) -> str:
-    """标识脱敏：日志与审计都不写全量标识——它可直接用于冒充。"""
-    if len(actor) <= 8:
-        return "***"
-    return f"{actor[:4]}...{actor[-4:]}"
+def _actor_of(request: Request) -> tuple[str, str]:
+    """从请求头判定调用方。**如实记录原文，不脱敏**（2026-10-01 用户决定：
+    单运维者工具，审计的价值就在于如实——谁、用什么令牌、从哪里来）。"""
+    token = request.headers.get("X-Ops-Token")
+    if token:
+        return "ops", token
+    identity = request.headers.get("X-Identity")
+    if identity:
+        return "identity", identity
+    return "anonymous", ""
 
 
 def record(
@@ -122,20 +129,26 @@ def record(
     duration_ms: int = 0,
     actor_kind: str = "",
     actor: str = "",
+    client_ip: str = "",
+    user_agent: str = "",
+    request_body: str = "",
     device_id: str = "",
     problem_type: str = "",
     detail: str = "",
 ) -> None:
-    """写一行审计。关联字段取自中间件置位的 contextvar；同步执行（经线程池调用）。
+    """写一行 HTTP 审计（kind='http'）。关联字段取自中间件置位的 contextvar。
 
     与命令审计的关联靠 trace_id：本行与 command_audit 各带一份，查两边即得全链路。
-    `query` 是请求的查询串（令牌走请求头、永不进 query，落库无泄漏面）；
+    `query` 是请求的查询串；`request_body` 是 JSON 请求体（截断上限见中间件）；
     `detail` 是失败响应的中文说明（RFC 9457 的 detail，经 problem+json 体取回）。
+    调用方与参数**如实记录不脱敏**（2026-10-01 用户决定：单运维者工具，审计的
+    价值就在于如实）。
     """
     db.get_conn().execute(
         "INSERT INTO api_call (kind, requested_at, request_id, trace_id, actor_kind, actor,"
-        " method, path, query, status_code, duration_ms, device_id, problem_type, detail)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " client_ip, user_agent, method, path, query, request_body, status_code, duration_ms,"
+        " device_id, problem_type, detail)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             "http",
             now_rfc3339(),
@@ -143,9 +156,12 @@ def record(
             trace_id_var.get(),
             actor_kind,
             actor,
+            client_ip or None,
+            user_agent or None,
             method,
             path,
             query or None,
+            request_body or None,
             status_code,
             duration_ms,
             device_id or None,
@@ -156,13 +172,14 @@ def record(
     db.get_conn().commit()
 
 
-def record_gateway(device_id: str, event: str) -> None:
+def record_gateway(device_id: str, event: str, client_ip: str = "") -> None:
     """网关生命周期一行（connect/disconnect）。kind='gateway'，status 约定 0=连接 1=断开。"""
     status_code = 0 if event == "connect" else 1
     db.get_conn().execute(
         "INSERT INTO api_call (kind, requested_at, request_id, trace_id, actor_kind, actor,"
-        " method, path, query, status_code, duration_ms, device_id, problem_type, detail)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " client_ip, user_agent, method, path, query, request_body, status_code, duration_ms,"
+        " device_id, problem_type, detail)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             "gateway",
             now_rfc3339(),
@@ -170,8 +187,11 @@ def record_gateway(device_id: str, event: str) -> None:
             "",
             "device",
             device_id,
+            client_ip or None,
+            None,
             "WS",
             "/gateway/device",
+            None,
             None,
             status_code,
             0,
@@ -192,8 +212,9 @@ def list_calls(
 ) -> list[JsonObject]:
     """按时间倒序取审计记录（/ops/audit）。"""
     sql = (
-        "SELECT kind, requested_at, request_id, trace_id, actor_kind, actor, method, path,"
-        " query, status_code, duration_ms, device_id, problem_type, detail FROM api_call"
+        "SELECT kind, requested_at, request_id, trace_id, actor_kind, actor, client_ip,"
+        " user_agent, method, path, query, request_body, status_code, duration_ms, device_id,"
+        " problem_type, detail FROM api_call"
     )
     params: list[object] = []
     clauses: list[str] = []
@@ -214,13 +235,20 @@ def list_calls(
 
 
 def prune(retention_days: int) -> int:
-    """删除超过保留期的审计行，返回删除行数。库文件不复缩，页复用即可。"""
-    cursor = db.get_conn().execute(
-        "DELETE FROM api_call WHERE requested_at < datetime('now', ?)",
-        (f"-{retention_days} days",),
-    )
+    """删除超过保留期的**审计**行（api_call 与 command_audit），返回删除行数。
+
+    只动审计表：业务数据（喷头状态迁移、使用会话）是运营历史，**永久保留**。
+    库文件不复缩，页复用即可。
+    """
+    removed = 0
+    for table, column in (("api_call", "requested_at"), ("command_audit", "created_at")):
+        cursor = db.get_conn().execute(
+            f"DELETE FROM {table} WHERE {column} < datetime('now', ?)",
+            (f"-{retention_days} days",),
+        )
+        removed += cursor.rowcount
     db.get_conn().commit()
-    return cursor.rowcount
+    return removed
 
 
 async def _prune_loop() -> None:
@@ -260,17 +288,6 @@ def stop_prune() -> None:
         _prune_task = None
 
 
-def _actor_of(request: Request) -> tuple[str, str]:
-    """从请求头判定调用方。令牌只落指纹（sha256 前 16 位），绝不落令牌本身。"""
-    token = request.headers.get("X-Ops-Token")
-    if token:
-        return "ops", hashlib.sha256(token.encode()).hexdigest()[:16]
-    identity = request.headers.get("X-Identity")
-    if identity:
-        return "identity", mask_actor(identity)
-    return "anonymous", ""
-
-
 def _device_of(path: str) -> str:
     """路径里可识别的设备（/ops/devices/{id}/...）。"""
     parts = path.split("/")
@@ -302,6 +319,21 @@ def install_audit(app: FastAPI) -> None:
             trace_id = resolve_trace_id(request.headers.get("traceparent"))
             request_id_var.set(request_id)
             trace_id_var.set(trace_id)
+
+            # 请求体原文落库（不截断——截断了后续就查不回真实内容）。
+            # 只对 JSON 体做：multipart（发布上传的 APK 二进制）不落库——本体已存
+            # ota_releases，审计行记版本与大小即完整事实。读完放回，下游照常解析。
+            request_body = ""
+            content_type = request.headers.get("content-type", "")
+            if request.method in ("POST", "PUT", "PATCH", "DELETE") and "application/json" in content_type:
+                body_bytes = await request.body()
+
+                async def receive() -> dict[str, object]:
+                    return {"type": "http.request", "body": body_bytes, "more_body": False}
+
+                request = Request(request.scope, receive=receive)
+                request_body = body_bytes.decode(errors="replace")
+
             started = time.perf_counter()
             response = await call_next(request)
             duration_ms = int((time.perf_counter() - started) * 1000)
@@ -330,6 +362,8 @@ def install_audit(app: FastAPI) -> None:
                 with contextlib.suppress(Exception):
                     detail = str(json.loads(body).get("detail") or "")
 
+            # 来源 IP：经 nginx 代理而来，真实地址在 X-Real-IP 里
+            client_ip = request.headers.get("x-real-ip") or (request.client.host if request.client else "")
             actor_kind, actor = _actor_of(request)
             await run_in_threadpool(
                 record,
@@ -340,6 +374,9 @@ def install_audit(app: FastAPI) -> None:
                 duration_ms=duration_ms,
                 actor_kind=actor_kind,
                 actor=actor,
+                client_ip=client_ip,
+                user_agent=request.headers.get("user-agent", ""),
+                request_body=request_body,
                 device_id=_device_of(path),
                 problem_type=response.headers.get("X-Problem-Type", ""),
                 detail=detail,

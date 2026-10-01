@@ -13,12 +13,14 @@ def init_tables() -> None:
             command_id       TEXT    NOT NULL,
             device_id        TEXT    NOT NULL,
             action           TEXT    NOT NULL,
+            params           TEXT,
             created_at       TEXT    NOT NULL,
             finished_at      TEXT,
             status           TEXT,
             reason_code      TEXT,
             terminal_message TEXT,
-            trace_id         TEXT
+            trace_id         TEXT,
+            data             TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_command_audit_device
             ON command_audit(device_id, created_at);
@@ -26,19 +28,25 @@ def init_tables() -> None:
     )
 
 
-def insert_command(command_id: str, device_id: str, action: str, trace_id: str = "") -> None:
+def insert_command(
+    command_id: str,
+    device_id: str,
+    action: str,
+    trace_id: str = "",
+    params: str | None = None,
+) -> None:
     get_conn().execute(
-        "INSERT INTO command_audit (command_id, device_id, action, created_at, trace_id) VALUES (?,?,?,?,?)",
-        (command_id, device_id, action, now_rfc3339(), trace_id or None),
+        "INSERT INTO command_audit (command_id, device_id, action, created_at, trace_id, params) VALUES (?,?,?,?,?,?)",
+        (command_id, device_id, action, now_rfc3339(), trace_id or None, params),
     )
     get_conn().commit()
 
 
-def finish(command_id: str, status: str, reason_code: str, terminal_message: str) -> None:
+def finish(command_id: str, status: str, reason_code: str, terminal_message: str, data: str | None = None) -> None:
     get_conn().execute(
-        "UPDATE command_audit SET finished_at = ?, status = ?, reason_code = ?, terminal_message = ?"
+        "UPDATE command_audit SET finished_at = ?, status = ?, reason_code = ?, terminal_message = ?, data = ?"
         " WHERE command_id = ?",
-        (now_rfc3339(), status, reason_code, terminal_message, command_id),
+        (now_rfc3339(), status, reason_code, terminal_message, data, command_id),
     )
     get_conn().commit()
 
@@ -46,8 +54,8 @@ def finish(command_id: str, status: str, reason_code: str, terminal_message: str
 def list_commands(device_id: str | None = None, limit: int = 50) -> list[JsonObject]:
     """按时间倒序取命令审计记录（调试与问题追踪）。"""
     sql = (
-        "SELECT command_id, device_id, action, created_at, finished_at, status,"
-        " reason_code, terminal_message, trace_id FROM command_audit"
+        "SELECT command_id, device_id, action, params, created_at, finished_at, status,"
+        " reason_code, terminal_message, trace_id, data FROM command_audit"
     )
     params: list[object] = []
     if device_id:
