@@ -11,7 +11,9 @@ from app.modules.ota import service as ota_service
 
 
 @pytest.fixture
-def ota_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def ota_dir(fresh_db: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """独立的发布文件目录。依赖 fresh_db：注册表查询必须落在临时库上，
+    否则会读写到本地开发库。"""
     path = tmp_path / "releases"
     monkeypatch.setattr(config_module.settings, "ota_dir", str(path))
     return path
@@ -41,6 +43,19 @@ def test_prune_with_keep_larger_than_count_is_noop(ota_dir: Path) -> None:
     _publish("0.1.0", 1)
 
     assert ota_service.prune_releases(keep=5) == []
+    assert (ota_dir / "0.1.0.apk").exists()
+
+
+def test_orphan_files_are_swept(ota_dir: Path) -> None:
+    """盘上有、注册表里没有的孤儿 APK 一并清除——"不积累垃圾"只做一半等于没做。"""
+    ota_dir.mkdir(parents=True, exist_ok=True)
+    (ota_dir / "0.0.9.apk").write_bytes(b"orphan")
+    _publish("0.1.0", 1)
+
+    removed = ota_service.prune_releases(keep=1)
+
+    assert "0.0.9" in removed
+    assert not (ota_dir / "0.0.9.apk").exists()
     assert (ota_dir / "0.1.0.apk").exists()
 
 

@@ -60,6 +60,10 @@ def prune_releases(keep: int) -> list[str]:
 
     新版登记时调用：旧的 APK 留在盘上只有体积没有意义，但上一两个版本要留作
     回滚点，所以 keep 是配置而不是写死的 1。
+
+    两类都要清：注册表里超出 keep 的发布（行+文件），以及**盘上没有注册行的孤儿
+    文件**——历史上删除只清了行、库重建丢了行，都会留下这种；孤儿不清，
+    "不积累垃圾"只做了一半。
     """
     from . import repository
 
@@ -69,6 +73,12 @@ def prune_releases(keep: int) -> list[str]:
         remove_release_file(version)
         repository.delete_release(version)
         removed.append(version)
+
+    known = {rel["version"] for rel in repository.list_releases()}
+    for path in sorted(Path(settings.ota_dir).glob("*.apk")):
+        if path.stem not in known:
+            path.unlink()
+            removed.append(path.stem)
     return removed
 
 
