@@ -97,6 +97,9 @@ UI_UNKNOWN_KEY = Reason("ui.unknown_key", "未知的按键名")
 UI_UNSUPPORTED_ACTION = Reason("ui.unsupported_action", "无障碍通道不支持该操作")
 UI_NO_WINDOW = Reason("ui.no_window", "读不到当前窗口的节点树")
 UI_CLICK_NO_EFFECT = Reason("ui.click_no_effect", "点击已发出，但界面没有变化")
+UI_TEXT_REJECTED = Reason("ui.text_rejected", "系统拒绝了文本注入")
+UI_KEYS_ASCII_ONLY = Reason("ui.keys_ascii_only", "按键通道仅支持英文、数字与符号")
+UI_UNKNOWN_CHANNEL = Reason("ui.unknown_channel", "未知的输入通道")
 
 # ── 采集 ──
 
@@ -135,6 +138,9 @@ REGISTRY: tuple[Reason, ...] = (
     UI_UNSUPPORTED_ACTION,
     UI_NO_WINDOW,
     UI_CLICK_NO_EFFECT,
+    UI_TEXT_REJECTED,
+    UI_KEYS_ASCII_ONLY,
+    UI_UNKNOWN_CHANNEL,
     CAMERA_CAPTURE_FAILED,
     SCREEN_CAPTURE_FAILED,
 )

@@ -208,10 +208,29 @@ def test_key_and_text_dispatch_their_payload(client: TestClient, monkeypatch: py
     assert captured["action"] == actions.UI_KEY
     assert captured["params"] == {"key": "home"}
 
-    r = client.post(f"/ops/devices/{DEVICE_ID}/input", headers=OPS_HEADERS, json={"text": "hello"})
+    r = client.post(
+        f"/ops/devices/{DEVICE_ID}/input",
+        headers=OPS_HEADERS,
+        json={"text": "hello", "channel": "keys"},
+    )
     assert r.status_code == 200
     assert captured["action"] == actions.UI_INPUT
-    assert captured["params"] == {"text": "hello"}
+    assert captured["params"] == {"text": "hello", "channel": "keys"}
+
+
+def test_input_channel_is_required(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """注入通道是必填的闭集：两条通路并列、由调用方明确选择，没有缺省回落。"""
+    _ready(monkeypatch)
+
+    r = client.post(f"/ops/devices/{DEVICE_ID}/input", headers=OPS_HEADERS, json={"text": "hello"})
+    assert r.status_code == 422
+
+    r = client.post(
+        f"/ops/devices/{DEVICE_ID}/input",
+        headers=OPS_HEADERS,
+        json={"text": "hello", "channel": "telepathy"},
+    )
+    assert r.status_code == 422
 
 
 def test_key_rejects_unknown_key_name(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
