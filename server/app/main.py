@@ -25,7 +25,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
 from typing_extensions import TypedDict
 
-from .core import db
+from .core import audit, db
 from .core.config import settings
 from .core.errors import install_error_handlers
 from .core.logging import configure_logging
@@ -35,6 +35,7 @@ from .gateway.routes import router as gateway_router
 from .modules.access import repository as access_repository
 from .modules.access.routes import ops_router as access_ops_router
 from .modules.access.routes import router as access_router
+from .modules.audit.routes import ops_router as audit_ops_router
 from .modules.bridge.routes import ops_router as bridge_ops_router
 from .modules.bridge.routes import router as bridge_router
 from .modules.config import store as config_store
@@ -83,6 +84,7 @@ def init_schema() -> None:
     access_repository.init_tables()
     ota_repository.init_tables()
     config_store.init_tables()
+    audit.init_tables()
 
 
 def create_app() -> FastAPI:
@@ -96,11 +98,14 @@ def create_app() -> FastAPI:
         # 启动自检：配置不合法时拒绝启动，而非带着占位密钥对外服务
         assert_ops_token_configured()
         auto_settle.start()
+        audit.start_prune()  # 审计保留期清理（NIST SP 800-92），过期行每日删除
         yield
+        audit.stop_prune()
         auto_settle.stop()
 
     app = FastAPI(title="NTU Shower", version=APP_VERSION, lifespan=lifespan)
     install_error_handlers(app)
+    audit.install_audit(app)
 
     app.include_router(gateway_router)
     app.include_router(doors_router)
@@ -115,6 +120,7 @@ def create_app() -> FastAPI:
     app.include_router(ota_ops_router)
     app.include_router(bridge_router)
     app.include_router(bridge_ops_router)
+    app.include_router(audit_ops_router)
     app.include_router(access_router)
     app.include_router(access_ops_router)
 
