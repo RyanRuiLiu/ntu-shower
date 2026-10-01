@@ -3,6 +3,21 @@
 本项目所有显著变更记录于此。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)；
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.4.6] - 2026-10-01
+
+### 新增
+
+- 审计行补齐"请求与响应"：`query` 记录请求查询串（令牌走请求头、永不进
+  query），失败响应经 problem+json 体缓冲取回中文 `detail`——审计行从
+  "type 代号"升级为"为什么失败"的中文答案
+- 前端审计页重做：接口调用审计与命令流水两层同屏；设备显示名字（id 在
+  展开区）；点行展开全部字段（request_id / trace_id 全值、失败说明），
+  每行可整行复制 JSON 带出去比对；命令流水补 trace_id 与中文说明列
+
+### 变更
+
+- api_call 表增加 query / detail 两列（开发库直接重建）
+
 ## [0.4.5] - 2026-10-01
 
 ### 变更

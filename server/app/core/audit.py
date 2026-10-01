@@ -28,18 +28,21 @@
 """
 
 import asyncio
+import contextlib
 import hashlib
+import json
 import re
 import time
 import traceback
 import uuid
 from collections.abc import Awaitable, Callable
+from typing import cast
 
 from fastapi import FastAPI
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import Response, StreamingResponse
 
 from . import db
 from .clock import now_rfc3339
@@ -76,10 +79,12 @@ def init_tables() -> None:
             actor        TEXT    NOT NULL,
             method       TEXT    NOT NULL,
             path         TEXT    NOT NULL,
+            query        TEXT,
             status_code  INTEGER NOT NULL,
             duration_ms  INTEGER NOT NULL,
             device_id    TEXT,
-            problem_type TEXT
+            problem_type TEXT,
+            detail       TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_api_call_requested
             ON api_call(requested_at);
@@ -112,21 +117,25 @@ def record(
     *,
     method: str,
     path: str,
-    status_code: int,
-    duration_ms: int,
-    actor_kind: str,
-    actor: str,
+    query: str = "",
+    status_code: int = 0,
+    duration_ms: int = 0,
+    actor_kind: str = "",
+    actor: str = "",
     device_id: str = "",
     problem_type: str = "",
+    detail: str = "",
 ) -> None:
     """写一行审计。关联字段取自中间件置位的 contextvar；同步执行（经线程池调用）。
 
     与命令审计的关联靠 trace_id：本行与 command_audit 各带一份，查两边即得全链路。
+    `query` 是请求的查询串（令牌走请求头、永不进 query，落库无泄漏面）；
+    `detail` 是失败响应的中文说明（RFC 9457 的 detail，经 problem+json 体取回）。
     """
     db.get_conn().execute(
         "INSERT INTO api_call (kind, requested_at, request_id, trace_id, actor_kind, actor,"
-        " method, path, status_code, duration_ms, device_id, problem_type)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        " method, path, query, status_code, duration_ms, device_id, problem_type, detail)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             "http",
             now_rfc3339(),
@@ -136,10 +145,12 @@ def record(
             actor,
             method,
             path,
+            query or None,
             status_code,
             duration_ms,
             device_id or None,
             problem_type or None,
+            detail or None,
         ),
     )
     db.get_conn().commit()
@@ -150,8 +161,8 @@ def record_gateway(device_id: str, event: str) -> None:
     status_code = 0 if event == "connect" else 1
     db.get_conn().execute(
         "INSERT INTO api_call (kind, requested_at, request_id, trace_id, actor_kind, actor,"
-        " method, path, status_code, duration_ms, device_id, problem_type)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        " method, path, query, status_code, duration_ms, device_id, problem_type, detail)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             "gateway",
             now_rfc3339(),
@@ -161,9 +172,11 @@ def record_gateway(device_id: str, event: str) -> None:
             device_id,
             "WS",
             "/gateway/device",
+            None,
             status_code,
             0,
             device_id,
+            None,
             None,
         ),
     )
@@ -180,7 +193,7 @@ def list_calls(
     """按时间倒序取审计记录（/ops/audit）。"""
     sql = (
         "SELECT kind, requested_at, request_id, trace_id, actor_kind, actor, method, path,"
-        " status_code, duration_ms, device_id, problem_type FROM api_call"
+        " query, status_code, duration_ms, device_id, problem_type, detail FROM api_call"
     )
     params: list[object] = []
     clauses: list[str] = []
@@ -294,17 +307,42 @@ def install_audit(app: FastAPI) -> None:
             duration_ms = int((time.perf_counter() - started) * 1000)
             response.headers["X-Request-ID"] = request_id
 
+            # 失败响应把中文说明取回来：problem 体是我们自己的错误处理器产的、内容有界
+            # （短句），缓冲它不影响流式响应的其他场景。detail 是审计行里"为什么失败"
+            # 的中文答案，不取回来的话审计只能给出 type 代号。
+            detail = ""
+            if response.headers.get("X-Problem-Type"):
+                # BaseHTTPMiddleware 返回的实际是流式响应子类（Starlette 约定）
+                streaming = cast(StreamingResponse, response)
+                chunks: list[bytes] = []
+                async for chunk in streaming.body_iterator:
+                    if isinstance(chunk, (bytes, bytearray, memoryview)):
+                        chunks.append(bytes(chunk))
+                    else:
+                        chunks.append(str(chunk).encode())
+                body = b"".join(chunks)
+                response = Response(
+                    content=body,
+                    status_code=response.status_code,
+                    headers=dict(response.headers),
+                    media_type=response.media_type,
+                )
+                with contextlib.suppress(Exception):
+                    detail = str(json.loads(body).get("detail") or "")
+
             actor_kind, actor = _actor_of(request)
             await run_in_threadpool(
                 record,
                 method=request.method,
                 path=path,
+                query=request.url.query,
                 status_code=response.status_code,
                 duration_ms=duration_ms,
                 actor_kind=actor_kind,
                 actor=actor,
                 device_id=_device_of(path),
                 problem_type=response.headers.get("X-Problem-Type", ""),
+                detail=detail,
             )
             return response
 

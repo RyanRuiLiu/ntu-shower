@@ -138,5 +138,6 @@ export const api = {
     send(OPS_API, `/releases/${encodeURIComponent(version)}/rearm/${encodeURIComponent(deviceId)}`, post()),
 
   // ── 审计 ──
+  auditCalls: (params) => send(OPS_API, `/audit${query(params)}`),
   commands: (params) => send(OPS_API, `/commands${query(params)}`),
 }
