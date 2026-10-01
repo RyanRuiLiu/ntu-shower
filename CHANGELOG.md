@@ -3,6 +3,16 @@
 本项目所有显著变更记录于此。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)；
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.4.2] - 2026-10-01
+
+### 修复
+
+- 界面检视"输入文本"报设备端内部错误：节点树查找的命中项是直接子节点自己时，
+  循环里先 `recycle()` 再把它当返回值交出去，调用方随后在**已回收节点**上
+  `performAction`（4.4 对已回收节点直接抛 IllegalStateException，落进命令
+  catch-all）。命中自身时改为不当场回收，仍由调用方的 `finally` 统一回收一次，
+  每个节点依旧恰好回收一次
+
 ## [0.4.1] - 2026-10-01
 
 ### 修复
