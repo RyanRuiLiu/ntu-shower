@@ -18,6 +18,7 @@ import { api, getToken, setToken } from './core/api.js'
 import { fmtDateTime, fmtDuration, fmtServerTimeNow, fmtUptime } from './core/clock.js'
 import { EVENT_TYPES } from './core/contract.js'
 import { $, esc, listen, PLACEHOLDER } from './core/dom.js'
+import { problemText } from './core/outcome.js'
 import { toast } from './core/toast.js'
 import {
   currentDevice,
@@ -371,7 +372,7 @@ async function refreshDoors() {
   } catch (error) {
     // 401 由 handleAuthError 引导补令牌；其余错误此前只进日志，而日志区已不存在，
     // 于是页面只剩一个空列表、看起来跟"设备离线"一样——现在弹出来
-    if (!handleAuthError(error)) toast(`获取喷头状态失败：${error.message}`)
+    if (!handleAuthError(error)) toast(`获取喷头状态 · ${problemText(error)}`)
   }
 }
 
@@ -395,7 +396,7 @@ async function refreshDevicesSafely() {
   try {
     await refreshDevices()
   } catch (error) {
-    if (!handleAuthError(error)) toast(`获取设备清单失败：${error.message}`)
+    if (!handleAuthError(error)) toast(`获取设备清单 · ${problemText(error)}`)
   }
 }
 

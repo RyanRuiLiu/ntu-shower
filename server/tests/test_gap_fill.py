@@ -75,8 +75,8 @@ def test_bridge_manager_units() -> None:
     bridge = AdbBridge("dev-u", 15655, 1)
     assert bridge.connected is False
     assert bridge.has_adb_client is False
-    asyncio.run(bridge.recycle())  # 幂等：重复回收不抛
-    asyncio.run(bridge.recycle())
+    asyncio.run(bridge.recycle("test"))  # 幂等：重复回收不抛
+    asyncio.run(bridge.recycle("test"))
 
 
 def test_auto_settle_loop_lifecycle(client: TestClient) -> None:

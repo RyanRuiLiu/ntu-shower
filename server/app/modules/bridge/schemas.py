@@ -30,13 +30,17 @@ class BridgeClosed(TypedDict):
 class BridgeStatus(TypedDict, total=False):
     """桥的当前状态（管理面可观测性）。
 
-    `open` 恒存在；为真时其余字段才有意义。
+    `device_id`、`open`、`ssh_target` 恒存在；`open` 为真时其余字段才有意义。
     `device_connected` 指设备侧连入，`adb_client_connected` 指本机 adb 客户端连入。
     `expires_in_s` 是距**绝对寿命**到点的秒数——桥有硬上限，不会一直开着。
+
+    `ssh_target` 放在这里而不是让客户端自己拼：网页挂在 `ntu-shower` 子域上，而 ssh
+    连的是主域，前者推不出后者。本机连接命令另外还需要端口，那取自 `port`。
     """
 
     device_id: str
     open: bool
+    ssh_target: str
     port: int
     generation: int
     device_connected: bool

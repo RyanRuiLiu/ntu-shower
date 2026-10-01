@@ -36,6 +36,7 @@
  * 编码，也把别人的操作挤掉。
  */
 import { api } from '../core/api.js'
+import { problemText, statusLabel } from '../core/outcome.js'
 import { $, disposer, esc, listen } from '../core/dom.js'
 import { store, subscribe } from '../core/store.js'
 import { toast } from '../core/toast.js'
@@ -100,7 +101,7 @@ function isEditable(cls) {
   return /EditText|AutoCompleteTextView/.test(cls || '')
 }
 
-function report(text, kind) {
+function setOpState(text, kind) {
   const box = $('opState')
   box.className = kind === 'ok' ? 'tb-status is-ok' : kind === 'err' ? 'tb-status is-err' : 'tb-status'
   box.textContent = text
@@ -290,7 +291,7 @@ function selectNode(index) {
 
 async function requireDevice() {
   if (!store.deviceId) {
-    report('请先在顶栏选择设备', 'err')
+    setOpState('请先在顶栏选择设备', 'err')
     return null
   }
   return store.deviceId
@@ -299,29 +300,33 @@ async function requireDevice() {
 async function act(label, run, options = {}) {
   const deviceId = await requireDevice()
   if (!deviceId) return
-  report(`${label}…`)
+  setOpState(`${label}…`)
   try {
     const result = await run(deviceId)
     const ok = result.status === 'ok'
     const detail = result.terminal_message || result.reason_code || ''
-    report(ok ? `${label} 完成` : `${label} 失败：${detail}`, ok ? 'ok' : 'err')
+    // 状态词取自 core.outcome，不自建：这里原先自己拼了"完成"/"失败："两套词，
+    // 而概览页用的是 core 那套（"已完成"），同一个系统两种说法。
+    // 加上动作名前缀是因为这块面板会连着点好几个动作，光看"已完成"不知道是哪个。
+    const state = statusLabel(result.status)
+    setOpState(detail ? `${label} · ${state} · ${detail}` : `${label} · ${state}`, ok ? 'ok' : 'err')
     // 操作改变了界面，画面与树都要跟着更新，否则看的是操作前的样子
     if (options.refresh !== false) refreshBoth()
   } catch (error) {
-    report(error.message, 'err')
+    setOpState(problemText(error), 'err')
   }
 }
 
 async function capture() {
   const deviceId = await requireDevice()
   if (!deviceId) return
-  report('正在截图…')
+  setOpState('正在截图…')
   $('screenPanel').classList.add('is-loading')
   try {
     const result = await api.capture(deviceId)
     const image = result.data?.image_base64
     if (!image) {
-      report('设备未返回画面', 'err')
+      setOpState('设备未返回画面', 'err')
       return
     }
     const url = `data:image/jpeg;base64,${image}`
@@ -334,12 +339,12 @@ async function capture() {
       $('screenHint').hidden = true
       highlight(selected)
       if (nodes.length > 0) renderTree()
-      report(`画面 ${deviceWidth}×${deviceHeight}`, 'ok')
+      setOpState(`画面 ${deviceWidth}×${deviceHeight}`, 'ok')
     }
-    probe.onerror = () => report('画面解码失败', 'err')
+    probe.onerror = () => setOpState('画面解码失败', 'err')
     probe.src = url
   } catch (error) {
-    report(error.message, 'err')
+    setOpState(problemText(error), 'err')
   } finally {
     $('screenPanel').classList.remove('is-loading')
   }
@@ -348,21 +353,21 @@ async function capture() {
 async function refreshTree() {
   const deviceId = await requireDevice()
   if (!deviceId) return
-  report('正在读取界面结构…')
+  setOpState('正在读取界面结构…')
   try {
     const result = await api.dumpTree(deviceId)
     const xml = result.data?.xml
     if (!xml) {
-      report(result.terminal_message || '未能读取界面结构', 'err')
+      setOpState(result.terminal_message || '未能读取界面结构', 'err')
       return
     }
     currentXml = xml
     parseTree(xml)
     collapsed = new Set()
     selectNode(-1)
-    report(`${nodes.length} 个节点`, 'ok')
+    setOpState(`${nodes.length} 个节点`, 'ok')
   } catch (error) {
-    report(error.message, 'err')
+    setOpState(problemText(error), 'err')
   }
 }
 
@@ -482,7 +487,7 @@ function tapSelected() {
   const node = nodes[selected]
   const box = node ? boundsOf(node) : null
   if (!box) {
-    report('选中的节点没有可用坐标', 'err')
+    setOpState('选中的节点没有可用坐标', 'err')
     return
   }
   tapAt(box.cx, box.cy)
@@ -528,7 +533,7 @@ function hideContextMenu() {
 function copy(text, what) {
   navigator.clipboard.writeText(text).then(
     () => toast(`已复制${what}`),
-    () => report('复制失败（浏览器未授予剪贴板权限）', 'err'),
+    () => setOpState('复制失败（浏览器未授予剪贴板权限）', 'err'),
   )
 }
 
@@ -644,7 +649,7 @@ export const inspectorView = {
     root.querySelector('[data-act="send"]').addEventListener('click', () => {
       const text = $('textInput').value.trim()
       if (!text) {
-        report('请输入文本', 'err')
+        setOpState('请输入文本', 'err')
         return
       }
       // 发送后清空输入框，与旧版一致：一屏通常要连着输几次
@@ -748,7 +753,7 @@ export const inspectorView = {
           stopPress()
           dragStart = null
           clearSwipe()
-          report('已取消')
+          setOpState('已取消')
           return
         }
         if (event.button !== 0) return
