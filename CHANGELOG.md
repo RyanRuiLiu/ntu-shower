@@ -3,6 +3,19 @@
 本项目所有显著变更记录于此。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)；
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.4.10] - 2026-10-01
+
+### 变更
+
+- **设备端日志统一**：`core.audit.CommandAuditLog` 更名 `core.log.DeviceLog`（audit.log
+  → device.log），成为设备**唯一**结构化落盘日志入口；新增 `lifecycle` / `error`
+  两个事件方法，接入服务拉起/销毁、配置应用、OTA 检查失败，事件名与服务端
+  log_event 同族。此前生命周期事件只进 Logcat，重启即空，长跑设备无从回溯
+- 敏感红线写入 DeviceLog 类注释作为硬约定：学号/密码/令牌/剪贴板内容永不入日志
+- **看门狗闹钟**：`setRepeating`（4.4 批处理下分钟级漂移且不可纠正）改为
+  `setExact` 逐次排（收到 tick 由 onStartCommand 重排下一次）。不用
+  `setExactAndAllowWhileIdle`——那是 API 23，本设备是 19
+
 ## [0.4.9] - 2026-10-01
 
 ### 修复

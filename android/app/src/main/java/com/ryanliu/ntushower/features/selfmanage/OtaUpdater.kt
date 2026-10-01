@@ -5,6 +5,7 @@ import android.util.Log
 import com.ryanliu.ntushower.BuildConfig
 import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.identity.DeviceIdentity
+import com.ryanliu.ntushower.core.log.DeviceLog
 import com.ryanliu.ntushower.core.shell.RootShell
 import com.ryanliu.ntushower.service.A11yService
 import okhttp3.OkHttpClient
@@ -30,6 +31,9 @@ class OtaUpdater(
 
     private val appContext = context.applicationContext
 
+    /** OTA 的步骤落设备统一日志（device.log）：安装是脱手的，事后只有这里能查。 */
+    private val deviceLog = DeviceLog(File(AppConfig.WORK_DIR))
+
     /**
      * 轮询/推送共用的检查入口。
      * force 发布无视版本号（调试期反复推送同一版本）；
@@ -50,6 +54,7 @@ class OtaUpdater(
             true
         } catch (e: Exception) {
             Log.e(TAG, "ota check failed: ${e.message}")
+            deviceLog.error("ota.check-failed", e.message ?: "")
             onProgress("", "failed", e.message ?: "")
             false
         }
@@ -116,6 +121,9 @@ class OtaUpdater(
     private fun installDetached(apk: File, expectedVersionName: String) {
         val log = File(AppConfig.WORK_DIR, INSTALL_LOG_NAME).absolutePath
         val pkg = BuildConfig.APPLICATION_ID
+        // 步骤事实同步进 device.log（脱手脚本自身无法回调，这里记"已发起"；
+        // 脚本内的逐步结果仍在 ota-install.log——那是脚本唯一可写的通道）
+        deviceLog.lifecycle("ota.install-started", "version=$expectedVersionName")
         RootShell.execDetached(
             "echo OTA_START > $log; " +
                 // 安装；Success 只代表 installd 收下了请求，不代表生效

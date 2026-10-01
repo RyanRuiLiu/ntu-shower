@@ -8,11 +8,11 @@ import android.os.IBinder
 import android.os.SystemClock
 import android.util.Log
 import com.ryanliu.ntushower.BuildConfig
-import com.ryanliu.ntushower.core.audit.CommandAuditLog
 import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.config.ConfigCache
 import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.identity.DeviceIdentity
+import com.ryanliu.ntushower.core.log.DeviceLog
 import com.ryanliu.ntushower.core.net.HttpClientFactory
 import com.ryanliu.ntushower.core.shell.RootShell
 import com.ryanliu.ntushower.features.automation.CommandFactory
@@ -79,8 +79,8 @@ class AgentService : Service() {
     /** 已处理命令的结果缓存（幂等接收者，见 CommandResultCache）。 */
     private val recentOutcomes = CommandResultCache(RuntimeConfig.commandDedupMaxCount.toInt())
 
-    /** 命令痕迹落盘（见 core.audit.CommandAuditLog）：与服务端 command_audit 呼应。 */
-    private val commandAudit = CommandAuditLog(File(AppConfig.WORK_DIR))
+    /** 设备统一日志（见 core.log.DeviceLog）：与服务端审计同事件族。 */
+    private val deviceLog = DeviceLog(File(AppConfig.WORK_DIR))
     private var adbBridge: AdbBridge? = null
 
     @Volatile private var trusted = false
@@ -106,6 +106,7 @@ class AgentService : Service() {
             startDoorMonitor()
             startWatchdog()
             scheduleOtaCheck()
+            deviceLog.lifecycle("service.started", "action=${intent?.action ?: "startService"}")
             Log.i(TAG, "service started")
         }
         // 每次拉起都同步一次：看门狗 tick 也走这里，组件可能已被系统回收过
@@ -116,7 +117,7 @@ class AgentService : Service() {
     private val callback = object : GatewayClient.Callback {
         override fun onConnected(trusted: Boolean, config: JSONObject, upgrade: JSONObject?) {
             this@AgentService.trusted = trusted
-            commandAudit.gateway(connected = true, detail = "trusted=$trusted")
+            deviceLog.gateway(connected = true, detail = "trusted=$trusted")
             Log.i(TAG, "gateway connected, trusted=$trusted")
             // hello_ack 里的配置已经由 GatewayClient 写进 RuntimeConfig，这里做两件事：
             // 落到依赖配置的组件上，以及存一份供下次启动直接用。
@@ -142,7 +143,7 @@ class AgentService : Service() {
 
         override fun onDisconnected(reason: String) {
             trusted = false
-            commandAudit.gateway(connected = false, detail = reason)
+            deviceLog.gateway(connected = false, detail = reason)
             Log.w(TAG, "gateway disconnected: $reason")
         }
 
@@ -195,14 +196,14 @@ class AgentService : Service() {
         // 分配/结算会真实操作硬件，重复执行必须在这里拦下；且重发结果而非静默忽略——
         // 服务端可能正是因为没收到结果才重发。
         recentOutcomes.recall(commandId)?.let { cached ->
-            commandAudit.received(commandId, "(重复接收，重发既有结果)", duplicate = true)
+            deviceLog.received(commandId, "(重复接收，重发既有结果)", duplicate = true)
             Log.i(TAG, "duplicate command, resending result: $commandId")
             sendOutcome(cached)
             return
         }
         val payload = envelope.payload
         val action = payload.optString("action", "")
-        commandAudit.received(commandId, action)
+        deviceLog.received(commandId, action)
         val params = payload.optJSONObject("params") ?: JSONObject()
 
         Log.i(TAG, "command: $action ($commandId)")
@@ -263,6 +264,7 @@ class AgentService : Service() {
         startWatchdog()
         restartDoorMonitor()
         client.send("config.ack", JSONObject().put("revision", revision), replyTo = envelope.id)
+        deviceLog.lifecycle("config.applied", "revision=$revision")
         Log.i(TAG, "config applied revision=$revision heartbeat=${RuntimeConfig.heartbeatIntervalS}s")
     }
 
@@ -362,7 +364,7 @@ class AgentService : Service() {
 
     private fun sendOutcome(outcome: CommandOutcome) {
         recentOutcomes.remember(outcome)
-        commandAudit.result(outcome.commandId, outcome.status, outcome.reasonCode)
+        deviceLog.result(outcome.commandId, outcome.status, outcome.reasonCode)
         val payload = JSONObject()
             .put("status", outcome.status)
             .put("reason_code", outcome.reasonCode)
@@ -379,14 +381,17 @@ class AgentService : Service() {
     }
 
     /**
-     * 看门狗：按配置间隔拉活服务（对存活服务为幂等 onStartCommand）。配置变更后再调一次即可
-     * ——[AlarmManager.setRepeating] 对同一个 `PendingIntent` 会先撤掉旧闹钟再排新的，
-     * 不需要另外 cancel 一遍。
+     * 看门狗：按配置间隔拉活服务（对存活服务为幂等 onStartCommand）。收到 tick 后由
+     * onStartCommand 重排下一次——逐次排精确闹钟而不是 [AlarmManager.setRepeating]：
+     * 后者受系统闹钟批处理影响会有分钟级漂移且不可纠正，逐次排是官方推荐的连续告警
+     * 形态，漂移不累积。
      *
-     * 走 [AlarmManager.ELAPSED_REALTIME_WAKEUP]：间隔的语义是"距上次 tick 过了这么久"，
-     * 而不是"到了某个墙上时刻"。目标设备没有 NTP，系统时间会被运维改动、掉电重启后
-     * 也会跳变——用 RTC 的话，时钟被往回调只会让 tick 静默推迟，自恢复链路整体延后，
-     * 而日志里什么都看不出来。
+     * 走 [AlarmManager.setExact]（ELAPSED_REALTIME_WAKEUP）：间隔的语义是"距上次
+     * tick 过了这么久"，而不是"到了某个墙上时刻"。目标设备没有 NTP，系统时间会被
+     * 运维改动、掉电重启后也会跳变——用 RTC 的话，时钟被往回调只会让 tick 静默
+     * 推迟，自恢复链路整体延后，而日志里什么都看不出来。
+     * `setExactAndAllowWhileIdle` 要 API 23，本设备是 19——`setExact` 是 19 上
+     * 可用的精确形式。
      */
     private fun startWatchdog() {
         val alarm = getSystemService(ALARM_SERVICE) as AlarmManager
@@ -394,18 +399,18 @@ class AgentService : Service() {
             this,
             0,
             Intent(this, WatchdogReceiver::class.java),
-            0,
+            PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val intervalMs = RuntimeConfig.watchdogIntervalS * 1000
-        alarm.setRepeating(
+        alarm.setExact(
             AlarmManager.ELAPSED_REALTIME_WAKEUP,
             SystemClock.elapsedRealtime() + intervalMs,
-            intervalMs,
             pending,
         )
     }
 
     override fun onDestroy() {
+        deviceLog.lifecycle("service.destroyed", "")
         // 先停掉一切会继续调度工作的东西，再拆连接：
         // 只断连接不关线程池，会让定时任务与服务线程在 Service 销毁后继续存活
         otaCheckFuture?.cancel(false)
