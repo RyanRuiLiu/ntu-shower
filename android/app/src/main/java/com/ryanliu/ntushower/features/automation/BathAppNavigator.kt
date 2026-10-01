@@ -4,6 +4,7 @@
 
 package com.ryanliu.ntushower.features.automation
 
+import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Rect
 import android.view.accessibility.AccessibilityNodeInfo
@@ -74,6 +75,10 @@ object BathAppNavigator {
      * 这不是"看见弹窗就找确定键点一下"那类试探：关面板与拉前台都是系统给出的确定动作，而
      * 认不出的页面一律走失败回报，不去猜它是什么、更不去点它上面的任何东西。
      */
+    // MissingPermission：ACTION_CLOSE_SYSTEM_DIALOGS 的权限声明是后来才有的（signature 级），
+    // 目标 API 19 上发送本广播无需任何权限（当年第三方应用即如此使用）。lint 按 compileSdk
+    // 判定，不适用于本设备的运行时下限。
+    @SuppressLint("MissingPermission")
     fun ensureForeground(a11y: A11yService) {
         val root = a11y.rootInActiveWindow
         if (root == null) {
