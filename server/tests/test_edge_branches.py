@@ -4,7 +4,6 @@ import asyncio
 import io
 import json
 import socket
-import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -146,7 +145,7 @@ def test_bridge_open_reports_offline_when_send_fails(client: TestClient, monkeyp
 
     assert r.status_code == 409
     assert device_id not in registry.pending
-    assert device_id not in registry.active
+    assert registry.get(device_id) is None
 
 
 def test_bridge_open_reports_port_unavailable(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -168,37 +167,33 @@ def test_bridge_open_reports_port_unavailable(client: TestClient, monkeypatch: p
         holder.close()
 
     assert r.status_code == 409
-    assert device_id not in registry.active
+    assert registry.get(device_id) is None
 
 
-def test_bridge_rejects_stale_generation(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    """桥内已有更新世代时，旧世代 nonce 接入被拒（4409）。
+def test_bridge_rejects_unknown_nonce(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """不属于任何现役会话的 nonce 被拒（4401）。
 
-    判定必须是严格大于——相等表示本次 open 刚建立的桥正等待设备接管。
+    nonce 是**一次性**的：`open_session` 每发一个就记下，`consume_nonce` 用过即删。
+    所以"旧世代的 nonce"与"随便编的 nonce"是同一回事——都已经不在待配对记录里，
+    不需要再单独比一次世代号（实现里因此没有那一步，也就没有那一步会漏掉的状态）。
     """
-    from app.modules.bridge import routes as bridge_routes
     from app.modules.bridge.manager import registry
 
-    device_id = "dev-gen-stale"
+    device_id = "dev-nonce-unknown"
     _register_trusted(device_id)
     monkeypatch.setattr(manager_module.manager, "_connections", {device_id: FakeGatewayWS()})
 
     client.post(f"/ops/devices/{device_id}/bridge/open", headers=OPS_HEADERS)
-    bridge = registry.active[device_id]
-
-    # 人为构造"旧世代 nonce"：把在册世代推进一格，pending 记录退回一世代
-    stale_nonce = "stale-nonce"
-    monkeypatch.setattr(bridge_routes.registry, "_generation_by_device", {device_id: bridge.generation + 1})
-    monkeypatch.setattr(bridge, "generation", bridge.generation + 1)
-    registry.pending[device_id] = (bridge.generation - 1, stale_nonce, time.monotonic())
+    assert registry.get(device_id) is not None, "开桥该把桥建起来"
 
     with (
-        pytest.raises(WebSocketDisconnect) as stale,
-        client.websocket_connect(f"/gateway/bridge?device_id={device_id}&nonce={stale_nonce}") as ws,
+        pytest.raises(WebSocketDisconnect) as rejected,
+        client.websocket_connect(f"/gateway/bridge?device_id={device_id}&nonce=not-the-one") as ws,
     ):
         ws.receive_bytes()
 
-    assert stale.value.code == 4409
+    assert rejected.value.code == 4401
+    assert registry.get(device_id) is not None, "一次非法配对不该把已建好的桥拆掉"
 
 
 def test_bridge_open_is_idempotent_while_connected(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -210,7 +205,7 @@ def test_bridge_open_is_idempotent_while_connected(client: TestClient, monkeypat
     monkeypatch.setattr(manager_module.manager, "_connections", {device_id: FakeGatewayWS()})
 
     first = client.post(f"/ops/devices/{device_id}/bridge/open", headers=OPS_HEADERS).json()
-    registry.active[device_id].device_ws = object()  # 模拟设备 WS 已接入
+    registry.get(device_id).device_ws = object()  # type: ignore[assignment]  # 模拟设备 WS 已接入
 
     second = client.post(f"/ops/devices/{device_id}/bridge/open", headers=OPS_HEADERS).json()
 
