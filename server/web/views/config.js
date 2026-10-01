@@ -169,7 +169,7 @@ async function reload() {
       const view = await api.globalConfig()
       overriddenKeys = new Set()
       renderForm(view.config)
-      $('cfgNote').textContent = `修订 ${view.revision} · 所有设备的默认值`
+      $('cfgNote').textContent = `已保存 ${view.revision} 次 · 作用于所有设备`
       $('btnSave').textContent = '保存并推送全部'
       return
     }
@@ -182,8 +182,8 @@ async function reload() {
     overriddenKeys = new Set(Object.keys(view.overrides || {}))
     renderForm(view.config)
     $('cfgNote').textContent = view.overrides
-      ? `${store.deviceId} · 修订 ${view.revision} · 覆盖 ${overriddenKeys.size} 项`
-      : `${store.deviceId} · 修订 ${view.revision} · 全部继承`
+      ? `${store.deviceId} · ${overriddenKeys.size} 项单独设置，其余跟随全局`
+      : `${store.deviceId} · 全部跟随全局`
     $('btnSave').textContent = '保存到这台设备'
   } catch (error) {
     report('configResult', problemText(error), 'err')
@@ -198,10 +198,10 @@ async function save() {
       const result = await api.saveGlobalConfig(values)
       const notified = result.notified || []
       const applied = notified.filter((item) => item.applied).length
-      report('configResult', `全局默认已保存（修订 ${result.revision}），推送 ${notified.length} 台、生效 ${applied} 台`, 'ok')
+      report('configResult', `已保存并推送：${notified.length} 台设备收到，${applied} 台已生效`, 'ok')
     } else {
       const result = await api.saveDeviceConfig(store.deviceId, values)
-      report('configResult', `已保存（修订 ${result.revision}）${result.applied ? '，设备已生效' : `，${result.reason || '未生效'}`}`, 'ok')
+      report('configResult', result.applied ? '已保存，设备已生效' : `已保存，${result.reason || '设备暂未生效'}`, 'ok')
     }
     await reload()
   } catch (error) {
