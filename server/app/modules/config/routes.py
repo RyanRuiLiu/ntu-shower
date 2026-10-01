@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from app.core.logging import log_event
 from app.core.problems import INVALID_CONFIG, ApiProblemError
+from app.core.protocol import JsonObject
 from app.core.security import require_ops_token
 from app.gateway.manager import manager
 from app.modules.devices.dependencies import require_trusted_online_device
@@ -25,7 +26,6 @@ from app.modules.sessions import service as sessions_service
 from . import store
 from .schemas import (
     ConfigPushNotice,
-    ConfigSpecView,
     ConfigValues,
     DeviceConfigRemovalReport,
     DeviceConfigUpdateReport,
@@ -52,13 +52,16 @@ def _validated(values: ConfigValues) -> ConfigValues:
 
 
 @ops_router.get("/config/spec")
-def get_config_spec() -> list[ConfigSpecView]:
-    """配置登记表：每个键的类型、范围、默认值、归属与说明。
+def get_config_spec() -> JsonObject:
+    """配置登记表：每个键的类型、范围、默认值、归属、分组与说明。
 
     客户端据此渲染控件（布尔用开关、整数输入框带上下限），无需各自硬编码键表；
-    这份描述由 spec.CONFIG_SPECS 生成，改了代码不会忘记同步文档。
+    `groups` 是分组的有序清单（前端据此分卡片），都由 spec.CONFIG_SPECS 生成，
+    改了代码不会忘记同步文档。
     """
-    return store.describe()
+    from .spec import GROUPS
+
+    return {"groups": [{"key": key, "title": title} for key, title in GROUPS], "specs": store.describe()}
 
 
 @ops_router.get("/config/global")
