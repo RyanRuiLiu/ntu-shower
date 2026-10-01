@@ -42,7 +42,7 @@ def pick_auto_settle_candidate(config: JsonObject) -> tuple[str, str, str, int] 
     也就不会因为重复解析而引入不可达的防御分支。
 
     `config` 取自 `config_store.effective()`，它保证含登记表里的每一个键，
-    因此这里直接取值——缺键即 KeyError，好过用兜底阈值静默结算错人。
+    因此这里直接取值——缺键即 KeyError，绝不静默换一个默认阈值结算错人。
     """
     if not config.get("auto_settle_enabled"):
         return None
