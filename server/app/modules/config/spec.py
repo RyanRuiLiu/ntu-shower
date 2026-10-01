@@ -50,6 +50,7 @@ class ConfigSpec:
     """一个配置键的完整规格。
 
     `minimum` / `maximum` 只对 `ConfigKind.INT` 有意义，其余类型为 None。
+    `group` 是界面分组（配置页按它分卡片），取值见 [GROUPS]。
     """
 
     key: str
@@ -61,6 +62,23 @@ class ConfigSpec:
     minimum: int | None = None
     maximum: int | None = None
     unit: str = ""
+    group: str = "misc"
+
+
+#: 界面分组 registry：顺序即配置页卡片顺序。分组元数据只在这里一份，
+#: 前端据此分卡片渲染，不在各处硬编码键表。
+GROUPS: tuple[tuple[str, str], ...] = (
+    ("gateway", "链路与心跳"),
+    ("doors", "喷头状态采集"),
+    ("automation", "自动化流程"),
+    ("ui", "界面操作"),
+    ("overlay", "操作遮罩"),
+    ("guard", "崩溃守护"),
+    ("ota", "自更新"),
+    ("debug", "调试通道"),
+    ("settle", "自动结算"),
+    ("misc", "其他"),
+)
 
 
 DEVICE = ConfigScope.DEVICE
@@ -84,6 +102,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=5,
         maximum=600,
         unit="秒",
+        group="gateway",
     ),
     ConfigSpec(
         "ping_interval_s",
@@ -95,6 +114,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=10,
         maximum=1800,
         unit="秒",
+        group="gateway",
     ),
     ConfigSpec(
         "clock_jump_threshold_s",
@@ -109,6 +129,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=30,
         maximum=86400,
         unit="秒",
+        group="gateway",
     ),
     ConfigSpec(
         "bridge_ssh_target",
@@ -119,6 +140,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "网页端生成本机连接命令时用的 `用户@主机`。它是**现场那台电脑**要 ssh 过去的地方，"
         "与网页自己的域名不是一回事——网页挂在 ntu-shower 子域上，而 ssh 连的是主域，"
         "所以推不出来，只能配。见 docs/RUNBOOK.md 的连接指引。",
+        group="debug",
     ),
     ConfigSpec(
         "reconnect_base_ms",
@@ -130,6 +152,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=500,
         maximum=60000,
         unit="毫秒",
+        group="gateway",
     ),
     ConfigSpec(
         "reconnect_max_ms",
@@ -141,6 +164,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=5000,
         maximum=600000,
         unit="毫秒",
+        group="gateway",
     ),
     ConfigSpec(
         "watchdog_interval_s",
@@ -152,6 +176,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=30,
         maximum=3600,
         unit="秒",
+        group="gateway",
     ),
     # ── 喷头状态采集 ──
     ConfigSpec(
@@ -164,6 +189,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=0,
         maximum=60000,
         unit="毫秒",
+        group="doors",
     ),
     ConfigSpec(
         "outbox_max_rows",
@@ -178,6 +204,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=1000,
         maximum=1_000_000,
         unit="行",
+        group="doors",
     ),
     # ── 自动化遮盖 ──
     ConfigSpec(
@@ -187,6 +214,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         True,
         "显示操作遮罩",
         "自动操作期间是否盖住屏幕，防止现场学生误触",
+        group="overlay",
     ),
     ConfigSpec(
         "overlay_message",
@@ -196,6 +224,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "操作遮罩文字",
         "盖屏期间显示的文字。刻意**不写「正在自动操作」**——现场学生看到网络问题会安静等待，"
         "看到「系统正在远程操作这台机器」则可能去拔电源或找来管理员。这句话沿用旧项目",
+        group="overlay",
     ),
     ConfigSpec(
         "overlay_text_size_sp",
@@ -207,6 +236,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=10,
         maximum=200,
         unit="sp",
+        group="overlay",
     ),
     ConfigSpec(
         "overlay_text_color",
@@ -215,6 +245,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "#d94f16",
         "遮罩文字颜色",
         "十六进制颜色，如 #d94f16。默认值来自旧项目，与浴室 App 的提示色一致",
+        group="overlay",
     ),
     ConfigSpec(
         "overlay_margin_left_dp",
@@ -226,6 +257,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=0,
         maximum=2000,
         unit="dp",
+        group="overlay",
     ),
     ConfigSpec(
         "automation_trace_enabled",
@@ -236,6 +268,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "把分配/结算流程的分段耗时写进 /sdcard/ntu-shower/automation.log，"
         "用 device.exec 可以直接 cat 取回。默认关：每次记录都要开一次文件，长期开着是"
         "白花的开销，而它的用途本来就是「要量的时候量一轮」",
+        group="automation",
     ),
     # ── 命令去重 ──
     ConfigSpec(
@@ -252,6 +285,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=16,
         maximum=65536,
         unit="条",
+        group="automation",
     ),
     ConfigSpec(
         "bath_response_timeout_ms",
@@ -263,6 +297,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=1000,
         maximum=60000,
         unit="毫秒",
+        group="automation",
     ),
     ConfigSpec(
         "cert_verify_wait_ms",
@@ -274,6 +309,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=500,
         maximum=30000,
         unit="毫秒",
+        group="automation",
     ),
     ConfigSpec(
         "home_timeout_ms",
@@ -285,6 +321,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=1000,
         maximum=60000,
         unit="毫秒",
+        group="automation",
     ),
     ConfigSpec(
         "ui_poll_interval_ms",
@@ -299,6 +336,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=50,
         maximum=5000,
         unit="毫秒",
+        group="ui",
     ),
     ConfigSpec(
         "ui_click_delay_ms",
@@ -310,6 +348,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=0,
         maximum=5000,
         unit="毫秒",
+        group="ui",
     ),
     ConfigSpec(
         "ui_dump_max_nodes",
@@ -321,6 +360,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=100,
         maximum=20000,
         unit="个",
+        group="ui",
     ),
     ConfigSpec(
         "ui_operation_timeout_s",
@@ -332,6 +372,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=5,
         maximum=300,
         unit="秒",
+        group="ui",
     ),
     ConfigSpec(
         "ui_swipe_duration_ms",
@@ -343,6 +384,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=50,
         maximum=5000,
         unit="毫秒",
+        group="ui",
     ),
     ConfigSpec(
         "device_exec_max_output_bytes",
@@ -354,6 +396,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=1024,
         maximum=1048576,
         unit="字节",
+        group="gateway",
     ),
     # ── 自更新 ──
     ConfigSpec(
@@ -366,6 +409,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=60,
         maximum=86400,
         unit="秒",
+        group="ota",
     ),
     # ── 浴室 App 崩溃守护 ──
     ConfigSpec(
@@ -375,6 +419,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         True,
         "崩溃后拉起浴室 App",
         "浴室 App 异常退出时是否自动重新拉起",
+        group="guard",
     ),
     ConfigSpec(
         "bath_app_exit_window_ms",
@@ -386,6 +431,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=1000,
         maximum=600000,
         unit="毫秒",
+        group="guard",
     ),
     ConfigSpec(
         "bath_app_exit_max_count",
@@ -397,6 +443,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=1,
         maximum=100,
         unit="次",
+        group="guard",
     ),
     ConfigSpec(
         "bath_app_exit_cooldown_ms",
@@ -408,6 +455,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=1000,
         maximum=3600000,
         unit="毫秒",
+        group="guard",
     ),
     # ── 调试通道 ──
     ConfigSpec(
@@ -423,6 +471,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=300,
         maximum=86400,
         unit="秒",
+        group="debug",
     ),
     ConfigSpec(
         "bridge_pair_timeout_s",
@@ -434,6 +483,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=5,
         maximum=300,
         unit="秒",
+        group="debug",
     ),
     # ── 自动结算（服务端侧）──
     ConfigSpec(
@@ -443,6 +493,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         False,
         "启用自动结算",
         "占用时长超过阈值的会话由服务端自动结算",
+        group="settle",
     ),
     ConfigSpec(
         "auto_settle_threshold_s",
@@ -454,6 +505,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=60,
         maximum=7200,
         unit="秒",
+        group="settle",
     ),
     ConfigSpec(
         "auto_settle_students",
@@ -463,6 +515,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         # 模块级单例，全进程仅此一份；defaults() 会为调用方复制，勿在此就地修改
         "自动结算名单",
         "学号到密码的映射；只对这些学号执行自动结算，留空表示全部",
+        group="settle",
     ),
 )
 

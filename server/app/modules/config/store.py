@@ -216,6 +216,7 @@ def describe() -> list[ConfigSpecView]:
             "minimum": spec.minimum,
             "maximum": spec.maximum,
             "unit": spec.unit,
+            "group": spec.group,
         }
         for spec in CONFIG_SPECS
     ]

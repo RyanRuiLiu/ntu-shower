@@ -168,12 +168,18 @@ def test_config_spec_endpoint_lists_every_key(client: TestClient) -> None:
     """客户端据此渲染控件，不必各自硬编码键表。"""
     spec = client.get("/ops/config/spec", headers=_ops_token(client)).json()
 
-    assert {item["key"] for item in spec} >= {"heartbeat_interval_s", "overlay_enabled", "auto_settle_threshold_s"}
-    heartbeat = next(item for item in spec if item["key"] == "heartbeat_interval_s")
+    items = spec["specs"]
+    assert {item["key"] for item in items} >= {"heartbeat_interval_s", "overlay_enabled", "auto_settle_threshold_s"}
+    heartbeat = next(item for item in items if item["key"] == "heartbeat_interval_s")
     assert heartbeat["kind"] == "int"
     assert heartbeat["scope"] == "device"
     assert heartbeat["minimum"] == 5
     assert heartbeat["unit"] == "秒"
+    assert heartbeat["group"] == "gateway"
+    # 分组有序清单：前端据此分卡片
+    groups = [g["key"] for g in spec["groups"]]
+    assert "gateway" in groups
+    assert "settle" in groups
 
 
 def test_device_config_override_lifecycle(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
