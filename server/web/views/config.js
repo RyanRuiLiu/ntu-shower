@@ -69,6 +69,13 @@ function controlHtml(spec, value, id, isOverridden) {
                   spellcheck="false" placeholder="99990052=000000">${esc(lines)}</textarea>
       </div>${desc}`
   }
+  if (spec.kind === 'text') {
+    return `<div class="field">
+        <label for="${esc(id)}">${esc(spec.title)}${badgeHtml}${resetButton}</label>
+        <input id="${esc(id)}" type="text" data-key="${esc(spec.key)}" data-kind="text"
+               value="${esc(value)}" spellcheck="false">
+      </div>${desc}`
+  }
   const min = spec.minimum === null ? '' : `min="${spec.minimum}"`
   const max = spec.maximum === null ? '' : `max="${spec.maximum}"`
   return `<div class="field">
@@ -154,6 +161,8 @@ function readForm() {
       config[key] = input.checked
     } else if (input.dataset.kind === 'text_map') {
       config[key] = parseTextMap(input.value)
+    } else if (input.dataset.kind === 'text') {
+      config[key] = input.value
     } else {
       const value = Number(input.value)
       if (Number.isFinite(value)) config[key] = value
