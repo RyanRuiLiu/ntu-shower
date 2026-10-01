@@ -66,8 +66,16 @@ class CommandScheduler(
         /** 系统按键（返回/主页/最近任务/通知栏）。 */
         class UiKey(id: String, val key: String) : Command(id)
 
-        /** 向焦点控件输入文本。 */
-        class UiInput(id: String, val text: String) : Command(id)
+        /**
+         * 向焦点控件输入文本。
+         *
+         * [channel] 是**并列的两条通路**，不是主备，调用方必须明确给值：
+         * - `clipboard`——无障碍粘贴，支持中文；本 ROM 的粘贴在"同一字段第二次插入"
+         *   时会带出一个空格（ROM widget 行为）；
+         * - `keys`——shell `input text`（仅 ASCII），无空格问题。
+         * 网页端给使用者一个开关自己选。值缺失或不认识时命令被拒绝，不做静默回落。
+         */
+        class UiInput(id: String, val text: String, val channel: String) : Command(id)
 
         /** 导出界面节点树。 */
         class UiDump(id: String) : Command(id)
@@ -281,11 +289,36 @@ class CommandScheduler(
                     outcome(command.id, ShellUiChannel.key(key), ReasonCodes.UI_KEY_REJECTED, "系统拒绝了该按键")
                 }
 
-                // 输入是唯一走无障碍的操作：它必须支持中文，而 shell 的 `input text`
-                // 在本 ROM 上按字节处理，非 ASCII 会被写坏（见 A11yUiChannel 的类注释）
-                is Command.UiInput -> {
-                    val ok = a11y != null && A11yUiChannel.typeIntoFocus(a11y, command.text)
-                    outcome(command.id, ok, ReasonCodes.UI_NO_EDITABLE_FIELD, "没有可输入的控件，或无障碍服务不可用")
+                // 输入有两条并列通道：剪贴板粘贴支持中文，但本 ROM 的粘贴在第二次
+                // 插入时会带出空格；按键注入没有空格问题却只走得通 ASCII——所以
+                // 按键通道在设备端再守一次 ASCII，守不住就明确拒绝，不把写坏的内容
+                // 静默落进输入框。选哪条由网页端的使用者定；通道值缺失或不认识
+                // 直接拒绝，不做静默回落。
+                is Command.UiInput -> when (command.channel) {
+                    "keys" -> {
+                        if (!command.text.all { it.code in 32..126 }) {
+                            return CommandOutcome(
+                                command.id,
+                                OutcomeStatus.FAILED,
+                                ReasonCodes.UI_KEYS_ASCII_ONLY,
+                                "按键通道仅支持英文、数字与符号，中文请用粘贴通道",
+                            )
+                        }
+                        val ok = ShellUiChannel.typeText(command.text)
+                        outcome(command.id, ok, ReasonCodes.UI_TEXT_REJECTED, "系统拒绝了文本注入")
+                    }
+
+                    "clipboard" -> {
+                        val ok = a11y != null && A11yUiChannel.typeIntoFocus(a11y, command.text)
+                        outcome(command.id, ok, ReasonCodes.UI_NO_EDITABLE_FIELD, "没有可输入的控件，或无障碍服务不可用")
+                    }
+
+                    else -> CommandOutcome(
+                        command.id,
+                        OutcomeStatus.FAILED,
+                        ReasonCodes.UI_UNKNOWN_CHANNEL,
+                        "未知的输入通道：${command.channel}",
+                    )
                 }
 
                 is Command.UiDump -> exportTree(command)

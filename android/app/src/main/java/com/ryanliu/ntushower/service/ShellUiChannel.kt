@@ -35,10 +35,11 @@ import com.ryanliu.ntushower.core.shell.RootShell
  * | `input keyevent` | 可用 | 前台 Activity 由设置变为桌面 |
  * | `input text` | 可用（仅 ASCII） | 拨号盘 `digits` 节点文本变为写入值 |
  *
- * `input text` 按字节处理，**非 ASCII 会被写坏**——中文必须走无障碍的剪贴板
- * 粘贴（API 19 没有 `ACTION_SET_TEXT`）。因此本通道**不提供**文本输入：它只走得通
- * ASCII，而要输的账号密码是纯数字、中文提示走不到这里，一条只能输 ASCII 的通路
- * 没有用武之地。真需要时再按上表那一行的结论接回来即可。
+ * `input text` 按字节处理，**非 ASCII 会被写坏**——中文必须走无障碍的剪贴板粘贴
+ * （[A11yUiChannel]）。但粘贴在字段的**第二次**插入时会带出一个空格（本 ROM 的
+ * widget 行为，两次发送之间必现；单次粘贴的自动化登录不受影响），而按键注入没有
+ * 这个问题。因此文本输入在 [typeText]（仅 ASCII）与无障碍粘贴两条通道并存，由
+ * 调用方按内容与需要选择，见 `executeUiAction`。
  */
 object ShellUiChannel {
 
@@ -93,6 +94,21 @@ object ShellUiChannel {
 
     /** 系统按键。 */
     fun key(key: UiKey): Boolean = run("input keyevent ${key.keyCode}", "key ${key.name}")
+
+    /**
+     * 按键注入文本（仅 ASCII；非 ASCII 由调用方拦截，见 `executeUiAction` 的守卫）。
+     *
+     * 整串放进双引号里，shell 元字符先转义——与旧项目 bridge-server 的做法一致，
+     * 那条路在本项目接手前已长期使用。含空格的文本也因此能整体落进去。
+     */
+    fun typeText(text: String): Boolean {
+        val escaped = text
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("$", "\\$")
+            .replace("`", "\\`")
+        return run("""input text "$escaped"""", "text")
+    }
 
     /**
      * 执行一条 input 命令。
