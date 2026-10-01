@@ -25,10 +25,15 @@
  * `{x, y, to_x: x, to_y: y, duration_ms: 按住时长}`（起点等于终点的滑动）就是长按。
  * 这条路径复用 `ui.touch` 的既有能力，双端代码都不用动。
  *
- * ## 每次操作后自动重截、重读
+ * ## 每次操作后自动重截、重读（各自可关）
  *
  * 照旧版：点击 / 长按 / 滑动 / 按键 / 输入之后都自动刷新画面与树，两者并行发出。
- * 不刷的话，点完看到的还是旧画面，得自己再点一次截图才知道点没点中。
+ * 不刷的话，点完看到的还是旧画面，得自己再点一次截图才知道点没点中。工具条上给两个
+ * 开关（自动画面 / 自动UI树），各自记在 localStorage——有人只想手动截图省掉每步 3 秒
+ * 的采集，全写死就堵死了这条路。
+ * 两条打磨：截图在飞时不重发（screenrecord 一次约 3 秒且占住采集通道，连点会把手势
+ * 挤掉），期间到来的刷新并成一次尾随重取；命令 `failed`/`rejected`（没落到界面上，
+ * 画面不会变）不重取，省一轮采集——`timeout` 结果未知，照旧重取。
  *
  * ## 画面与结构都不轮询
  *
@@ -56,6 +61,14 @@ const SWIPE_MIN = 8
 
 /** 节点列表（深度优先摊平，每项带 depth）。 */
 let nodes = []
+/**
+ * 操作后要不要自动刷新画面 / UI 树。记在 localStorage，缺席视为开——
+ * 这两步照旧版默认都做，开关只是给想省采集的人留的。
+ */
+const AUTO_CAPTURE_KEY = 'ntu-shower.inspector.auto-capture'
+const AUTO_TREE_KEY = 'ntu-shower.inspector.auto-tree'
+let autoCapture = localStorage.getItem(AUTO_CAPTURE_KEY) !== '0'
+let autoTree = localStorage.getItem(AUTO_TREE_KEY) !== '0'
 /** 父索引 → 子索引数组；根节点的父记作 -1。 */
 let children = new Map()
 /** 折叠起来的节点索引。 */
@@ -310,16 +323,26 @@ async function act(label, run, options = {}) {
     // 加上动作名前缀是因为这块面板会连着点好几个动作，光看"已完成"不知道是哪个。
     const state = statusLabel(result.status)
     setOpState(detail ? `${label} · ${state} · ${detail}` : `${label} · ${state}`, ok ? 'ok' : 'err')
-    // 操作改变了界面，画面与树都要跟着更新，否则看的是操作前的样子
-    if (options.refresh !== false) refreshBoth()
+    // 操作改变了界面，画面与树都要跟着更新，否则看的是操作前的样子。
+    // failed/rejected 是命令没落到界面上（被拒或执行失败），画面不会变，重取只是白花
+    // 一轮 3 秒的采集；timeout 的结果未知（命令可能迟达生效），照旧重取。
+    if (options.refresh !== false && (ok || result.status === 'timeout')) refreshBoth()
   } catch (error) {
     setOpState(problemText(error), 'err')
   }
 }
 
+/** 截图在飞标记：screenrecord 占住设备端采集通道，重复触发只会有害。 */
+let capturing = false
+/** 刷新单飞与尾随合并：连续操作只补一轮，不把采集通道排成串。 */
+let refreshInFlight = false
+let refreshPending = false
+
 async function capture() {
   const deviceId = await requireDevice()
   if (!deviceId) return
+  if (capturing) return
+  capturing = true
   setOpState('正在截图…')
   $('screenPanel').classList.add('is-loading')
   try {
@@ -347,6 +370,7 @@ async function capture() {
     setOpState(problemText(error), 'err')
   } finally {
     $('screenPanel').classList.remove('is-loading')
+    capturing = false
   }
 }
 
@@ -371,9 +395,26 @@ async function refreshTree() {
   }
 }
 
-/** 画面与树一起刷新，照旧版：只刷一边会看到不匹配的两份状态。 */
+/** 画面与树一起刷新，照旧版：只刷一边会看到不匹配的两份状态。
+ *  两个开关各自决定要不要刷，全关就不刷（用户明确要手动控制）。
+ *  在飞时不重发，期间的请求并成一次尾随重取——连点五下只产生两轮采集，不是五轮。 */
 async function refreshBoth() {
-  await Promise.all([capture(), refreshTree()])
+  if (!autoCapture && !autoTree) return
+  if (refreshInFlight) {
+    refreshPending = true
+    return
+  }
+  refreshInFlight = true
+  try {
+    const jobs = [autoCapture ? capture() : null, autoTree ? refreshTree() : null].filter(Boolean)
+    await Promise.all(jobs)
+  } finally {
+    refreshInFlight = false
+    if (refreshPending) {
+      refreshPending = false
+      refreshBoth()
+    }
+  }
 }
 
 /** 画面上的坐标换算。越界时夹到边缘，与旧版一致——拖到画面外也要能结束滑动。 */
@@ -557,7 +598,15 @@ export const inspectorView = {
           <button type="button" data-key="recents">Recent</button>
           <button type="button" data-key="notifications">Notify</button>
         </span>
-        <div class="tb-right"><span class="tb-status" id="opState">就绪</span></div>
+        <div class="tb-right">
+          <label class="tb-toggle" title="操作后自动重截画面">
+            <input type="checkbox" id="autoCaptureToggle"> 自动画面
+          </label>
+          <label class="tb-toggle" title="操作后自动重读界面结构">
+            <input type="checkbox" id="autoTreeToggle"> 自动UI树
+          </label>
+          <span class="tb-status" id="opState">就绪</span>
+        </div>
       </div>
 
       <div class="stage">
@@ -571,8 +620,10 @@ export const inspectorView = {
               <line id="crossH" x1="0" y1="0" x2="100%" y2="0"></line>
               <line id="crossV" x1="0" y1="0" x2="0" y2="100%"></line>
             </svg>
+            <!-- 提示条必须挂在 screen-frame 里：坐标按图片算，挂在面板上会差出留白，
+                 而面板 overflow:hidden 会把贴边时的提示条裁掉 -->
+            <div class="coord-tip" id="coordTip" hidden></div>
           </div>
-          <div class="coord-tip" id="coordTip" hidden></div>
         </div>
 
         <div class="tree-panel">
@@ -669,6 +720,24 @@ export const inspectorView = {
     root.querySelectorAll('[data-key]').forEach((btn) => {
       dispose.add(listen(btn, 'click', () => act(`按键 ${btn.textContent}`, (id) => api.key(id, btn.dataset.key))))
     })
+
+    // ── 自动刷新开关：选择即时生效并记忆，下一次进页面还是这个选择 ──
+    const autoCaptureBox = $('autoCaptureToggle')
+    const autoTreeBox = $('autoTreeToggle')
+    autoCaptureBox.checked = autoCapture
+    autoTreeBox.checked = autoTree
+    dispose.add(
+      listen(autoCaptureBox, 'change', () => {
+        autoCapture = autoCaptureBox.checked
+        localStorage.setItem(AUTO_CAPTURE_KEY, autoCapture ? '1' : '0')
+      }),
+    )
+    dispose.add(
+      listen(autoTreeBox, 'change', () => {
+        autoTree = autoTreeBox.checked
+        localStorage.setItem(AUTO_TREE_KEY, autoTree ? '1' : '0')
+      }),
+    )
 
     // ── 树 ──
     dispose.add(
@@ -798,8 +867,14 @@ export const inspectorView = {
         $('crossV').setAttribute('x2', at.cx)
         tip.hidden = false
         tip.textContent = `${at.x}, ${at.y}`
-        tip.style.left = `${at.cx + 16}px`
-        tip.style.top = `${at.cy - 28}px`
+        // 提示条贴边时向内翻转，而不是溢出被裁：光标在右缘时往左弹、在顶缘时往下弹。
+        // 先写入文字再量尺寸，offsetWidth/Height 才是这段文字的真实占位
+        const tipW = tip.offsetWidth
+        const tipH = tip.offsetHeight
+        const overflowRight = at.cx + 16 + tipW > at.rect.width
+        tip.style.left = `${overflowRight ? at.cx - 16 - tipW : at.cx + 16}px`
+        const overflowTop = at.cy - tipH - 8 < 0
+        tip.style.top = `${overflowTop ? at.cy + 18 : at.cy - tipH - 8}px`
 
         // 按住后移动超过阈值：这一下不再是点击/长按，转为滑动
         if (pressStart) {
