@@ -59,9 +59,13 @@ def get_config_spec() -> JsonObject:
     `groups` 是分组的有序清单（前端据此分卡片），都由 spec.CONFIG_SPECS 生成，
     改了代码不会忘记同步文档。
     """
-    from .spec import GROUPS
+    from .spec import GROUPS, SECTIONS
 
-    return {"groups": [{"key": key, "title": title} for key, title in GROUPS], "specs": store.describe()}
+    return {
+        "sections": [{"key": key, "title": title} for key, title in SECTIONS],
+        "groups": [{"key": g.key, "title": g.title, "section": g.section} for g in GROUPS],
+        "specs": store.describe(),
+    }
 
 
 @ops_router.get("/config/global")
