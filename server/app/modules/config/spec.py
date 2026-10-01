@@ -95,7 +95,7 @@ GROUPS: tuple[GroupSpec, ...] = (
     GroupSpec("overlay", "操作遮罩", "infra"),
     GroupSpec("guard", "崩溃守护", "infra"),
     GroupSpec("ota", "自更新", "infra"),
-    GroupSpec("debug", "调试通道", "business"),
+    GroupSpec("debug", "调试通道", "infra"),
     GroupSpec("misc", "其他", "infra"),
 )
 
