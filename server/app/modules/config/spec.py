@@ -111,6 +111,16 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         unit="秒",
     ),
     ConfigSpec(
+        "bridge_ssh_target",
+        TEXT,
+        SERVER,
+        "root@iseekdream.com",
+        "调试通道的 SSH 目标",
+        "网页端生成本机连接命令时用的 `用户@主机`。它是**现场那台电脑**要 ssh 过去的地方，"
+        "与网页自己的域名不是一回事——网页挂在 ntu-shower 子域上，而 ssh 连的是主域，"
+        "所以推不出来，只能配。见 docs/RUNBOOK.md 的连接指引。",
+    ),
+    ConfigSpec(
         "reconnect_base_ms",
         INT,
         DEVICE,
@@ -401,23 +411,15 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
     ),
     # ── 调试通道 ──
     ConfigSpec(
-        "bridge_idle_timeout_s",
-        INT,
-        SERVER,
-        300,
-        "调试通道空闲超时",
-        "无数据往来达到该时长即关闭。服务器同时承担其他服务，不留死连接",
-        minimum=30,
-        maximum=3600,
-        unit="秒",
-    ),
-    ConfigSpec(
         "bridge_max_lifetime_s",
         INT,
         SERVER,
         3600,
         "调试通道最长开启时长",
-        "从打开算起的最长存活时长，到点强制关闭。空闲超时只覆盖「没人用」的情况，一直有流量时它不会触发",
+        "从打开算起的最长存活时长，到点强制关闭。**这是唯一的自动关闭条件**——早先另有一个"
+        "300 秒的空闲超时，而它的判据错了：设备侧的隧道连进来之后，在我们这边还没执行"
+        "`adb connect` 之前一个字节都不会发，于是开桥五分钟后就自己关了，而人还以为它在。"
+        "调试的节奏由人定，中途停下来想事情、去装 adb 都正常，不该被打断",
         minimum=300,
         maximum=86400,
         unit="秒",

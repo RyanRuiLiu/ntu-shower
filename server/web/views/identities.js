@@ -9,6 +9,7 @@
  * 查看类接口不需要身份，所以这里不发令牌也不影响别人看状态。
  */
 import { api } from '../core/api.js'
+import { problemText, report } from '../core/outcome.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
 import { toast } from '../core/toast.js'
 
@@ -30,12 +31,6 @@ const KIND_LABEL = {
 function capabilityBadges(values) {
   if (!values || values.length === 0) return '<span class="muted">无</span>'
   return values.map((value) => `<span class="badge badge-blue">${esc(CAPABILITY_LABEL[value] || value)}</span>`).join(' ')
-}
-
-function report(id, text, kind) {
-  const box = $(id)
-  box.className = `result ${kind}`
-  box.textContent = text
 }
 
 function render(list) {
@@ -64,7 +59,7 @@ async function reload() {
   try {
     render(await api.identities())
   } catch (error) {
-    report('identityResult', error.message, 'err')
+    report('identityResult', problemText(error), 'err')
   }
 }
 
@@ -72,7 +67,7 @@ async function create() {
   const label = $('inLabel').value.trim()
   const capabilities = [...$('capBox').querySelectorAll('input:checked')].map((input) => input.value)
   if (capabilities.length === 0) {
-    report('identityResult', '至少选一个能力位', 'err')
+    report('identityResult', '失败 · 至少选一个能力位', 'err')
     return
   }
   report('identityResult', '正在登记…', 'info')
@@ -82,7 +77,7 @@ async function create() {
     report('identityResult', `已签发：${created.identity}（请立即记录，明文不会再次显示）`, 'ok')
     await reload()
   } catch (error) {
-    report('identityResult', error.message, 'err')
+    report('identityResult', problemText(error), 'err')
   }
 }
 
@@ -144,7 +139,7 @@ export const identitiesView = {
           toast('已撤销')
           await reload()
         } catch (error) {
-          report('identityResult', error.message, 'err')
+          report('identityResult', problemText(error), 'err')
         }
       }),
     )

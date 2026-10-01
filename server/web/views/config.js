@@ -9,6 +9,7 @@
  * 页面分左右两栏正是后面两级：左边改全局，右边改当前设备。
  */
 import { api } from '../core/api.js'
+import { problemText, report } from '../core/outcome.js'
 import { $, disposer, esc, listen } from '../core/dom.js'
 import { store, subscribe } from '../core/store.js'
 import { toast } from '../core/toast.js'
@@ -55,19 +56,13 @@ function readForm(container) {
   return config
 }
 
-function report(id, text, kind) {
-  const box = $(id)
-  box.className = `result ${kind}`
-  box.textContent = text
-}
-
 async function loadGlobal() {
   try {
     const view = await api.globalConfig()
     renderForm($('globalForm'), view.config, 'g')
     $('globalNote').textContent = `修订 ${view.revision}`
   } catch (error) {
-    report('globalResult', error.message, 'err')
+    report('globalResult', problemText(error), 'err')
   }
 }
 
@@ -84,7 +79,7 @@ async function loadDevice() {
       ? `修订 ${view.revision} · 已覆盖 ${Object.keys(view.overrides).length} 项`
       : `修订 ${view.revision} · 跟随全局`
   } catch (error) {
-    report('deviceResult', error.message, 'err')
+    report('deviceResult', problemText(error), 'err')
   }
 }
 
@@ -97,7 +92,7 @@ async function saveGlobal() {
     report('globalResult', `已保存（修订 ${result.revision}），推送 ${notified.length} 台、生效 ${applied} 台`, 'ok')
     await loadDevice()
   } catch (error) {
-    report('globalResult', error.message, 'err')
+    report('globalResult', problemText(error), 'err')
   }
 }
 
@@ -109,7 +104,7 @@ async function saveDevice() {
     report('deviceResult', `已保存（修订 ${result.revision}）${result.applied ? '，设备已生效' : `，${result.reason || '未生效'}`}`, 'ok')
     await loadDevice()
   } catch (error) {
-    report('deviceResult', error.message, 'err')
+    report('deviceResult', problemText(error), 'err')
   }
 }
 
@@ -121,7 +116,7 @@ async function clearDevice() {
     toast('已回落为跟随全局')
     await loadDevice()
   } catch (error) {
-    report('deviceResult', error.message, 'err')
+    report('deviceResult', problemText(error), 'err')
   }
 }
 
@@ -176,7 +171,7 @@ export const configView = {
         specs = list
         return Promise.all([loadGlobal(), loadDevice()])
       })
-      .catch((error) => report('globalResult', `读取配置登记表失败：${error.message}`, 'err'))
+      .catch((error) => report('globalResult', problemText(error), 'err'))
   },
 
   unmount() {
