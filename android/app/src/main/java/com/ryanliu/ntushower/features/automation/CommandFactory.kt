@@ -53,7 +53,9 @@ object CommandFactory {
 
         SupportedActions.UI_KEY -> CommandScheduler.Command.UiKey(commandId, params.optString("key"))
 
-        SupportedActions.UI_INPUT -> CommandScheduler.Command.UiInput(commandId, params.optString("text"))
+        // 通道是必填项：缺了或值不认识，命令在 executeUiAction 里被明确拒绝，不做静默回落
+        SupportedActions.UI_INPUT ->
+            CommandScheduler.Command.UiInput(commandId, params.optString("text"), params.optString("channel"))
 
         SupportedActions.UI_SCROLL -> CommandScheduler.Command.UiScroll(
             id = commandId,

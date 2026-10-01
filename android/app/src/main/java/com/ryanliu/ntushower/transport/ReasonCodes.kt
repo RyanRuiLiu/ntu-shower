@@ -101,6 +101,15 @@ object ReasonCodes {
     /** 点击已发出，但界面没有变化 */
     const val UI_CLICK_NO_EFFECT = "ui.click_no_effect"
 
+    /** 系统拒绝了文本注入 */
+    const val UI_TEXT_REJECTED = "ui.text_rejected"
+
+    /** 按键通道仅支持英文、数字与符号 */
+    const val UI_KEYS_ASCII_ONLY = "ui.keys_ascii_only"
+
+    /** 未知的输入通道 */
+    const val UI_UNKNOWN_CHANNEL = "ui.unknown_channel"
+
     /** 拍照失败 */
     const val CAMERA_CAPTURE_FAILED = "camera.capture_failed"
 
