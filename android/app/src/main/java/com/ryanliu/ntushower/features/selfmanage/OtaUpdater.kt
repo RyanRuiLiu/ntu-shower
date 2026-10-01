@@ -94,26 +94,45 @@ class OtaUpdater(
         }
 
         onProgress(version, "installing", "")
-        installDetached(target)
+        installDetached(target, version)
     }
 
     /**
-     * 脱手安装。
+     * 脱手安装：安装 → 自验证 → 未生效则强制重启进程。
      *
      * 不能用常驻通道，也不能用一次性进程：`pm install -r` 会为了替换 APK 而杀掉本
      * 进程，而那条进程是本进程的子进程，会跟着一起死——脚本跑到一半就断，结果也
      * 永远读不回来。独立进程会成为孤儿被 init 收养，把脚本跑完。
      *
-     * 代价是**拿不到安装结果**：成败写进日志，升级是否生效由服务端核对设备重连时
-     * 上报的版本号判断（`link.hello` 带版本），那比脚本的返回值更接近事实。
+     * **自验证是必须的**（真机 2026-10-01 实测）：4.4 的 `pm install -r` 会在设备
+     * 处于进程被杀/存储抖动窗口时**返回 Success 但替换未生效**——旧版本继续跑，
+     * 而 `pm` 的退出码与日志都是"成功"，无从分辨。这台设备物理不可达，"装了但没
+     * 生效"等于升级失败且无法挽回，因此脚本自己在安装后读包版本核对，不一致就
+     * `am force-stop`（root 下的标准强制收尾）并重新拉起服务。步骤全部落日志，
+     * 每一步成败事后可查。
      *
-     * 末尾把 APK 删掉：它是下载产物，装完就没有用了。留在盘上会让每次升级都多攒一个
-     * 文件——真机上跑了一个下午就攒了三十个、二十八兆。失败也没关系，重试本来就要重下。
+     * 末尾把 APK 删掉：它是下载产物，装完就没有用了。失败也没关系，重试本来就要重下。
      */
-    private fun installDetached(apk: File) {
+    private fun installDetached(apk: File, expectedVersionName: String) {
         val log = File(AppConfig.WORK_DIR, INSTALL_LOG_NAME).absolutePath
+        val pkg = BuildConfig.APPLICATION_ID
         RootShell.execDetached(
-            "echo OTA_START > $log; pm install -r ${apk.absolutePath} >> $log 2>&1; " +
+            "echo OTA_START > $log; " +
+                // 安装；Success 只代表 installd 收下了请求，不代表生效
+                "pm install -r ${apk.absolutePath} >> $log 2>&1; " +
+                // 自验证：安装后实际读包版本（dumpsys 的 versionName 行）
+                "installed=\$(dumpsys package $pkg 2>/dev/null | grep -m1 versionName | tr -d ' \r' ); " +
+                "echo \"installed: \$installed\" >> $log; " +
+                "case \"\$installed\" in *$expectedVersionName) " +
+                "    echo OTA_VERIFIED >> $log;; " +
+                "    *) " +
+                // 未生效：强制收尾旧进程并拉起新版（am start 服务是 root 侧的标准拉起手段）
+                "    echo OTA_RESTART >> $log; " +
+                "    am force-stop $pkg >> $log 2>&1; " +
+                "    sleep 2; " +
+                "    am startservice -n $pkg/com.ryanliu.ntushower.service.AgentService >> $log 2>&1; " +
+                "    echo OTA_RESTART_DONE >> $log;; " +
+                "esac; " +
                 "echo OTA_END >> $log; rm -f ${apk.absolutePath}",
         )
     }
