@@ -5,11 +5,19 @@ package com.ryanliu.ntushower.features.automation
  * 浴室 App 退出到桌面的事件流经此决策——是否拉起、是否进入冷却。
  *
  * 对齐旧系统真机验证过的语义（docs/DECISIONS.md 参数化后移植）：
- * - [windowMs] 内退出达 [maxCount] 次 → 进入 [cooldownMs] 冷却期，冷却期内不拉起；
+ * - [onBackground] 的 [Params.windowMs] 内退出达 [Params.maxCount] 次 → 进入冷却期，
+ *   冷却期内不拉起；
  * - 浴室 App 回到前台即解除冷却；
  * - 自动化执行期间不拉起（由调用方判断 automationInProgress）。
+ *
+ * 阈值由调用方**每次调用时传入**而不是构造期固化：它们是远程配置项，改成构造参数的话，
+ * 服务端改了配置还要等本服务重绑才生效——而重绑恰恰是故障场景里最不可得的。
+ * 状态（退出历史、冷却截止）仍是它自己的：那是决策的依据，不是配置。
  */
-class BathAppGuard(private val windowMs: Long, private val maxCount: Int, private val cooldownMs: Long) {
+class BathAppGuard {
+
+    /** 一次判定的阈值集合。取值来自 [com.ryanliu.ntushower.core.config.RuntimeConfig]（唯一来源）。 */
+    data class Params(val windowMs: Long, val maxCount: Int, val cooldownMs: Long)
 
     enum class Action {
         /** 无动作（次数未达阈值）。 */
@@ -32,15 +40,15 @@ class BathAppGuard(private val windowMs: Long, private val maxCount: Int, privat
     }
 
     /** 浴室 App 退出到桌面：返回本次应执行的动作。 */
-    fun onBackground(nowMs: Long): Action {
+    fun onBackground(nowMs: Long, params: Params): Action {
         if (nowMs < cooldownUntil) return Action.COOLDOWN
         exitHistory.addLast(nowMs)
-        val cutoff = nowMs - windowMs
+        val cutoff = nowMs - params.windowMs
         while (exitHistory.isNotEmpty() && exitHistory.first() < cutoff) {
             exitHistory.removeFirst()
         }
-        return if (exitHistory.size >= maxCount) {
-            cooldownUntil = nowMs + cooldownMs
+        return if (exitHistory.size >= params.maxCount) {
+            cooldownUntil = nowMs + params.cooldownMs
             exitHistory.clear()
             Action.COOLDOWN
         } else {
