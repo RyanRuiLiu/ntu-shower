@@ -200,15 +200,32 @@
   line-height: 1.5;
 }
 
-/* scope 徽标：区分"下发给设备的"与"服务端自己的" */
-.cfg-scope {
+/* 继承/覆盖徽标：键处于哪一级一目了然（业界设置继承模式） */
+.cfg-inherit,
+.cfg-override {
   display: inline-block;
   margin-left: 6px;
   padding: 0 5px;
-  border: 1px solid var(--border);
   border-radius: 3px;
-  color: var(--muted);
   font-size: 9px;
+  font-weight: 600;
+  vertical-align: 1px;
+}
+
+.cfg-inherit {
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.cfg-override {
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+
+/* 回落按钮：仅覆盖态的键有，贴着徽标 */
+.cfg-reset {
+  margin-left: 6px;
+  padding: 1px 6px !important;
   vertical-align: 1px;
 }
 
