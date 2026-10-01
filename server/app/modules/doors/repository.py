@@ -244,7 +244,7 @@ def latest_usage_by_door() -> dict[tuple[str, int], Row]:
 _DOOR_LIST_SQL = """
     SELECT d.device_id, d.door_no, d.state, d.card_no, d.cert_no, d.acc_no,
            d.open_time, d.in_time, d.close_time, d.bath_time_s, d.status_raw, d.reported_at,
-           dev.online AS device_online, dev.name AS device_name
+           dev.name AS device_name
     FROM door_live d LEFT JOIN device dev ON dev.device_id = d.device_id
 """
 
@@ -284,7 +284,7 @@ def _as_door_view(row: Row, last_usage: Row | None) -> DoorView:
         "bath_time_s": row["bath_time_s"],
         "status_raw": row["status_raw"],
         "reported_at": row["reported_at"],
-        "device_online": None if row["device_online"] is None else bool(row["device_online"]),
+        "device_online": False,  # 占位：由 service 用内存连接表覆盖（唯一来源，见 devices/service）
         "device_name": row["device_name"],
         "last_used_at": "" if last_usage is None else str(last_usage["opened_at"]),
         "last_used_s": 0 if last_usage is None else int(last_usage["flow_s"]),

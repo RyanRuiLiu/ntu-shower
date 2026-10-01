@@ -21,8 +21,12 @@ from typing_extensions import TypedDict
 class DeviceRecord(TypedDict):
     """一台设备的档案。
 
-    对应 repository 中 `_DEVICE_COLUMNS` 的列；`trusted` / `online` 是布尔语义，
+    除 `online` 外都对应 repository 中 `_DEVICE_COLUMNS` 的列；`trusted` 是布尔语义，
     repository 负责把 SQLite 的 0/1 转换好再返回。
+
+    `online` **不在档案表里**：它由 `devices.service` 从内存连接表填入，所以只有经过
+    service 的记录才带正确的值——直接调 repository 拿到的是恒假的占位。原因见
+    `devices/repository` 的模块注释。
     """
 
     device_id: str
