@@ -180,6 +180,38 @@
   white-space: nowrap;
 }
 
+/* ── 配置页：卡片式分模块 ──────────────────────────────── */
+
+/* 分组卡片：每张卡是同一件事的参数；卡片内键与键之间用细分隔线 */
+.cfg-card {
+  margin-bottom: var(--sp-3);
+}
+
+.cfg-sep {
+  margin: var(--sp-2) 0;
+  border-top: 1px solid var(--row-alt);
+}
+
+/* 键的说明文字：次要色小字，跟在控件下方 */
+.cfg-desc {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* scope 徽标：区分"下发给设备的"与"服务端自己的" */
+.cfg-scope {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--muted);
+  font-size: 9px;
+  vertical-align: 1px;
+}
+
 /* ── 审计页：标签、行选中、详情卡与主从分栏 ────────────── */
 
 /*
