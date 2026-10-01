@@ -72,11 +72,11 @@ def test_bridge_close_with_active_session(client: TestClient, monkeypatch: pytes
 
 
 def test_bridge_manager_units() -> None:
-    bridge = AdbBridge("dev-u", 15655)
+    bridge = AdbBridge("dev-u", 15655, 1)
     assert bridge.connected is False
     assert bridge.has_adb_client is False
-    asyncio.run(bridge.close())  # 幂等：未开启时 close 不抛
-    asyncio.run(bridge.close())
+    asyncio.run(bridge.recycle())  # 幂等：重复回收不抛
+    asyncio.run(bridge.recycle())
 
 
 def test_auto_settle_loop_lifecycle(client: TestClient) -> None:
