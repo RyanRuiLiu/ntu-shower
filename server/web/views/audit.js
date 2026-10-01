@@ -161,19 +161,22 @@ function selectRow(index) {
   renderDetail(row, `${TABS[state.tab].label}详情${deviceSuffix}`)
 }
 
+/** 从共享状态重建设备名映射。store.devices 由顶栏每 30 秒刷新——这里只读它。 */
+function refreshDeviceNames() {
+  deviceNames.clear()
+  for (const device of store.devices) deviceNames.set(device.device_id, device.name)
+}
+
 async function reload() {
   const scope = $('inScope').value
   const limit = Number($('inLimit').value) || 50
   const deviceId = scope === 'device' ? store.deviceId : ''
   try {
-    // 设备名映射用 store.devices（顶栏每 30 秒刷新的共享状态）——自己再拉一份
-    // 就是同一份数据两个来源，迟早打架
     const [calls, commands] = await Promise.all([
       api.auditCalls({ device_id: deviceId, limit }),
       api.commands({ device_id: deviceId, limit }),
     ])
-    deviceNames.clear()
-    for (const device of store.devices) deviceNames.set(device.device_id, device.name)
+    refreshDeviceNames()
     state.rows.api = calls.calls
     state.rows.command = commands
     state.selected.api = -1
@@ -270,8 +273,19 @@ export const auditView = {
     dispose.add(listen($('inScope'), 'change', reload))
     dispose.add(listen($('inLimit'), 'change', reload))
 
+    // 设备清单是共享状态，由顶栏异步刷新——本视图切入时它可能还没到（刷新页面
+    // 直接落在审计页时尤甚）。订阅它：清单一到/一变就更新名字映射并重渲染，
+    // 否则名字时有时无取决于加载时序。
+    dispose.add(
+      subscribe('devices', () => {
+        refreshDeviceNames()
+        rerenderTable()
+      }),
+    )
+
     dispose.add(subscribe('view', (id) => { if (id !== 'audit') dispose.dispose() }))
 
+    refreshDeviceNames()
     reload()
   },
 
