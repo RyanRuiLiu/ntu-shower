@@ -30,13 +30,26 @@ from app.core import events, reason_codes
 from app.core.clock import now_rfc3339, seconds_between
 from app.core.device_clock import correct_rfc3339
 from app.core.protocol import JsonObject
+from app.modules.devices import service as devices_service
 from app.modules.doors import repository
-from app.modules.doors.schemas import OCCUPIED_STATES, DoorState
+from app.modules.doors.schemas import OCCUPIED_STATES, DoorState, DoorView
 
 # t_doorlist.status 原始值（设备上报的 int，不可靠，仅作辅助判据）
 RAW_STATUS_REPAIR = 1
 RAW_STATUS_SELECTED = 2
 RAW_STATUS_DISABLED = 3
+
+
+def list_doors(device_id: str | None = None) -> list[DoorView]:
+    """喷头现态列表。**两个列表端点与 shadow 都走这里**，不再各自调仓储。
+
+    联表拿到的只有所属设备的档案；`device_online` 由内存连接表填入——那是它的唯一来源，
+    档案表里没有这个列（见 `devices/service` 的模块注释）。
+    """
+    doors = repository.list_doors(device_id)
+    for door in doors:
+        door["device_online"] = devices_service.is_online(door["device_id"])
+    return doors
 
 
 def _safe_int(value: object, default: int = 0) -> int:

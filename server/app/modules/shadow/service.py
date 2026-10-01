@@ -6,22 +6,26 @@
 
 两份数据分别由 devices 与 doors 领域拥有，本模块只做聚合——此前它自己写了两条
 SELECT，与那两个领域的查询重复，其中设备那份还少取了 capabilities 与 last_ip。
+
+聚合走的是那两个领域的 **service** 而不是 repository：在线状态由 devices 的 service
+合并进记录（它是内存连接表，仓储够不着），`device_online` 同理。直接调仓储会拿到一个
+永远为假的在线标志。
 """
 
 from app.core.clock import now_rfc3339
 from app.modules.config import store as config_store
-from app.modules.devices import repository as devices_repository
-from app.modules.doors import repository as doors_repository
+from app.modules.devices import service as devices_service
+from app.modules.doors import service as doors_service
 
 from .schemas import DeviceShadow, ShadowReported
 
 
 def get_reported(device_id: str) -> ShadowReported | None:
     """reported：设备最后上报的状态（含在线标志）；设备不存在返回 None。"""
-    device = devices_repository.get(device_id)
+    device = devices_service.get_device(device_id)
     if device is None:
         return None
-    return {"device": device, "doors": doors_repository.list_doors(device_id)}
+    return {"device": device, "doors": doors_service.list_doors(device_id)}
 
 
 def get_shadow(device_id: str) -> DeviceShadow | None:

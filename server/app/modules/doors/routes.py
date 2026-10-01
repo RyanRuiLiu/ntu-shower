@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
 from app.core import events
 from app.core.security import require_ops_token
-from app.modules.doors import repository
+from app.modules.doors import service
 
 from .schemas import DoorView
 
@@ -22,13 +22,13 @@ ops_router = APIRouter(prefix="/ops", dependencies=[Depends(require_ops_token)],
 
 @router.get("/doors")
 def list_doors(device_id: str | None = None) -> list[DoorView]:
-    return repository.list_doors(device_id)
+    return service.list_doors(device_id)
 
 
 @ops_router.get("/doors")
 def list_doors_ops(device_id: str | None = None) -> list[DoorView]:
     """与 `/api/v1/doors` 同源同形，仅多一道 `X-Ops-Token` 校验。"""
-    return repository.list_doors(device_id)
+    return service.list_doors(device_id)
 
 
 @router.websocket("/stream")

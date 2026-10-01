@@ -235,3 +235,66 @@ def test_event_type_names_use_dots() -> None:
 
     assert events.DEVICE_UPDATE == "device.update"
     assert events.DOOR_UPDATE == "door.update"
+
+
+def test_online_reflects_connection_not_storage(fresh_db: str) -> None:
+    """档案在库里、连接不在内存里 → 报离线。
+
+    这正是进程刚重启后的状态：连接表空了，而档案还在。此前档案表另存一个在线位，
+    于是重启后前端一直显示"在线"——一台根本没有连接的设备。每次部署都会进入这个状态，
+    而它看起来又"正常"，因为设备很快会重连上来把自己再次置为在线。
+    """
+    from typing import cast
+
+    from fastapi import WebSocket
+
+    from app.gateway.manager import manager
+    from app.modules.devices import repository, service
+
+    device_id = "dev-online-src"
+    repository.register(device_id, "0.3.35", 42, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
+
+    record = service.get_device(device_id)
+    assert record is not None, "档案该在库里"
+    assert record["online"] is False, "库里没有连接，就不能报在线"
+    listed = next(item for item in service.list_devices() if item["device_id"] == device_id)
+    assert listed["online"] is False
+
+    manager.register(device_id, cast(WebSocket, object()))
+    assert service.get_device(device_id)["online"] is True
+    manager.unregister(device_id, cast(WebSocket, object()))  # 不是同一条，按设计不动
+    assert service.get_device(device_id)["online"] is True, "摘掉别的连接不该影响这一条"
+
+
+def test_heartbeat_refreshes_last_seen(client: TestClient) -> None:
+    """心跳刷新 last_seen_at，让这个字段名副其实。
+
+    此前只有上线与下线两处写它，于是设备跑了几小时之后，那一列还停在连接建立那一刻，
+    而前端那行写的是"最后上报"。
+
+    验证方式是把那一列先改成显然过期的值再发心跳——直接比较前后两次 `now_rfc3339()`
+    不行，测试里 register 与心跳之间只隔一次进程内 WS 往返，可能落在同一毫秒。
+    """
+    from app.core.db import get_conn
+    from app.modules.devices import service
+
+    device_id = "dev-heartbeat"
+    with client.websocket_connect("/gateway/device") as ws:
+        ws.send_text(_hello(device_id))
+        _recv_until(ws, "link.hello_ack")
+
+        conn = get_conn()
+        conn.execute(
+            "UPDATE device SET last_seen_at = ? WHERE device_id = ?",
+            ("2020-01-01T00:00:00.000Z", device_id),
+        )
+        conn.commit()
+
+        ws.send_text(_envelope("link.ping", {"sender_time": "2026-09-29T12:00:01.000Z"}))
+        _recv_until(ws, "link.pong")
+
+        record = service.get_device(device_id)
+        assert record is not None
+        assert record["last_seen_at"] > "2020-01-01T00:00:00.000Z", (
+            f"心跳该把 last_seen_at 往前推，实际是 {record['last_seen_at']!r}"
+        )
