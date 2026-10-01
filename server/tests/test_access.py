@@ -147,12 +147,66 @@ def test_capability_denied_when_missing(client: TestClient) -> None:
 
     r = client.post(
         "/api/v1/sessions/assign",
-        json={"device_id": "dev-x", "door_no": 1, "cert_no": "C", "password": "P"},
+        json={"device_id": "dev-xyz-001", "door_no": 1, "cert_no": "C", "password": "P"},
         headers={"X-Identity": "photo-only-user"},
     )
 
     assert r.status_code == 403
     assert r.json()["type"].endswith("/problems/capability-denied")
+
+
+def test_device_scope_wildcard_allows_any_device(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """作用域 ["*"] 的身份对任何设备都有执行权（新建身份缺省即通配）。"""
+    from app.gateway.manager import manager as gateway_manager
+    from app.modules.devices import repository as devices_repository
+    from app.modules.sessions import routes as sessions_routes
+
+    devices_repository.register("dev-any-0001", "0.4.12", 56, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
+    devices_repository.set_trusted("dev-any-0001", True)
+    repository.put_identity("wildcard-user", IdentityKind.WEB, ["ops"], "通配")
+    monkeypatch.setattr(gateway_manager, "_connections", {"dev-any-0001": object()})
+
+    async def _ok(*_a: object, **_k: object) -> dict:
+        return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
+
+    monkeypatch.setattr(sessions_routes, "perform_assign", _ok)
+
+    r = client.post(
+        "/api/v1/sessions/assign",
+        json={"device_id": "dev-any-0001", "door_no": 1, "cert_no": "C", "password": "P"},
+        headers={"X-Identity": "wildcard-user"},
+    )
+    assert r.status_code == 200
+
+
+def test_device_scope_blocks_device_outside_list(client: TestClient) -> None:
+    """作用域限定具体设备后，对列表外设备的操作被拒（capability-denied）。"""
+    repository.put_identity("scoped-user", IdentityKind.WEB, ["ops"], "限定设备", device_scope=["dev-allow-0001"])
+    r = client.post(
+        "/api/v1/sessions/assign",
+        json={"device_id": "dev-other-002", "door_no": 1, "cert_no": "C", "password": "P"},
+        headers={"X-Identity": "scoped-user"},
+    )
+    assert r.status_code == 403
+    assert r.json()["type"].endswith("/problems/capability-denied")
+
+
+def test_identity_record_exposes_device_scope(client: TestClient) -> None:
+    """/identity 与 /ops/identities 都要透出作用域——前端展示与自查的依据。"""
+    repository.put_identity("scoped-2", IdentityKind.WEB, ["photo"], "限一台", device_scope=["dev-a-00001"])
+    me = client.get("/api/v1/identity", headers={"X-Identity": "scoped-2"})
+    assert me.status_code == 200
+    assert me.json()["device_scope"] == ["dev-a-00001"]
+
+
+def test_unknown_device_in_scope_is_rejected(client: TestClient) -> None:
+    """作用域里的 device_id 必须真实存在：写错身份永远执行不了，事后难查。"""
+    r = client.post(
+        "/ops/identities",
+        headers=OPS_HEADERS,
+        json={"kind": "web", "capabilities": ["ops"], "device_scope": ["no-such-device-01"], "label": "x"},
+    )
+    assert r.status_code == 422
 
 
 # ── 管理面 ──

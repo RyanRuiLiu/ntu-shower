@@ -21,6 +21,7 @@ import { syncClock } from './clock.js'
 
 const OPS_API = '/ops'
 const OTA_API = '/ota'
+const API_V1 = '/api/v1'
 /**
  * 访问令牌。这个页面只给开发者一个人用，令牌存 localStorage：
  * 刷新页面不该每次重输。
@@ -127,7 +128,10 @@ export const api = {
 
   // ── 身份 ──
   identities: () => send(OPS_API, '/identities'),
+  capabilities: () => send(API_V1, '/capabilities'),
   createIdentity: (value) => send(OPS_API, '/identities', post(value)),
+  updateIdentity: (identity, value) =>
+    send(OPS_API, `/identities/${encodeURIComponent(identity)}`, put(value)),
   deleteIdentity: (id) => send(OPS_API, `/identities/${encodeURIComponent(id)}`, del()),
 
   // ── 发布 ──

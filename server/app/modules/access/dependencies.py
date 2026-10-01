@@ -7,8 +7,16 @@
     @router.post("/x", dependencies=[Depends(require_capability(Capability.OPS))])
     def x(caller: IdentityRecord = Depends(require_identity)) -> ...
 
-两种情况各有明确的问题类型，客户端可据 type 分支：没带标识（unauthenticated）、
-标识不在名单里（unknown-identity）、在名单里但缺所需能力（capability-denied）。
+三种情况各有明确的问题类型，客户端可据 type 分支：没带标识（unauthenticated）、
+标识不在名单里（unknown-identity）、在名单里但缺所需能力或设备不在作用域
+（capability-denied）。
+
+## 设备作用域
+
+能力回答"能做什么"，作用域回答"对哪些设备做"——两者缺一不可：授予 ops 却限定
+只有 28-2 的身份，对 28-3 的分配必须被拒。判定集中在 [device_allowed] 一处，
+所有业务路由经 require_capability(capability, device_id) 间接使用，不出现
+第二份判定逻辑。
 """
 
 from collections.abc import Callable
@@ -39,12 +47,32 @@ def require_identity(x_identity: str | None = Header(default=None, alias=IDENTIT
     return caller
 
 
-def require_capability(capability: Capability) -> Callable[..., IdentityRecord]:
-    """构造守卫：要求调用方持有该能力。"""
+def device_allowed(caller: IdentityRecord, device_id: str) -> bool:
+    """设备作用域判定（唯一实现）："*" 通配全部，否则须显式列出。"""
+    scope = caller["device_scope"]
+    return "*" in scope or device_id in scope
 
-    def guard(caller: IdentityRecord = Depends(require_identity)) -> IdentityRecord:
-        if capability.value not in caller["capabilities"]:
-            raise ApiProblemError(CAPABILITY_DENIED, f"缺少能力：{capability.value}")
+
+def enforce(caller: IdentityRecord, capability: Capability, device_id: str) -> None:
+    """能力 + 设备作用域的一体化判定（唯一实现）。不通过即抛 capability-denied。
+
+    为什么是普通函数而不是 FastAPI 依赖：device_id 在请求体里，依赖无法在
+    函数定义时取到它。路由处理函数体内调用，意图一目了然。
+    """
+    if capability.value not in caller["capabilities"]:
+        raise ApiProblemError(CAPABILITY_DENIED, f"缺少能力：{capability.value}")
+    if not device_allowed(caller, device_id):
+        raise ApiProblemError(CAPABILITY_DENIED, f"作用域不含设备：{device_id}")
+
+
+def require_capability(capability: Capability, device_id: str) -> Callable[..., IdentityRecord]:
+    """构造守卫：要求调用方持有该能力，且目标设备在其作用域内。"""
+
+    def guard(
+        caller: IdentityRecord = Depends(require_identity),
+        device_id: str = device_id,
+    ) -> IdentityRecord:
+        enforce(caller, capability, device_id)
         return caller
 
     return guard
