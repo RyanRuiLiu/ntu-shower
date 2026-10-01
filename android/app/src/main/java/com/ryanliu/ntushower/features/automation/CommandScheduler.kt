@@ -16,10 +16,12 @@ import java.util.concurrent.Executors
 /** 调度器产出的命令结果（与 session.command_result payload 对应）。 */
 data class CommandOutcome(
     val commandId: String,
-    val status: String, // ok | failed | blocked | timeout
+    // status 的合法取值唯一来源是 transport/OutcomeStatus（与服务端 outcomes.py 对账），
+    // 这里不重复列举——列了就会漂移（此前写着 blocked，那个值早已废弃）
+    val status: String,
     val reasonCode: String, // 结构化错误码；成功时为 ""
     val terminalMessage: String, // 浴室 App 结果页人读文本
-    val data: JSONObject? = null, // photo.capture 携带 base64 图片
+    val data: JSONObject? = null, // photo/screen.capture 携带 base64 图片
 )
 
 /**
