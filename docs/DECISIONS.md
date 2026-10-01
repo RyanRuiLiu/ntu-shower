@@ -154,11 +154,19 @@
   → 设备端 `audit.log`（命令痕迹 JSONL），以 `command_id` 与 `trace_id` 贯通——
   "这个命令服务端发给谁、设备收到没有、结果是什么"在三个层面各有一行可查。
 - **审计记什么**：全部 /api、/ops、/ota 请求（认证失败、授权失败、参数不合法、
-  服务端错误天然落表，OWASP 的必记事件类）；设备网关的连接与断开。**不记**请求体
-  与响应体（学号密码、令牌、业务参数一律不落库），不记静态资源与 /healthz。
-- **令牌与标识脱敏是唯一实现**：`core.audit.mask_actor`——令牌只落 sha256 指纹
-  （前 16 位十六进制），身份标识按"前4后4"脱敏、短标识整体替换。审计与日志共用
-  这一份，禁止各写一份。
+  服务端错误天然落表，OWASP 的必记事件类）；设备网关的连接与断开（含设备来源 IP）。
+  不记静态资源与 /healthz；发布上传的 APK 二进制体不落库（本体已存 ota_releases，
+  审计行记版本与大小即完整事实）。
+- **如实记录、不脱敏、不截断**（2026-10-01 用户决定，覆盖同日早先的脱敏决定）：
+  本系统是单运维者工具，审计的价值就在于如实——调用方令牌、身份、来源 IP、
+  User-Agent、请求体原文**全文落库**；`device.exec` 的输出（不可重现的运维事实）
+  随命令审计落 `data` 列。媒体（截图/拍照的 base64）与可重取的 `ui.dump` XML
+  仍不落库——那是体积与时效取舍，不是脱敏。
+- **两个审计分类的分工**：`api_call`（接口调用）记"每一次后台请求——谁、从哪个
+  IP、调了什么、结果如何"；`command_audit`（命令流水）记"每条发到设备的命令——
+  参数、结果、设备回报"。**必要分开**：命令是"先登记、结果异步回填"的两段式
+  生命周期，与一次写完的请求行形状不同；合并会得到一张两边都缺列的稀疏表。
+  前端用标签切换并以 tooltip 写明各自职责。
 - **stdout 日志是 JSON 事件流**（12-Factor §XI）：一行一个对象，字段照 OTel
   Log Data Model（`ts`/`level`/`logger`/`message`/`event`），`trace_id`/
   `request_id` 有值才输出。`event` 是给机器检索的稳定代号（kebab-case），与
@@ -167,8 +175,10 @@
 - **HTTP 与命令的关联**：W3C `traceparent`（调用方带就沿用其 trace-id，否则生成），
   响应回 `X-Request-ID`；问题响应经 `X-Problem-Type` 头把 RFC 9457 type 带进审计行。
   命令派发时把 trace_id 写进 `command_audit`——跨层查一次 SQL 就是全链路。
-- **保留期执行而不是声明**：`api_call` 按 `audit_retention_days`（默认 90 天）由
-  每日任务删除；OTA 发布按 `ota_release_keep`（默认 5 个）在新版登记时裁剪。
+- **保留期执行而不是声明**：审计两表（`api_call` 与 `command_audit`）按
+  `audit_retention_days`（默认 90 天）由每日任务删除——审计是滚动窗口；**业务
+  数据（喷头状态迁移、使用会话）永久保留**，那是运营历史。OTA 发布按
+  `ota_release_keep`（默认 5 个）在新版登记时裁剪。
   设备端落盘文件全部有界：crash.log / automation.log / audit.log 256KB 封顶、
   ota-install.log 每次安装截断、OTA 下载包装完即删、outbox 按行数上限裁剪、
   shell pid 文件正常完成与超时两条路径都自清。

@@ -74,7 +74,7 @@ async def device_gateway(ws: WebSocket) -> None:
         # 会因此形成「下发→下载→安装→重启→再下发」的无限重装循环（真机实测复现）。
         await run_in_threadpool(ota_repository.mark_installed_upto, device_id, version_code)
         manager.register(device_id, ws)
-        await run_in_threadpool(audit.record_gateway, device_id, "connect")
+        await run_in_threadpool(audit.record_gateway, device_id, "connect", ip)
         log_event(
             "INFO",
             "gateway.device-connected",
@@ -137,7 +137,7 @@ async def device_gateway(ws: WebSocket) -> None:
         if device_id:
             manager.unregister(device_id, ws)
             await run_in_threadpool(devices_service.set_device_offline, device_id)
-            await run_in_threadpool(audit.record_gateway, device_id, "disconnect")
+            await run_in_threadpool(audit.record_gateway, device_id, "disconnect", ip)
             log_event("INFO", "gateway.device-disconnected", "设备断开", device_id=device_id)
             events.publish(events.DEVICE_UPDATE, await _device_snapshot(device_id))
 

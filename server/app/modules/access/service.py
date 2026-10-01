@@ -11,7 +11,6 @@
 
 import secrets
 
-from app.core.audit import mask_actor
 from app.core.logging import log_event
 from app.core.wechat import WeChatNotConfiguredError, code_to_openid
 
@@ -44,7 +43,7 @@ def put_identity(
         "access.identity-put",
         "身份已登记",
         kind=kind.value,
-        identity=mask_actor(identity),
+        identity=identity,
         capabilities=",".join(capabilities),
     )
     return record
@@ -69,7 +68,7 @@ def login_with_wx_code(code: str) -> IdentityRecord | None:
 
     record = repository.find_identity(openid)
     if record is None:
-        log_event("INFO", "access.login-rejected", "登录被拒：未获授权", identity=mask_actor(openid))
+        log_event("INFO", "access.login-rejected", "登录被拒：未获授权", identity=openid)
     return record
 
 
@@ -82,7 +81,7 @@ def revoke_identity(identity: str) -> bool:
     """撤销授权；该标识立即失去全部能力。"""
     removed = repository.delete_identity(identity)
     if removed:
-        log_event("INFO", "access.identity-revoked", "身份已吊销", identity=mask_actor(identity))
+        log_event("INFO", "access.identity-revoked", "身份已吊销", identity=identity)
     return removed
 
 

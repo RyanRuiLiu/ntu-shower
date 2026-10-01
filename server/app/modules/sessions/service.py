@@ -1,6 +1,7 @@
 """命令下发与结果等待：asyncio Future + 超时（单 worker 语义下安全）。"""
 
 import asyncio
+import json
 import uuid
 from dataclasses import dataclass
 
@@ -144,7 +145,9 @@ async def _send_and_wait(
     supported = _supported_actions(device_id)
     # 空能力集表示设备未声明（旧版本）：不据此拦截，否则升级服务端会锁死在网设备
     if supported and action not in supported:
-        repository.insert_command(command_id, device_id, action, trace_id_var.get())
+        repository.insert_command(
+            command_id, device_id, action, trace_id_var.get(), json.dumps(params, ensure_ascii=False)
+        )
         repository.finish(command_id, outcomes.FAILED.value, reason_codes.DEVICE_UNSUPPORTED_ACTION.code, "")
         return {
             "status": outcomes.FAILED.value,
@@ -156,7 +159,9 @@ async def _send_and_wait(
     channel = actions.ACTION_CHANNELS[action]
     key = (device_id, channel)
     if _channel_waiting.get(key, 0) >= CHANNEL_QUEUE_MAX:
-        repository.insert_command(command_id, device_id, action, trace_id_var.get())
+        repository.insert_command(
+            command_id, device_id, action, trace_id_var.get(), json.dumps(params, ensure_ascii=False)
+        )
         log_event(
             "INFO",
             "command.rejected",
@@ -183,7 +188,9 @@ async def _send_and_wait(
         async with _lock_for(device_id, channel):
             remaining = deadline - loop.time()
             if remaining <= 0:
-                repository.insert_command(command_id, device_id, action, trace_id_var.get())
+                repository.insert_command(
+                    command_id, device_id, action, trace_id_var.get(), json.dumps(params, ensure_ascii=False)
+                )
                 repository.finish(command_id, outcomes.TIMEOUT.value, reason_codes.DEADLINE_EXCEEDED.code, "")
                 return CommandOutcome(
                     status=outcomes.TIMEOUT.value,
@@ -234,7 +241,9 @@ async def _dispatch(
             },
             frame_id=command_id,
         )
-        repository.insert_command(command_id, device_id, action, trace_id_var.get())
+        repository.insert_command(
+            command_id, device_id, action, trace_id_var.get(), json.dumps(params, ensure_ascii=False)
+        )
         if not await manager.send_to(device_id, envelope):
             log_event(
                 "WARNING",
@@ -295,7 +304,28 @@ async def _dispatch(
             reason_code=str(outcome["reason_code"] or "-"),
             elapsed_ms=elapsed_ms,
         )
-        repository.finish(command_id, outcome["status"], outcome["reason_code"], outcome["terminal_message"])
+        repository.finish(
+            command_id,
+            outcome["status"],
+            outcome["reason_code"],
+            outcome["terminal_message"],
+            audit_data(action, outcome["data"]),
+        )
+
+
+def audit_data(action: str, data: object) -> str | None:
+    """命令结果里进审计的 data——取舍规则一句话：**记不可重现的文本结果**。
+
+    - `device.exec` 的输出是排障最有价值、且**不可重现**的运维事实（设备此刻
+      在干什么的最直接答案），必须留痕；输出体积有配置上限（`max_output_bytes`），
+      增长有界。
+    - 其余一律不落：媒体（截图/拍照的 base64）体积巨大且可重取；`ui.dump` 的
+      XML 随界面变化时效即逝、也可重取；涉及凭证的动作（分配/结算）参数与结果
+      从进审计的那一刻就被排除（OWASP：凭证不落库）。
+    """
+    if action != actions.DEVICE_EXEC or not isinstance(data, dict):
+        return None
+    return json.dumps(data, ensure_ascii=False)
 
 
 def resolve(command_id: str, payload: JsonObject) -> bool:
