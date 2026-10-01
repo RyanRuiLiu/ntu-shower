@@ -126,7 +126,7 @@ def list_releases() -> list[ReleaseRecord]:
         get_conn()
         .execute(
             "SELECT version, version_code, sha256, mandatory, force, target, created_at"
-            " FROM ota_release ORDER BY created_at DESC"
+            " FROM ota_release ORDER BY version_code DESC, created_at DESC"
         )
         .fetchall()
     )

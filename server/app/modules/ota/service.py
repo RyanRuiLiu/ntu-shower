@@ -46,6 +46,32 @@ def store_release(version: str, data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def remove_release_file(version: str) -> bool:
+    """删发布文件；返回文件此前是否存在。注册行的删除在 repository，两者成对调用。"""
+    path = release_path(version)
+    if not path.exists():
+        return False
+    path.unlink()
+    return True
+
+
+def prune_releases(keep: int) -> list[str]:
+    """只留最近 keep 个发布（version_code 优先），其余连注册行带文件一起删。
+
+    新版登记时调用：旧的 APK 留在盘上只有体积没有意义，但上一两个版本要留作
+    回滚点，所以 keep 是配置而不是写死的 1。
+    """
+    from . import repository
+
+    removed: list[str] = []
+    for rel in repository.list_releases()[max(keep, 0) :]:
+        version = rel["version"]
+        remove_release_file(version)
+        repository.delete_release(version)
+        removed.append(version)
+    return removed
+
+
 async def notify_target_devices(version: str, version_code: int, mandatory: bool, target: str) -> list[str]:
     """向在线的目标设备推送升级通知，返回成功送达的 device_id 列表。"""
     targets = None if target == "all" else [t.strip() for t in target.split(",") if t.strip()]
