@@ -156,21 +156,26 @@ async function reload() {
   const limit = Number($('inLimit').value) || 50
   const deviceId = scope === 'device' ? store.deviceId : ''
   try {
-    const [devices, calls, commands] = await Promise.all([
-      api.devices(),
+    // 设备名映射用 store.devices（顶栏每 30 秒刷新的共享状态）——自己再拉一份
+    // 就是同一份数据两个来源，迟早打架
+    const [calls, commands] = await Promise.all([
       api.auditCalls({ device_id: deviceId, limit }),
       api.commands({ device_id: deviceId, limit }),
     ])
     deviceNames.clear()
-    for (const device of devices) deviceNames.set(device.device_id, device.name)
+    for (const device of store.devices) deviceNames.set(device.device_id, device.name)
     state.rows.api = calls.calls
     state.rows.command = commands
     state.selected.api = -1
     state.selected.command = -1
     rerenderTable()
     renderDetail(null, '')
-    report(`接口 ${state.rows.api.length} 条 · 命令 ${state.rows.command.length} 条`, 'info')
+    report('auditResult', `接口 ${state.rows.api.length} 条 · 命令 ${state.rows.command.length} 条`, 'info')
   } catch (error) {
+    if (error?.status === 401) {
+      report('auditResult', '访问令牌缺失或无效，请在顶栏填写', 'err')
+      return
+    }
     report('auditResult', problemText(error), 'err')
   }
 }

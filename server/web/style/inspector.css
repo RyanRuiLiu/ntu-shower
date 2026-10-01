@@ -322,11 +322,6 @@
   resize: horizontal;
 }
 
-/* hidden 属性被 display:flex 覆盖，收起状态要显式声明 */
-.tree-panel[hidden] {
-  display: none;
-}
-
 /* 右面板收起后的恢复把手：贴在画面区右缘竖着挂一块 */
 .tree-restore {
   position: absolute;
