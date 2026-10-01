@@ -105,7 +105,9 @@ class ShellChannel(private val name: String) {
         val started = Runtime.getRuntime().exec("su")
         process = started
         stdin = DataOutputStream(started.outputStream)
-        stdout = BufferedReader(InputStreamReader(started.inputStream))
+        // 两侧都显式指定 UTF-8。不能依赖平台默认编码：命令可能含中文（远程命令是我们
+        // 自己发下去的，内容不可预期），而 su 链路上的字节是按 UTF-8 交换的。
+        stdout = BufferedReader(InputStreamReader(started.inputStream, Charsets.UTF_8))
         Thread {
             try {
                 started.errorStream.readBytes() // 丢弃 stderr，防止缓冲区塞满
@@ -128,7 +130,12 @@ class ShellChannel(private val name: String) {
         val marker = "__DONE_${stamp}_${UUID.randomUUID().toString().take(8)}__"
         val pidFile = "/data/local/tmp/ntushower-$name-$stamp.pid"
         return try {
-            stdin!!.writeBytes(wrap(command, marker, pidFile))
+            // 用 write(ByteArray) 而不是 writeBytes(String)。
+            //
+            // `writeBytes` 的语义是"逐字符写出并**丢弃高 8 位**"，中文命令到了设备就变成
+            // 一串 ASCII 噪声。真机上验证过：`echo 测试` 实际执行的是 `echo K-`——因为
+            // 「测」是 U+6D4B 而「试」是 U+8BD5，低 8 位正是 0x4B 与 0xD5 里那截。
+            stdin!!.write(wrap(command, marker, pidFile).toByteArray(Charsets.UTF_8))
             stdin!!.flush()
             when (val captured = readUntil(marker, timeoutMs, pidFile)) {
                 null -> Result("命令超过 ${timeoutMs}ms 未返回", timedOut = true)
@@ -190,7 +197,7 @@ class ShellChannel(private val name: String) {
      * "拿到退出码"就是同一件事了——分两行写过一版，真机上被 `head -c` 打穿过：那条命令
      * 的输出没有结尾换行，标记粘在内容后面，退出码那一行跟着错位，成败就读不出来了。
      */
-    private fun wrap(command: String, marker: String, pidFile: String): String =
+    internal fun wrap(command: String, marker: String, pidFile: String): String =
         "( $command ) < /dev/null & __ntu=\$!; echo \$__ntu > $pidFile; " +
             "wait \$__ntu; __ntu_rc=\$?; rm -f $pidFile; echo $marker\$__ntu_rc\n"
 
