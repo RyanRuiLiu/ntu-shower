@@ -307,20 +307,24 @@ async def push_config_update(
     pending = PendingResult(loop, loop.create_future())
     _config_pending[device_id] = pending
 
-    envelope = protocol.envelope(
-        "config.update",
-        {"revision": revision, "config": config},
-    )
-    sent = await manager.send_to(device_id, envelope)
-    if not sent:
-        _config_pending.pop(device_id, None)
-        return ConfigPushResult(notified=False, applied=False, reason="device offline")
     try:
-        await asyncio.wait_for(pending.future, timeout=timeout_s)
-        return ConfigPushResult(notified=True, applied=True)
-    except asyncio.TimeoutError:
+        envelope = protocol.envelope(
+            "config.update",
+            {"revision": revision, "config": config},
+        )
+        if not await manager.send_to(device_id, envelope):
+            return ConfigPushResult(notified=False, applied=False, reason="device offline")
+        try:
+            await asyncio.wait_for(pending.future, timeout=timeout_s)
+            return ConfigPushResult(notified=True, applied=True)
+        except asyncio.TimeoutError:
+            return ConfigPushResult(notified=True, applied=False, reason="ack timeout")
+    finally:
+        # 清理覆盖**整个** await 周期，理由与 _dispatch 相同：登记发生在下发之前，而下发
+        # 本身是 await 点，调用方在这期间断开连接会取消整个协程，那时既不返回成功也不返回
+        # 超时，挂起项只能靠 finally 摘。成功那条已由 resolve_config_ack 摘掉，
+        # 这里再摘一次是幂等的。
         _config_pending.pop(device_id, None)
-        return ConfigPushResult(notified=True, applied=False, reason="ack timeout")
 
 
 def resolve_config_ack(device_id: str, revision: int) -> bool:
