@@ -179,9 +179,17 @@
   `audit_retention_days`（默认 90 天）由每日任务删除——审计是滚动窗口；**业务
   数据（喷头状态迁移、使用会话）永久保留**，那是运营历史。OTA 发布按
   `ota_release_keep`（默认 5 个）在新版登记时裁剪。
-  设备端落盘文件全部有界：crash.log / automation.log / audit.log 256KB 封顶、
-  ota-install.log 每次安装截断、OTA 下载包装完即删、outbox 按行数上限裁剪、
-  shell pid 文件正常完成与超时两条路径都自清。
+  设备端落盘文件全部有界且集中：`/sdcard/ntu-shower/` 下 device.log（统一日志，
+  见下）/ crash.log / automation.log 各 256KB 封顶、ota-install.log（脱手脚本
+  唯一可写通道）每次安装截断、OTA 下载包装完即删、outbox 按行数上限裁剪、
+  shell pid 文件正常完成与超时两条路径都自清。敏感数据（发件箱含学号）在应用
+  私有目录 `/data/data/<包名>/databases/agent.db`，共享存储上无敏感内容。
+- **设备端统一日志（core.log.DeviceLog）**：全设备唯一结构化落盘入口——一个类、
+  一个文件（device.log，JSONL）、一种格式，事件名与服务端 log_event 同族
+  （command.* / gateway.* / service.* / config.* / ota.*）。服务生命周期、配置
+  变更、命令痕迹、网关状态全部经它落盘；敏感红线（学号/密码/令牌/剪贴板内容
+  永不入日志）写入类注释作为硬约定。看门狗闹钟用 setExact 逐次排（4.4 的
+  setRepeating 有不可纠正的批处理漂移；setExactAndAllowWhileIdle 要 API 23）。
 - **设备端痕迹是文件而不是 Logcat**：Logcat 环形缓冲重启即空，而"命令收到没有、
   回了什么"是远程排障的第一直觉；`/sdcard/ntu-shower/audit.log` 用 `device.exec`
   直接 `cat` 取回。
