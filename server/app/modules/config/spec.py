@@ -50,7 +50,8 @@ class ConfigSpec:
     """一个配置键的完整规格。
 
     `minimum` / `maximum` 只对 `ConfigKind.INT` 有意义，其余类型为 None。
-    `group` 是界面分组（配置页按它分卡片），取值见 [GROUPS]。
+    `group` 是界面分组（配置页按它分卡片），取值见 [GROUPS]；分组又归属
+    `SECTIONS` 之一（基础能力 / 拓展功能）。
     """
 
     key: str
@@ -65,19 +66,36 @@ class ConfigSpec:
     group: str = "misc"
 
 
+@dataclass(frozen=True)
+class GroupSpec:
+    """一个界面分组的规格：键名、标题与所属分区。"""
+
+    key: str
+    title: str
+    section: str
+
+
+#: 分区 registry：配置页的两个大区。**基础能力**是设备长期运行的地基
+#: （链路、采集、自动化、界面、遮罩、守护、自更新），装好后基本不动；
+#: **拓展功能**是我们自建的业务扩展（调试通道、自动结算），按需启停与调整。
+SECTIONS: tuple[tuple[str, str], ...] = (
+    ("core", "基础能力"),
+    ("extensions", "拓展功能"),
+)
+
 #: 界面分组 registry：顺序即配置页卡片顺序。分组元数据只在这里一份，
 #: 前端据此分卡片渲染，不在各处硬编码键表。
-GROUPS: tuple[tuple[str, str], ...] = (
-    ("gateway", "链路与心跳"),
-    ("doors", "喷头状态采集"),
-    ("automation", "自动化流程"),
-    ("ui", "界面操作"),
-    ("overlay", "操作遮罩"),
-    ("guard", "崩溃守护"),
-    ("ota", "自更新"),
-    ("debug", "调试通道"),
-    ("settle", "自动结算"),
-    ("misc", "其他"),
+GROUPS: tuple[GroupSpec, ...] = (
+    GroupSpec("gateway", "链路与心跳", "core"),
+    GroupSpec("doors", "喷头状态采集", "core"),
+    GroupSpec("automation", "自动化流程", "core"),
+    GroupSpec("ui", "界面操作", "core"),
+    GroupSpec("overlay", "操作遮罩", "core"),
+    GroupSpec("guard", "崩溃守护", "core"),
+    GroupSpec("ota", "自更新", "core"),
+    GroupSpec("debug", "调试通道", "extensions"),
+    GroupSpec("settle", "自动结算", "extensions"),
+    GroupSpec("misc", "其他", "core"),
 )
 
 
