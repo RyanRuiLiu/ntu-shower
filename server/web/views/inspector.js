@@ -6,8 +6,10 @@
  * 结构取自 `ntu-remote-shower` 的 `bridge-server/src/viewer.html`：顶部工具条，
  * 下面左右分栏，右列自上而下是节点树、属性面板、输入栏。样式在 `style/inspector.css`。
  *
- * 工具条只留三样：截图、界面树、四个按键。旧版还有方向键与 Enter/Del，我们**不放**——
- * 设备端的 `UiKey` 只有 back / home / recents / notifications 四个，放了就是装饰。
+ * 工具条四组：截图 / 界面树，Home/Back/Recent/Notify，方向键组（▲▼◀▶ 移动设备端
+ * 的焦点光标、OK 按下焦点控件——原理照旧项目 viewer 的按钮栏，全走 `input keyevent`），
+ * Enter/Del。旧版有的这批按键我们**现在也放了**：设备端 `UiKey` 已补齐方向键组，
+ * 它们是逐字符删除与控件间导航的主要手段，不再是装饰。
  *
  * ## 鼠标三种手势（照旧版）
  *
@@ -69,6 +71,16 @@ const AUTO_CAPTURE_KEY = 'ntu-shower.inspector.auto-capture'
 const AUTO_TREE_KEY = 'ntu-shower.inspector.auto-tree'
 let autoCapture = localStorage.getItem(AUTO_CAPTURE_KEY) !== '0'
 let autoTree = localStorage.getItem(AUTO_TREE_KEY) !== '0'
+
+/**
+ * 文本注入通道：`clipboard` 粘贴（支持中文；同一字段第二次插入会多一个空格——ROM
+ * 行为）与 `keys` 按键注入（无空格问题，仅英文/数字/符号）。两条**并列**、由使用者
+ * 按内容选择，选择记在 localStorage。
+ */
+const INPUT_CHANNEL_KEY = 'ntu-shower.inspector.input-channel'
+const INPUT_CHANNELS = ['clipboard', 'keys']
+let inputChannel = localStorage.getItem(INPUT_CHANNEL_KEY)
+if (!INPUT_CHANNELS.includes(inputChannel)) inputChannel = 'clipboard'
 /** 父索引 → 子索引数组；根节点的父记作 -1。 */
 let children = new Map()
 /** 折叠起来的节点索引。 */
@@ -598,6 +610,19 @@ export const inspectorView = {
           <button type="button" data-key="recents">Recent</button>
           <button type="button" data-key="notifications">Notify</button>
         </span>
+        <span class="sep"></span>
+        <span class="grp">
+          <button type="button" data-key="dpad_up" title="焦点上移">▲</button>
+          <button type="button" data-key="dpad_down" title="焦点下移">▼</button>
+          <button type="button" data-key="dpad_left" title="焦点左移">◀</button>
+          <button type="button" data-key="dpad_right" title="焦点右移">▶</button>
+          <button type="button" data-key="dpad_center" title="按下焦点控件">OK</button>
+        </span>
+        <span class="sep"></span>
+        <span class="grp">
+          <button type="button" data-key="enter">Enter</button>
+          <button type="button" data-key="del">Del</button>
+        </span>
         <div class="tb-right">
           <label class="tb-toggle" title="操作后自动重截画面">
             <input type="checkbox" id="autoCaptureToggle"> 自动画面
@@ -626,9 +651,9 @@ export const inspectorView = {
           </div>
         </div>
 
-        <div class="tree-panel">
-          <div class="panel-header">
-            UI Tree
+        <div class="tree-panel" id="treePanel">
+          <div class="panel-header" id="panelHeader">
+            <span class="panel-title-btn" id="panelCollapse" title="收起右侧面板，画面占满整行">UI Tree</span>
             <span class="count" id="treeCount"></span>
             <span class="actions">
               <button type="button" data-act="collapse" title="折叠选中节点的子树">[-]</button>
@@ -664,15 +689,28 @@ export const inspectorView = {
           </div>
 
           <div class="input-bar">
+            <span class="input-channel" id="inputChannel">
+              <button type="button" data-channel="clipboard" title="剪贴板粘贴：支持中文；同一字段第二次插入会多一个空格（ROM 行为）">粘贴</button>
+              <button type="button" data-channel="keys" title="按键注入：无空格问题，仅英文/数字/符号">按键</button>
+            </span>
             <input type="text" id="textInput" placeholder="输入文本后按 Enter 发送…">
             <button type="button" data-act="send">发送</button>
           </div>
         </div>
       </div>
 
+      <!-- 右面板收起后的恢复把手：贴在画面区右缘 -->
+      <button type="button" class="tree-restore" id="treeRestore" title="展开 UI 树面板" hidden>‹ UI树</button>
+
       <div class="ctx-menu" id="ctxMenu" hidden>
         <div class="item" data-ctx="tap">点击元素<span class="shortcut">双击</span></div>
+        <div class="item" data-ctx="long-tap">长按元素</div>
+        <div class="item" data-ctx="copy-id">复制 resource-id</div>
+        <div class="item" data-ctx="copy-text">复制文本</div>
+        <div class="item" data-ctx="copy-desc">复制内容描述</div>
+        <div class="item" data-ctx="copy-class">复制类名</div>
         <div class="item" data-ctx="copy-bounds">复制范围</div>
+        <div class="item" data-ctx="copy-center">复制中心坐标</div>
       </div>`
 
     dispose = disposer()
@@ -703,11 +741,52 @@ export const inspectorView = {
         setOpState('请输入文本', 'err')
         return
       }
+      // 按键通道只走得通 ASCII：客户端先拦一次，别等设备端拒绝才看到原因
+      if (inputChannel === 'keys' && /[^\x20-\x7E]/.test(text)) {
+        setOpState('按键通道仅支持英文、数字与符号，中文请切换到粘贴通道', 'err')
+        return
+      }
       // 发送后清空输入框，与旧版一致：一屏通常要连着输几次
-      act('输入文本', (deviceId) => api.input(deviceId, text)).then(() => {
+      act('输入文本', (deviceId) => api.input(deviceId, text, inputChannel)).then(() => {
         $('textInput').value = ''
       })
     })
+
+    // 输入通道切换：点谁用谁，选择记忆
+    const channelBox = $('inputChannel')
+    const applyChannel = () => {
+      channelBox.querySelectorAll('button').forEach((btn) => {
+        btn.classList.toggle('is-active', btn.dataset.channel === inputChannel)
+      })
+    }
+    applyChannel()
+    dispose.add(
+      listen(channelBox, 'click', (event) => {
+        const btn = event.target.closest('[data-channel]')
+        if (!btn) return
+        inputChannel = btn.dataset.channel
+        localStorage.setItem(INPUT_CHANNEL_KEY, inputChannel)
+        applyChannel()
+      }),
+    )
+
+    // 右面板收起/恢复：收起后画面占满整行；百分比高亮随图片尺寸自动跟随，无需重算
+    const treePanel = $('treePanel')
+    const treeRestore = $('treeRestore')
+    dispose.add(
+      listen($('panelCollapse'), 'click', () => {
+        treePanel.hidden = true
+        treeRestore.hidden = false
+        clearSwipe()
+      }),
+    )
+    dispose.add(
+      listen(treeRestore, 'click', () => {
+        treePanel.hidden = false
+        treeRestore.hidden = true
+        clearSwipe()
+      }),
+    )
 
     dispose.add(
       listen($('textInput'), 'keydown', (event) => {
@@ -921,8 +1000,39 @@ export const inspectorView = {
         const node = nodes[ctxIndex]
         hideContextMenu()
         if (!node) return
-        if (item.dataset.ctx === 'tap') tapSelected()
-        else copy(node.bounds || '', '范围')
+        const box = boundsOf(node)
+        switch (item.dataset.ctx) {
+          case 'tap':
+            tapSelected()
+            break
+          case 'long-tap':
+            // 起点等于终点的滑动就是长按（设备端按"有没有 to_x"分派）；时长取 1s
+            if (!box) {
+              setOpState('选中的节点没有可用坐标', 'err')
+              break
+            }
+            longPressAt(box.cx, box.cy, 1000)
+            break
+          case 'copy-id':
+            copy(node.id || '(无 resource-id)', 'resource-id')
+            break
+          case 'copy-text':
+            copy(node.text || '(无文本)', '文本')
+            break
+          case 'copy-desc':
+            copy(node.desc || '(无内容描述)', '内容描述')
+            break
+          case 'copy-class':
+            copy(node.cls || '(无类名)', '类名')
+            break
+          case 'copy-bounds':
+            copy(node.bounds || '', '范围')
+            break
+          case 'copy-center':
+            if (box) copy(`${box.cx}, ${box.cy}`, '中心坐标')
+            else setOpState('选中的节点没有可用坐标', 'err')
+            break
+        }
       }),
     )
     dispose.add(listen(document, 'click', hideContextMenu))
