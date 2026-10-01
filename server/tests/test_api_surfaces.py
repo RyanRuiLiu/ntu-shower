@@ -176,10 +176,15 @@ def test_config_spec_endpoint_lists_every_key(client: TestClient) -> None:
     assert heartbeat["minimum"] == 5
     assert heartbeat["unit"] == "秒"
     assert heartbeat["group"] == "gateway"
-    # 分组有序清单：前端据此分卡片
+    # 分组有序清单：前端据此分卡片；分区把基础能力与拓展功能分开
     groups = [g["key"] for g in spec["groups"]]
     assert "gateway" in groups
     assert "settle" in groups
+    settle = next(g for g in spec["groups"] if g["key"] == "settle")
+    gateway = next(g for g in spec["groups"] if g["key"] == "gateway")
+    assert settle["section"] == "extensions"
+    assert gateway["section"] == "core"
+    assert {s["key"] for s in spec["sections"]} == {"core", "extensions"}
 
 
 def test_device_config_override_lifecycle(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

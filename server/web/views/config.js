@@ -31,6 +31,8 @@ import { toast } from '../core/toast.js'
 
 let groups = []
 let specs = []
+/** 分区清单（基础能力/拓展功能），来自服务端登记表。 */
+let SECTIONS = []
 /** 设备覆盖项的键集合（设备视图下其余键处于继承态）。 */
 let overriddenKeys = new Set()
 /** 编辑目标：global（主）或 device（辅）。 */
@@ -45,10 +47,10 @@ function badge(isOverridden) {
 function controlHtml(spec, value, id, isOverridden) {
   const desc = `<div class="cfg-desc">${esc(spec.description)}</div>`
   const badgeHtml = target === 'device' ? badge(isOverridden) : ''
+  // 单项恢复默认：值等于登记表默认值的键，服务端保存时会自动丢弃覆盖——
+  // 恢复即"重填默认值"，与当前视图的作用目标（全局/设备）一致
   const resetButton =
-    target === 'device' && isOverridden
-      ? `<button type="button" class="btn btn-ghost btn-sm cfg-reset" data-reset="${esc(spec.key)}" title="删除这条设备覆盖，回落到全局值">回落</button>`
-      : ''
+    `<button type="button" class="btn btn-ghost btn-sm cfg-reset" data-reset-one="${esc(spec.key)}" title="恢复这一项为默认值">恢复默认</button>`
   if (spec.kind === 'bool') {
     const checked = value ? 'checked' : ''
     return `<label class="field-row" for="${esc(id)}">
@@ -76,17 +78,53 @@ function controlHtml(spec, value, id, isOverridden) {
     </div>${desc}`
 }
 
+/** 单键恢复默认：重填 spec.default（后续保存时服务端自动丢弃该键的覆盖）。 */
+function resetOne(key) {
+  const spec = specs.find((item) => item.key === key)
+  if (!spec) return
+  const input = $(`cfg-${key}`)
+  if (spec.kind === 'bool') input.checked = Boolean(spec.default)
+  else if (spec.kind === 'text_map') input.value = ''
+  else input.value = spec.default
+  toast(`已重填「${spec.title}」默认值（记得保存）`)
+}
+
+/** 整组恢复默认：重填该组全部键。 */
+function resetGroup(groupKey) {
+  for (const spec of specs.filter((item) => item.group === groupKey)) {
+    resetOne(spec.key)
+  }
+}
+
+/** 全部恢复默认：整表重填默认值（记得保存才生效）。 */
+function resetAll() {
+  if (!window.confirm('把表单里的全部键重填为默认值？（还需点「保存」才会生效）')) return
+  for (const spec of specs) resetOne(spec.key)
+  toast('已全部重填为默认值（记得保存）')
+}
+
 function renderForm(values) {
   const used = new Set()
-  const cards = groups
-    .map(({ key: groupKey, title }) => {
-      const groupSpecs = specs.filter((spec) => spec.group === groupKey)
-      if (groupSpecs.length === 0) return ''
-      groupSpecs.forEach((spec) => used.add(spec.key))
-      return `<section class="cfg-card">
-          <div class="cfg-card-title">${esc(title)}</div>
+  // 先分区（基础能力/拓展功能），区内再排分组卡片
+  const cards = SECTIONS
+    .map(([sectionKey, sectionTitle]) => {
+      const groupKeys = groups.filter((group) => group.section === sectionKey)
+      const groupCards = groupKeys
+        .map(({ key: groupKey, title }) => {
+          const groupSpecs = specs.filter((spec) => spec.group === groupKey)
+          if (groupSpecs.length === 0) return ''
+          groupSpecs.forEach((spec) => used.add(spec.key))
+          return `<section class="cfg-card">
+          <div class="cfg-card-title">
+            ${esc(title)}
+            <button type="button" class="btn btn-ghost btn-sm cfg-reset" data-reset-group="${esc(groupKey)}" title="恢复这个模块的全部键为默认值">恢复默认</button>
+          </div>
           ${groupSpecs.map((spec) => controlHtml(spec, values[spec.key], `cfg-${spec.key}`, overriddenKeys.has(spec.key))).join('')}
         </section>`
+        })
+        .join('')
+      if (!groupCards) return ''
+      return `<div class="cfg-section"><div class="cfg-section-title">${esc(sectionTitle)}</div><div class="cfg-grid">${groupCards}</div></div>`
     })
     .join('')
   const orphans = specs.filter((spec) => !used.has(spec.key))
@@ -171,21 +209,7 @@ async function save() {
   }
 }
 
-/** 删除单个键的设备覆盖，回落到全局值（业界标准的 reset-to-inherited 交互）。 */
-async function resetKey(key) {
-  if (!store.deviceId || target !== 'device') return
-  try {
-    const current = await api.deviceConfig(store.deviceId)
-    const overrides = current.overrides || {}
-    if (!(key in overrides)) return
-    delete overrides[key]
-    await api.saveDeviceConfig(store.deviceId, overrides)
-    toast('已回落到全局值')
-    await reload()
-  } catch (error) {
-    report('configResult', problemText(error), 'err')
-  }
-}
+/** 整组恢复默认：重填该组全部键。 */
 
 function setTarget(next) {
   if (target === next) return
@@ -210,12 +234,13 @@ export const configView = {
           <span class="cfg-tab" data-target="device">单台设备（覆盖）</span>
           <span class="panel-note" id="cfgNote"></span>
           <div class="panel-tools">
-            <button type="button" class="btn btn-sm" id="btnSave">保存并推送全部</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="btnResetAll">全部恢复默认</button>
+            <button type="button" class="btn btn-sm" id="btnSave">保存</button>
           </div>
         </div>
         <div class="panel-body">
-          <div class="muted" style="margin-bottom:8px">设备视图下：标记「继承」的键跟随全局默认，改动即成为本设备覆盖（可一键回落）。</div>
-          <div class="cfg-grid" id="configGrid"><div class="empty">正在加载…</div></div>
+          <div class="muted" style="margin-bottom:8px">全局为主，设备覆盖为辅。设备视图下：标记「继承」的键跟随全局默认，改动即成为本设备覆盖（可一键回落）。各模块与单项都有「恢复默认」，重填后需点保存。</div>
+          <div id="configGrid"><div class="empty">正在加载…</div></div>
         </div>
       </section>
       <div class="result" id="configResult" style="padding:0 4px"></div>`
@@ -224,22 +249,29 @@ export const configView = {
     dispose.add(subscribe('device', () => { if (target === 'device') reload() }))
     dispose.add(subscribe('view', (id) => { if (id !== 'config') dispose.dispose() }))
     dispose.add(listen($('btnSave'), 'click', save))
+    dispose.add(listen($('btnResetAll'), 'click', resetAll))
 
     root.querySelectorAll('.cfg-tab').forEach((tab) => {
       dispose.add(listen(tab, 'click', () => setTarget(tab.dataset.target)))
     })
 
-    // 回落按钮走事件委托：网格整体重建后监听器仍在
+    // 模块/单项恢复默认走事件委托：网格整体重建后监听器仍在
     dispose.add(
       listen($('configGrid'), 'click', (event) => {
-        const button = event.target.closest('[data-reset]')
-        if (button) resetKey(button.dataset.reset)
+        const group = event.target.closest('[data-reset-group]')
+        if (group) {
+          resetGroup(group.dataset.resetGroup)
+          return
+        }
+        const one = event.target.closest('[data-reset-one]')
+        if (one) resetOne(one.dataset.resetOne)
       }),
     )
 
     api
       .configSpec()
       .then((view) => {
+        SECTIONS = view.sections.map((section) => [section.key, section.title])
         groups = view.groups
         specs = view.specs
         return reload()

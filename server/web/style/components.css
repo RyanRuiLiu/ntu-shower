@@ -267,6 +267,22 @@
   vertical-align: 1px;
 }
 
+/* 大区分隔：基础能力 / 拓展功能，各自带标题与小卡片网格 */
+.cfg-section {
+  margin-bottom: var(--sp-4);
+}
+
+.cfg-section-title {
+  margin-bottom: var(--sp-2);
+  color: var(--text);
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.cfg-card .field:last-of-type {
+  margin-bottom: 0;
+}
+
 /* ── 审计页：标签、行选中、详情卡与主从分栏 ────────────── */
 
 /*
