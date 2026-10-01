@@ -25,7 +25,7 @@ def envelope(msg_type: str, payload: dict[str, Any], reply_to: str | None = None
     """组装出站信封（JSON 文本帧）。
 
     frame_id：调用方指定的帧 ID（如 command_id，设备按它回 reply_to）；
-    缺省时自动生成 UUID。
+    未提供 id 时自动生成 UUID。
     """
     frame: dict[str, Any] = {
         "v": PROTOCOL_VERSION,

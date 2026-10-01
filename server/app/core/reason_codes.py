@@ -100,6 +100,7 @@ UI_CLICK_NO_EFFECT = Reason("ui.click_no_effect", "点击已发出，但界面�
 UI_TEXT_REJECTED = Reason("ui.text_rejected", "系统拒绝了文本注入")
 UI_KEYS_ASCII_ONLY = Reason("ui.keys_ascii_only", "按键通道仅支持英文、数字与符号")
 UI_UNKNOWN_CHANNEL = Reason("ui.unknown_channel", "未知的输入通道")
+UI_UNKNOWN_DIRECTION = Reason("ui.unknown_direction", "未知的滚动方向")
 
 # ── 采集 ──
 
@@ -141,6 +142,7 @@ REGISTRY: tuple[Reason, ...] = (
     UI_TEXT_REJECTED,
     UI_KEYS_ASCII_ONLY,
     UI_UNKNOWN_CHANNEL,
+    UI_UNKNOWN_DIRECTION,
     CAMERA_CAPTURE_FAILED,
     SCREEN_CAPTURE_FAILED,
 )
