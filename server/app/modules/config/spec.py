@@ -75,27 +75,28 @@ class GroupSpec:
     section: str
 
 
-#: 分区 registry：配置页的两个大区。**基础能力**是设备长期运行的地基
-#: （链路、采集、自动化、界面、遮罩、守护、自更新），装好后基本不动；
-#: **拓展功能**是我们自建的业务扩展（调试通道、自动结算），按需启停与调整。
+#: 分区 registry：配置页的两个大区，**业务功能在前**。**业务功能**是这个软件
+#: 存在的目的（自动结算这类自建业务扩展，需要按需及时调整）；**运行基础**
+#: 是支撑它长期跑着的地基（链路、采集、自动化、界面、遮罩、守护、自更新），
+#: 装好后基本不动。
 SECTIONS: tuple[tuple[str, str], ...] = (
-    ("core", "基础能力"),
-    ("extensions", "拓展功能"),
+    ("business", "业务功能"),
+    ("infra", "运行基础"),
 )
 
 #: 界面分组 registry：顺序即配置页卡片顺序。分组元数据只在这里一份，
 #: 前端据此分卡片渲染，不在各处硬编码键表。
 GROUPS: tuple[GroupSpec, ...] = (
-    GroupSpec("gateway", "链路与心跳", "core"),
-    GroupSpec("doors", "喷头状态采集", "core"),
-    GroupSpec("automation", "自动化流程", "core"),
-    GroupSpec("ui", "界面操作", "core"),
-    GroupSpec("overlay", "操作遮罩", "core"),
-    GroupSpec("guard", "崩溃守护", "core"),
-    GroupSpec("ota", "自更新", "core"),
-    GroupSpec("debug", "调试通道", "extensions"),
-    GroupSpec("settle", "自动结算", "extensions"),
-    GroupSpec("misc", "其他", "core"),
+    GroupSpec("settle", "自动结算", "business"),
+    GroupSpec("gateway", "链路与心跳", "infra"),
+    GroupSpec("doors", "喷头状态采集", "infra"),
+    GroupSpec("automation", "自动化流程", "infra"),
+    GroupSpec("ui", "界面操作", "infra"),
+    GroupSpec("overlay", "操作遮罩", "infra"),
+    GroupSpec("guard", "崩溃守护", "infra"),
+    GroupSpec("ota", "自更新", "infra"),
+    GroupSpec("debug", "调试通道", "business"),
+    GroupSpec("misc", "其他", "infra"),
 )
 
 

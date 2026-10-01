@@ -208,7 +208,8 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: var(--sp-3);
-  align-items: start;
+  /* 同一行卡片等高拉伸（align-items 默认 stretch），高矮随内容自适应但排列整齐 */
+  align-items: stretch;
 }
 
 .cfg-card {
