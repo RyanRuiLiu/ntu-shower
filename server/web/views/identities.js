@@ -21,6 +21,7 @@
 import { api } from '../core/api.js'
 import { problemText, report } from '../core/outcome.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
+import { subscribe } from '../core/store.js'
 import { toast } from '../core/toast.js'
 
 let capabilities = []
