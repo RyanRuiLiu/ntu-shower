@@ -14,7 +14,7 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.concurrency import run_in_threadpool
 
-from ..core import events, outcomes, protocol, reason_codes
+from ..core import audit, events, outcomes, protocol, reason_codes
 from ..core.clock import now_rfc3339, rfc3339_ago
 from ..core.device_clock import load_skew, ping_payload, update_skew
 from ..core.protocol import JsonObject, as_int, list_of, payload_of, text_of
@@ -76,6 +76,7 @@ async def device_gateway(ws: WebSocket) -> None:
         # 会因此形成「下发→下载→安装→重启→再下发」的无限重装循环（真机实测复现）。
         await run_in_threadpool(ota_repository.mark_installed_upto, device_id, version_code)
         manager.register(device_id, ws)
+        await run_in_threadpool(audit.record_gateway, device_id, "connect")
         logger.info(
             "device connected: id=%s trusted=%s version=%s os=%s capabilities=%d ip=%s",
             device_id,
@@ -130,6 +131,7 @@ async def device_gateway(ws: WebSocket) -> None:
         if device_id:
             manager.unregister(device_id, ws)
             await run_in_threadpool(devices_service.set_device_offline, device_id)
+            await run_in_threadpool(audit.record_gateway, device_id, "disconnect")
             logger.info("device disconnected: id=%s", device_id)
             events.publish(events.DEVICE_UPDATE, await _device_snapshot(device_id))
 
