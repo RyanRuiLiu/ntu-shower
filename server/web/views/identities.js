@@ -126,7 +126,7 @@ export const identitiesView = {
 
     dispose = disposer()
     dispose.add(subscribe('view', (id) => { if (id !== 'identities') dispose.dispose() }))
-    dispose.add(listen($('btnReload'), 'click', reload))
+    dispose.add(listen(root.querySelector('#btnReload'), 'click', reload))
     dispose.add(listen($('btnCreate'), 'click', create))
     dispose.add(
       listen($('identityTable'), 'click', async (event) => {

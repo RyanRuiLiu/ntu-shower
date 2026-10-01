@@ -7,19 +7,17 @@ package com.ryanliu.ntushower.service
 import android.view.accessibility.AccessibilityNodeInfo
 
 /**
- * 无障碍通道里**唯一**保留的写操作：往输入框写文本。
+ * 文本输入的**粘贴通道**：剪贴板 + `ACTION_PASTE` 写入焦点输入框。与按键注入
+ * （[ShellUiChannel.typeText]，仅 ASCII）并列，由网页端的使用者按内容选择。
  *
- * ## 为什么只剩它
+ * ## 为什么粘贴必须存在
  *
- * 网页端界面检视的其余操作（点击、滑动、滚动、按键）都走 root shell 的 `input`
- * 命令（见 [ShellUiChannel]）。它们是坐标语义，而远程操作的人本来就是指着截图上的
- * 某个位置点下去的——坐标天然对应，不需要经过节点树兜一圈。
- *
- * **输入是唯一的例外，因为它必须支持中文**。shell 的 `input text` 在本 ROM 上按
- * 字节处理，非 ASCII 会被写坏；而剪贴板 + `ACTION_PASTE` 是 API 19 上唯一能写入
- * 任意字符的方式（`ACTION_SET_TEXT` 要 API 21）。它同时也是**最快**的一条：`input`
- * 每次执行都要起一个 `app_process`（ART 启动 + 加载 framework，几百毫秒），而剪贴板
- * 与 `ACTION_PASTE` 都是纯 IPC。
+ * shell 的 `input text` 在本 ROM 上按字节处理，非 ASCII 会被写坏；而剪贴板 +
+ * `ACTION_PASTE` 是 API 19 上唯一能写入任意字符的方式（`ACTION_SET_TEXT` 要
+ * API 21）。它同时也是**最快**的一条：`input` 每次执行都要起一个 `app_process`
+ * （ART 启动 + 加载 framework，几百毫秒），而剪贴板与 `ACTION_PASTE` 都是纯 IPC。
+ * 代价：本 ROM 的粘贴在同一字段**第二次**插入时会带出一个空格——要连着发英文数字
+ * 时用按键通道。两条通路的取舍与选择机制见 `executeUiAction`。
  *
  * 自动化流程（分配/结算）不经过这里：它走 [A11yService.performSetText] 按**节点**
  * 写入，那条路会真的扣钱，需要精确落到 `et_id_code` / `et_id_pwd` 上。
