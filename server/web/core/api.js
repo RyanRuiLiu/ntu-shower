@@ -108,7 +108,9 @@ export const api = {
   touch: (id, value) => send(OPS_API, `/devices/${encodeURIComponent(id)}/touch`, post(value)),
   scroll: (id, direction) => send(OPS_API, `/devices/${encodeURIComponent(id)}/scroll`, post({ direction })),
   key: (id, key) => send(OPS_API, `/devices/${encodeURIComponent(id)}/key`, post({ key })),
-  input: (id, text) => send(OPS_API, `/devices/${encodeURIComponent(id)}/input`, post({ text })),
+  // channel 必填："clipboard"（粘贴，支持中文）或 "keys"（按键注入，仅 ASCII）
+  input: (id, text, channel) =>
+    send(OPS_API, `/devices/${encodeURIComponent(id)}/input`, post({ text, channel })),
 
   // ── 调试通道 ──
   bridgeStatus: (id) => send(OPS_API, `/devices/${encodeURIComponent(id)}/bridge/status`),
