@@ -1,5 +1,7 @@
 """接口调用审计：写入、关联、查询与保留期清理。"""
 
+import json
+
 from fastapi.testclient import TestClient
 
 from app.core import audit
@@ -25,9 +27,8 @@ def test_ops_call_is_audited_with_masked_actor(client: TestClient) -> None:
     assert row["path"] == "/ops/devices"
     assert row["status_code"] == 200
     assert row["actor_kind"] == "ops"
-    # 令牌只落指纹：审计行里永远找不到令牌本身
-    assert "test-token" not in row["actor"]
-    assert row["actor"] != "test-token"
+    # 不脱敏：调用方令牌与来源如实落库（2026-10-01 用户决定）
+    assert row["actor"] == "test-token"
     assert row["duration_ms"] >= 0
 
 
@@ -41,12 +42,12 @@ def test_unauthorized_call_is_audited(client: TestClient) -> None:
     assert len(failed) == 2
     kinds = {row["actor_kind"] for row in failed}
     assert kinds == {"anonymous", "ops"}
-    # 错的令牌只落指纹，绝不落令牌本身
+    # 错的令牌也原文落库：审计的价值就在于如实（2026-10-01 不脱敏决定）
     ops_row = next(row for row in failed if row["actor_kind"] == "ops")
-    assert "wrong" not in ops_row["actor"]
+    assert ops_row["actor"] == "wrong"
 
 
-def test_device_call_records_device_and_problem_type(client: TestClient) -> None:
+def test_device_call_records_device_problem_and_body(client: TestClient) -> None:
     r = client.post(f"/ops/devices/{GHOST_ID}/exec", headers=OPS_HEADERS, json={"command": "id"})
     assert r.status_code == 404
 
@@ -54,6 +55,8 @@ def test_device_call_records_device_and_problem_type(client: TestClient) -> None
     assert row["device_id"] == GHOST_ID
     assert row["status_code"] == 404
     assert row["problem_type"]
+    # 请求体原文落库不截断：发了什么命令审计里就是什么（语义比较，不依赖序列化空格）
+    assert json.loads(row["request_body"]) == {"command": "id"}
 
 
 def test_validation_failure_records_problem_type_and_detail(client: TestClient) -> None:
