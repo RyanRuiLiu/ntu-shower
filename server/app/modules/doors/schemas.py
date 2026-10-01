@@ -70,9 +70,13 @@ ASSIGNABLE_STATES = frozenset({DoorState.FREE, DoorState.SELECTED})
 class DoorView(TypedDict):
     """一个喷头的现态：`door_live` 全列 + 所属设备 + 上次使用。
 
-    `device_online` / `device_name` 可空：查询用的是 LEFT JOIN，若喷头现态存在而设备
-    记录不在（理论上不会——喷头现态正是设备上报的），二者为 NULL。可空是对查询形状的
-    诚实描述，不是预期会发生的情况。
+    `device_name` 可空：查询用的是 LEFT JOIN，若喷头现态存在而设备记录不在（理论上不会
+    ——喷头现态正是设备上报的），它为 NULL。可空是对查询形状的诚实描述，不是预期会发生
+    的情况。
+
+    `device_online` 非空：它来自内存连接表而非联表结果（档案表里没有这个列），
+    由 `doors.service.list_doors` 填入——单设备的喷头列表走 `device_id` 查询，
+    设备名取不到才是那种罕见情形，而在不在线总是答得出来。
 
     `last_used_*` 只在喷头**没有进行中的会话**时才有展示意义：占用中的喷头卡片显示的是这
     一次的分配与开阀时间，再挂一行"上次"是噪声。判据是**开过阀**（`opened_at` 非空）
@@ -91,7 +95,7 @@ class DoorView(TypedDict):
     bath_time_s: int
     status_raw: int
     reported_at: str
-    device_online: bool | None
+    device_online: bool
     device_name: str | None
 
     last_used_at: str

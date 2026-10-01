@@ -164,12 +164,16 @@ async def _handle_frame(
     payload = payload_of(msg)
 
     if mtype == "link.ping":
+        # 先记"收到了它"再回 pong：顺序反过来时，收到的这一帧已经处理完而记录还没落，
+        # 外面看到 pong 就以为那一列已经刷新了。
+        await run_in_threadpool(devices_service.touch_seen, device_id)
         await ws.send_text(protocol.envelope("link.pong", {"sender_time": now_rfc3339()}, reply_to=frame_id))
     elif mtype == "link.pong":
         config = await run_in_threadpool(config_store.effective, device_id)
         threshold = as_int(config.get("clock_jump_threshold_s"), default=300)
         skew = update_skew(device_id, text_of(payload, "sender_time"), threshold)
         await run_in_threadpool(devices_repository.set_clock_skew, device_id, skew)
+        await run_in_threadpool(devices_service.touch_seen, device_id)
         pong_seen.set()
     elif mtype == "config.ack":
         sessions_service.resolve_config_ack(device_id, as_int(payload.get("revision")))
