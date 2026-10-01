@@ -124,9 +124,14 @@ def test_revoke_removes_identity(client: TestClient) -> None:
 
 
 def test_short_identity_is_fully_masked_in_logs(client: TestClient) -> None:
-    """短标识按"前4后4"脱敏会等于原样输出，因此整体替换。日志不得泄漏可用凭据。"""
-    assert service._mask_identity("short") == "***"
-    assert service._mask_identity("openid-long-enough") == "open...ough"
+    """短标识按"前4后4"脱敏会等于原样输出，因此整体替换。日志不得泄漏可用凭据。
+
+    实现收敛在 core.audit.mask_actor：审计与日志是同一个"脱敏"概念的同一份实现。
+    """
+    from app.core.audit import mask_actor
+
+    assert mask_actor("short") == "***"
+    assert mask_actor("openid-long-enough") == "open...ough"
 
 
 # ── 守卫 ──

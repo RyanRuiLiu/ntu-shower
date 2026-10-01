@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     # systemd 单元决定（见 deploy/nginx 与 docs/RUNBOOK.md）
     log_level: str = "INFO"
 
+    # ── 审计保留（NIST SP 800-92：按运维需要定保留期并执行）──
+    # api_call 审计行的保留天数，过期行由每日清理任务删除
+    audit_retention_days: int = 90
+
     # ── 对外地址 ──
     public_base_url: str = ""  # 对外基址（RFC 9457 问题 type 等绝对引用用）；留空则输出相对引用
 
