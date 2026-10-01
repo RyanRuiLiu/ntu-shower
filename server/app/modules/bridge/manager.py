@@ -19,16 +19,14 @@
 
 import asyncio
 import contextlib
-import logging
 import uuid
 from collections.abc import Awaitable, Callable
 
 from fastapi import WebSocket
 
 from app.core.config import settings
+from app.core.logging import log_event
 from app.core.problems import PORT_UNAVAILABLE, ApiProblemError
-
-logger = logging.getLogger("ntu-shower.bridge")
 
 BRIDGE_BUFFER_SIZE = 65536
 PENDING_MAX = 1024 * 1024  # 对端未就绪时的有界缓冲
@@ -161,12 +159,14 @@ class AdbBridge:
         if self.recycled:
             return
         self.recycled = True
-        logger.info(
-            "bridge recycled: device=%s port=%d generation=%d reason=%s",
-            self.device_id,
-            self.port,
-            self.generation,
-            reason,
+        log_event(
+            "INFO",
+            "bridge.recycled",
+            "ADB 桥已回收",
+            device_id=self.device_id,
+            port=self.port,
+            generation=self.generation,
+            reason=reason,
         )
 
         await self.detach_client()
