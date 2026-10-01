@@ -133,7 +133,7 @@ export const releasesView = {
 
     dispose = disposer()
     dispose.add(subscribe('view', (id) => { if (id !== 'releases') dispose.dispose() }))
-    dispose.add(listen($('btnReload'), 'click', reload))
+    dispose.add(listen(root.querySelector('#btnReload'), 'click', reload))
     dispose.add(listen($('btnUpload'), 'click', upload))
     dispose.add(
       listen($('releaseTable'), 'click', async (event) => {

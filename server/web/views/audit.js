@@ -95,7 +95,7 @@ export const auditView = {
 
     dispose = disposer()
     dispose.add(subscribe('view', (id) => { if (id !== 'audit') dispose.dispose() }))
-    dispose.add(listen($('btnReload'), 'click', reload))
+    dispose.add(listen(root.querySelector('#btnReload'), 'click', reload))
     dispose.add(listen($('inScope'), 'change', reload))
     dispose.add(listen($('inLimit'), 'change', reload))
 
