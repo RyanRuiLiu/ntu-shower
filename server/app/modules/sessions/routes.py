@@ -23,7 +23,8 @@ from app.core.problems import (
 from app.core.protocol import JsonObject
 from app.core.security import require_ops_token
 from app.modules.access.capabilities import Capability
-from app.modules.access.dependencies import require_capability
+from app.modules.access.dependencies import enforce, require_identity
+from app.modules.access.schemas import IdentityRecord
 from app.modules.devices.dependencies import require_trusted_online_device
 from app.modules.doors import repository as doors_repository
 from app.modules.doors.schemas import ASSIGNABLE_STATES, DoorState
@@ -129,21 +130,33 @@ async def perform_photo(req: PhotoRequest) -> CommandOutcome:
     return _reject_overload(result)
 
 
-@router.post("/sessions/assign", dependencies=[Depends(require_capability(Capability.OPS))])
-async def assign(req: AssignRequest) -> CommandOutcome:
-    """用户面：小程序调用，凭 ops 能力位。"""
+@router.post("/sessions/assign")
+async def assign(
+    req: AssignRequest,
+    caller: IdentityRecord = Depends(require_identity),
+) -> CommandOutcome:
+    """用户面：小程序或 APP 调用，凭 ops 能力位且设备在作用域内。"""
+    enforce(caller, Capability.OPS, req.device_id)
     return await perform_assign(req)
 
 
-@router.post("/sessions/settle", dependencies=[Depends(require_capability(Capability.OPS))])
-async def settle(req: SettleRequest) -> CommandOutcome:
-    """用户面：小程序调用，凭 ops 能力位。"""
+@router.post("/sessions/settle")
+async def settle(
+    req: SettleRequest,
+    caller: IdentityRecord = Depends(require_identity),
+) -> CommandOutcome:
+    """用户面：小程序或 APP 调用，凭 ops 能力位且设备在作用域内。"""
+    enforce(caller, Capability.OPS, req.device_id)
     return await perform_settle(req)
 
 
-@router.post("/sessions/photo", dependencies=[Depends(require_capability(Capability.PHOTO))])
-async def take_photo(req: PhotoRequest) -> CommandOutcome:
-    """用户面：小程序调用，凭 photo 能力位。"""
+@router.post("/sessions/photo")
+async def take_photo(
+    req: PhotoRequest,
+    caller: IdentityRecord = Depends(require_identity),
+) -> CommandOutcome:
+    """用户面：小程序或 APP 调用，凭 photo 能力位且设备在作用域内。"""
+    enforce(caller, Capability.PHOTO, req.device_id)
     return await perform_photo(req)
 
 
