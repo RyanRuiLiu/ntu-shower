@@ -36,6 +36,7 @@ import traceback
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import cast
+from urllib.parse import parse_qs
 
 from fastapi import FastAPI
 from starlette.concurrency import run_in_threadpool
@@ -69,24 +70,25 @@ def init_tables() -> None:
     db.get_conn().executescript(
         """
         CREATE TABLE IF NOT EXISTS api_call (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            kind         TEXT    NOT NULL,
-            requested_at TEXT    NOT NULL,
-            request_id   TEXT    NOT NULL,
-            trace_id     TEXT    NOT NULL,
-            actor_kind   TEXT    NOT NULL,
-            actor        TEXT    NOT NULL,
-            client_ip    TEXT,
-            user_agent   TEXT,
-            method       TEXT    NOT NULL,
-            path         TEXT    NOT NULL,
-            query        TEXT,
-            request_body TEXT,
-            status_code  INTEGER NOT NULL,
-            duration_ms  INTEGER NOT NULL,
-            device_id    TEXT,
-            problem_type TEXT,
-            detail       TEXT
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind          TEXT    NOT NULL,
+            requested_at  TEXT    NOT NULL,
+            request_id    TEXT    NOT NULL,
+            trace_id      TEXT    NOT NULL,
+            actor_kind    TEXT    NOT NULL,
+            actor         TEXT    NOT NULL,
+            client_ip     TEXT,
+            user_agent    TEXT,
+            method        TEXT    NOT NULL,
+            path          TEXT    NOT NULL,
+            query         TEXT,
+            request_body  TEXT,
+            status_code   INTEGER NOT NULL,
+            duration_ms   INTEGER NOT NULL,
+            device_id     TEXT,
+            problem_type  TEXT,
+            detail        TEXT,
+            response_body TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_api_call_requested
             ON api_call(requested_at);
@@ -120,6 +122,24 @@ def _actor_of(request: Request) -> tuple[str, str]:
     return "anonymous", ""
 
 
+#: 响应体入库的体积上限。**全有或全无，绝不截断**——截断了后续就查不回真实内容。
+#: 超限的（目前只有截图/拍照的 base64，1MB 级）记录占位说明；媒体本身可重取，
+#: 与"不落媒体"的既有取舍一致。普通 JSON 响应（列表、命令结果）都在 KB 量级，
+#: 全文入库。
+BODY_MAX_BYTES = 256 * 1024
+
+#: 响应体不落库的路径：**数据重型且可重取**的三个端点——屏幕截图 / 摄像头拍照 /
+# UI 节点树（XML 随界面变化时效即逝）。与媒体同一处理（2026-10-01 用户决定）。
+_DATA_HEAVY_PATH = re.compile(r"/(capture|dump|photo)$")
+
+
+def store_body(body: str) -> str:
+    """全有或全无：体积在限内原文入库，超限记占位说明（绝不截断）。"""
+    if len(body.encode()) <= BODY_MAX_BYTES:
+        return body
+    return f"[响应体 {len(body.encode())} 字节，超出 {BODY_MAX_BYTES} 字节上限未存储——媒体类可重取]"
+
+
 def record(
     *,
     method: str,
@@ -132,6 +152,7 @@ def record(
     client_ip: str = "",
     user_agent: str = "",
     request_body: str = "",
+    response_body: str = "",
     device_id: str = "",
     problem_type: str = "",
     detail: str = "",
@@ -139,16 +160,16 @@ def record(
     """写一行 HTTP 审计（kind='http'）。关联字段取自中间件置位的 contextvar。
 
     与命令审计的关联靠 trace_id：本行与 command_audit 各带一份，查两边即得全链路。
-    `query` 是请求的查询串；`request_body` 是 JSON 请求体（截断上限见中间件）；
-    `detail` 是失败响应的中文说明（RFC 9457 的 detail，经 problem+json 体取回）。
+    `query` 是请求的查询串；`request_body`/`response_body` 是 JSON 请求与响应体
+    （全有或全无，不截断）；`detail` 是失败响应的中文说明（RFC 9457 的 detail）。
     调用方与参数**如实记录不脱敏**（2026-10-01 用户决定：单运维者工具，审计的
     价值就在于如实）。
     """
     db.get_conn().execute(
         "INSERT INTO api_call (kind, requested_at, request_id, trace_id, actor_kind, actor,"
         " client_ip, user_agent, method, path, query, request_body, status_code, duration_ms,"
-        " device_id, problem_type, detail)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " device_id, problem_type, detail, response_body)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             "http",
             now_rfc3339(),
@@ -167,6 +188,7 @@ def record(
             device_id or None,
             problem_type or None,
             detail or None,
+            store_body(response_body) or None,
         ),
     )
     db.get_conn().commit()
@@ -214,7 +236,7 @@ def list_calls(
     sql = (
         "SELECT kind, requested_at, request_id, trace_id, actor_kind, actor, client_ip,"
         " user_agent, method, path, query, request_body, status_code, duration_ms, device_id,"
-        " problem_type, detail FROM api_call"
+        " problem_type, detail, response_body FROM api_call"
     )
     params: list[object] = []
     clauses: list[str] = []
@@ -288,13 +310,28 @@ def stop_prune() -> None:
         _prune_task = None
 
 
-def _device_of(path: str) -> str:
-    """路径里可识别的设备（/ops/devices/{id}/...）。"""
+def _device_of(path: str, query: str = "", request_body: str = "") -> str:
+    """本次调用作用于哪台设备就记哪台。解析优先级（三种落点各司其职）：
+
+    ① 路径段 `/ops/devices/{id}/...`（设备动作）；
+    ② query 的 `device_id`（列表类接口，如 `/ops/doors?device_id=`）；
+    ③ JSON 体的 `device_id`（动作类接口，如 `/ops/sessions/assign`）。
+    都没有就为空——调用不针对任何设备（如设备清单本身）。
+    """
     parts = path.split("/")
     if "devices" in parts:
         index = parts.index("devices")
         if index + 1 < len(parts):
             return parts[index + 1]
+    if query:
+        value = parse_qs(query).get("device_id", [""])[0]
+        if value:
+            return value
+    if request_body:
+        with contextlib.suppress(Exception):
+            value = json.loads(request_body).get("device_id")
+            if value:
+                return str(value)
     return ""
 
 
@@ -323,9 +360,11 @@ def install_audit(app: FastAPI) -> None:
             # 请求体原文落库（不截断——截断了后续就查不回真实内容）。
             # 只对 JSON 体做：multipart（发布上传的 APK 二进制）不落库——本体已存
             # ota_releases，审计行记版本与大小即完整事实。读完放回，下游照常解析。
+            # 按 "json" 判定：application/problem+json 也含 json，application/json
+            # 子串反而匹配不上它（吃过的亏）。
             request_body = ""
             content_type = request.headers.get("content-type", "")
-            if request.method in ("POST", "PUT", "PATCH", "DELETE") and "application/json" in content_type:
+            if request.method in ("POST", "PUT", "PATCH", "DELETE") and "json" in content_type:
                 body_bytes = await request.body()
 
                 async def receive() -> dict[str, object]:
@@ -339,11 +378,14 @@ def install_audit(app: FastAPI) -> None:
             duration_ms = int((time.perf_counter() - started) * 1000)
             response.headers["X-Request-ID"] = request_id
 
-            # 失败响应把中文说明取回来：problem 体是我们自己的错误处理器产的、内容有界
-            # （短句），缓冲它不影响流式响应的其他场景。detail 是审计行里"为什么失败"
-            # 的中文答案，不取回来的话审计只能给出 type 代号。
+            # JSON 响应体全文入库（请求与响应都存，审计才完整）。缓冲 JSON 响应：
+            # 都是我们自己的处理器产的、体量在 KB 量级；唯一的 MB 级是媒体 base64，
+            # 由 store_body 的上限挡下（全有或全无，不截断）。problem 响应顺带从中
+            # 取出 detail——"为什么失败"的中文答案。截图/拍照/UI 树三个端点的响应
+            # 不落库（数据重型且可重取，与媒体同一处理）。
+            response_body = ""
             detail = ""
-            if response.headers.get("X-Problem-Type"):
+            if "json" in response.headers.get("content-type", "") and not _DATA_HEAVY_PATH.search(path):
                 # BaseHTTPMiddleware 返回的实际是流式响应子类（Starlette 约定）
                 streaming = cast(StreamingResponse, response)
                 chunks: list[bytes] = []
@@ -359,8 +401,10 @@ def install_audit(app: FastAPI) -> None:
                     headers=dict(response.headers),
                     media_type=response.media_type,
                 )
-                with contextlib.suppress(Exception):
-                    detail = str(json.loads(body).get("detail") or "")
+                response_body = store_body(body.decode(errors="replace"))
+                if response.headers.get("X-Problem-Type"):
+                    with contextlib.suppress(Exception):
+                        detail = str(json.loads(body).get("detail") or "")
 
             # 来源 IP：经 nginx 代理而来，真实地址在 X-Real-IP 里
             client_ip = request.headers.get("x-real-ip") or (request.client.host if request.client else "")
@@ -377,7 +421,8 @@ def install_audit(app: FastAPI) -> None:
                 client_ip=client_ip,
                 user_agent=request.headers.get("user-agent", ""),
                 request_body=request_body,
-                device_id=_device_of(path),
+                response_body=response_body,
+                device_id=_device_of(path, request.url.query, request_body),
                 problem_type=response.headers.get("X-Problem-Type", ""),
                 detail=detail,
             )
