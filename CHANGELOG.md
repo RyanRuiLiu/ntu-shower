@@ -3,6 +3,18 @@
 本项目所有显著变更记录于此。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)；
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.4.9] - 2026-10-01
+
+### 修复
+
+- **OTA 安装后自验证与强制生效**：4.4 的 `pm install -r` 在设备处于进程被杀/
+  存储抖动窗口时会返回 Success 但替换未生效（真机实测：日志 Success、
+  dumpsys 仍是旧版）。设备物理不可达，"装了但没生效"等于升级失败且无法
+  挽回——安装脚本追加自验证（安装后读包版本核对），不一致即
+  `am force-stop` + `am startservice` 强制拉起新版，每一步落日志。
+  拉起链三层：脚本 startservice（第一）→ 看门狗闹钟（第二）→ A11yGuard
+  重绑锚点（第三），均不依赖系统广播
+
 ## [0.4.8] - 2026-10-01
 
 ### 修复
