@@ -34,6 +34,10 @@ class IdentityRequest(BaseModel):
 
     kind: IdentityKind
     capabilities: list[str] = Field(min_length=1)
+    device_scope: list[str] = Field(
+        default=["*"],
+        description='作用域：能操作哪些设备（device_id 列表）。["*"] 表示全部设备',
+    )
     label: str = Field(default="", description="人读备注：这个标识是谁在用")
 
     openid: str = Field(
@@ -52,5 +56,6 @@ class IdentityRecord(TypedDict):
     identity: str
     kind: IdentityKind
     capabilities: list[str]
+    device_scope: list[str]
     label: str
     created_at: str

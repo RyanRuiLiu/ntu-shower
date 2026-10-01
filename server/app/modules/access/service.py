@@ -27,8 +27,9 @@ def put_identity(
     capabilities: list[str],
     label: str = "",
     openid: str = "",
+    device_scope: list[str] | None = None,
 ) -> IdentityRecord:
-    """登记一个标识并授予能力。
+    """登记一个标识并授予能力与设备作用域。
 
     - `kind=OPENID`：用微信给的 `openid` 作标识（登记，随后该用户可登录）
     - `kind=WEB`：服务端签发一个不可枚举的标识（网页拿不到 openid，
@@ -37,7 +38,7 @@ def put_identity(
     两种来源写进同一张表、出现在同一份名单，一眼能看到"这个标识是谁在用"。
     """
     identity = openid if kind is IdentityKind.OPENID else secrets.token_urlsafe(WEB_IDENTITY_BYTES)
-    record = repository.put_identity(identity, kind, capabilities, label)
+    record = repository.put_identity(identity, kind, capabilities, label, device_scope)
     log_event(
         "INFO",
         "access.identity-put",
