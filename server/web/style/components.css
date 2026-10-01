@@ -180,29 +180,75 @@
   white-space: nowrap;
 }
 
-/* ── 审计行的展开详情 ──────────────────────────────────── */
+/* ── 审计页：标签、行选中与详情卡 ──────────────────────── */
 
-/* 展开区的值全量折行展示：trace_id、失败说明这类长值省略号一截就失去了可比对性 */
-.detail-block {
-  padding: 8px 10px;
+/* 标签：面板头里的两组数据源切换，激活项用主色下边线标出 */
+.audit-tab {
+  padding: 4px 10px;
+  border-bottom: 2px solid transparent;
+  color: var(--dim);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--transition);
+}
+
+.audit-tab:hover {
+  color: var(--text);
+}
+
+.audit-tab.is-active {
+  border-bottom-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 可选中的审计行：hover 预示可点，选中行用主色底标出对应关系 */
+tr.audit-row {
+  cursor: pointer;
+}
+
+tr.audit-row:hover td {
+  background: var(--accent-bg);
+}
+
+tr.audit-row.is-selected td {
+  background: var(--accent-bg-strong);
+}
+
+/* 详情卡：标签 + 全量折行的值（长值省略号一截就失去了可比对性），点卡复制 */
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: var(--sp-2);
+}
+
+.detail-card {
+  padding: 6px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg);
+  cursor: pointer;
+  transition: border-color var(--transition);
 }
 
-.detail-block .kv .v {
+.detail-card:hover {
+  border-color: var(--muted);
+}
+
+.detail-card .k {
+  margin-bottom: 2px;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.detail-card .v {
   overflow-wrap: anywhere;
-  text-align: left;
+  font-family: var(--font-mono);
+  font-size: var(--fs-chip);
   white-space: normal;
-}
-
-.detail-block .btn {
-  margin-top: var(--sp-2);
-}
-
-tr.detail-row > td {
-  padding: 4px 8px 10px;
-  background: var(--elevated);
 }
 
 /* ── 设备信息面板 ───────────────────────────────────────── */
