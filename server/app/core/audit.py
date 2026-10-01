@@ -1,6 +1,6 @@
 """接口调用审计：谁、何时、对什么、结果如何，一行一个调用。
 
-标准依据见 docs/decisions/0037-observability.md（OWASP Logging Cheat Sheet 的
+标准依据见 docs/DECISIONS.md「可观测性」一节（OWASP Logging Cheat Sheet 的
 事件清单、NIST SP 800-92 的生成/保护/保留框架、W3C Trace Context 的关联标识）。
 
 ## 记什么

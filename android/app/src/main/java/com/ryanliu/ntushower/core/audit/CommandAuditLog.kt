@@ -12,7 +12,7 @@ import java.io.File
  * ## 为什么文件而不是只靠 Logcat
  *
  * Logcat 是环形缓冲，重启即空；而"这条命令设备到底收到没有、回了什么"是远程排障的
- * 第一直觉（docs/decisions/0037-observability.md）。落盘才有回溯能力，与服务端的
+ * 第一直觉（docs/DECISIONS.md「可观测性」）。落盘才有回溯能力，与服务端的
  * `command_audit` / `api_call` 呼应——同一 `command_id` 两端各留一份痕迹。
  *
  * ## 形状

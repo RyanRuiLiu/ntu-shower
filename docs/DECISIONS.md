@@ -138,6 +138,43 @@
   `ota_release_install` 表记录到该版本为止；已确认的 `force` 发布不再推，重推同一版本需先调
   `POST /ops/releases/{version}/rearm/{device_id}`，`DELETE /ops/releases/{version}` 用于
   紧急下架。缺少这层跟踪会让 force 发布与设备重启构成无限重装循环——真机发生过一次。
+- **发布按个数保留（`ota_release_keep`，默认 5）**：新版登记时裁最旧的，注册行与 APK
+  文件一起删。留的是回滚点而不是历史档案——盘上的旧 APK 只有体积没有意义；N=1 会让
+  "新版有问题退回上一版"无处可退。
+- **删除接口连文件一起删**：`DELETE /ops/releases` 只删注册行会让 APK 变成无人认领的
+  孤儿文件，"下架"的语义必须覆盖到盘上那份。
+
+## 可观测性
+
+> 标准依据：OWASP Logging Cheat Sheet（记什么、不记什么）、NIST SP 800-92
+> （审计记录的生成/保护/保留）、W3C Trace Context（关联标识）、OpenTelemetry
+> Log Data Model（字段命名）。2026-10-01 采纳。
+
+- **三层痕迹，一条链**：`api_call`（HTTP/网关审计）→ `command_audit`（命令级审计）
+  → 设备端 `audit.log`（命令痕迹 JSONL），以 `command_id` 与 `trace_id` 贯通——
+  "这个命令服务端发给谁、设备收到没有、结果是什么"在三个层面各有一行可查。
+- **审计记什么**：全部 /api、/ops、/ota 请求（认证失败、授权失败、参数不合法、
+  服务端错误天然落表，OWASP 的必记事件类）；设备网关的连接与断开。**不记**请求体
+  与响应体（学号密码、令牌、业务参数一律不落库），不记静态资源与 /healthz。
+- **令牌与标识脱敏是唯一实现**：`core.audit.mask_actor`——令牌只落 sha256 指纹
+  （前 16 位十六进制），身份标识按"前4后4"脱敏、短标识整体替换。审计与日志共用
+  这一份，禁止各写一份。
+- **stdout 日志是 JSON 事件流**（12-Factor §XI）：一行一个对象，字段照 OTel
+  Log Data Model（`ts`/`level`/`logger`/`message`/`event`），`trace_id`/
+  `request_id` 有值才输出。`event` 是给机器检索的稳定代号（kebab-case），与
+  中文 `message` 分开——改文案不能破坏检索；属性只收标量。不写文件、不做轮转，
+  归档是运行环境的职责。
+- **HTTP 与命令的关联**：W3C `traceparent`（调用方带就沿用其 trace-id，否则生成），
+  响应回 `X-Request-ID`；问题响应经 `X-Problem-Type` 头把 RFC 9457 type 带进审计行。
+  命令派发时把 trace_id 写进 `command_audit`——跨层查一次 SQL 就是全链路。
+- **保留期执行而不是声明**：`api_call` 按 `audit_retention_days`（默认 90 天）由
+  每日任务删除；OTA 发布按 `ota_release_keep`（默认 5 个）在新版登记时裁剪。
+  设备端落盘文件全部有界：crash.log / automation.log / audit.log 256KB 封顶、
+  ota-install.log 每次安装截断、OTA 下载包装完即删、outbox 按行数上限裁剪、
+  shell pid 文件正常完成与超时两条路径都自清。
+- **设备端痕迹是文件而不是 Logcat**：Logcat 环形缓冲重启即空，而"命令收到没有、
+  回了什么"是远程排障的第一直觉；`/sdcard/ntu-shower/audit.log` 用 `device.exec`
+  直接 `cat` 取回。
 
 ## 测试与质量
 
