@@ -182,9 +182,9 @@ def test_config_spec_endpoint_lists_every_key(client: TestClient) -> None:
     assert "settle" in groups
     settle = next(g for g in spec["groups"] if g["key"] == "settle")
     gateway = next(g for g in spec["groups"] if g["key"] == "gateway")
-    assert settle["section"] == "extensions"
-    assert gateway["section"] == "core"
-    assert {s["key"] for s in spec["sections"]} == {"core", "extensions"}
+    assert settle["section"] == "business"
+    assert gateway["section"] == "infra"
+    assert [s["key"] for s in spec["sections"]] == ["business", "infra"]
 
 
 def test_device_config_override_lifecycle(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
