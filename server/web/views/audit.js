@@ -5,7 +5,8 @@
  *
  * 两个数据源是**两种审计**，用标签切换而不是上下堆两张表——堆叠会把页面撑得很长，
  * 且看一个表时另一个在视野里纯属干扰。表格只放关键列；**点行 = 选中**（高亮），
- * 下方详情面板随即显示该行的全部字段。不做"点行展开/再点收起"——那个交互点击
+ * 右侧详情面板随即显示该行的全部字段——详情在右栏**常驻**而不是页面底部：
+ * 比对几行时眼睛不用上下跑。不做"点行展开/再点收起"——那个交互点击
  * 目标小、表格忽长忽短、字段藏在点击之后，连续比对几行会非常累。
  *
  * ## 展示：库里有什么就展示什么
@@ -191,30 +192,32 @@ export const auditView = {
 
   mount(root) {
     root.innerHTML = `
-      <section class="panel">
-        <div class="panel-head">
-          ${Object.entries(TABS)
-            .map(
-              ([key, tab]) =>
-                `<span class="audit-tab${key === state.tab ? ' is-active' : ''}" data-tab="${key}">${esc(tab.label)}</span>`,
-            )
-            .join('')}
-          <span class="panel-note">点行看全部字段，点字段值可复制</span>
-          <div class="panel-tools">
-            <select id="inScope">
-              <option value="device">当前设备</option>
-              <option value="all">全部设备</option>
-            </select>
-            <input id="inLimit" type="number" min="1" max="500" value="50" style="width:90px">
-            <button type="button" class="btn btn-ghost btn-sm" id="btnReload">刷新</button>
+      <div class="audit-split">
+        <section class="panel">
+          <div class="panel-head">
+            ${Object.entries(TABS)
+              .map(
+                ([key, tab]) =>
+                  `<span class="audit-tab${key === state.tab ? ' is-active' : ''}" data-tab="${key}">${esc(tab.label)}</span>`,
+              )
+              .join('')}
+            <span class="panel-note">点行看详情</span>
+            <div class="panel-tools">
+              <select id="inScope">
+                <option value="device">当前设备</option>
+                <option value="all">全部设备</option>
+              </select>
+              <input id="inLimit" type="number" min="1" max="500" value="50" style="width:90px">
+              <button type="button" class="btn btn-ghost btn-sm" id="btnReload">刷新</button>
+            </div>
           </div>
-        </div>
-        <div class="panel-body flush" id="auditTable"></div>
-      </section>
+          <div class="panel-body flush" id="auditTable"></div>
+        </section>
 
-      <section class="panel" id="detailPanel">
-        <div class="empty">点击上方任一行查看全部字段（点字段值可复制）</div>
-      </section>
+        <section class="panel" id="detailPanel">
+          <div class="empty">点击左侧任一行，详情显示在这里</div>
+        </section>
+      </div>
       <div class="result" id="auditResult" style="padding:0 4px"></div>`
 
     dispose = disposer()
