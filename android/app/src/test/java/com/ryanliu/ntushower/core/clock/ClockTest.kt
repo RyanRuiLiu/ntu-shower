@@ -42,4 +42,22 @@ class ClockTest {
         done.await()
         assertEquals(0, errors.get())
     }
+
+    @Test
+    fun `parse round-trips the formatted output`() {
+        // 解析只有一个消费者（开机校时比对 server_time），输入就是本类的输出
+        val now = Clock.nowRfc3339()
+        val parsed = Clock.parseRfc3339(now)
+
+        assertTrue(parsed != null)
+        assertEquals(now, Clock.formatRfc3339(parsed!!))
+    }
+
+    @Test
+    fun `parse returns null for malformed input`() {
+        // 毫秒缺失、非法文本都拒绝：调用方据此走留痕分支，而不是拿到错误的时刻
+        assertTrue(Clock.parseRfc3339("2026-10-02T05:11:14Z") == null)
+        assertTrue(Clock.parseRfc3339("not-a-time") == null)
+        assertTrue(Clock.parseRfc3339("") == null)
+    }
 }
