@@ -31,6 +31,12 @@
 
 派生层先清空再重建，跑两遍结果相同。`door_snapshot` 一行不动——它是输入，不是产物。
 
+## 为什么不收尾
+
+`replay_history` 重放到历史截止、之后没有帧了，所以要把还开着的会话按"最后见到"结掉。
+本库的帧是**连续的**：重建完服务立刻接着收，悬空的那条正是"此刻真有人在洗"。收尾会把
+它提前结束——2026-10-02 试跑时，门 6 一条仍在进行的会话就被这么结掉了。
+
 用法：
 
     cd server
@@ -98,7 +104,7 @@ def rebuild(db_path: Path) -> dict[str, int]:
 
     settings.db_path = str(db_path)
 
-    from tools.replay_history import settle_open_sessions, turbo_writes
+    from tools.replay_history import turbo_writes
 
     from app.main import init_schema
     from app.modules.doors import repository, service
@@ -158,14 +164,12 @@ def rebuild(db_path: Path) -> dict[str, int]:
         processed += 1
 
     conn.commit()
-    settled = settle_open_sessions(db_path)
 
     stats = {table: _count(conn, f"SELECT COUNT(*) FROM {table}") for table in _DERIVED}
     return {
         "frames": len(frames),
         "processed": processed,
         "skipped": skipped,
-        "settled": settled,
         "flow_s": _count(conn, "SELECT COALESCE(SUM(flow_s), 0) FROM usage_session"),
         **stats,
     }
