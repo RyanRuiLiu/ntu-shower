@@ -14,11 +14,9 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "sender_time"
-          ],
           "properties": {
-            "sender_time": {
+            "device_time": {
+              "description": "设备回 pong 那一刻自己的墙上时钟。服务端拿它与收到时刻相减得到偏差，用来把快照里的 open_time / in_time 平移到服务端时间轴——那两个字段是「这次会话从什么时候开始」的唯一线索，而设备钟的绝对值不可信（自然漂移 8.5 秒/天，还会被人为回拨一小时）。为什么要读它：一次会话压在 20 分钟以内（设备满 maxbatchtime 就强制释放），而 20 分钟里的漂移只有 0.03 秒；跳变只有 23:5x 那一处，而设备 23:53 自动释放所有喷头，所以任何会话都不会跨过它——窗口内偏差是常量，一减就还原出真实时刻。**服务端回的那一份不带它**：那一刻没有要校准的东西。",
               "$ref": "https://<public-domain>/schema/envelope.json#/$defs/rfc3339"
             }
           }

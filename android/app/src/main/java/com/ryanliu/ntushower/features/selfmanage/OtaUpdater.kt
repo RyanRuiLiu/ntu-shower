@@ -23,7 +23,10 @@ import java.security.MessageDigest
  * 1. 轮询 /ota/manifest 对比 version_code（同一版本失败退避，不压秒级循环）；
  * 2. 下载新 APK 到 /sdcard/ntu-shower/ 并做 sha256 与长度校验；
  * 3. 先停进程再 root `pm install -r` 静默安装（进程存活时替换会被 ROM 静默丢弃）；
- * 4. 带重试的自验证 + 拉起服务；无障碍重绑由 A11yGuard 看门狗负责。
+ *    安装结论只落 `pm` 的原始输出，脚本不做任何二次验证；
+ * 4. 拉起服务。"新版本是否真的在跑"的唯一确认是重启后 `link.hello` 自报的
+ *    `version_code`（服务端据此标记 `ota_release_install`）；真未生效时发布保持
+ *    待装，按调用侧退避重装收敛。无障碍重绑由 A11yGuard 看门狗负责。
  */
 class OtaUpdater(
     context: Context,
@@ -119,7 +122,7 @@ class OtaUpdater(
     }
 
     /**
-     * 脱手安装：先停进程 → 安装 → 带重试的自验证 → 拉起服务。
+     * 脱手安装：停进程 → 安装 → 拉起服务，日志只落命令的原始输出。
      *
      * 不能用常驻通道，也不能用一次性进程：`pm install -r` 会为了替换 APK 而杀掉本
      * 进程，而那条进程是本进程的子进程，会跟着一起死——脚本跑到一半就断，结果也
@@ -130,36 +133,33 @@ class OtaUpdater(
      * `pm` 的退出码与日志都是"成功"，无从分辨。先把进程停下来再装，替换就不再有
      * 这条歧义路径。
      *
-     * **自验证带重试**：安装刚提交时 `dumpsys package` 可能瞬时读不到 versionName
-     * （读取为空会被误判成"未生效"），隔 2 秒重读，最多三轮。
+     * ## 安装结论只有一个来源：`pm install` 的原始输出
      *
-     * 验证失败时不再盲目强停重启：进程已被停掉，重启解决不了未生效的安装；如实记
-     * `OTA_NOT_APPLIED`，由调用侧的退避与本轮轮询自然收敛。拉起服务之后无障碍的
-     * 重绑由 A11yGuard 看门狗负责（安装与强停都会解除绑定，此处不重复处理）。
+     * 脚本不做二次验证（此前的 dumpsys 读 versionName 三轮重试已删）。真机实测
+     * （2026-10-02，0.4.16 安装）：`pm` 已明确 Success，而 2/4/6 秒三轮读
+     * `versionName` 全空、包实际已生效——本 ROM 强停换包走的路径重，安装提交后
+     * `dumpsys package` 的落定窗口没有上界，轮询验证是在猜时机，只会产出假阴性
+     * （那次它把成功的安装写成了 OTA_NOT_APPLIED，污染唯一的调查证据）。
+     * "新版本是否真的在跑"由此只有一个权威确认：重启后 `link.hello` 自报
+     * `version_code`，服务端标记安装（`ota_release_install`）——它发生在全链路
+     * 终点，不存在时机问题；真未生效时发布保持待装，按调用侧退避重装收敛。
      *
      * 末尾把 APK 删掉：它是下载产物，装完就没有用了。失败也没关系，重试本来就要重下。
      */
-    private fun installDetached(apk: File, expectedVersionName: String) {
+    private fun installDetached(apk: File, version: String) {
         val log = File(AppConfig.WORK_DIR, INSTALL_LOG_NAME).absolutePath
         val pkg = BuildConfig.APPLICATION_ID
-        // 步骤事实同步进 device.log（脱手脚本自身无法回调，这里记"已发起"；
-        // 脚本内的逐步结果仍在 ota-install.log——那是脚本唯一可写的通道）
-        deviceLog.lifecycle("ota.install-started", "version=$expectedVersionName")
+        // 步骤事实同步进 device.log（脱手脚本自身无法回调，这里记"已发起"）；
+        // 安装的原始输出在 ota-install.log——那是脚本唯一可写的通道，也是安装
+        // 结论的唯一落点（pm 的 Success/Failure [...] 原文，不二次推断）
+        deviceLog.lifecycle("ota.install-started", "version=$version")
         RootShell.execDetached(
             "echo OTA_START > $log; " +
                 // 先停进程再装：进程存活时的替换在本 ROM 上会被静默丢弃
                 "am force-stop $pkg >> $log 2>&1; " +
                 "sleep 1; " +
+                // 这条输出就是安装结论，原文落盘
                 "pm install -r ${apk.absolutePath} >> $log 2>&1; " +
-                // 自验证带重试：安装提交后系统状态落定需要一点时间
-                "verified=0; " +
-                "for i in 1 2 3; do " +
-                "    sleep 2; " +
-                "    installed=\$(dumpsys package $pkg 2>/dev/null | grep -m1 versionName | tr -d ' \r' ); " +
-                "    echo \"try\$i installed: \$installed\" >> $log; " +
-                "    case \"\$installed\" in *$expectedVersionName) verified=1; break;; esac; " +
-                "done; " +
-                "if [ \$verified = 1 ]; then echo OTA_VERIFIED >> $log; else echo OTA_NOT_APPLIED >> $log; fi; " +
                 "am startservice -n $pkg/com.ryanliu.ntushower.service.AgentService >> $log 2>&1; " +
                 "echo OTA_END >> $log; rm -f ${apk.absolutePath}",
         )

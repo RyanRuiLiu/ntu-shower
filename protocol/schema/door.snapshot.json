@@ -27,7 +27,17 @@
               "enum": [
                 "db_watch",
                 "startup"
-              ]
+              ],
+              "description": "这一帧为什么产生。db_watch：浴室 App 写库触发，状态真的变了，服务端据此派生状态迁移与会话。startup：重连或开机后推的一遍全貌，与状态是否变化无关——服务端只用它刷新现态，不派生（拿它派生会在每次断线重连时凭空记出一串从未发生的迁移）。"
+            },
+            "captured_at": {
+              "description": "采集时刻，由设备锚在服务端时间上（core/clock/ServerClock）。它是本帧的权威时刻：会话起点、终点与出水时长都以它为准。设备尚无锚点（刚起来还没握上手）时缺省，此时服务端退回用自身接收时刻。",
+              "$ref": "#/$defs/null_or_time"
+            },
+            "seq": {
+              "description": "发件箱自增序号，单调递增。只在最旧的快照被裁掉时才跳号，服务端据此看得出中间丢了 N 条。",
+              "type": "integer",
+              "minimum": 1
             },
             "doors": {
               "type": "array",
@@ -42,29 +52,39 @@
                 "properties": {
                   "door_no": {
                     "type": "integer",
-                    "minimum": 1
+                    "minimum": 1,
+                    "maximum": 48,
+                    "description": "喷头号。上限与设备的 DoorCount 同步（共享配置里是 48）。必须是严格整数：3.7 截断成 3 会把一条坏数据伪装成 3 号喷头的真实读数，服务端因此拒收越界与非整数。"
                   },
                   "card_no": {
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "卡号。本设备是无卡模式，实测 235270 个门帧里非 0 的一个都没有——所以“谁”要看 cert_no，不要看它。"
                   },
                   "cert_no": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "证件号，占用者标识。服务端在它为空时退回 acc_no。"
                   },
                   "acc_no": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "账户号。实测与 cert_no 严格一对一（255 个映射无例外），退回只为覆盖极端输入。"
                   },
                   "open_time": {
-                    "$ref": "#/$defs/null_or_time"
+                    "$ref": "#/$defs/null_or_time",
+                    "description": "刷卡时刻，取自设备的墙上时钟。**服务端只看它有没有值**，值一律不参与推导——那口钟实测自然漂移 8.5 秒/天，还会被人为回拨一小时（代价是把自动释放推后），100 天里 16.6% 的时间锚点落在被改过的时段。"
                   },
                   "in_time": {
-                    "$ref": "#/$defs/null_or_time"
+                    "$ref": "#/$defs/null_or_time",
+                    "description": "本次开阀时刻，设备钟，同上只表存在性。它在暂停时被清空、恢复时重写，所以不能拿它当会话起点。"
                   },
                   "close_time": {
-                    "$ref": "#/$defs/null_or_time"
+                    "$ref": "#/$defs/null_or_time",
+                    "description": "本次关阀时刻，设备钟，同上只表存在性。与服务端的 close 语义无关，只表示“关过阀”。"
                   },
                   "bath_time_s": {
                     "type": "integer",
-                    "minimum": 0
+                    "minimum": 0,
+                    "description": "设备累计的本次出水秒数。它是**时长不是时刻**，因此不受设备钟影响、值可用。设备的写法是：只在暂停那一刻累加，出水期间不动，释放喷头时整体归零。"
                   },
                   "status_raw": {
                     "type": "integer",

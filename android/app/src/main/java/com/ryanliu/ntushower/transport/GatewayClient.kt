@@ -6,6 +6,7 @@ import android.os.Looper
 import android.util.Log
 import com.ryanliu.ntushower.BuildConfig
 import com.ryanliu.ntushower.core.clock.Clock
+import com.ryanliu.ntushower.core.clock.ServerClock
 import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.identity.DeviceIdentity
@@ -25,7 +26,7 @@ import org.json.JSONObject
  * 链路行为（对应 protocol/schema/）：
  * - 连接成功后首帧发 link.hello；
  * - hello_ack 带回配置（心跳间隔等）与 trusted 标志；[HANDSHAKE_TIMEOUT_MS] 内等不到就断掉重连；
- * - 按配置间隔发 link.ping；服务端 ping → pong（时钟偏差测量）；
+ * - 按配置间隔发 link.ping；服务端 ping → 给 [ServerClock] 立锚点、再回 pong；
  * - 断线自动重连，指数退避（5s 起、60s 封顶）；
  * - 业务消息一律回调 onMessage 交给上层。
  *
@@ -155,12 +156,17 @@ class GatewayClient(context: Context, private val callback: Callback) {
             }
             when (env.type) {
                 MessageTypes.LINK_PING -> {
-                    // 服务端时钟偏差测量：pong 带设备侧时间
-                    send(
-                        MessageTypes.LINK_PONG,
-                        JSONObject().put("sender_time", Clock.nowRfc3339()),
-                        replyTo = env.id,
-                    )
+                    // 三件事，顺序不能反：先用这一轮的服务端时刻刷新锚点，再回一个带着
+                    // 本机墙上时刻的 pong 报活。快照的产生时刻取自锚点，锚点越新越准。
+                    //
+                    // pong 里的 `device_time` 是给服务端算偏差用的，用途与我们这边的锚点
+                    // 不同：服务端要拿它把快照中的 `open_time`/`in_time` 平移到服务端时间
+                    // 轴——那两个字段是"这次会话从什么时候开始"的唯一线索，而设备钟的
+                    // 绝对值不可信。这里报的是**墙上时钟**（[Clock]），不是锚点：锚点本身
+                    // 就是从服务端时刻推出来的，拿它去算偏差等于自己减自己。
+                    ServerClock.anchor(env.payload.optString("sender_time"))
+                    val deviceTime = JSONObject().put("device_time", Clock.nowRfc3339())
+                    send(MessageTypes.LINK_PONG, deviceTime, replyTo = env.id)
                 }
 
                 MessageTypes.LINK_HELLO_ACK -> {
@@ -177,6 +183,9 @@ class GatewayClient(context: Context, private val callback: Callback) {
                         null
                     }
                     val serverTime = env.payload.optString("server_time")
+                    // 握手应答里的服务端时刻是最早可得的锚点，先立上再回调上层：
+                    // 此后的快照时刻就有据可依，不必干等到第一轮 ping。
+                    ServerClock.anchor(serverTime)
                     Log.i(TAG, "hello_ack trusted=$trusted upgrade=${upgrade?.optString("version")}")
                     handler.post { callback.onConnected(trusted, config, upgrade, serverTime) }
                 }
