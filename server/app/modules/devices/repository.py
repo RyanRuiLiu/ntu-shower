@@ -15,8 +15,8 @@ from .schemas import DeviceRecord
 
 #: 读模型的列清单。列名只在此处出现一次，避免多条查询各写一遍后分叉。
 _DEVICE_COLUMNS = (
-    "device_id, name, trusted, app_version, version_code, os_version, capabilities, "
-    "last_seen_at, last_ip, booted_at, clock_skew_s"
+    "device_id, name, trusted, app_version, version_code, os_version, capabilities,"
+    " last_seen_at, last_ip, booted_at, clock_skew_s"
 )
 
 
@@ -34,24 +34,39 @@ def init_tables() -> None:
             last_seen_at TEXT NOT NULL DEFAULT '',
             last_ip      TEXT NOT NULL DEFAULT '',
             booted_at    TEXT NOT NULL DEFAULT '',
+            -- 设备钟与服务端的偏差（秒）。用来把快照里的 open_time / in_time 平移到
+            -- 服务端时间轴——那两个字段是"这次会话从什么时候开始"的唯一线索。
+            -- 持久化是必须的：只留内存的话，服务重启后回到 0 等于这段时间不平移，而
+            -- "我们刚接手、那边已经在洗"恰恰最常发生在设备上线到首次 pong 之间。
+            -- 见 core/device_clock。
             clock_skew_s REAL NOT NULL DEFAULT 0
         );
+
+        -- 设备上下线。帧是**事件驱动**的（状态变化才上报），空闲时不上报，所以
+        -- "没消息"既可能是"没人用"也可能是"设备离线"——两者在数据里长得一模一样、
+        -- 事后无法区分。这张表把它分开，同时给出设备利用率的分母。
+        --
+        -- 只记"连接建立/断开"这个事实：为什么断（网络、重启、被踢）不在其中，
+        -- 那要结合断线前的日志看。
+        CREATE TABLE IF NOT EXISTS device_link_event (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            device_id   TEXT NOT NULL,
+            occurred_at TEXT NOT NULL,
+            event       TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_device_link_event
+            ON device_link_event(device_id, occurred_at);
         """
     )
 
 
-def set_clock_skew(device_id: str, skew_s: float) -> None:
-    """记下设备时钟相对服务端的偏差（秒，正数表示设备快）。
-
-    偏差必须持久化的理由见 core/device_clock 的模块注释。
-    """
-    write("UPDATE device SET clock_skew_s = ? WHERE device_id = ?", (skew_s, device_id))
-
-
-def get_clock_skew(device_id: str) -> float:
-    """取上次记下的偏差；设备不在档案里时为 0。"""
-    row = read_one("SELECT clock_skew_s FROM device WHERE device_id = ?", (device_id,))
-    return float(row["clock_skew_s"]) if row is not None else 0.0
+def insert_link_event(device_id: str, event: str, occurred_at: str) -> None:
+    """记一次链路事件。重复的 online/offline 不去重——那是如实记录，
+    统计侧自己去重（"同一秒连着断三次"本身是网络质量的信号）。"""
+    write(
+        "INSERT INTO device_link_event (device_id, occurred_at, event) VALUES (?,?,?)",
+        (device_id, occurred_at, event),
+    )
 
 
 def get(device_id: str) -> DeviceRecord | None:
@@ -124,6 +139,18 @@ def set_trusted(device_id: str, trusted: bool) -> bool:
         ).rowcount
         > 0
     )
+
+
+def get_clock_skew(device_id: str) -> float:
+    """读这台设备上次记下的钟偏差；档案不存在时为 0。"""
+    row = read_one("SELECT clock_skew_s FROM device WHERE device_id = ?", (device_id,))
+    return float(row["clock_skew_s"]) if row is not None else 0.0
+
+
+def set_clock_skew(device_id: str, skew_s: float) -> None:
+    """写下这台设备的钟偏差。档案还不存在时什么也不做——偏差是档案的附属，
+    而档案由上线登记创建（见 register），这条不该反过来造出一个只有偏差的空档案。"""
+    write("UPDATE device SET clock_skew_s = ? WHERE device_id = ?", (skew_s, device_id))
 
 
 def _as_device(row: Row) -> DeviceRecord:

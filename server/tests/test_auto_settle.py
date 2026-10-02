@@ -7,6 +7,7 @@ import pytest
 
 from app.core.clock import rfc3339_ago
 from app.modules.doors import repository as doors_repository
+from app.modules.doors import service as doors_service
 from app.modules.sessions import auto_settle
 
 THRESHOLD_S = 600
@@ -18,8 +19,19 @@ STUDENT_CONFIG: dict[str, Any] = {
 
 
 def _seed_open_session(device_id: str, door_no: int, cert_no: str, assigned_seconds_ago: int) -> None:
-    """直接在 usage_session 里开一条指定分配时刻的会话。"""
-    doors_repository.open_session(device_id, door_no, 900 + door_no, cert_no, rfc3339_ago(assigned_seconds_ago))
+    """直接在 usage_session 里开一条指定分配时刻的会话。
+
+    `assigned_source` 取 observed：这条是测试直接造出来的，没有经过推导，也就没有
+    设备报的 open_time 可平移——那正是"观测下界"的语义。
+    """
+    doors_repository.open_session(
+        device_id,
+        door_no,
+        900 + door_no,
+        cert_no,
+        rfc3339_ago(assigned_seconds_ago),
+        doors_service.SESSION_ASSIGNED_OBSERVED,
+    )
 
 
 def test_pick_candidate_requires_enabled(fresh_db: str) -> None:

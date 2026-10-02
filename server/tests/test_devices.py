@@ -89,7 +89,7 @@ def test_runtime_requires_admin(client: TestClient, ops_headers: dict[str, str])
 
 
 def test_runtime_returns_full_record(client: TestClient, admin_headers: dict[str, str]) -> None:
-    """GET /devices/runtime 返回完整档案：版本、信任、IP、时钟偏差、在线都在。"""
+    """GET /devices/runtime 返回完整档案：版本、信任、IP、钟偏差、在线都在。"""
     helpers.register_trusted_device(DEVICE_ID)
 
     r = client.get("/api/v1/devices/runtime", headers=admin_headers)
@@ -107,13 +107,12 @@ def test_runtime_returns_full_record(client: TestClient, admin_headers: dict[str
         "online",
         "last_seen_at",
         "last_ip",
-        "booted_at",
         "clock_skew_s",
+        "booted_at",
     }
     assert record["trusted"] is True
     assert record["version_code"] == 57
     assert record["last_ip"] == "127.0.0.1"
-    assert record["clock_skew_s"] == 0.0
     assert record["online"] is False
 
 

@@ -10,12 +10,20 @@ from typing import Literal
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
+#: 链路事件的两种取值。
+#:
+#: 记的是"连接建立 / 断开"这个事实，不是"设备能不能用"——后者要结合心跳看：连接在
+#: 而心跳停说明是 TCP 半开，服务端靠 ping/pong 把它断掉，断开之后这里才落 offline
+#: （见 gateway 的存活探针）。
+LINK_ONLINE = "online"
+LINK_OFFLINE = "offline"
+
 
 class DeviceSummary(TypedDict):
     """设备的精简视图：可辨识与在场状态，用户面与实时推送共用。
 
-    版本、来源 IP、时钟偏差等运维诊断字段不在此列，只出现在完整档案
-    （DeviceRecord）与管理面接口里。
+    版本、来源 IP 等运维诊断字段不在此列，只出现在完整档案（DeviceRecord）与
+    管理面接口里。
     """
 
     device_id: str
@@ -49,10 +57,11 @@ class DeviceRecord(TypedDict):
     """
 
     clock_skew_s: float
-    """设备墙上时钟相对服务端的偏差（秒，正数表示设备快）。
+    """设备钟与服务端的偏差（秒）。由设备回 pong 时带上的墙上时刻算出（见 core/device_clock）。
 
-    由 link.pong 的设备时间戳算出、EMA 平滑后存库；必须持久化的理由见
-    core/device_clock 的模块注释。
+    它用来把快照里的 `open_time` / `in_time` 平移到服务端时间轴——那两个字段是"这次
+    会话从什么时候开始"的唯一线索。**绝对值不可信不代表它没用**：一次会话压在 20 分钟
+    以内，而 20 分钟里的漂移只有 0.03 秒，窗口内偏差是常量。
     """
 
 

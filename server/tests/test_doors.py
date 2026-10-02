@@ -10,7 +10,6 @@ from tests import helpers
 
 from app.core import db
 from app.core.clock import rfc3339_after
-from app.core.device_clock import load_skew
 from app.modules.doors import repository, service
 from app.modules.doors.schemas import DoorState
 
@@ -31,8 +30,23 @@ def _door(door_no: int, **overrides: object) -> dict[str, Any]:
     return door
 
 
-def _snapshot(doors: list[dict[str, Any]]) -> dict[str, Any]:
-    return {"snapshot_id": str(uuid.uuid4()), "source": "db_watch", "doors": doors}
+def _snapshot(
+    doors: list[dict[str, Any]],
+    captured_at: str | None = None,
+    source: str = service.SOURCE_DB_WATCH,
+) -> dict[str, Any]:
+    """构造一帧。
+
+    `captured_at` 是帧的采集时刻，也是推导里唯一的时刻来源。不给时服务端退回本机
+    接收时刻——那对"隔了多久"这类断言没有意义（两帧在测试里只差几毫秒），所以凡是要
+    验时长的用例都得显式给它。
+
+    `source` 区分事件帧与全貌帧，后者只刷新现态、不派生（见 service 的常量说明）。
+    """
+    payload: dict[str, Any] = {"snapshot_id": str(uuid.uuid4()), "source": source, "doors": doors}
+    if captured_at is not None:
+        payload["captured_at"] = captured_at
+    return payload
 
 
 @pytest.mark.parametrize(
@@ -72,22 +86,24 @@ def test_snapshot_updates_live_state_and_records_events(fresh_db: str) -> None:
     assert len(live) == 2
     assert live[1]["state"] == DoorState.FREE.value
 
-    # 时间戳相对当前时刻构造：服务端用"收到快照的时刻"减 inTime 计算出水时长
-    assigned = rfc3339_after(-120)
-    opened = rfc3339_after(-60)
+    # 三帧的采集时刻由测试显式给出。设备报的 open_time/in_time 只表达"有没有"，
+    # 它们的值一律不参与计算——那是设备的墙上时钟，实测偏差可达 24 小时。
+    t0 = "2026-09-30T12:00:00.000Z"
+    t1 = "2026-09-30T12:01:00.000Z"
+    t2 = "2026-09-30T12:02:00.000Z"
+    opened = "2026-09-30T12:00:30.000Z"
 
-    service.process_snapshot(device_id, _snapshot([_door(1, card_no=2001, cert_no="C1", open_time=assigned), _door(2)]))
+    service.process_snapshot(device_id, _snapshot([_door(1, card_no=2001, cert_no="C1"), _door(2)], t0))
     live = repository.get_all_live(device_id)
     assert live[1]["state"] == DoorState.WAITING.value
     assert live[1]["card_no"] == 2001
+    assert live[1]["reported_at"] == t0
 
-    service.process_snapshot(
-        device_id, _snapshot([_door(1, card_no=2001, cert_no="C1", open_time=assigned, in_time=opened)])
-    )
+    service.process_snapshot(device_id, _snapshot([_door(1, card_no=2001, cert_no="C1", in_time=opened)], t1))
     assert repository.get_all_live(device_id)[1]["state"] == DoorState.BATHING.value
     assert repository.get_open_session(device_id, 1) is not None
 
-    service.process_snapshot(device_id, _snapshot([_door(1), _door(2)]))
+    service.process_snapshot(device_id, _snapshot([_door(1), _door(2)], t2))
     assert repository.get_open_session(device_id, 1) is None
 
     conn = db.get_conn()
@@ -106,19 +122,25 @@ def test_snapshot_updates_live_state_and_records_events(fresh_db: str) -> None:
     assert session["card_no"] == 2001
     assert session["ended_at"] is not None
     assert session["opened_at"] is not None
-    assert session["flow_s"] >= 55  # 这一趟确实出过水，时长接近一分钟
+    assert session["flow_s"] == 60  # t1 到 t2 那一段：上一帧还在出水，计入
+    assert session["assigned_at"] == t0  # 会话起点取帧时刻，不取设备的 openTime
+    assert session["opened_at"] == t1  # 首次观测到出水的那一帧
 
 
-def test_snapshot_corrects_device_time_by_clock_skew(fresh_db: str) -> None:
-    """设备时间字段按已登记的时钟偏差校准为服务器时钟。"""
-    device_id = "dev-skew-00001"
-    load_skew(device_id, 100.0)  # 设备慢 100 秒
+def test_snapshot_keeps_device_time_fields_untouched(fresh_db: str) -> None:
+    """设备时间字段逐字透出，不做任何校正。
+
+    那三个字段只表达"设备当时说是什么"，保留原样才能溯源。本系统的一切时刻都取自
+    服务端时间轴（帧的采集时刻），设备墙钟偏差多少都不进入统计——所以这里既不校正
+    也不参与任何判据。
+    """
+    device_id = "dev-rawtime-01"
     opened = "2026-09-30T12:00:00.000Z"
 
     service.process_snapshot(device_id, _snapshot([_door(1, card_no=1, cert_no="C", in_time=opened)]))
 
     live = repository.get_all_live(device_id)
-    assert live[1]["in_time"] == "2026-09-30T12:01:40.000Z"
+    assert live[1]["in_time"] == opened
 
 
 def test_session_owner_change_closes_old_and_opens_new(fresh_db: str) -> None:
@@ -140,12 +162,17 @@ def test_session_owner_change_closes_old_and_opens_new(fresh_db: str) -> None:
     assert current["cert_no"] == "B"
 
 
-def test_snapshot_rejects_invalid_and_skips_zero_door_no(fresh_db: str) -> None:
-    """doors 缺失或非列表报 door.invalid_snapshot；door_no 非正的条目跳过。"""
+def test_snapshot_records_missing_doors_and_skips_nonpositive_door_no(fresh_db: str) -> None:
+    """doors 缺失照收照落（记成空数组）；door_no 非正的条目跳过。
+
+    缺失的 doors 不是协议错误，而是"设备这一帧没有可用的门数据"这条事实：原始层要
+    留下它，派生跳过。回错误会让设备端不删发件箱那一行，把队列堵死。
+    """
     device_id = "dev-bad-snap-1"
-    bad = service.process_snapshot(device_id, {"snapshot_id": "s"})
-    assert bad["status"] == "error"
-    assert bad["error"]["code"] == "door.invalid_snapshot"
+    empty = service.process_snapshot(device_id, {"snapshot_id": "s"})
+    assert empty == {"status": "ok", "processed": 0}
+    recorded = db.get_conn().execute("SELECT doors FROM door_snapshot WHERE snapshot_id = ?", ("s",)).fetchall()
+    assert [row["doors"] for row in recorded] == ["[]"]
 
     helpers.register_trusted_device(device_id)
     result = service.process_snapshot(device_id, _snapshot([_door(0), _door(1)]))
@@ -162,17 +189,18 @@ def test_last_used_ignores_sessions_that_never_opened(fresh_db: str) -> None:
 
 
 def test_last_used_keeps_zero_length_bath(fresh_db: str) -> None:
-    """开了阀立刻关（出水时长为 0）要算一次使用：判据是 opened_at 而非时长。"""
+    """开了阀立刻关（出水时长为 0）也要算一次使用：判据是 opened_at，不是时长。"""
     device_id = "dev-last-used-2"
-    opened = rfc3339_after(-5)
+    t0 = "2026-09-30T12:00:00.000Z"
     service.process_snapshot(
-        device_id, _snapshot([_door(1, card_no=2, cert_no="B", open_time=rfc3339_after(-20), in_time=opened)])
+        device_id, _snapshot([_door(1, card_no=2, cert_no="B", in_time="2026-09-30T12:00:00.000Z")], t0)
     )
-    service.process_snapshot(device_id, _snapshot([_door(1)]))
+    service.process_snapshot(device_id, _snapshot([_door(1)], "2026-09-30T12:00:00.500Z"))
 
     row = repository.latest_usage_by_door()[(device_id, 1)]
     assert row["cert_no"] == "B"
-    assert row["opened_at"] == opened
+    assert row["opened_at"] == t0  # 帧时刻，不是设备报的 inTime
+    assert row["flow_s"] == 0  # 不足一秒，没有可计入的出水
 
 
 def test_last_used_returns_the_most_recent(fresh_db: str) -> None:
@@ -200,22 +228,25 @@ def test_doors_api_exposes_last_used(fresh_db: str) -> None:
     device_id = "dev-last-used-4"
     helpers.register_trusted_device(device_id)
 
-    opened = rfc3339_after(-30)
+    t0 = "2026-09-30T12:00:00.000Z"
+    t1 = "2026-09-30T12:01:00.000Z"
     service.process_snapshot(
         device_id,
         _snapshot(
             [
-                _door(1, card_no=7, cert_no="C", open_time=rfc3339_after(-60), in_time=opened),
-                _door(2, card_no=8, cert_no="D", open_time=rfc3339_after(-600)),
-            ]
+                _door(1, card_no=7, cert_no="C", in_time="2026-09-30T12:00:30.000Z"),
+                _door(2, card_no=8, cert_no="D"),
+            ],
+            t0,
         ),
     )
-    service.process_snapshot(device_id, _snapshot([_door(1), _door(2)]))  # 两门先后释放
+    service.process_snapshot(device_id, _snapshot([_door(1), _door(2)], t1))  # 两门先后释放
 
     doors = {d["door_no"]: d for d in repository.list_doors(device_id)}
-    assert doors[1]["last_used_at"] == opened
+    # last_used_at 是"首次观测到出水那一帧"的帧时刻，不是设备报的 inTime
+    assert doors[1]["last_used_at"] == t0
     assert doors[1]["last_used_cert"] == "C"
-    assert doors[1]["last_used_s"] > 0
+    assert doors[1]["last_used_s"] == 60  # t0 到 t1：上一帧还在出水，计入
     assert doors[2]["last_used_at"] == ""
     assert doors[2]["last_used_s"] == 0
 
@@ -312,3 +343,158 @@ def test_stream_client_close_ends_session_cleanly(client: TestClient, fresh_db: 
         service.process_snapshot("dev-stream-close", _snapshot([_door(1)]))
         json.loads(ws.receive_text())  # 确认推送通道活着
         ws.close()
+
+
+def test_startup_snapshot_refreshes_live_without_deriving(fresh_db: str) -> None:
+    """全貌帧（`source=startup`）只刷新现态，不记迁移、不动会话。
+
+    它与"状态是否变化"无关——重连与开机都会推一遍，而设备侧状态可能一直没变。拿它
+    派生，每次断线重连都会凭空记出一串从未发生的迁移，并把会话起点拽到重连那一刻，
+    而真实起点在此之前。
+    """
+    device_id = "dev-startup-1"
+    # 起始是空闲：这一帧走 db_watch，且它不涉及占用
+    service.process_snapshot(device_id, _snapshot([_door(1)], "2026-09-30T12:00:00.000Z"))
+
+    # 全貌帧里门突然显示被占着。它是"当前是什么样"，不是"刚刚有人刷卡进来"
+    service.process_snapshot(
+        device_id,
+        _snapshot(
+            [_door(1, card_no=1, cert_no="A", in_time="2026-09-30T12:00:00.000Z")],
+            "2026-09-30T12:05:00.000Z",
+            service.SOURCE_STARTUP,
+        ),
+    )
+
+    assert repository.get_all_live(device_id)[1]["state"] == DoorState.BATHING.value  # 现态确实刷新了
+    assert db.get_conn().execute("SELECT COUNT(*) FROM door_state_event").fetchone()[0] == 0  # 但没有迁移
+    assert repository.get_open_session(device_id, 1) is None  # 也没有会话
+
+
+def test_last_seen_stops_at_the_last_occupied_frame(fresh_db: str) -> None:
+    """`last_seen_at` 停在最后一次确认占着的那一帧，结束帧不动它。
+
+    它把"结束时刻可不可信"变成一个判据：`ended_at` 与它的差就是观测盲区。
+    """
+    device_id = "dev-lastseen-1"
+    t0 = "2026-09-30T12:00:00.000Z"
+    t1 = "2026-09-30T12:01:00.000Z"
+    t2 = "2026-09-30T12:02:00.000Z"
+
+    service.process_snapshot(device_id, _snapshot([_door(1, card_no=1, cert_no="A")], t0))
+    service.process_snapshot(device_id, _snapshot([_door(1, card_no=1, cert_no="A", in_time=t0)], t1))
+    service.process_snapshot(device_id, _snapshot([_door(1)], t2))
+
+    row = db.get_conn().execute("SELECT * FROM usage_session WHERE device_id = ?", (device_id,)).fetchone()
+    assert row["assigned_at"] == t0
+    assert row["ended_at"] == t2
+    assert row["last_seen_at"] == t1  # 不是 t2——结束那一帧恰恰证明它已经不占了
+
+
+def test_gap_beyond_session_limit_is_not_counted(fresh_db: str) -> None:
+    """两帧间隔超过会话上限：中间必然发生过一次没看见的释放，那段出水不计。
+
+    设备满 SESSION_MAX_S 会强制释放，所以横跨这个间隔的"同一段水"不可能存在——宁可
+    少算，也不能把两段接成一段。
+    """
+    device_id = "dev-gap-1"
+    t0 = "2026-09-30T12:00:00.000Z"
+    far = "2026-09-30T12:30:00.000Z"  # 与 t0 相隔 1800 秒 > SESSION_MAX_S
+
+    service.process_snapshot(device_id, _snapshot([_door(1, card_no=1, cert_no="A", in_time=t0)], t0))
+    service.process_snapshot(device_id, _snapshot([_door(1, card_no=1, cert_no="A", in_time=t0)], far))
+
+    row = db.get_conn().execute("SELECT flow_s FROM usage_session WHERE device_id = ?", (device_id,)).fetchone()
+    assert row["flow_s"] == 0
+
+
+def test_session_survives_process_restart(fresh_db: str) -> None:
+    """进程重启不丢状态：会话的延续全靠库里的两处落点。
+
+    处理一帧用到的一切都在表里——`door_live` 给出上一帧的状态与时刻，`usage_session`
+    给出进行中的会话与已累计的出水。处理过程本身没有内存状态（只剩一把按设备分的锁，
+    而锁不承载语义），所以"重启"不是一件需要恢复的事，只是下一帧照常处理。
+
+    这个用例同时钉住"重启后不会把同一次占用重开成两条会话"。
+    """
+    device_id = "dev-restart-1"
+    t0 = "2026-09-30T12:00:00.000Z"
+    t1 = "2026-09-30T12:01:00.000Z"
+
+    service.process_snapshot(device_id, _snapshot([_door(1, card_no=1, cert_no="A", in_time=t0)], t0))
+
+    # 模拟重启：清掉进程内的一切。库不动——这正是状态所在之处。
+    service._device_locks.clear()
+
+    service.process_snapshot(device_id, _snapshot([_door(1, card_no=1, cert_no="A", in_time=t0)], t1))
+
+    conn = db.get_conn()
+    rows = conn.execute("SELECT * FROM usage_session WHERE device_id = ?", (device_id,)).fetchall()
+    assert len(rows) == 1, "重启不该把同一次占用重开成两条会话"
+    assert rows[0]["assigned_at"] == t0, "起点仍是原来那一帧"
+    assert rows[0]["flow_s"] == 60, "上一帧在出水的证据跨重启仍然有效"
+
+
+def test_door_no_must_be_a_strict_in_range_integer(fresh_db: str) -> None:
+    """门号必须是 1..48 的严格整数；不截断、不宽容。
+
+    门号决定"这是哪个喷头"。`3.7` 截成 `3` 会把一条坏数据伪装成 3 号喷头的真实读数，
+    脏账记到别人头上——其余数值字段可以宽容，这一个不行。
+    """
+    device_id = "dev-door-no"
+    result = service.process_snapshot(
+        device_id,
+        _snapshot([_door(1), _door("2"), _door(3.0), _door(3.7), _door(0), _door(49), _door("abc")]),
+    )
+    assert result["processed"] == 3  # 只有 1、"2"、3.0 合法
+    assert sorted(repository.get_all_live(device_id)) == [1, 2, 3]
+
+
+def test_duplicate_door_no_in_one_frame_keeps_the_last(fresh_db: str) -> None:
+    """同一帧里重复的门号取最后一条。
+
+    设备按门号整行读取，重复只可能来自拼装错误，取后者与"后来者覆盖"的直觉一致。
+    一帧只处理一次——否则"甲"会先开一条会话、"乙"再触发换人，同一帧里凭空多出一个
+    人和一条账。
+    """
+    device_id = "dev-dup-door"
+    service.process_snapshot(device_id, _snapshot([_door(1)]))
+    service.process_snapshot(
+        device_id, _snapshot([_door(1, card_no=1, cert_no="甲"), _door(1, card_no=2, cert_no="乙")])
+    )
+
+    live = repository.get_all_live(device_id)
+    assert live[1]["cert_no"] == "乙"
+
+    # 去重之后只开一条会话。不去重的话"甲"会先开一条、"乙"再触发换人结旧开新——同一帧
+    # 里凭空多出一个人和一条账。
+    sessions = db.get_conn().execute("SELECT cert_no FROM usage_session WHERE device_id = ?", (device_id,)).fetchall()
+    assert [row["cert_no"] for row in sessions] == ["乙"]
+
+
+def test_numeric_fields_are_clamped_not_trusted(fresh_db: str) -> None:
+    """负卡号归零、出水秒数夹进 [0, 一天]。
+
+    负卡号会凭空造出一个占用者（占用判据是"卡号非 0"）；出水秒数的负值与天文数字都只
+    可能是脏数据。夹到一天而不是设备上限——那个上限由配置下发、随时可能变大。
+    """
+    device_id = "dev-clamp"
+    service.process_snapshot(device_id, _snapshot([_door(1, card_no=-5, cert_no="A", bath_time_s=-1)]))
+    assert repository.get_all_live(device_id)[1]["state"] == DoorState.FREE.value
+
+    service.process_snapshot(device_id, _snapshot([_door(1, card_no=1, cert_no="A", bath_time_s=99_999_999)]))
+    assert repository.get_all_live(device_id)[1]["bath_time_s"] == 86400
+
+
+def test_occupant_falls_back_to_acc_no_when_cert_no_is_blank(fresh_db: str) -> None:
+    """证件号为空时占用者退回账户号。
+
+    退回只覆盖极端输入（实测两者始终同时有值），但少了它，一条只有 `acc_no` 的帧会被
+    当成"无人认领"，按人统计时凭空多出一个空身份。
+    """
+    device_id = "dev-occupant"
+    service.process_snapshot(device_id, _snapshot([_door(1, card_no=0, cert_no="", acc_no="1010209501")]))
+
+    session = repository.get_open_session(device_id, 1)
+    assert session is not None
+    assert session["cert_no"] == "1010209501"
