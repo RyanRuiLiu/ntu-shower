@@ -82,6 +82,7 @@ GROUPS: tuple[GroupSpec, ...] = (
     GroupSpec("ui", "界面操作", "infra"),
     GroupSpec("overlay", "操作遮罩", "infra"),
     GroupSpec("guard", "崩溃守护", "infra"),
+    GroupSpec("clock", "时间校正", "infra"),
     GroupSpec("ota", "自更新", "infra"),
     GroupSpec("debug", "调试通道", "infra"),
     GroupSpec("misc", "其他", "infra"),
@@ -481,6 +482,30 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         maximum=3600000,
         unit="毫秒",
         group="guard",
+    ),
+    # ── 时间校正 ──
+    ConfigSpec(
+        "boot_time_sync_enabled",
+        BOOL,
+        DEVICE,
+        False,
+        "开机自动校时",
+        "每次开机联网后，把设备时钟校准为服务端时间，并重启浴室 App 让它重读每日"
+        "定时开关机计划。设备没有 NTP，时钟靠 RTC 维持、会跑偏（实测快过整 1 小时）；"
+        "依赖开关机计划准确时应开启。默认关闭",
+        group="clock",
+    ),
+    ConfigSpec(
+        "boot_time_sync_threshold_s",
+        INT,
+        DEVICE,
+        60,
+        "开机校时触发阈值",
+        "开机校时的门槛：设备时钟与服务端的偏差超过该秒数才执行校正并重启浴室 App，"
+        "偏差在阈值内不动。仅在「开机自动校时」开启时生效",
+        minimum=60,
+        unit="秒",
+        group="clock",
     ),
     # ── 调试通道 ──
     ConfigSpec(

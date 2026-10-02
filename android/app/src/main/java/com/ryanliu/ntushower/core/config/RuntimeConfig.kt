@@ -142,6 +142,12 @@ object RuntimeConfig {
     @Volatile var bathExitCooldownMs = ConfigDefaults.BATH_APP_EXIT_COOLDOWN_MS
         private set
 
+    @Volatile var bootTimeSyncEnabled = ConfigDefaults.BOOT_TIME_SYNC_ENABLED
+        private set
+
+    @Volatile var bootTimeSyncThresholdS = ConfigDefaults.BOOT_TIME_SYNC_THRESHOLD_S
+        private set
+
     /**
      * 把每个键复位为 [ConfigDefaults] 的值。
      *
@@ -179,6 +185,8 @@ object RuntimeConfig {
         bathExitWindowMs = ConfigDefaults.BATH_APP_EXIT_WINDOW_MS
         bathExitMaxCount = ConfigDefaults.BATH_APP_EXIT_MAX_COUNT.toInt()
         bathExitCooldownMs = ConfigDefaults.BATH_APP_EXIT_COOLDOWN_MS
+        bootTimeSyncEnabled = ConfigDefaults.BOOT_TIME_SYNC_ENABLED
+        bootTimeSyncThresholdS = ConfigDefaults.BOOT_TIME_SYNC_THRESHOLD_S
     }
 
     /**
@@ -243,6 +251,13 @@ object RuntimeConfig {
             { c -> bathExitMaxCount = atLeastOne(c.optInt("bath_app_exit_max_count", bathExitMaxCount)) },
         "bath_app_exit_cooldown_ms" to
             { c -> bathExitCooldownMs = atLeastOne(c.optLong("bath_app_exit_cooldown_ms", bathExitCooldownMs)) },
+        "boot_time_sync_enabled" to
+            { c -> bootTimeSyncEnabled = c.optBoolean("boot_time_sync_enabled", bootTimeSyncEnabled) },
+        "boot_time_sync_threshold_s" to
+            { c ->
+                bootTimeSyncThresholdS =
+                    atLeastOne(c.optLong("boot_time_sync_threshold_s", bootTimeSyncThresholdS))
+            },
     )
 
     /** 应用下发的配置；未知键忽略（服务端可能比设备端新，新增键由后续版本消化）。 */
