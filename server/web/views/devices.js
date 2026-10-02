@@ -59,7 +59,7 @@ function renderCurrent() {
   const device = store.devices.find((item) => item.device_id === store.deviceId)
   $('currentDevice').textContent = device ? `${device.name || device.device_id}（${device.online ? '在线' : '离线'}）` : '未选择'
   const usable = Boolean(device)
-  for (const id of ['btnExec', 'btnRestart', 'btnUninstall', 'btnBridgeOpen', 'btnBridgeClose', 'btnBridgeStatus']) {
+  for (const id of ['btnExec', 'btnRestart', 'btnUninstall', 'btnBathRestart', 'btnClockSet', 'btnBridgeOpen', 'btnBridgeClose', 'btnBridgeStatus']) {
     $(id).disabled = !usable
   }
   // 换了设备，上一条连接命令与上一份状态都不再属于眼前这台，收起来免得照着旧端口去连
@@ -146,6 +146,44 @@ async function doUninstall() {
   } catch (error) {
     report('maintResult', problemText(error), 'err')
   }
+}
+
+/** 重启浴室 App：强停会中断进行中的会话，必须确认。 */
+async function doBathRestart() {
+  if (!window.confirm('重启浴室 App？进行中的会话会被中断。')) return
+  report('maintResult', '正在重启浴室 App…', 'info')
+  try {
+    const result = await api.bathRestart(store.deviceId)
+    report('maintResult', outcomeText(result), result.status === 'ok' ? 'ok' : 'err')
+  } catch (error) {
+    report('maintResult', problemText(error), 'err')
+  }
+}
+
+/**
+ * 校正设备系统时间：网页端给定任意时刻，设备端写墙钟。
+ *
+ * 默认值取本机当前时间（设备与操作者同城，偏差应在校正后的秒级内）；格式校验
+ * 在客户端先拦一次，服务端边界仍有同一条正则。
+ */
+function promptClockSet() {
+  const pad = (n) => String(n).padStart(2, '0')
+  const now = new Date()
+  const defaultVal =
+    `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ` +
+    `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
+  const input = window.prompt('设置设备系统时间（格式：YYYY-MM-DD HH:MM:SS）', defaultVal)
+  if (!input) return
+  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(input.trim())) {
+    report('maintResult', '失败 · 时间格式应为 YYYY-MM-DD HH:MM:SS', 'err')
+    return
+  }
+  report('maintResult', '正在设置设备时间…', 'info')
+  api.clockSet(store.deviceId, input.trim()).then((result) => {
+    report('maintResult', outcomeText(result), result.status === 'ok' ? 'ok' : 'err')
+  }).catch((error) => {
+    report('maintResult', problemText(error), 'err')
+  })
 }
 
 /**
@@ -264,6 +302,8 @@ export const devicesView = {
             <div class="btn-row">
               <button type="button" class="btn btn-ghost btn-sm" id="btnRestart">重启设备端程序</button>
               <button type="button" class="btn btn-danger btn-sm" id="btnUninstall">卸载设备端程序</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnBathRestart">重启浴室App</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnClockSet">校正时间</button>
             </div>
             <div class="result" id="maintResult"></div>
 
@@ -336,6 +376,8 @@ export const devicesView = {
     dispose.add(listen($('btnExec'), 'click', runExec))
     dispose.add(listen($('btnRestart'), 'click', doRestart))
     dispose.add(listen($('btnUninstall'), 'click', doUninstall))
+    dispose.add(listen($('btnBathRestart'), 'click', doBathRestart))
+    dispose.add(listen($('btnClockSet'), 'click', promptClockSet))
     dispose.add(listen($('btnBridgeStatus'), 'click', bridgeStatus))
     dispose.add(listen($('btnBridgeOpen'), 'click', bridgeOpen))
     dispose.add(listen($('btnBridgeClose'), 'click', bridgeClose))
