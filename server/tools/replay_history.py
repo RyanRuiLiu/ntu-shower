@@ -219,7 +219,7 @@ def replay(source: Path, target: Path) -> dict[str, int]:
 
     # 批处理期间没提交过，收尾前先落盘——后面那两个函数各开自己的连接，看不见未提交的写
     core_db.get_conn().commit()
-    settled = settle_open_sessions(target)
+    settled = _settle_open_sessions(target)
     return {"frames": len(frames), "duplicates": duplicates, "settled": settled}
 
 
@@ -232,7 +232,7 @@ def _trim(target: Path) -> None:
     conn.close()
 
 
-def settle_open_sessions(target: Path) -> int:
+def _settle_open_sessions(target: Path) -> int:
     """收尾：重放结束时仍开着的会话，按"最后见到"那一刻结束。
 
     数据总在某一刻截断，而截断时恰好有人在洗是常态。不收尾的话它们会永远挂在
