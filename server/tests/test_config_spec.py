@@ -74,13 +74,13 @@ def test_every_spec_has_a_title_and_description() -> None:
 
 
 def test_integer_specs_declare_bounds() -> None:
-    """整数键必须给出上下限：没有范围的整数可以配出 0 或负数。"""
-    unbounded = [
-        spec.key
-        for spec in SPECS_BY_KEY.values()
-        if spec.kind.value == "int" and (spec.minimum is None or spec.maximum is None)
-    ]
-    assert not unbounded, f"整数键缺少上下限：{unbounded}"
+    """整数键必须声明下限：没有下限的整数可以配出 0 或负数。
+
+    上限允许省略——阈值类键没有天然上界（如开机校时的触发阈值，设得越大越接近
+    "永不触发"），强行给一个反而限制使用。
+    """
+    unbounded = [spec.key for spec in SPECS_BY_KEY.values() if spec.kind.value == "int" and spec.minimum is None]
+    assert not unbounded, f"整数键缺少下限：{unbounded}"
 
 
 def test_defaults_are_within_declared_bounds() -> None:

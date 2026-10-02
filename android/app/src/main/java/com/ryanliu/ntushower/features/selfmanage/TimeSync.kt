@@ -4,6 +4,7 @@ import android.util.Log
 import com.ryanliu.ntushower.core.clock.Clock
 import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.AppConfig
+import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.log.DeviceLog
 import com.ryanliu.ntushower.core.shell.RootShell
 import com.ryanliu.ntushower.features.automation.BathAppRestart
@@ -23,6 +24,13 @@ import java.util.concurrent.atomic.AtomicBoolean
  * 启动，它一整天的开关机计划全错。因此校正必须成对——**先把时钟写对，再重启浴室
  * App** 让它带着正确时钟重读计划；只改时钟不重启，已启动的浴室 App 不会重读。
  *
+ * ## 开关与阈值
+ *
+ * 功能默认**关闭**，由设备配置项 `boot_time_sync_enabled` 控制（配置页「时间校正」）；
+ * 触发阈值为 `boot_time_sync_threshold_s`（默认 60 秒，无上限）：偏差超过阈值才校正
+ * 并重启浴室 App，阈值内的秒级噪声不动。手动设置（setWallClock）是显式动作，
+ * 不受这两个配置影响。
+ *
  * ## 写时钟的命令（真机验证 2026-10-02，勿改）
  *
  * `date -s "YYYYMMDD.HHMMSS"`（设备本地时区）。这台 4.4 ROM 的 toolbox date：
@@ -32,15 +40,15 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * ## 每次开机一次
  *
- * [syncFrom] 以原子闸门保证开机后只校正一次（无论成败）——断线重连触发的后续
+ * [syncFrom] 以原子闸门保证开机后只评估一次（无论结果如何）——断线重连触发的后续
  * hello_ack 不再重复。校正成功后，服务端基于 link.pong 的时钟偏差测量随之归零。
  */
 object TimeSync {
 
     private const val TAG = "TimeSync"
 
-    /** 偏差小于该值不校正：浴室 App 的开关机计划是分钟粒度，秒级噪声不值得重启它。 */
-    private const val THRESHOLD_MS = 5_000L
+    /** 手动设置（网页端）的验证残余门槛：显式动作允许比开机校时更紧的判定。 */
+    private const val MANUAL_THRESHOLD_MS = 5_000L
 
     /** 每次开机只尝试一次：重启、网络闪断引发的重连都由这道闸门挡住。 */
     private val attempted = AtomicBoolean(false)
@@ -53,6 +61,11 @@ object TimeSync {
     /** 开机校正入口：GatewayClient 收到 hello_ack 后在工作线程调用。 */
     fun syncFrom(serverTimeRfc3339: String) {
         if (!attempted.compareAndSet(false, true)) return
+        if (!RuntimeConfig.bootTimeSyncEnabled) {
+            Log.i(TAG, "boot time sync disabled by config")
+            deviceLog.lifecycle("clock.sync-disabled", "配置未开启")
+            return
+        }
         val server = Clock.parseRfc3339(serverTimeRfc3339)
         if (server == null) {
             Log.w(TAG, "cannot parse server time: $serverTimeRfc3339")
@@ -63,15 +76,16 @@ object TimeSync {
         // 流逝量一律走单调时钟（Uptime）：墙钟即将跳变，用墙钟算流逝会把跳变量算进结果
         val upBefore = Uptime.nowMs()
         val offsetMs = server.time - System.currentTimeMillis()
-        if (!needsCorrection(offsetMs)) {
-            Log.i(TAG, "clock aligned (offset=${offsetMs}ms)")
-            deviceLog.lifecycle("clock.aligned", "offset=${offsetMs}ms")
+        val thresholdMs = RuntimeConfig.bootTimeSyncThresholdS * 1000
+        if (!needsCorrection(offsetMs, thresholdMs)) {
+            Log.i(TAG, "clock aligned (offset=${offsetMs}ms, threshold=${thresholdMs}ms)")
+            deviceLog.lifecycle("clock.aligned", "offset=${offsetMs}ms, threshold=${thresholdMs}ms")
             return
         }
 
         deviceLog.lifecycle("clock.correcting", "offset=${offsetMs}ms")
         val residual = applyWallClock(server.time)
-        if (needsCorrection(residual)) {
+        if (needsCorrection(residual, thresholdMs)) {
             Log.e(TAG, "clock correction failed (residual=${residual}ms)")
             deviceLog.error("clock.correct-failed", "residual=${residual}ms")
             return
@@ -130,8 +144,11 @@ object TimeSync {
         null
     }
 
-    /** 偏差是否达到需要校正的程度。单独提出便于单测锁定阈值语义。 */
-    internal fun needsCorrection(offsetMs: Long): Boolean = Math.abs(offsetMs) >= THRESHOLD_MS
+    /** 手动设置后的残余偏差判定：显式动作用固定的小门槛，不受开机校时配置影响。 */
+    private fun needsCorrection(offsetMs: Long): Boolean = Math.abs(offsetMs) >= MANUAL_THRESHOLD_MS
+
+    /** 开机校时的偏差判定：阈值来自远程配置。单独提出便于单测锁定语义。 */
+    internal fun needsCorrection(offsetMs: Long, thresholdMs: Long): Boolean = Math.abs(offsetMs) >= thresholdMs
 
     /** 服务端时刻 → 本 ROM `date -s` 认的 `YYYYMMDD.HHMMSS`（按 [zone] 的本地墙钟）。 */
     internal fun shellDatetime(epochMs: Long, zone: TimeZone = TimeZone.getDefault()): String {

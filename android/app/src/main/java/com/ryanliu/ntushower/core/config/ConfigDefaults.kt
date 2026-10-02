@@ -89,4 +89,10 @@ object ConfigDefaults {
 
     /** 异常后的冷却时长 */
     const val BATH_APP_EXIT_COOLDOWN_MS = 600000L
+
+    /** 开机自动校时 */
+    const val BOOT_TIME_SYNC_ENABLED = false
+
+    /** 开机校时触发阈值 */
+    const val BOOT_TIME_SYNC_THRESHOLD_S = 60L
 }
