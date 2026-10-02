@@ -133,7 +133,7 @@ def _load_frames(source: Path) -> list[tuple[str, str, str]]:
     return frames
 
 
-def _turbo(conn: sqlite3.Connection) -> None:
+def turbo_writes(conn: sqlite3.Connection) -> None:
     """把重放期间的写调成批处理。
 
     默认路径每写一条语句就提交一次——实时场景下那是必须的（每个 commit 都落盘，掉电
@@ -171,7 +171,7 @@ def replay(source: Path, target: Path) -> dict[str, int]:
     init_schema()
     _trim(target)
     conn = core_db.get_conn()
-    _turbo(conn)
+    turbo_writes(conn)
 
     # 重放主体不发提交：把 repository 的 write 换成不提交的版本。数十万次提交只有
     # 这样才收敛得住。改的是模块属性（而非 core_db.write）——repository 中是
@@ -219,7 +219,7 @@ def replay(source: Path, target: Path) -> dict[str, int]:
 
     # 批处理期间没提交过，收尾前先落盘——后面那两个函数各开自己的连接，看不见未提交的写
     core_db.get_conn().commit()
-    settled = _settle_open_sessions(target)
+    settled = settle_open_sessions(target)
     return {"frames": len(frames), "duplicates": duplicates, "settled": settled}
 
 
@@ -232,7 +232,7 @@ def _trim(target: Path) -> None:
     conn.close()
 
 
-def _settle_open_sessions(target: Path) -> int:
+def settle_open_sessions(target: Path) -> int:
     """收尾：重放结束时仍开着的会话，按"最后见到"那一刻结束。
 
     数据总在某一刻截断，而截断时恰好有人在洗是常态。不收尾的话它们会永远挂在
