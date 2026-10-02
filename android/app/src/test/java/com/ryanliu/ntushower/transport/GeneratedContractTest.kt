@@ -2,6 +2,7 @@ package com.ryanliu.ntushower.transport
 
 import com.ryanliu.ntushower.core.config.ConfigDefaults
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -43,6 +44,17 @@ class GeneratedContractTest {
             assertTrue("不符合 <前缀>.<小写词> 的形式：$code", code.matches(Regex("""^[a-z]+(\.[a-z0-9_]+)+$""")))
         }
         assertEquals("常量值出现重复", codes.size, codes.toSet().size)
+    }
+
+    @Test
+    fun `ota version pattern accepts exactly three numeric segments`() {
+        // 形状由服务端发布流程铸造（生成物），版本号参与文件名构造——行为在这里钉住，
+        // 与生成来源的逐字节对账（test_contract_sync.py）互补
+        val pattern = Regex(OtaContract.VERSION_PATTERN)
+        assertTrue(pattern.matches("1.2.3"))
+        assertFalse(pattern.matches("1.2"))
+        assertFalse(pattern.matches("1.2.3.4"))
+        assertFalse(pattern.matches("1.2.3-beta"))
     }
 
     @Test

@@ -11,8 +11,11 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import com.ryanliu.ntushower.core.a11y.A11yNodeSource
+import com.ryanliu.ntushower.core.a11y.A11yRuntime
 import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.config.RuntimeConfig
@@ -20,7 +23,6 @@ import com.ryanliu.ntushower.core.threading.MainThread
 import com.ryanliu.ntushower.features.automation.BathAppGuard
 import com.ryanliu.ntushower.features.automation.BathAppPage
 import com.ryanliu.ntushower.features.automation.ContentEvent
-import java.util.concurrent.atomic.AtomicLong
 
 /**
  * 无障碍服务实体：UI 操作原语与页面事件流。
@@ -29,15 +31,24 @@ import java.util.concurrent.atomic.AtomicLong
  * - 输入：剪贴板 + ACTION_PASTE（API 18+；ACTION_SET_TEXT 需 API 21 不可用）
  * - 页面变化：事件原样交给 [BathAppPage]，由它筛掉与页面判定无关的那些再重算
  * - 浴室 App 退出守护：阈值与冷却时长都是配置项，决策在 [BathAppGuard]
+ *
+ * 绑定状态、前台标志与页面变化信令不在本类：它们的使用者横跨 features 与 service，
+ * 存放在 [A11yRuntime]（拆分理由见其类注释）。本服务是写入方——绑定时注册、窗口事件
+ * 维护前台标志、销毁时解绑；features 侧经 [A11yNodeSource] 只读与等待。
  */
-class A11yService : AccessibilityService() {
+// TooManyFunctions：生命周期两条路径（绑定自举、事件分流）与 A11yNodeSource 的原语实现在
+// 同一个类里是有意的——原语操作的就是本服务持有的无障碍会话，拆开反而要互相暴露状态。
+@Suppress("TooManyFunctions")
+class A11yService :
+    AccessibilityService(),
+    A11yNodeSource {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        instance = this
+        A11yRuntime.bind(this)
         Log.i(TAG, "connected")
         enableViewIdReporting()
-        bathAppInForeground = isBathAppInForeground()
+        A11yRuntime.bathAppInForeground = isBathAppInForeground()
         // 自举主服务：无障碍绑定是本设备上唯一可靠的开机拉起锚点——
         // DS83X ROM 不投递 BOOT_COMPLETED（真机实测 + 旧项目同结论），
         // 系统开机后主动重绑已启用的无障碍服务（不受 stopped 状态影响）。
@@ -64,7 +75,7 @@ class A11yService : AccessibilityService() {
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
             // 只入队，不在这里算。重算要做同步 IPC，而本回调跑在**主线程**上——真机上正是
             // 这条路径把主线程按住，让看门狗的广播排不上队、超时后进程被系统以 ANR 杀掉。
-            // 重算线程算完会经 onPageRefreshed 放行等待者。
+            // 重算线程算完会经 A11yRuntime.onPageRefreshed 放行等待者。
             //
             // 附带的事件特征只用本地字段（见 ContentEvent）。getSource() 刻意不取：它为拿一个
             // 节点要发起一次跨进程调用，而这类事件每秒来五十来条。
@@ -78,13 +89,13 @@ class A11yService : AccessibilityService() {
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val pkg = event.packageName?.toString() ?: ""
             if (pkg == AppConfig.BATH_APP_PACKAGE) {
-                bathAppInForeground = true
+                A11yRuntime.bathAppInForeground = true
                 // 回到前台即清除退出历史与冷却：不论此前是否处于冷却期，
                 // App 能回到前台就说明它自己活过来了。此前只在冷却期清除，
                 // 会让未达阈值的退出记录残留，导致下次退出提前触发冷却。
                 guard.onForeground()
-            } else if (bathAppInForeground) {
-                bathAppInForeground = false
+            } else if (A11yRuntime.bathAppInForeground) {
+                A11yRuntime.bathAppInForeground = false
                 handleBathAppExit(pkg)
             }
         }
@@ -103,7 +114,7 @@ class A11yService : AccessibilityService() {
         )
         when (guard.onBackground(now, params)) {
             BathAppGuard.Action.RELAUNCH ->
-                if (!automationInProgress) {
+                if (!A11yRuntime.automationInProgress) {
                     Log.i(TAG, "bath app exited to $leftToPackage, relaunching")
                     launchBathApp()
                 }
@@ -122,23 +133,27 @@ class A11yService : AccessibilityService() {
     }
 
     override fun onDestroy() {
-        instance = null
+        A11yRuntime.unbind()
         // 自动化完全依赖本服务，服务销毁时它不可能还在跑。不复位的话这个标志会停在 true，
         // 而 BathAppGuard 据此不再拉起浴室 App——那正是界面能力的自举锚点，
         // 一次服务重绑就会让设备从此不再自愈。
-        automationInProgress = false
+        A11yRuntime.automationInProgress = false
         super.onDestroy()
     }
 
-    // ── UI 操作原语 ──
+    // ── UI 操作原语（A11yNodeSource） ──
 
-    fun performClick(node: AccessibilityNodeInfo): Boolean = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+    /** 活动窗口的根节点；调用方负责 recycle（API 19 上不回收会泄漏节点）。 */
+    override fun activeWindowRoot(): AccessibilityNodeInfo? = super.getRootInActiveWindow()
+
+    override fun performClick(node: AccessibilityNodeInfo): Boolean =
+        node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
 
     /**
      * 向节点输入文本：主线程写剪贴板 → 聚焦 → ACTION_PASTE。
      * 4.4 上 ClipboardManager 构造需主线程 Looper，故经 MainThread 投递并同步等待。
      */
-    fun performSetText(node: AccessibilityNodeInfo, text: String): Boolean {
+    override fun performSetText(node: AccessibilityNodeInfo, text: String): Boolean {
         var clipboardOk = false
         // 主线程若被长时间占用，这里必须能放弃：无限等待会让调用方线程永久卡死
         val done = MainThread.runAndWait {
@@ -162,7 +177,7 @@ class A11yService : AccessibilityService() {
     }
 
     /** 输入完成后清空剪贴板，防止账密残留（异步）。 */
-    fun clearClipboard() {
+    override fun clearClipboard() {
         MainThread.post {
             try {
                 (getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager)
@@ -173,8 +188,12 @@ class A11yService : AccessibilityService() {
         }
     }
 
+    override fun sendBroadcast(intent: Intent) {
+        super.sendBroadcast(intent)
+    }
+
     fun isBathAppInForeground(): Boolean {
-        val root = rootInActiveWindow ?: return false
+        val root = activeWindowRoot() ?: return false
         try {
             return root.packageName?.toString() == AppConfig.BATH_APP_PACKAGE
         } finally {
@@ -183,7 +202,7 @@ class A11yService : AccessibilityService() {
     }
 
     /** 热切换浴室 App 到前台（REORDER_TO_FRONT 不触发生命周期重建）。 */
-    fun launchBathApp(): Boolean = try {
+    override fun launchBathApp(): Boolean = try {
         val intent = packageManager.getLaunchIntentForPackage(AppConfig.BATH_APP_PACKAGE) ?: return false
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
         startActivity(intent)
@@ -193,77 +212,22 @@ class A11yService : AccessibilityService() {
         false
     }
 
+    /**
+     * 屏幕旋转角度（0/1/2/3，`Display.getRotation()` 语义），供节点树导出取用。
+     *
+     * 不能用 `Configuration.orientation` 顶替：那个只有竖屏(1)/横屏(2) 两值，
+     * 在旋转 180° 与 270° 时都会给出同一个答案，按它换算坐标必然错位。
+     */
+    override fun screenRotation(): Int = try {
+        (getSystemService(Context.WINDOW_SERVICE) as WindowManager).defaultDisplay.rotation
+    } catch (_: Exception) {
+        0
+    }
+
     companion object {
         private const val TAG = "A11yService"
 
         /** 剪贴板条目标签。 */
         private const val CLIPBOARD_LABEL = "ntushower"
-
-        @Volatile
-        var instance: A11yService? = null
-            private set
-
-        private val pageChangeLock = Object()
-
-        /** 已完成的重算次数：配合 [pageChangeMark] / [awaitPageChangeAfter] 用。 */
-        private val pageChangeCount = AtomicLong(0)
-
-        /**
-         * 一次页面重算已完成（由 [BathAppPage] 的重算线程调用）：放行正在等页面变化的调用方。
-         *
-         * 由重算线程调用而不是由事件回调调用，是这次线程模型调整的关键：事件回调跑在主线程，
-         * 那里不能做重算要的同步 IPC；而"放行等待者"必须发生在**状态已经跟上之后**，等待方
-         * 被唤醒就会立刻读 [BathAppPage.snapshot]，反过来就是它醒来看见旧值、白转一圈再等一轮。
-         *
-         * 多次界面变化可能合并成一次重算，所以这个计数不再等于"内容变化次数"，而是"重算次数"
-         * ——对 [awaitPageChangeAfter] 的用法（只比"是否大于动手前那个 mark"）没有影响。
-         */
-        @JvmStatic
-        fun onPageRefreshed() {
-            pageChangeCount.incrementAndGet()
-            synchronized(pageChangeLock) { pageChangeLock.notifyAll() }
-        }
-
-        /**
-         * 取当前的变化计数。**在动手之前取**——之后拿它判断"这一下有没有让页面变"。
-         */
-        @JvmStatic
-        fun pageChangeMark(): Long = pageChangeCount.get()
-
-        /**
-         * 等到页面内容在 [mark] 之后发生变化，最多等 [timeoutMs]（事件驱动，无人等待时零开销）。
-         *
-         * 为什么要传一个 mark，而不是单纯 `wait`：`Object.wait` 等的是**下一次**通知，
-         * 通知若发生在调用之前就永远等不到，只能等满上限。而"点完按钮页面立刻就变了"恰恰
-         * 是最常见的情形——那一拍纯属白等，一个流程里要发生五六次。
-         *
-         * 拿到锁之后再比一次，是为了盖住"取 mark 到进锁之间"那一小段；`wait` 被无关通知
-         * 唤醒时也会绕回循环再比。
-         */
-        @JvmStatic
-        fun awaitPageChangeAfter(mark: Long, timeoutMs: Long) {
-            synchronized(pageChangeLock) {
-                val deadline = Uptime.nowMs() + timeoutMs
-                while (pageChangeCount.get() == mark) {
-                    val left = deadline - Uptime.nowMs()
-                    if (left <= 0) return
-                    pageChangeLock.wait(left)
-                }
-            }
-        }
-
-        /** 阻塞等待下一次页面变化或超时；不关心"此前是否已经变过"的场景用它。 */
-        @JvmStatic
-        fun awaitPageChange(timeoutMs: Long) {
-            synchronized(pageChangeLock) { pageChangeLock.wait(timeoutMs) }
-        }
-
-        @Volatile
-        var bathAppInForeground = false
-            private set
-
-        /** 自动化流程执行中标志（崩溃守护在此期间不拉起）。 */
-        @Volatile
-        var automationInProgress = false
     }
 }

@@ -2,10 +2,10 @@
 
 只有一张表：`access_identity` 回答"这个标识被授予了哪些能力"。
 
-- **小程序用户**：`identity` 是微信 openid；
-- **网页用户**：`identity` 是我方签发的不透明标识。
+- 小程序用户：`identity` 是微信 openid；
+- 网页用户：`identity` 是我方签发的不透明标识。
 
-两者都是"请求时附带的一个标识"，服务端查表得能力。不做会话、不做令牌过期——
+两者都是"请求时附带的一个标识"，服务端查表得能力。不做会话、不做令牌过期：
 标识本身长期有效，撤销靠从名单里删掉。
 """
 
@@ -13,7 +13,7 @@ import json
 from sqlite3 import Row
 
 from app.core.clock import now_rfc3339
-from app.core.db import get_conn
+from app.core.db import get_conn, write
 
 from .identity import IdentityKind
 from .schemas import IdentityRecord
@@ -41,23 +41,23 @@ def put_identity(
     label: str = "",
     device_scope: list[str] | None = None,
 ) -> IdentityRecord:
-    """登记或更新一条标识（同一标识重复登记即更新其能力集与作用域）。
+    """登记或更新一条标识（同一标识重复登记即整体覆盖：能力集、作用域、备注）。
+
+    登记是全量写入：`device_scope` 不传按 `["*"]`（全部设备）落库，要改就连同
+    能力位一起提交完整值，"只改能力、保留作用域"的半量更新没有实现，编辑端点
+    （PUT）提交的就是整份表单。
 
     返回登记后的完整记录。`created_at` 在冲突走 UPDATE 时保持原值，因此回查一次
-    取值——调用方拿到的是与名单视图完全一致的形状，不必再自己拼一个子集模型。
-    `device_scope` 缺省按 ["*"]（全部设备）落库；UPDATE 时传 None 保持原作用域
-    不变（编辑能力位不必连带提交作用域）。
+    取值，调用方拿到的是与名单视图完全一致的形状。
     """
-    scope_json = json.dumps(device_scope if device_scope is not None else ["*"])
-    get_conn().execute(
+    scope = device_scope if device_scope is not None else ["*"]
+    write(
         "INSERT INTO access_identity (identity, kind, capabilities, device_scope, label, created_at)"
         " VALUES (?,?,?,?,?,?)"
         " ON CONFLICT(identity) DO UPDATE SET capabilities = excluded.capabilities,"
-        " device_scope = COALESCE(excluded.device_scope, access_identity.device_scope),"
-        " label = excluded.label",
-        (identity, kind.value, json.dumps(capabilities), scope_json, label, now_rfc3339()),
+        " device_scope = excluded.device_scope, label = excluded.label",
+        (identity, kind.value, json.dumps(capabilities), json.dumps(scope), label, now_rfc3339()),
     )
-    get_conn().commit()
     record = find_identity(identity)
     if record is None:
         # 刚写入就查不到只可能是数据库层面的异常（并发删除）。mypy 需要这里的
@@ -79,9 +79,7 @@ def list_identities() -> list[IdentityRecord]:
 
 
 def delete_identity(identity: str) -> bool:
-    cursor = get_conn().execute("DELETE FROM access_identity WHERE identity = ?", (identity,))
-    get_conn().commit()
-    return cursor.rowcount > 0
+    return write("DELETE FROM access_identity WHERE identity = ?", (identity,)).rowcount > 0
 
 
 def _as_identity(row: Row) -> IdentityRecord:

@@ -92,7 +92,7 @@ class ShellChannel(private val name: String) {
         return try {
             task.get(SHELL_START_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         } catch (e: Exception) {
-            // 超时意味着那个启动线程多半还挂在 exec 里，回收不掉，会泄漏一个线程。这是有意
+            // 超时意味着那个启动线程大概率仍阻塞在 exec 里，回收不掉，会泄漏一个线程。这是有意
             // 的取舍：宁可漏一个线程，也不能让本通道把调用方的执行器一起拖死。
             Log.w(TAG, "[$name] su did not start within ${SHELL_START_TIMEOUT_MS}ms: ${e.message}")
             resetShell()
@@ -134,7 +134,7 @@ class ShellChannel(private val name: String) {
             //
             // `writeBytes` 的语义是"逐字符写出并**丢弃高 8 位**"，中文命令到了设备就变成
             // 一串 ASCII 噪声。真机上验证过：`echo 测试` 实际执行的是 `echo K-`——因为
-            // 「测」是 U+6D4B 而「试」是 U+8BD5，低 8 位正是 0x4B 与 0xD5 里那截。
+            // 「测」是 U+6D4B、「试」是 U+8BD5，低 8 位分别落到 0x4B 与 0xD5。
             stdin!!.write(wrap(command, marker, pidFile).toByteArray(Charsets.UTF_8))
             stdin!!.flush()
             when (val captured = readUntil(marker, timeoutMs, pidFile)) {

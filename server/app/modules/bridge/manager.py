@@ -1,20 +1,13 @@
-"""ADB 桥：**单一建立点、唯一回收点**。
+"""ADB 桥：唯一的建立点与回收点。
 
-一条桥持有三样资源——本机回环监听套接字、到设备的 WS、本机 TCP 流。三者的生命周期
-完全一致，所以建立与销毁各只能有一处：
+一条桥持有本机回环监听套接字、到设备的 WS、本机 TCP 流三样资源，生命周期
+完全一致，因此建立与销毁各只有一处：AdbBridge.open 建立（成功后才进注册表），
+AdbBridge.recycle 销毁并摘除注册表。显式关桥、设备 WS 断开、寿命到点等全部
+结束路径都只调 recycle，不做任何自有清理；分散收尾会漏掉监听套接字，端口
+被占后每次开桥都是 Errno 98。
 
-    `AdbBridge.open()`     建立，成功后才进注册表
-    `AdbBridge.recycle()`  销毁，并从注册表摘除
-
-四条结束路径——显式关桥、设备 WS 断开、空闲超时、寿命到点——**都只调 `recycle()`**，
-自己不做任何清理。此前它们各自收尾，于是"关监听、摘注册表、清设备 WS"被写成了三份，
-每份都不完整：漏掉监听套接字那次，端口被永久占着，之后每次开桥都是 `Errno 98`，
-而设备侧明明已经连上来（日志里有 `/gateway/bridge` 的 accepted）。
-
-## 为什么端口按设备固定分配
-
-运维的 `adb connect` 脚本因此可以写死，不必每次去查端口。代价是重开时必然撞上同一个
-端口，而上一轮监听关闭后内核要一点时间才让它可复用——`open()` 为此退避重试。
+监听端口按设备固定分配，运维的 adb connect 脚本可以写死；重开时上一轮监听
+尚未完全释放，open 为此退避重试。
 """
 
 import asyncio
@@ -31,22 +24,21 @@ from app.core.problems import PORT_UNAVAILABLE, ApiProblemError
 BRIDGE_BUFFER_SIZE = 65536
 PENDING_MAX = 1024 * 1024  # 对端未就绪时的有界缓冲
 
-#: 监听套接字接到一个 adb 客户端时的处理函数。桥把它绑给 `start_server`，而它拿得到桥
-#: 本身——处理一个客户端必然要读写桥的缓冲与设备 WS。`AdbBridge` 写成字符串是因为注解
-#: 在类定义时就会求值，而这个别名必须排在类之前才能被它的方法签名引用。
+#: 监听套接字接到一个 adb 客户端时的处理函数。写成字符串是因为注解在类定义时
+#: 求值，而这个别名必须排在类之前才能被方法签名引用。
 ClientHandler = Callable[["AdbBridge", asyncio.StreamReader, asyncio.StreamWriter], Awaitable[None]]
 
-#: 监听端口被上一轮占用时的退避重试上限（次）。合计约 4.5 秒——压在 5 秒以内是刻意的，
-#: 那是本项目的单例超时约定；再长就该去查端口为什么没放，而不是继续等。
+#: 监听端口被上一轮占用时的退避重试上限，合计约 4.5 秒，压在本项目的单例超时
+#: 约定（5 秒）以内；再长就该去查端口为什么没放。
 BIND_ATTEMPTS = 5
 BIND_BACKOFF_S = 0.3
 
 
 class AdbBridge:
-    """一条 ADB 桥。**只有 [open] 能创建它，只有 [recycle] 能销毁它。**
+    """一条 ADB 桥。只有 open 能创建它，只有 recycle 能销毁它。
 
-    不做成 dataclass：它的字段之间有一致性要求（有 tcp_writer 才有 tcp_reader、
-    server 只在建立成功后才非空），构造过程被 [open] 收在一处才不会出现半成品。
+    不做成 dataclass：字段之间有一致性要求（有 tcp_writer 才有 tcp_reader、server
+    只在建立成功后非空），构造过程由 open 收在一处，不会出现半成品。
     """
 
     def __init__(self, device_id: str, port: int, generation: int) -> None:
@@ -65,11 +57,11 @@ class AdbBridge:
 
     @classmethod
     async def open(cls, device_id: str, generation: int, port: int, on_client: ClientHandler) -> "AdbBridge":
-        """建桥：绑本机回环监听，成功后才登记进注册表。
+        """建桥：绑定本机回环监听，成功后登记进注册表。
 
-        失败一律抛，且**不留半个桥**——没进注册表的东西没人会去回收它，所以这里由自己
-        保证：要么完整（监听已绑、已在注册表里），要么什么都不存在。登记也在这里做，
-        调用方不必记得去 attach——少一个能忘的步骤就少一处不一致。
+        失败一律抛出且不留半个桥：没进注册表的东西没人回收，因此这里保证要么
+        完整（监听已绑、已在注册表），要么什么都不存在。登记也在此完成，调用方
+        不必记得 attach。
         """
         bridge = cls(device_id, port, generation)
         bridge.opened_at = asyncio.get_running_loop().time()
@@ -106,11 +98,9 @@ class AdbBridge:
     def accept_device(self, ws: WebSocket, nonce: str, now: float, pair_timeout_s: float) -> bool:
         """把一个设备 WS 接到这条桥上；不属于本桥的返回 False。
 
-        判据只有 nonce 一条，因为它是**一次性**的：`open_session` 每发一个新 nonce 就把它
-        记下，`consume_nonce` 用过即删。所以旧世代重放拿的是已删的 nonce，自然通不过——
-        不需要再比一次世代号。此前路由层同时做 nonce 校验、世代比较、以及"桥不在册就
-        现建一条"三件事，于是建桥多出一个入口，那个入口建出来的桥没有监听套接字，
-        谁也回收不了它。
+        判据只有一次性 nonce：旧世代重放拿到的是已消费的 nonce，通不过，无需再比
+        世代号。世代比较与"桥不在册现建一条"都不在此做，后者会造成没有监听套接字、
+        无人可回收的桥。
         """
         if not registry.consume_nonce(self.device_id, nonce, now, pair_timeout_s):
             return False
@@ -118,10 +108,10 @@ class AdbBridge:
         return True
 
     def attach_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> bool:
-        """接入一个 adb 客户端；已有客户端时拒绝（返回 False）。
+        """接入一个 adb 客户端；已有客户端时拒绝。
 
-        一个世代只服务一个客户端：并发的 adb 会各自发 service 请求，而隧道只有一条，
-        交错之后谁也分不清哪个响应对应哪个请求。
+        一个世代只服务一个客户端：并发的 adb 各自发 service 请求，隧道只有一条，
+        交错后无法对应请求与响应。
         """
         if self.tcp_writer is not None:
             return False
@@ -130,10 +120,10 @@ class AdbBridge:
         return True
 
     async def detach_client(self) -> None:
-        """断开当前 adb 客户端，**保留桥**——回到等下一个客户端（旧系统的隧道语义）。
+        """断开当前 adb 客户端，保留桥，回到等待下一个客户端的状态。
 
-        泵任务取消后不 await：TCP socket 关闭会让它的 read 立即抛异常退出，等待反而会
-        在 WS 断开与 drain 并发时形成相互等待（真实死锁风险）。
+        泵任务取消后不 await：TCP socket 关闭会让它的 read 立即抛异常退出，等待
+        反而会在 WS 断开与 drain 并发时形成相互等待。
         """
         if self.pump_task is not None and not self.pump_task.done():
             self.pump_task.cancel()
@@ -147,14 +137,11 @@ class AdbBridge:
         self.pending_to_tcp.clear()
 
     async def recycle(self, reason: str) -> None:
-        """拆掉这条桥，并把自己从注册表摘除。**幂等**。
+        """拆掉这条桥并从注册表摘除，幂等。
 
-        `reason` 只用于日志，但它是必需的：此前四条结束路径都不留痕，于是"这条桥怎么
-        没了"只能靠猜——日志里只有 `bridge opened`，没有任何一条说它何时、为何被关。
-        真出过"开桥后过一阵再查就是未开启"这种问题，而当时查不出来。
-
-        幂等不是可选的：多条结束路径可能同时想关同一条桥，谁先谁后不确定，而
-        `asyncio.Server.close()` 重复调用会撞上内部已清空的成员（`NoneType._stop_serving`）。
+        reason 只用于日志，但必需：多条结束路径可能同时关同一条桥，而日志必须
+        能回答这条桥何时、因何被关。幂等同样必需：asyncio.Server.close() 重复
+        调用会撞上内部已清空的成员。
         """
         if self.recycled:
             return
@@ -185,25 +172,22 @@ class AdbBridge:
 
 
 class BridgeRegistry:
-    """全局索引：**只回答"这台设备现在有没有桥"**，不掌管桥的生命周期。
+    """全局索引：只回答"这台设备现在有没有桥"，不掌管桥的生命周期。
 
-    这里保留四份映射，因为它们是四种不同的信息（正在配对的、已建的、端口分配、世代）。
-    关键是**只有一处**改它们——[attach] 与 [detach]——而不是像此前那样由路由、WS 处理
-    函数、回收函数各自去动，那样每次改动都要让四者保持一致，补丁只会越打越多。
+    四份映射是四种不同的信息（待配对、已建、端口分配、世代），改写只发生在
+    attach 与 detach 两处。
     """
 
     def __init__(self) -> None:
-        #: device_id → (generation, nonce, 下发时刻)。带时刻是为了让"设备一直不连"
-        #: 的待配对状态能过期，而不是永久挂在那里。
+        # device_id → (generation, nonce, 下发时刻)。带时刻让"设备一直不连"的
+        # 待配对状态能过期，而不是永久挂起。
         self.pending: dict[str, tuple[int, str, float]] = {}
         self._active: dict[str, AdbBridge] = {}
         self._ports: dict[str, int] = {}
         self._generation: dict[str, int] = {}
 
-        #: 开与关的互斥锁。两者中间都有 await（start_server / wait_closed）会让出事件
-        #: 循环，并发到达的请求会交错读到半成品状态。一把全局锁而不是每设备一把：
-        #: 开关桥是罕见操作，串行化的代价可忽略，而少一层按设备管理的锁字典就少一处
-        #: 泄漏点。
+        # 开与关共用一把全局锁：两者中间都有 await，会让出事件循环，并发请求会
+        # 交错读到半成品状态。开关桥是罕见操作，串行化代价可忽略。
         self.op_lock = asyncio.Lock()
 
     def get(self, device_id: str) -> AdbBridge | None:
@@ -215,15 +199,14 @@ class BridgeRegistry:
     def detach(self, bridge: AdbBridge) -> None:
         """只摘自己的那一条。
 
-        按对象比对而不是按 device_id：同一台设备可能已经换了新桥（旧桥的回收晚到），
-        那时按 id 摘会摘掉新的那条，它的监听从此无人回收——实测过一次，
-        此后每次开桥都是端口占用。
+        按对象比对而非按 device_id：同一台设备可能已换了新桥（旧桥的回收晚到），
+        按 id 摘会摘掉新桥，它的监听从此无人回收。
         """
         if self._active.get(bridge.device_id) is bridge:
             del self._active[bridge.device_id]
 
     def open_session(self, device_id: str, now: float) -> tuple[int, int, str]:
-        """开一个新会话世代：世代严格递增（同设备跨会话可比较）、端口稳定、nonce 一次性。"""
+        """开一个新会话世代：世代严格递增、端口稳定、nonce 一次性。"""
         port = self._ports.setdefault(device_id, settings.bridge_base_port + len(self._ports))
         generation = self._generation.get(device_id, 0) + 1
         self._generation[device_id] = generation
@@ -244,13 +227,9 @@ class BridgeRegistry:
     def reset(self) -> None:
         """清空全部会话状态（测试隔离用）。
 
-        监听套接字也关：只清字典的话，用例之间会残留监听端口，而端口是**固定分配**的
-        （同一台设备每次拿同一个），下一个用例开桥必然 `Errno 98`。
-
-        整段套 `suppress` 且不 await：这是最后一道回收，常在事件循环已经关掉之后被调
-        （pytest 反向销毁夹具，`client` 先退出）。那时关闭既无效果也无必要，但不该让
-        teardown 报错——它会把一个通过的用例记成 ERROR。`server.close()` 本身是同步的
-        （只是停止 accept），所以在这里调不违反"同步重置"的前提。
+        监听套接字一并关闭：端口按设备固定分配，只清字典会让下一个用例开桥时
+        撞上残留监听。整段套 suppress 且不 await：这常在事件循环已关闭之后被调
+        （pytest 反向销毁夹具），关闭已无效果，但不应让 teardown 报错。
         """
         with contextlib.suppress(Exception):
             for bridge in self._active.values():

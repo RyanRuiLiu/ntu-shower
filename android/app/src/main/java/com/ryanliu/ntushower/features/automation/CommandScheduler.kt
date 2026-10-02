@@ -1,12 +1,11 @@
 package com.ryanliu.ntushower.features.automation
 
 import android.util.Log
+import com.ryanliu.ntushower.core.a11y.A11yNodeSource
+import com.ryanliu.ntushower.core.a11y.A11yRuntime
+import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.RuntimeConfig
-import com.ryanliu.ntushower.service.A11yService
-import com.ryanliu.ntushower.service.A11yUiChannel
-import com.ryanliu.ntushower.service.ShellUiChannel
-import com.ryanliu.ntushower.service.UiKey
-import com.ryanliu.ntushower.service.UiTreeCodec
+import com.ryanliu.ntushower.features.remote.ScreenCapture
 import com.ryanliu.ntushower.transport.OutcomeStatus
 import com.ryanliu.ntushower.transport.ReasonCodes
 import org.json.JSONObject
@@ -121,7 +120,7 @@ class CommandScheduler(
         expireAtMs: Long,
         run: (Command) -> Unit,
     ) {
-        if (expireAtMs > 0 && System.nanoTime() / 1_000_000 > expireAtMs) {
+        if (expireAtMs > 0 && Uptime.nowMs() > expireAtMs) {
             Log.w(TAG, "command expired before start, rejecting: ${command.id}")
             onOutcome(
                 CommandOutcome(
@@ -199,7 +198,7 @@ class CommandScheduler(
                 onOutcome(outcome) // 结果先回报
                 reported = true
                 if (needsFinish) { // 再做慢速收尾
-                    A11yService.instance?.let { AutomationFlow.finish(it, overlay) }
+                    A11yRuntime.source?.let { AutomationFlow.finish(it, overlay) }
                 }
             } catch (e: Throwable) {
                 if (reported) {
@@ -231,9 +230,9 @@ class CommandScheduler(
             else -> return executeUiAction(command)
         }
         // 会话流程完全由无障碍驱动浴室 APP 的界面，没有第二条通道
-        val a11y = A11yService.instance
+        val a11y = A11yRuntime.source
             ?: return CommandOutcome(command.id, OutcomeStatus.FAILED, ReasonCodes.DEVICE_A11Y_UNAVAILABLE, "无障碍服务不可用")
-        A11yService.automationInProgress = true
+        A11yRuntime.automationInProgress = true
         try {
             val result = AutomationFlow.run(a11y, action, overlay)
             if (result.error != null) {
@@ -242,7 +241,7 @@ class CommandScheduler(
             onNeedsFinish(true)
             return CommandOutcome(command.id, OutcomeStatus.OK, "", result.terminalMessage)
         } finally {
-            A11yService.automationInProgress = false
+            A11yRuntime.automationInProgress = false
         }
     }
 
@@ -263,8 +262,8 @@ class CommandScheduler(
      * 并发，用户会看到界面被抢。
      */
     private fun executeUiAction(command: Command): CommandOutcome {
-        val a11y = A11yService.instance
-        A11yService.automationInProgress = true
+        val a11y = A11yRuntime.source
+        A11yRuntime.automationInProgress = true
         try {
             return when (command) {
                 is Command.UiTouch -> {
@@ -296,7 +295,7 @@ class CommandScheduler(
                 else -> CommandOutcome(command.id, OutcomeStatus.FAILED, ReasonCodes.UI_UNSUPPORTED_ACTION, "不支持的操作")
             }
         } finally {
-            A11yService.automationInProgress = false
+            A11yRuntime.automationInProgress = false
         }
     }
 
@@ -310,12 +309,12 @@ class CommandScheduler(
      * 滚动：方向是必填的闭集，缺失或不认识直接拒绝，不做静默回落。
      */
     private fun executeScroll(command: Command.UiScroll): CommandOutcome = when (command.direction) {
-        "forward" -> {
+        CommandFactory.DIRECTION_FORWARD -> {
             val ok = ShellUiChannel.scroll(forward = true)
             outcome(command.id, ok, ReasonCodes.UI_NO_SCROLLABLE_CONTAINER, "界面上没有可滚动的容器")
         }
 
-        "backward" -> {
+        CommandFactory.DIRECTION_BACKWARD -> {
             val ok = ShellUiChannel.scroll(forward = false)
             outcome(command.id, ok, ReasonCodes.UI_NO_SCROLLABLE_CONTAINER, "界面上没有可滚动的容器")
         }
@@ -334,7 +333,7 @@ class CommandScheduler(
      * ASCII，守不住就明确拒绝，不把写坏的内容静默落进输入框。选哪条由网页端的
      * 使用者定；通道值缺失或不认识直接拒绝，不做静默回落。
      */
-    private fun executeInput(command: Command.UiInput, a11y: A11yService?): CommandOutcome {
+    private fun executeInput(command: Command.UiInput, a11y: A11yNodeSource?): CommandOutcome {
         when (command.channel) {
             "keys" -> {
                 if (!command.text.all { it.code in 32..126 }) {
@@ -368,7 +367,7 @@ class CommandScheduler(
         val imageBase64 = if (command is Command.Photo) {
             PhotoCapture.takePhoto()
         } else {
-            com.ryanliu.ntushower.features.remote.ScreenCapture.captureJpegBase64()
+            ScreenCapture.captureJpegBase64()
         }
         val (failedCode, failedMessage) = if (command is Command.Photo) {
             ReasonCodes.CAMERA_CAPTURE_FAILED to "拍照失败"
@@ -390,7 +389,7 @@ class CommandScheduler(
      * 但风险远大于便利）。无障碍不在时如实失败，不给一个更差的替代。
      */
     private fun exportTree(command: Command): CommandOutcome {
-        val tree = A11yService.instance?.let { UiTreeCodec.export(it, RuntimeConfig.uiDumpMaxNodes.toInt()) }
+        val tree = A11yRuntime.source?.let { UiTreeCodec.export(it, RuntimeConfig.uiDumpMaxNodes.toInt()) }
             ?: return CommandOutcome(command.id, OutcomeStatus.FAILED, ReasonCodes.UI_NO_WINDOW, "无障碍服务不可用或未能读取窗口")
         return CommandOutcome(command.id, OutcomeStatus.OK, "", "", JSONObject().put("xml", tree))
     }

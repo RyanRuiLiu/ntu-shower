@@ -10,7 +10,7 @@ from pathlib import Path
 
 from app.core import protocol
 from app.core.config import settings
-from app.gateway.manager import manager
+from app.core.connections import manager
 
 # 发布版本号格式：SemVer 三段数字的严格子集。
 # 该约束同时承担安全职责——版本号最终拼入文件路径，字符集必须排除
@@ -58,12 +58,9 @@ def remove_release_file(version: str) -> bool:
 def prune_releases(keep: int) -> list[str]:
     """只留最近 keep 个发布（version_code 优先），其余连注册行带文件一起删。
 
-    新版登记时调用：旧的 APK 留在盘上只有体积没有意义，但上一两个版本要留作
-    回滚点，所以 keep 是配置而不是写死的 1。
-
-    两类都要清：注册表里超出 keep 的发布（行+文件），以及**盘上没有注册行的孤儿
-    文件**——历史上删除只清了行、库重建丢了行，都会留下这种；孤儿不清，
-    "不积累垃圾"只做了一半。
+    旧的 APK 留在盘上只有体积没有意义，但上一两个版本要留作回滚点，所以 keep
+    是配置而不是写死的 1。注册行与盘上文件可能因删除或库重建而脱节，孤儿文件
+    （盘上有、注册表里没有）一并清，"不积累垃圾"才算完整。
     """
     from . import repository
 
@@ -91,7 +88,7 @@ async def notify_target_devices(version: str, version_code: int, mandatory: bool
         {
             "version": version,
             "version_code": version_code,
-            "url": f"/ota/download/{version}",
+            "url": f"/api/v1/ota/releases/{version}/download",
             "mandatory": mandatory,
         },
     )

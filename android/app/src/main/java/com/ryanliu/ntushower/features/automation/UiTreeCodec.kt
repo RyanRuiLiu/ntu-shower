@@ -2,13 +2,11 @@
 // 但在 19 上不回收会造成节点泄漏。本文件遍历节点，必须逐个回收。
 @file:Suppress("DEPRECATION")
 
-package com.ryanliu.ntushower.service
+package com.ryanliu.ntushower.features.automation
 
-import android.accessibilityservice.AccessibilityService
-import android.content.Context
 import android.graphics.Rect
-import android.view.WindowManager
 import android.view.accessibility.AccessibilityNodeInfo
+import com.ryanliu.ntushower.core.a11y.A11yNodeSource
 
 /**
  * 界面节点树导出，格式与 `uiautomator dump` 完全一致。
@@ -23,8 +21,8 @@ import android.view.accessibility.AccessibilityNodeInfo
  * - `bounds="[left,top][right,bottom]"`
  * - 属性名带连字符：`resource-id` / `content-desc` / `long-clickable`
  *
- * 自己另定一套 JSON 只在"只有我一个人读它"时成立；任何按 UiAutomator 写过的
- * 工具、文档、经验都会对不上。
+ * 自行另定一套 JSON，只有在唯一的读者是自己时才成立；任何按 UiAutomator 写过的
+ * 工具、文档与经验都会对不上。
  *
  * ## 为什么不用 `uiautomator dump`
  *
@@ -41,9 +39,6 @@ import android.view.accessibility.AccessibilityNodeInfo
  */
 object UiTreeCodec {
 
-    /** 单次导出的节点上限。取 `RuntimeConfig.uiDumpMaxNodes`（可调）。 */
-    private const val DEFAULT_MAX_NODES = 2000
-
     /** XML 转义：属性值里的这几个字符必须替换，否则产出的 XML 无法解析。 */
     private val ESCAPES = mapOf(
         "&" to "&amp;",
@@ -55,15 +50,16 @@ object UiTreeCodec {
     /**
      * 导出当前窗口，返回与 `uiautomator dump` 同格式的 XML。
      *
+     * 单次导出的节点上限由调用方传入（`RuntimeConfig.uiDumpMaxNodes`，可调）。
      * 无法读取根节点时返回 null——调用方据此报错，而不是返回空文档让远端
      * 以为"这个界面真的什么都没有"。
      */
-    fun export(service: AccessibilityService, maxNodes: Int = DEFAULT_MAX_NODES): String? {
-        val root = service.rootInActiveWindow ?: return null
+    fun export(source: A11yNodeSource, maxNodes: Int): String? {
+        val root = source.activeWindowRoot() ?: return null
         try {
             val out = StringBuilder(4096)
             out.append("<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>\n")
-            out.append("<hierarchy rotation=\"").append(rotationOf(service)).append("\">\n")
+            out.append("<hierarchy rotation=\"").append(source.screenRotation()).append("\">\n")
             var budget = maxNodes
             for (index in 0 until root.childCount) {
                 val child = root.getChild(index) ?: continue
@@ -161,19 +157,9 @@ object UiTreeCodec {
     }
 
     /**
-     * `hierarchy` 的 `rotation` 属性。
-     *
-     * 取 `Display.getRotation()`——官方 `uiautomator dump` 的语义就是它：
-     * 0/1/2/3 表示 0°/90°/180°/270° 的屏幕旋转。
-     *
-     * 不能用 `Configuration.orientation` 顶替：那个只有竖屏(1)/横屏(2) 两值，
-     * 在旋转 180° 与 270° 时都会给出同一个答案，按它换算坐标必然错位。
+     * `hierarchy` 的 `rotation` 属性由 [A11yNodeSource.screenRotation] 提供——
+     * 取 `Display.getRotation()`，官方 `uiautomator dump` 的语义就是它。
      */
-    private fun rotationOf(service: AccessibilityService): Int = try {
-        (service.getSystemService(Context.WINDOW_SERVICE) as WindowManager).defaultDisplay.rotation
-    } catch (_: Exception) {
-        0
-    }
 
     private fun escape(raw: String): String {
         if (raw.none { it.toString() in ESCAPES }) return raw

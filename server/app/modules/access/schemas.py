@@ -1,15 +1,8 @@
 """访问授权领域的 API 契约。
 
-## 一个资源，一套模型
-
-名单里的东西是**标识**（identity）——不论是微信给的 openid 还是我们签发的
-网页标识，它都是"一个带能力的调用方身份"。因此只有一个记录模型
-`IdentityRecord`，而不是按"谁在什么场景拿到它"分成四个子集模型。
-
-此前有四个响应模型（登录结果、能力列表、签发结果、名单记录）彼此是字段子集
-关系，同一个概念在四处各写一遍字段——改一处忘三处就漂移。
-
-`kind` 用 `IdentityKind` 枚举而非裸字符串，让 OpenAPI 生成联合类型。
+名单里的东西是标识（identity）：不论微信 openid 还是我方签发的网页标识，都是
+"一个带能力的调用方身份"。只有一个记录模型 IdentityRecord，登记、签发、名单、
+查询自身共用同一形状；kind 用 IdentityKind 枚举让 OpenAPI 生成联合类型。
 """
 
 from pydantic import BaseModel, Field
@@ -18,18 +11,12 @@ from typing_extensions import TypedDict
 from .identity import IdentityKind
 
 
-class WxLoginRequest(BaseModel):
-    """小程序换取标识：wx.login 拿到的 code。"""
-
-    code: str = Field(min_length=1, description="wx.login 返回的临时凭证")
-
-
 class IdentityRequest(BaseModel):
     """登记一个标识。
 
-    两种来源共用一个端点——它们创建的是同一种资源，只是 `identity` 的由来不同：
-    微信给的 openid 需要登记，网页标识则由我们签发。用 `kind` 区分，
-    避免两个几乎相同的端点和两份几乎相同的请求模型。
+    两种来源共用一个端点：kind=openid 登记小程序用户（openid 必填），kind=web
+    由服务端签发不可枚举的随机标识——也可经 identity 自创指定标识串（留空则
+    生成）。它们创建的是同一种资源。
     """
 
     kind: IdentityKind
@@ -42,16 +29,19 @@ class IdentityRequest(BaseModel):
 
     openid: str = Field(
         default="",
-        description="kind=openid 时必填：该用户的微信 openid。kind=web 时留空，由服务端签发",
+        description="kind=openid 时必填：该用户的微信 openid。kind=web 时留空",
+    )
+    identity: str | None = Field(
+        default=None,
+        min_length=8,
+        max_length=64,
+        pattern=r"^\S+$",
+        description="kind=web 时可选：自创的标识串。留空由服务端生成",
     )
 
 
 class IdentityRecord(TypedDict):
-    """一条标识记录。
-
-    同一个模型用于：小程序换取标识的响应、查询自身能力的响应、登记/
-    签发后的响应、名单列表的条目。四处的字段本就该一致。
-    """
+    """一条标识记录，登记、签发、名单、查询自身四处共用同一形状。"""
 
     identity: str
     kind: IdentityKind

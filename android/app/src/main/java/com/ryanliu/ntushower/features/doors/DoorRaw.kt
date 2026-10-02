@@ -1,9 +1,9 @@
 package com.ryanliu.ntushower.features.doors
 
+import com.ryanliu.ntushower.core.clock.Clock
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Locale
-import java.util.TimeZone
 
 /** t_doorlist 原始行：设备端零派生，字段与数据库列一一对应。 */
 data class DoorRaw(
@@ -57,14 +57,11 @@ data class DoorRaw(
         } catch (e: Exception) {
             null
         } ?: return
-        target.put(name, utcFormat.format(parsed))
+        target.put(name, Clock.formatRfc3339(parsed))
     }
 
     companion object {
         private val localFormat = SimpleDateFormat("yyyyMMddHHmmss", Locale.US)
-        private val utcFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
-        }
 
         /** sqlite3 -separator '|' 输出解析：doorNo|cardno|certno|accno|openTime|inTime|closeTime|bathTime|status */
         fun parseRows(output: String): List<DoorRaw> =

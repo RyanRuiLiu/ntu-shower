@@ -21,7 +21,7 @@ import com.ryanliu.ntushower.core.threading.MainThread
  * 自动化遮盖层：分配/结算期间盖住整屏，防止现场学生误触。
  *
  * **背景用浴室 APP 自己的「网络异常」提示图**（`fm_hint.png`），默认文案是
- * 「网络连接中，请稍后重试...」——两样都取自旧项目，不是随手挑的。现场学生看到网络
+ * 「网络连接中，请稍后重试...」——两样均沿用旧项目的线上取值。现场学生看到网络
  * 问题会安静等一会儿，看到「系统正在远程操作」则可能去拔电源或找来管理员。
  * 遮盖要挡的不只是手指，还得让这段等待显得合理。
  *
@@ -66,7 +66,7 @@ class CoverOverlay(context: Context) {
         if (showing) return
         view.removeAllViews()
         // 文案为空时不放 TextView：设备拿到下发的配置之前 RuntimeConfig 里就是空的，
-        // 那时只显示背景图，比在图上压一行空白更像话
+        // 那时只显示背景图，不在提示图上叠一行空白文字
         if (RuntimeConfig.overlayMessage.isNotEmpty()) {
             view.addView(buildMessage(RuntimeConfig.overlayMessage))
         }

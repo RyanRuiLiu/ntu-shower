@@ -60,33 +60,41 @@
 
 ## 服务端平面
 
-| 平面 | 路径 | 职责 |
+**版本化的单一资源树**：对外 HTTP 面统一挂 `/api/v1` 前缀（路径版本化，破坏性
+变更升 v2）；URL 只表达资源，不表达权限，谁能调用由能力位守卫决定。模块按
+领域划分，`/devices/*` 由 devices、sessions、bridge、config 各域按资源归属提供
+端点。
+
+| 域 | 路径 | 职责 |
 |---|---|---|
-| gateway | `/gateway/device`、`/gateway/bridge`（均 WSS） | 设备长连接；调试通道隧道 |
-| modules.doors | `/api/v1/doors`、`/ops/doors`、`/api/v1/stream`（WS） | 喷头现态与实时推送。两个查询端点**同源同形**，只是后者多一道令牌校验 |
-| modules.sessions | `/api/v1/sessions/*`、`/ops/sessions/*`、`/ops/commands` | 分配 / 结算 / 拍照；命令审计查询 |
-| modules.shadow | `/api/v1/devices/{id}/shadow`、`/ops/devices/{id}/shadow` | 设备影子（reported / desired / metadata） |
-| modules.access | `/api/v1/identity`、`/ops/identities` | 小程序用 code 换身份、查询自身能力；授权名单维护 |
-| modules.devices | `/ops/devices` | 设备档案 / 信任 / 改名 / 远程执行 / 截图 |
-| modules.config | `/ops/config`、`/ops/devices/{id}/config` | 配置登记表、全局默认与设备覆盖 |
-| modules.ota | `/ota/*`、`/ops/releases` | 版本清单 / 下载 + 发布管理 |
-| modules.bridge | `/ops/devices/{id}/bridge/*` | 调试通道经 443 透传（零新端口，docs/DECISIONS.md） |
+| gateway | `/gateway/device`（WSS）、`/gateway/bridge`（WSS） | 设备长连接；调试通道隧道。路径为设备硬编码契约，无版本前缀、冻结 |
+| devices | `GET /api/v1/devices`（精简+actions，公开）、`GET /api/v1/devices/runtime`（运维档案）、`PATCH /api/v1/devices/{id}`、远程动作 `/api/v1/devices/{id}/exec` 等 | 设备档案与远程操作 |
+| doors | `GET /api/v1/doors?device_id=`、`WS /api/v1/stream?device_id=` | 喷头现态与实时推送（door.update 数据承载，直接应用） |
+| sessions | `POST /api/v1/devices/{id}/assign`、`…/settle`、`…/photo` | 会话操作，目标设备在路径里 |
+| config | `GET/PUT /api/v1/config`、`GET /api/v1/config/spec`、`/api/v1/devices/{id}/config` | 全局配置、登记表、单台覆盖 |
+| identities | `/api/v1/identities`（名单响应含能力位枚举） | 身份域读模型与签发/编辑/撤销 |
+| ota | `/ota/manifest`（设备硬编码契约，无前缀冻结）、`/api/v1/ota/releases`（读公开、写 admin）、`/api/v1/ota/releases/{v}/download` | 版本清单 / 下载 / 发布管理 |
+| audit | `GET /api/v1/audit/calls`、`GET /api/v1/audit/commands` | 接口调用与命令级审计，以 trace_id 关联 |
 
-### 鉴权模型（core/security + modules/access）
+### 鉴权模型（modules/access）
 
-**按接口面分三档，不设角色。** 不同的人拿到的是不同的**接口请求权限**——权限本身就是
-能力位，没有"这个人是什么角色"这一层，也就不存在"按角色下发不同内容"。
+**统一身份制，全部凭 `X-Identity`。** URL 不出现权限词；能力位是唯一权限模型。
 
-| 接口面 | 能做什么 | 凭证 |
+| 端点类别 | 能做什么 | 凭证 |
 |---|---|---|
-| 查看类 | 读喷头现态、阴影、实时推送 | 无需凭据 |
-| 用户操作类 | 分配 / 结算（需 `ops`）、拍照（需 `photo`） | `X-Identity` + 能力位 |
-| 管理面 | 设备 / 配置 / OTA / 调试 / 名单 | `X-Ops-Token` |
+| 公开 | 设备与喷头查看、实时推送、发布清单与下载 | 无需凭据 |
+| 用户操作 | 分配 / 结算（`session`）、拍照（`photo`），设备须在作用域内 | `X-Identity` + 能力位 × 设备作用域 |
+| 管理 | 运维档案、远程调试、配置、名单、发布写、审计 | `X-Identity` + `admin` 能力位 |
 
-- **无注册流程**：授权经 `/ops/identities` 预置（小程序用户登记 openid，
-  网页用户签发一个标识），撤销即从名单删除。
-- 小程序身份：`wx.login` 的 code → 服务端换 openid → 直接作为标识返回，
-  不另发会话令牌（docs/DECISIONS.md）。
+- 管理台不是特权通道：管理台身份持有 `["admin","session","photo"]`，代用户
+  操作时走与用户同一路径，审计 actor 即其身份。
+- **无注册流程**：授权经 `/api/v1/identities` 预置（小程序用户登记 openid，
+  网页用户签发一个标识），撤销即从名单删除；能力位与作用域修改即时生效
+  （每请求实时查库）。
+- `/api/v1/devices` 的 `actions` 字段由服务端按调用方算出（access 唯一判定），
+  客户端不复制作用域规则。
+- 小程序身份：openid 由 status-panel 的登录端点换取（本项目**不含微信交互**），
+  小程序直连本项目、请求带 `X-Identity: <openid>`，本项目直接认该字符串为身份。
 - 浴室账号密码**不落库**：随操作请求直传设备，由浴室系统验证。
 
 ### HTTP 错误响应

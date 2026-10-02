@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>浴室终端开发者工具</title>
+<title>NTU Shower 运维控制台</title>
 <link rel="stylesheet" href="style/tokens.css">
 <link rel="stylesheet" href="style/base.css">
 <link rel="stylesheet" href="style/layout.css">
@@ -16,14 +16,14 @@
 <!--
   顶栏：导航 + 设备选择 + 连接状态 + 设备信息入口。
 
-  导航按钮与设备下拉**都由 app.js 按注册表生成**，这里只留空容器：
-  写死在 HTML 里就得两处维护，加一个视图要改两个文件，迟早对不上。
+  导航按钮与设备下拉都由 app.js 按注册表生成，这里只留空容器：
+  写死在 HTML 里就得两处维护，加一个视图要改两个文件。
 
-  设备选择放在顶栏而不是某个视图里，是因为七个视图都要认"当前设备"——
+  设备选择放在顶栏而不是某个视图里：七个视图都要认"当前设备"，
   它是全局上下文，不是某个视图的局部状态。
 
-  "设备信息"是个按钮而不是常驻显示：里面是设备 ID、IP、版本这些**排障时**才看的
-  字段，常驻会挤掉真正要一直盯着的两样东西（在线状态、令牌）。
+  "设备信息"是个按钮而不是常驻显示：里面是设备 ID、IP、版本这些排障时才看的
+  字段，常驻会挤掉真正要一直盯着的两样东西（在线状态、身份）。
 -->
 <div class="bar">
   <nav class="bar-nav" id="nav"></nav>
@@ -40,12 +40,9 @@
 
   <!--
     右半部分分两组，中间用一条竖线隔开：
-
-    - 左组是**关于被控设备**的：设备的身份、版本、地址。
-    - 右组是**关于本页与服务端之间那条链路**的：实时通道通不通、访问令牌、服务端时钟。
-
-    两组的失效含义完全不同——设备离线说明那台机器有问题，实时断开说明要么网络要么服务端
-    有问题。混在一起看，排障时第一步就得先分辨"我现在看到的是哪一类故障"。
+    左组关于被控设备（身份、版本、地址），右组关于本页与服务端之间的链路
+    （实时通道、身份标识、服务端时钟）。两组的失效含义不同：设备离线说明那台
+    机器有问题，实时断开说明网络或服务端有问题。
   -->
   <div class="bar-right">
     <div class="bar-group">
@@ -55,7 +52,7 @@
 
     <div class="bar-group">
       <span class="badge badge-red" id="streamChip">断开</span>
-      <button type="button" class="btn btn-ghost btn-sm" id="btnToken">令牌</button>
+      <button type="button" class="btn btn-ghost btn-sm" id="btnIdentity">身份标识</button>
       <span id="clock" class="bar-mono">--:--:--</span>
     </div>
   </div>
@@ -63,7 +60,6 @@
 
 <!--
   七个能力域各一个容器，切入时才由对应视图模块填充。
-
   容器 id 与视图的 id 一一对应（`view-<id>`）：加视图只需在 views/ 下加一个模块
   并在 app.js 的注册表里排个位置，本文件不用动。
 -->
