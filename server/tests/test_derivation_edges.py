@@ -590,3 +590,75 @@ def test_takeover_does_not_inherit_the_previous_open_time(fresh_db: str) -> None
     assert second["opened_at"] == "2026-09-30T12:02:00.000Z", "新人名下的开阀时刻不得早于他进门"
     assert first["assigned_source"] == service.SESSION_ASSIGNED_OBSERVED, "这一帧没带偏差，起点是观测下界"
     assert first["ended_at"] == "2026-09-30T12:02:00.000Z", "旧账在换人那一刻结清，结束时刻是准的"
+
+
+def test_start_later_than_the_frame_is_not_adopted(fresh_db: str) -> None:
+    """`open_time` 平移后晚于本帧就不采用——刷卡不可能发生在我们看见它之后。
+
+    设备钟被往回拨、而偏差还没跟上时会读到这种值。
+    """
+    device_id = "dev-assign-future"
+    device_clock.load(device_id, 3600.0)  # 设备钟慢 1 小时：平移会把读数推后
+
+    service.process_snapshot(
+        device_id,
+        _frame([_door(cert_no="C", acc_no="A", open_time="2026-09-30T11:10:00.000Z")], "2026-09-30T12:05:00.000Z"),
+    )
+
+    row = _sessions(device_id)[0]
+    assert row["assigned_at"] == "2026-09-30T12:05:00.000Z", "退回本帧，而不是算出 12:10"
+    assert row["assigned_source"] == service.SESSION_ASSIGNED_OBSERVED
+
+
+def test_start_before_the_last_sighting_is_not_adopted(fresh_db: str) -> None:
+    """起点早于**上次看见这个门**的时刻就不采用——更早的会话我们已经见过了。
+
+    上一次看见它还是空闲，刷卡只可能发生在那之后。2026-10-02 的断链场景就落在这一条上：
+    刷卡写在设备钟被改之前，重连时偏差已经换代。
+    """
+    device_id = "dev-assign-early"
+    device_clock.load(device_id, 0.0)
+
+    service.process_snapshot(device_id, _frame([_door()], "2026-09-30T12:00:00.000Z"))  # 12:00 它空着
+    service.process_snapshot(
+        device_id,
+        _frame([_door(cert_no="C", acc_no="A", open_time="2026-09-30T11:50:00.000Z")], "2026-09-30T12:10:00.000Z"),
+    )
+
+    row = _sessions(device_id)[0]
+    assert row["assigned_at"] == "2026-09-30T12:10:00.000Z", "退回本帧，而不是早于上次见它的 11:50"
+    assert row["assigned_source"] == service.SESSION_ASSIGNED_OBSERVED
+
+
+def test_start_far_from_in_time_is_not_adopted(fresh_db: str) -> None:
+    """与同帧 `in_time` 的平移值相差超过一次占用的上限，就不采用 `open_time`。
+
+    两个读数出自同一口钟，而一次占用压在 20 分钟内（设备满 `maxbatchtime` 强制释放）。
+    差得更多只有一个解释：其中一个是用**另一口钟**写的——设备钟被改过而我们没跟上。
+
+    这是"拨钟时我们离线"**唯一**能识破的一条：那时没有上一帧可参照（判据 2 无从谈起）。
+    下例还原 2026-10-02 实测的那一次：断链期间刷卡（旧钟，12:01）→ 拨快一小时 →
+    重连后开阀（新钟，13:05）。`open_time` 平移出来是 11:01，比开阀早了 64 分钟。
+    """
+    device_id = "dev-assign-skew"
+    device_clock.load(device_id, -3600.0)  # 拨钟后：设备钟快 1 小时
+
+    service.process_snapshot(
+        device_id,
+        _frame(
+            [
+                _door(
+                    cert_no="C",
+                    acc_no="A",
+                    open_time="2026-09-30T12:01:00.000Z",  # 旧钟写的
+                    in_time="2026-09-30T13:05:00.000Z",  # 新钟写的
+                )
+            ],
+            "2026-09-30T12:05:00.000Z",
+        ),
+    )
+
+    row = _sessions(device_id)[0]
+    assert row["assigned_at"] == "2026-09-30T12:05:00.000Z", "退回本帧，而不是算出 11:01"
+    assert row["assigned_source"] == service.SESSION_ASSIGNED_OBSERVED
+    assert row["opened_at"] == "2026-09-30T12:05:00.000Z", "in_time 是新钟写的，平移回来是对的"
