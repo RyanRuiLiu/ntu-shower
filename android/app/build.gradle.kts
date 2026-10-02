@@ -38,8 +38,8 @@ android {
         applicationId = "com.ryanliu.ntushower"
         minSdk = 19          // 设备 ROM 固定 Android 4.4，运行时下限不可动
         targetSdk = 19       // 目标设备冻结在 4.4，无升级路径
-        versionCode = 58
-        versionName = "0.4.14"
+        versionCode = 59
+        versionName = "0.4.15"
         buildConfigField("String", "SERVER_DOMAIN", "\"${providers.gradleProperty("serverDomain").get()}\"")
         buildConfigField("String", "APP_VERSION", "\"$versionName\"")
         buildConfigField("int", "VERSION_CODE", "$versionCode")
@@ -146,9 +146,13 @@ val frameworkBoundClasses = listOf(
     // 只会为了被测而存在。
     "**/core/storage/**",
     "**/core/config/ConfigCache*",
-    // 自管理：依赖 root shell 与包管理器（A11ySettingsMerge / A11yState 是纯逻辑，已纳入覆盖）
+    // 自管理：依赖 root shell 与包管理器（A11ySettingsMerge / A11yState / TimeSync 的
+    // shellDatetime 与阈值判定是纯逻辑，已纳入覆盖）
     "**/features/selfmanage/A11yGuard*",
     "**/features/selfmanage/OtaUpdater*",
+    "**/features/selfmanage/TimeSync*",
+    // 浴室 App 进程级重启：依赖真实 root shell（拉起与否的决策由 BathAppGuardTest 覆盖）
+    "**/features/automation/BathAppRestart*",
     // 纯数据载体：仅编译器生成的 equals/hashCode/toString/copy/values/组件 N，
     // 无手写逻辑（JaCoCo 官方建议排除生成代码）。业务逻辑仍在其中方法之外。
     "**/features/automation/PageState*",

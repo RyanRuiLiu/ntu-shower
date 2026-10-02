@@ -24,6 +24,8 @@ class SupportedActionsTest {
             "device.exec",
             "device.restart",
             "device.uninstall",
+            "bath.restart",
+            "clock.set",
             "bridge.open",
             "bridge.close",
             "ui.dump",

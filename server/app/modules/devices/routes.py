@@ -34,6 +34,7 @@ from app.modules.sessions.schemas import CommandOutcome
 from . import service
 from .dependencies import require_trusted_online_device
 from .schemas import (
+    DeviceClockSetRequest,
     DeviceExecRequest,
     DevicePatchRequest,
     DeviceRecord,
@@ -144,6 +145,18 @@ async def restart_agent(device_id: str) -> CommandOutcome:
 async def uninstall_agent(device_id: str) -> CommandOutcome:
     """卸载设备上的 agent（退役或排障用）。"""
     return await _device_action(device_id, actions.DEVICE_UNINSTALL, {}, DEVICE_ACTION_TIMEOUT_S)
+
+
+@admin_router.post("/{device_id}/clock/set")
+async def set_clock(device_id: str, req: DeviceClockSetRequest) -> CommandOutcome:
+    """设置设备系统时钟（datetime 为设备本地墙钟时间）。浴室 App 的每日开关机计划依赖它。"""
+    return await _device_action(device_id, actions.CLOCK_SET, {"datetime": req.datetime}, DEVICE_ACTION_TIMEOUT_S)
+
+
+@admin_router.post("/{device_id}/bath/restart")
+async def restart_bath_app(device_id: str) -> CommandOutcome:
+    """重启浴室 App：先强停再冷启动，让它重读每日定时开关机计划。"""
+    return await _device_action(device_id, actions.BATH_RESTART, {}, DEVICE_ACTION_TIMEOUT_S)
 
 
 # ── 设备界面 ──
