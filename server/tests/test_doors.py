@@ -123,16 +123,16 @@ def test_snapshot_updates_live_state_and_records_events(fresh_db: str) -> None:
     assert session["ended_at"] is not None
     assert session["opened_at"] is not None
     assert session["flow_s"] == 60  # t1 到 t2 那一段：上一帧还在出水，计入
-    assert session["assigned_at"] == t0  # 会话起点取帧时刻，不取设备的 openTime
-    assert session["opened_at"] == t1  # 首次观测到出水的那一帧
+    assert session["assigned_at"] == t0  # 这台设备没回过 pong、无偏差可平移，起点落在本帧
+    assert session["opened_at"] == t1  # 同理，开阀时刻退回首次观测到出水的那一帧
 
 
 def test_snapshot_keeps_device_time_fields_untouched(fresh_db: str) -> None:
     """设备时间字段逐字透出，不做任何校正。
 
-    那三个字段只表达"设备当时说是什么"，保留原样才能溯源。本系统的一切时刻都取自
-    服务端时间轴（帧的采集时刻），设备墙钟偏差多少都不进入统计——所以这里既不校正
-    也不参与任何判据。
+    那三个字段保留原样才能溯源——它们的**值**在推导时经钟偏差平移到服务端时间轴
+    （见 core/device_clock 与 service 的 _opened_at），但落库的原始帧永远保持设备
+    当时的原话。
     """
     device_id = "dev-rawtime-01"
     opened = "2026-09-30T12:00:00.000Z"
@@ -189,7 +189,8 @@ def test_last_used_ignores_sessions_that_never_opened(fresh_db: str) -> None:
 
 
 def test_last_used_keeps_zero_length_bath(fresh_db: str) -> None:
-    """开了阀立刻关（出水时长为 0）也要算一次使用：判据是 opened_at，不是时长。"""
+    """开了阀立刻关（出水时长为 0）也要算一次使用：「上次使用」的判据是开阀时刻落过值，
+    不是时长。统计层的"算不算用过"另有判据（`flow_s > 0`），两者不要混。"""
     device_id = "dev-last-used-2"
     t0 = "2026-09-30T12:00:00.000Z"
     service.process_snapshot(
@@ -199,7 +200,7 @@ def test_last_used_keeps_zero_length_bath(fresh_db: str) -> None:
 
     row = repository.latest_usage_by_door()[(device_id, 1)]
     assert row["cert_no"] == "B"
-    assert row["opened_at"] == t0  # 帧时刻，不是设备报的 inTime
+    assert row["opened_at"] == t0  # 无偏差可平移，开阀时刻退回本帧
     assert row["flow_s"] == 0  # 不足一秒，没有可计入的出水
 
 
@@ -243,7 +244,7 @@ def test_doors_api_exposes_last_used(fresh_db: str) -> None:
     service.process_snapshot(device_id, _snapshot([_door(1), _door(2)], t1))  # 两门先后释放
 
     doors = {d["door_no"]: d for d in repository.list_doors(device_id)}
-    # last_used_at 是"首次观测到出水那一帧"的帧时刻，不是设备报的 inTime
+    # last_used_at 是开阀时刻，无偏差可平移时退回首次观测到出水的那一帧
     assert doors[1]["last_used_at"] == t0
     assert doors[1]["last_used_cert"] == "C"
     assert doors[1]["last_used_s"] == 60  # t0 到 t1：上一帧还在出水，计入

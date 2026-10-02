@@ -266,7 +266,7 @@ curl -X POST https://ntu-shower.iseekdream.com/api/v1/ota/releases \
 | 服务状态 | `systemctl status ntu-shower` |
 | 实时日志 | `journalctl -u ntu-shower -f` |
 | 备份列表 | `ls -lh /opt/ntu-shower-backup/` |
-| 抓设备画面 | `POST /devices/<id>/capture`（返回 `data.image_base64`） |
-| 远程执行 shell | `POST /devices/<id>/exec`，body `{"command": "..."}` |
-| 重启设备端程序 | `POST /devices/<id>/restart` |
-| 卸载设备端程序 | `POST /devices/<id>/uninstall` |
+| 抓设备画面 | `POST /api/v1/devices/<id>/capture`（返回 `data.image_base64`） |
+| 远程执行 shell | `POST /api/v1/devices/<id>/exec`，body `{"command": "..."}` |
+| 重启设备端程序 | `POST /api/v1/devices/<id>/restart` |
+| 卸载设备端程序 | `POST /api/v1/devices/<id>/uninstall` |

@@ -121,7 +121,9 @@ def init_tables() -> None:
             -- 统计时必须分得清：`inferred` 的跨度（ended_at − assigned_at）可以用，
             -- `observed` 的不能，它天然偏小。
             assigned_source TEXT NOT NULL DEFAULT 'observed',
-            -- 首次观测到出水那一帧；没出过水则为空。
+            -- 开阀时刻。三条来源按可信度取（见 service 的 _opened_at）：正在出水时是本段的
+            -- 观测起点，它优先由设备报的 in_time 平移而来；已经暂停时由"关阀时刻减累计出水
+            -- 秒数"推回。两者都不成立则留空——没出过水的会话就是空的。
             opened_at    TEXT,
             -- 离开占用态那一帧。**跨盲区时它不是真实结束时刻**，只是"下次见到它的时刻"。
             ended_at     TEXT,
