@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.ryanliu.ntushower.BuildConfig
 import com.ryanliu.ntushower.core.a11y.A11yRuntime
+import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.identity.DeviceIdentity
 import com.ryanliu.ntushower.core.log.DeviceLog
@@ -19,10 +20,10 @@ import java.security.MessageDigest
 
 /**
  * OTA 自更新：
- * 1. 轮询 /ota/manifest 对比 version_code；
- * 2. 下载新 APK 到 /sdcard/ntu-shower/ 并做 sha256 校验；
- * 3. root `pm install -r` 静默安装（pm 原子性保证失败不覆盖旧版）；
- * 4. 安装提交后 MY_PACKAGE_REPLACED 自动重启服务（真机验证过的路径）。
+ * 1. 轮询 /ota/manifest 对比 version_code（同一版本失败退避，不压秒级循环）；
+ * 2. 下载新 APK 到 /sdcard/ntu-shower/ 并做 sha256 与长度校验；
+ * 3. 先停进程再 root `pm install -r` 静默安装（进程存活时替换会被 ROM 静默丢弃）；
+ * 4. 带重试的自验证 + 拉起服务；无障碍重绑由 A11yGuard 看门狗负责。
  */
 class OtaUpdater(
     context: Context,
@@ -35,10 +36,16 @@ class OtaUpdater(
     /** OTA 的步骤落设备统一日志（device.log）：安装是脱手的，事后只有这里能查。 */
     private val deviceLog = DeviceLog(File(AppConfig.WORK_DIR))
 
+    /** 上一次尝试安装的版本号与时刻：同一版本退避期内不再重复下载安装。 */
+    private var lastAttempt: Pair<Int, Long>? = null
+
     /**
      * 轮询/推送共用的检查入口。
      * force 发布无视版本号（调试期反复推送同一版本）；
-     * 自动化执行期间不启动，避免打断分配/结算（推送方会重试或下轮轮询覆盖）。
+     * 自动化执行期间不启动，避免打断分配/结算（推送方会重试或下轮轮询覆盖）；
+     * 同一版本刚尝试过安装则按 [RETRY_BACKOFF_MS] 退避——安装是尽力而为的脱手
+     * 操作，失败无从确认（脚本不回传），靠"隔一段时间再试"收敛，避免把下载、
+     * 安装、重启的循环压到秒级。
      */
     fun checkAndInstall(): Boolean {
         if (A11yRuntime.automationInProgress) {
@@ -48,9 +55,17 @@ class OtaUpdater(
         return try {
             val manifest = fetchManifest() ?: return false
             if (manifest.optBoolean("up_to_date", true)) return false
+            val code = manifest.optInt("version_code", 0)
             val force = manifest.optBoolean("force", false)
-            val newer = manifest.optInt("version_code", 0) > BuildConfig.VERSION_CODE
+            val newer = code > BuildConfig.VERSION_CODE
             if (!force && !newer) return false
+            lastAttempt?.let { (attemptedCode, at) ->
+                if (code == attemptedCode && Uptime.nowMs() - at < RETRY_BACKOFF_MS) {
+                    Log.i(TAG, "same version attempted recently, backing off")
+                    return false
+                }
+            }
+            lastAttempt = code to Uptime.nowMs()
             applyUpdate(manifest)
             true
         } catch (e: Exception) {
@@ -104,18 +119,23 @@ class OtaUpdater(
     }
 
     /**
-     * 脱手安装：安装 → 自验证 → 未生效则强制重启进程。
+     * 脱手安装：先停进程 → 安装 → 带重试的自验证 → 拉起服务。
      *
      * 不能用常驻通道，也不能用一次性进程：`pm install -r` 会为了替换 APK 而杀掉本
      * 进程，而那条进程是本进程的子进程，会跟着一起死——脚本跑到一半就断，结果也
      * 永远读不回来。独立进程会成为孤儿被 init 收养，把脚本跑完。
      *
-     * **自验证是必须的**（真机 2026-10-01 实测）：4.4 的 `pm install -r` 会在设备
-     * 处于进程被杀/存储抖动窗口时**返回 Success 但替换未生效**——旧版本继续跑，
-     * 而 `pm` 的退出码与日志都是"成功"，无从分辨。这台设备物理不可达，"装了但没
-     * 生效"等于升级失败且无法挽回，因此脚本自己在安装后读包版本核对，不一致就
-     * `am force-stop`（root 下的标准强制收尾）并重新拉起服务。步骤全部落日志，
-     * 每一步成败事后可查。
+     * **安装前必须先 `am force-stop`**（真机 2026-10-02 实测）：本 ROM 在应用进程
+     * 存活时替换 APK，`pm install` 返回 Success 但替换未生效——旧版本继续跑，
+     * `pm` 的退出码与日志都是"成功"，无从分辨。先把进程停下来再装，替换就不再有
+     * 这条歧义路径。
+     *
+     * **自验证带重试**：安装刚提交时 `dumpsys package` 可能瞬时读不到 versionName
+     * （读取为空会被误判成"未生效"），隔 2 秒重读，最多三轮。
+     *
+     * 验证失败时不再盲目强停重启：进程已被停掉，重启解决不了未生效的安装；如实记
+     * `OTA_NOT_APPLIED`，由调用侧的退避与本轮轮询自然收敛。拉起服务之后无障碍的
+     * 重绑由 A11yGuard 看门狗负责（安装与强停都会解除绑定，此处不重复处理）。
      *
      * 末尾把 APK 删掉：它是下载产物，装完就没有用了。失败也没关系，重试本来就要重下。
      */
@@ -127,21 +147,20 @@ class OtaUpdater(
         deviceLog.lifecycle("ota.install-started", "version=$expectedVersionName")
         RootShell.execDetached(
             "echo OTA_START > $log; " +
-                // 安装；Success 只代表 installd 收下了请求，不代表生效
+                // 先停进程再装：进程存活时的替换在本 ROM 上会被静默丢弃
+                "am force-stop $pkg >> $log 2>&1; " +
+                "sleep 1; " +
                 "pm install -r ${apk.absolutePath} >> $log 2>&1; " +
-                // 自验证：安装后实际读包版本（dumpsys 的 versionName 行）
-                "installed=\$(dumpsys package $pkg 2>/dev/null | grep -m1 versionName | tr -d ' \r' ); " +
-                "echo \"installed: \$installed\" >> $log; " +
-                "case \"\$installed\" in *$expectedVersionName) " +
-                "    echo OTA_VERIFIED >> $log;; " +
-                "    *) " +
-                // 未生效：强制收尾旧进程并拉起新版（am start 服务是 root 侧的标准拉起手段）
-                "    echo OTA_RESTART >> $log; " +
-                "    am force-stop $pkg >> $log 2>&1; " +
+                // 自验证带重试：安装提交后系统状态落定需要一点时间
+                "verified=0; " +
+                "for i in 1 2 3; do " +
                 "    sleep 2; " +
-                "    am startservice -n $pkg/com.ryanliu.ntushower.service.AgentService >> $log 2>&1; " +
-                "    echo OTA_RESTART_DONE >> $log;; " +
-                "esac; " +
+                "    installed=\$(dumpsys package $pkg 2>/dev/null | grep -m1 versionName | tr -d ' \r' ); " +
+                "    echo \"try\$i installed: \$installed\" >> $log; " +
+                "    case \"\$installed\" in *$expectedVersionName) verified=1; break;; esac; " +
+                "done; " +
+                "if [ \$verified = 1 ]; then echo OTA_VERIFIED >> $log; else echo OTA_NOT_APPLIED >> $log; fi; " +
+                "am startservice -n $pkg/com.ryanliu.ntushower.service.AgentService >> $log 2>&1; " +
                 "echo OTA_END >> $log; rm -f ${apk.absolutePath}",
         )
     }
@@ -215,5 +234,8 @@ class OtaUpdater(
 
         /** 安装日志文件名（位于 `AppConfig.WORK_DIR`）。安装是脱手执行的，成败只在这里留痕。 */
         private const val INSTALL_LOG_NAME = "ota-install.log"
+
+        /** 同一版本安装尝试的退避窗口：窗口内不重复下载与安装。 */
+        private const val RETRY_BACKOFF_MS = 5 * 60_000L
     }
 }
