@@ -1,4 +1,4 @@
-package com.ryanliu.ntushower.service
+package com.ryanliu.ntushower.features.automation
 
 /**
  * 系统按键：远程界面操作里的导航键与方向键。

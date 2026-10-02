@@ -1,9 +1,7 @@
 """自动结算：占用超过阈值（且该学号在结算名单内）时自动下发结算。
 
-对齐旧项目语义（AUTO_SETTLE_THRESHOLD + AUTO_SETTLE_STUDENTS）：
-- 名单外学员不自动结算（避免误操作他人）；
-- 结算凭证使用名单中记录的密码（旧项目以 env sid:pwd 提供，
-  本系统由管理面远程配置 auto_settle_students 提供，键为 cert_no）；
+- 名单外学员不自动结算；
+- 结算凭证使用名单中记录的密码（管理面远程配置 auto_settle_students，键为 cert_no）；
 - 单次扫描至多下发一条结算（设备单在途命令约束下的保守节奏）。
 """
 
@@ -12,9 +10,9 @@ from datetime import datetime, timezone
 
 from app.core import actions, outcomes
 from app.core.clock import parse_rfc3339
+from app.core.connections import manager
 from app.core.logging import log_event
 from app.core.protocol import JsonObject, as_int
-from app.gateway.manager import manager
 from app.modules.config import store as config_store
 from app.modules.doors import repository as doors_repository
 from app.modules.sessions import service as sessions_service
@@ -26,8 +24,7 @@ SCAN_INTERVAL_S = 30
 def _duration_s(assigned_at: str) -> int:
     """会话从分配到现在的秒数；时间不可解析时返回 0（不参与自动结算）。
 
-    以**分配时刻**起算而不是开阀时刻：占用是从刷卡入门那刻开始的，旧系统释放喷头的
-    第一个条件（`maxinspacetime`，入门后 5 分钟未开水）也是从这一刻算。
+    以分配时刻起算而不是开阀时刻：占用是从刷卡入门那刻开始的。
     """
     moment = parse_rfc3339(assigned_at)
     if moment is None:
@@ -38,8 +35,7 @@ def _duration_s(assigned_at: str) -> int:
 def pick_auto_settle_candidate(config: JsonObject) -> tuple[str, str, str, int] | None:
     """选出 (device_id, cert_no, password, duration_s) 超时结算候选；无则 None。
 
-    纯函数，便于单元测试。密码随候选一并取出：调用方无需再解析一次配置，
-    也就不会因为重复解析而引入不可达的防御分支。
+    纯函数，便于单元测试。密码随候选一并取出：调用方无需再解析一次配置。
 
     `config` 取自 `config_store.effective()`，它保证含登记表里的每一个键，
     因此这里直接取值——缺键即 KeyError，绝不静默换一个默认阈值结算错人。

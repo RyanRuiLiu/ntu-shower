@@ -1,8 +1,8 @@
 """远程配置领域的 API 契约。
 
-`config` 字段一律是**合并后的有效配置**（默认值叠加各级覆盖），不是库里存的
-差异项——调用方关心"这台设备现在实际用什么值"，差异项是存储细节，仅在有区分
-必要时单独给出（`DeviceConfigView.overrides`）。
+`config` 字段一律是合并后的有效配置（默认值叠加各级覆盖），不是库里存的差异项：
+调用方关心"这台设备现在实际用什么值"，差异项是存储细节，仅在有区分必要时单独
+给出（`DeviceConfigView.overrides`）。
 """
 
 from typing_extensions import TypedDict

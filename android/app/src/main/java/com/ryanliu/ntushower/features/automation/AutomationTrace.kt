@@ -1,6 +1,7 @@
 package com.ryanliu.ntushower.features.automation
 
 import android.util.Log
+import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.logfile.CappedLogFile
@@ -15,20 +16,18 @@ import java.io.File
  * 输出到 `/sdcard/ntu-shower/automation.log`，用 `device.exec` 直接 `cat` 取回。现场没有
  * logcat，这是把设备上的时序带回开发机的唯一通道（崩溃日志走的是同一条路）。
  *
- * 时间基准用单调时钟（`System.nanoTime`）而不是墙上时钟：设备没有 NTP，系统时间会被
- * 运维改动、掉电重启后也会跳变，用墙上时钟算分段会算出负数。
+ * 时间基准用单调时钟（[Uptime]，开机以来的毫秒数）：设备没有 NTP，墙上时钟会被运维
+ * 改动、掉电重启后跳变，用它算分段会算出负数。落盘的绝对时刻与 device.log 的
+ * `uptime_ms` 同源，两份日志能按时间对上；协议时间的分工见 core/clock。
  *
- * 由 `automation_trace_enabled` 开关控制，默认关——它每次 append 都要开一次文件，长期
- * 开着是白花的开销，而它的用途本来就是"要量的时候量一轮"。
+ * 由 `automation_trace_enabled` 开关控制，默认关——每次记录都要开一次文件，持续开启
+ * 是无谓的开销，而它的用途本就是"要量的时候量一轮"。
  */
 object AutomationTrace {
 
     private const val TAG = "AutomationTrace"
 
     private const val FILE_NAME = "automation.log"
-
-    /** 超过这个大小就重写：记录的价值在最近几轮，不设上限会在反复运行中撑爆存储。 */
-    private const val MAX_BYTES = 256 * 1024L
 
     /**
      * 页面重算统计的落盘间隔（次）。
@@ -55,19 +54,19 @@ object AutomationTrace {
     /** 一轮流程的分段记录器。 */
     class Trace(private val label: String) {
 
-        private val startedAt = System.nanoTime() / 1_000_000
+        private val startedAt = Uptime.nowMs()
         private var lastAt = startedAt
 
         /** 记一个分段：输出距上一段的耗时与累计耗时。 */
         fun mark(step: String) {
-            val now = System.nanoTime() / 1_000_000
+            val now = Uptime.nowMs()
             append("$label $step +${now - lastAt}ms (累计 ${now - startedAt}ms)")
             lastAt = now
         }
 
         /** 收尾：输出总耗时。之后不应再调用 [mark]。 */
         fun end(outcome: String) {
-            val now = System.nanoTime() / 1_000_000
+            val now = Uptime.nowMs()
             append("$label end=$outcome total=${now - startedAt}ms")
         }
     }
@@ -83,7 +82,7 @@ object AutomationTrace {
      */
     fun recordRefresh(costMs: Long, state: String, changed: Boolean) {
         if (!RuntimeConfig.automationTraceEnabled) return
-        val line = refreshWindow.add(costMs, state, changed, System.nanoTime() / 1_000_000) ?: return
+        val line = refreshWindow.add(costMs, state, changed, Uptime.nowMs()) ?: return
         append(line)
     }
 
@@ -105,7 +104,7 @@ object AutomationTrace {
     private fun append(text: String) {
         Log.d(TAG, text)
         val dir = File(AppConfig.WORK_DIR).apply { mkdirs() }
-        CappedLogFile.append(File(dir, FILE_NAME), "[${System.nanoTime() / 1_000_000}] $text\n", MAX_BYTES)
+        CappedLogFile.append(File(dir, FILE_NAME), "[${Uptime.nowMs()}] $text\n", CappedLogFile.DEFAULT_MAX_BYTES)
     }
 }
 

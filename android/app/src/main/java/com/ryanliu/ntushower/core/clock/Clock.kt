@@ -25,5 +25,11 @@ object Clock {
             }
     }
 
-    fun nowRfc3339(): String = formatter.get()!!.format(Date())
+    fun nowRfc3339(): String = formatRfc3339(Date())
+
+    /**
+     * 把给定的时刻格式化为协议时间。格式串因此只在本文件出现一份：浴室 App 的本地
+     * 时间转协议时间（features.doors 的 DoorRaw）用的就是这里。解析依然不设，理由见类注释。
+     */
+    fun formatRfc3339(date: Date): String = formatter.get()!!.format(date)
 }

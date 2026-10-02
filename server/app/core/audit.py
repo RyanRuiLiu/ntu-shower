@@ -1,30 +1,13 @@
 """接口调用审计：谁、何时、对什么、结果如何，一行一个调用。
 
-标准依据见 docs/DECISIONS.md「可观测性」一节（OWASP Logging Cheat Sheet 的
-事件清单、NIST SP 800-92 的生成/保护/保留框架、W3C Trace Context 的关联标识）。
+按 OWASP Logging Cheat Sheet 的事件清单与 NIST SP 800-92 的保留框架设计，
+标准依据见 docs/DECISIONS.md「可观测性」。覆盖 /api、/ops、/ota 的全部请求
+（认证、授权、参数与服务端错误天然落表）与设备网关生命周期；静态资源与
+/healthz 不审计。
 
-## 记什么
-
-- 全部 API 请求（/api、/ops、/ota）：认证失败（401）、授权失败（403）、参数不合法
-  （422）、服务端错误（5xx）天然落在同一张表——OWASP 要求必记的事件类
-- 设备网关生命周期（连接/断开）：设备何时在线是回溯一条命令的上下文
-
-## 不记什么（OWASP：禁止记录密钥与敏感个人信息）
-
-- 请求体与响应体：学号密码、业务参数、令牌一律不落库；path + status 已能回答
-  "谁在什么时候对哪台设备做了什么、成没成"
-- 静态资源与 /healthz：无安全语义的噪音
-
-## 关联
-
-- `request_id`：本请求的关联键，随 `X-Request-ID` 响应头返回
-- `trace_id`：W3C Trace Context 的 trace-id——调用方带 `traceparent` 就沿用，
-  否则生成；HTTP 审计与 `command_audit`（命令审计）借此互通
-- `actor`：ops 令牌只记指纹，绝不记令牌本身；身份标识脱敏后记录
-
-## 保留（NIST SP 800-92：按运维需要定保留期并执行）
-
-`audit_retention_days`（默认 90 天），过期行由每日清理任务删除。
+JSON 请求体与响应体原文入库，全有或全无、不截断、不脱敏；数据重型且可重取的
+截图、拍照、UI 节点树与 multipart 上传体除外。审计行按 audit_retention_days
+保留，过期行由清理任务删除；业务数据永久保留。
 """
 
 import asyncio
@@ -56,8 +39,12 @@ def exc_info_text() -> str:
     return traceback.format_exc(limit=8).replace("\n", " | ")
 
 
-#: 需要审计的路径前缀。静态资源与 /healthz 不审计：无安全语义的噪音。
-_AUDITED_PREFIXES = ("/api", "/ops", "/ota")
+#: 需要审计的路径前缀 = 版本化对外面的全部域（/api/v1，见 main.py 的模块注释）。
+#: /ota/manifest 是设备硬编码契约，无版本前缀（见 ota/routes.py），但它是设备
+#: 最频繁的一手活动痕迹，单独列入。静态资源与 /healthz 不审计：无安全语义的
+#: 噪音。新增域必须同步此表，否则该域的调用（含 401/403）不留痕——test_audit.py
+#: 有跨域覆盖钉住它。
+_AUDITED_PREFIXES = ("/api/v1", "/ota/manifest")
 
 _TRACEPARENT = re.compile(r"^[0-9a-f]{2}-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$", re.IGNORECASE)
 
@@ -111,33 +98,27 @@ def resolve_trace_id(traceparent: str | None) -> str:
 
 
 def _actor_of(request: Request) -> tuple[str, str]:
-    """从请求头判定调用方。**如实记录原文，不脱敏**（2026-10-01 用户决定：
-    单运维者工具，审计的价值就在于如实——谁、用什么令牌、从哪里来）。"""
-    token = request.headers.get("X-Ops-Token")
-    if token:
-        return "ops", token
+    """从请求头判定调用方，如实记录原文、不脱敏。"""
     identity = request.headers.get("X-Identity")
     if identity:
         return "identity", identity
     return "anonymous", ""
 
 
-#: 响应体入库的体积上限。**全有或全无，绝不截断**——截断了后续就查不回真实内容。
-#: 超限的（目前只有截图/拍照的 base64，1MB 级）记录占位说明；媒体本身可重取，
-#: 与"不落媒体"的既有取舍一致。普通 JSON 响应（列表、命令结果）都在 KB 量级，
-#: 全文入库。
+#: 请求体与响应体入库的体积上限。全有或全无，绝不截断：截断了后续就查不回真实
+#: 内容，超限的记录占位说明（媒体类响应可重取，与不落媒体的取舍一致）。普通
+#: JSON 请求与响应都在 KB 量级，全文入库。
 BODY_MAX_BYTES = 256 * 1024
 
-#: 响应体不落库的路径：**数据重型且可重取**的三个端点——屏幕截图 / 摄像头拍照 /
-# UI 节点树（XML 随界面变化时效即逝）。与媒体同一处理（2026-10-01 用户决定）。
+#: 响应体不落库的路径：数据重型且可重取的截图、拍照、UI 节点树三个端点。
 _DATA_HEAVY_PATH = re.compile(r"/(capture|dump|photo)$")
 
 
 def store_body(body: str) -> str:
-    """全有或全无：体积在限内原文入库，超限记占位说明（绝不截断）。"""
+    """体积在限内原文返回，超限返回占位说明，绝不截断。"""
     if len(body.encode()) <= BODY_MAX_BYTES:
         return body
-    return f"[响应体 {len(body.encode())} 字节，超出 {BODY_MAX_BYTES} 字节上限未存储——媒体类可重取]"
+    return f"[JSON 体 {len(body.encode())} 字节，超出 {BODY_MAX_BYTES} 字节上限未存储]"
 
 
 def record(
@@ -159,13 +140,11 @@ def record(
 ) -> None:
     """写一行 HTTP 审计（kind='http'）。关联字段取自中间件置位的 contextvar。
 
-    与命令审计的关联靠 trace_id：本行与 command_audit 各带一份，查两边即得全链路。
-    `query` 是请求的查询串；`request_body`/`response_body` 是 JSON 请求与响应体
-    （全有或全无，不截断）；`detail` 是失败响应的中文说明（RFC 9457 的 detail）。
-    调用方与参数**如实记录不脱敏**（2026-10-01 用户决定：单运维者工具，审计的
-    价值就在于如实）。
+    与命令审计以 trace_id 关联：本行与 command_audit 各带一份，查两边即得全链路。
+    `query` 是请求的查询串；`request_body` 与 `response_body` 是 JSON 体原文；
+    `detail` 是失败响应的中文说明（RFC 9457 的 detail）。
     """
-    db.get_conn().execute(
+    db.write(
         "INSERT INTO api_call (kind, requested_at, request_id, trace_id, actor_kind, actor,"
         " client_ip, user_agent, method, path, query, request_body, status_code, duration_ms,"
         " device_id, problem_type, detail, response_body)"
@@ -191,13 +170,12 @@ def record(
             store_body(response_body) or None,
         ),
     )
-    db.get_conn().commit()
 
 
 def record_gateway(device_id: str, event: str, client_ip: str = "") -> None:
     """网关生命周期一行（connect/disconnect）。kind='gateway'，status 约定 0=连接 1=断开。"""
     status_code = 0 if event == "connect" else 1
-    db.get_conn().execute(
+    db.write(
         "INSERT INTO api_call (kind, requested_at, request_id, trace_id, actor_kind, actor,"
         " client_ip, user_agent, method, path, query, request_body, status_code, duration_ms,"
         " device_id, problem_type, detail)"
@@ -222,7 +200,6 @@ def record_gateway(device_id: str, event: str, client_ip: str = "") -> None:
             None,
         ),
     )
-    db.get_conn().commit()
 
 
 def list_calls(
@@ -257,19 +234,18 @@ def list_calls(
 
 
 def prune(retention_days: int) -> int:
-    """删除超过保留期的**审计**行（api_call 与 command_audit），返回删除行数。
+    """删除超过保留期的审计行（api_call 与 command_audit），返回删除行数。
 
-    只动审计表：业务数据（喷头状态迁移、使用会话）是运营历史，**永久保留**。
-    库文件不复缩，页复用即可。
+    只动审计表：业务数据（喷头状态迁移、使用会话）是运营历史，永久保留；
+    库文件不复缩，页复用即可。两张表的 DELETE 共用一个事务（不走 db.write 的
+    单语句事务）：要么都清、要么都不清，两边保留期才不会错开。
     """
+    conn = db.get_conn()
     removed = 0
     for table, column in (("api_call", "requested_at"), ("command_audit", "created_at")):
-        cursor = db.get_conn().execute(
-            f"DELETE FROM {table} WHERE {column} < datetime('now', ?)",
-            (f"-{retention_days} days",),
-        )
+        cursor = conn.execute(f"DELETE FROM {table} WHERE {column} < datetime('now', ?)", (f"-{retention_days} days",))
         removed += cursor.rowcount
-    db.get_conn().commit()
+    conn.commit()
     return removed
 
 
@@ -310,13 +286,12 @@ def stop_prune() -> None:
         _prune_task = None
 
 
-def _device_of(path: str, query: str = "", request_body: str = "") -> str:
-    """本次调用作用于哪台设备就记哪台。解析优先级（三种落点各司其职）：
+def _device_of(path: str, query: str) -> str:
+    """本次调用作用于哪台设备就记哪台。解析优先级：
 
-    ① 路径段 `/ops/devices/{id}/...`（设备动作）；
-    ② query 的 `device_id`（列表类接口，如 `/ops/doors?device_id=`）；
-    ③ JSON 体的 `device_id`（动作类接口，如 `/ops/sessions/assign`）。
-    都没有就为空——调用不针对任何设备（如设备清单本身）。
+    ① 路径段 `/devices/{id}/...`（设备动作与档案）；
+    ② query 的 `device_id`（如 /doors?device_id=）。
+    都没有就为空——调用不针对任何设备（如配置、名单本身）。
     """
     parts = path.split("/")
     if "devices" in parts:
@@ -327,19 +302,14 @@ def _device_of(path: str, query: str = "", request_body: str = "") -> str:
         value = parse_qs(query).get("device_id", [""])[0]
         if value:
             return value
-    if request_body:
-        with contextlib.suppress(Exception):
-            value = json.loads(request_body).get("device_id")
-            if value:
-                return str(value)
     return ""
 
 
 def install_audit(app: FastAPI) -> None:
-    """装配审计中间件：一行一个 API 调用 + X-Request-ID 响应头。
+    """装配审计中间件：一行一个 API 调用，并回填 X-Request-ID 响应头。
 
-    写库经线程池走"每线程连接"（见 core.db），不在事件循环里做同步 IO。
-    WebSocket 不经过 http 中间件，网关生命周期由 gateway 显式调 record_gateway。
+    写库经线程池走每线程连接（见 core.db），不在事件循环里做同步 IO。
+    WebSocket 不经过 HTTP 中间件，网关生命周期由 gateway 调 record_gateway 记录。
     """
 
     class AuditMiddleware(BaseHTTPMiddleware):
@@ -357,11 +327,10 @@ def install_audit(app: FastAPI) -> None:
             request_id_var.set(request_id)
             trace_id_var.set(trace_id)
 
-            # 请求体原文落库（不截断——截断了后续就查不回真实内容）。
-            # 只对 JSON 体做：multipart（发布上传的 APK 二进制）不落库——本体已存
-            # ota_releases，审计行记版本与大小即完整事实。读完放回，下游照常解析。
-            # 按 "json" 判定：application/problem+json 也含 json，application/json
-            # 子串反而匹配不上它（吃过的亏）。
+            # 请求体原文落库。只对 JSON 体做：multipart（APK 上传）本体已存
+            # ota_releases，审计行记版本与大小即完整事实。按 "json" 判定而非全等：
+            # application/problem+json 也含 json，而与 application/json 全等反而
+            # 匹配不上它。读完放回，下游照常解析。
             request_body = ""
             content_type = request.headers.get("content-type", "")
             if request.method in ("POST", "PUT", "PATCH", "DELETE") and "json" in content_type:
@@ -371,18 +340,16 @@ def install_audit(app: FastAPI) -> None:
                     return {"type": "http.request", "body": body_bytes, "more_body": False}
 
                 request = Request(request.scope, receive=receive)
-                request_body = body_bytes.decode(errors="replace")
+                request_body = store_body(body_bytes.decode(errors="replace"))
 
             started = time.perf_counter()
             response = await call_next(request)
             duration_ms = int((time.perf_counter() - started) * 1000)
             response.headers["X-Request-ID"] = request_id
 
-            # JSON 响应体全文入库（请求与响应都存，审计才完整）。缓冲 JSON 响应：
-            # 都是我们自己的处理器产的、体量在 KB 量级；唯一的 MB 级是媒体 base64，
-            # 由 store_body 的上限挡下（全有或全无，不截断）。problem 响应顺带从中
-            # 取出 detail——"为什么失败"的中文答案。截图/拍照/UI 树三个端点的响应
-            # 不落库（数据重型且可重取，与媒体同一处理）。
+            # JSON 响应体全文入库。缓冲响应：处理器产出的体量在 KB 量级，MB 级的
+            # 媒体 base64 由 store_body 的上限挡下；problem 响应顺带取出 detail。
+            # 截图、拍照、UI 树三个端点的响应不落库（见 _DATA_HEAVY_PATH）。
             response_body = ""
             detail = ""
             if "json" in response.headers.get("content-type", "") and not _DATA_HEAVY_PATH.search(path):
@@ -422,7 +389,7 @@ def install_audit(app: FastAPI) -> None:
                 user_agent=request.headers.get("user-agent", ""),
                 request_body=request_body,
                 response_body=response_body,
-                device_id=_device_of(path, request.url.query, request_body),
+                device_id=_device_of(path, request.url.query),
                 problem_type=response.headers.get("X-Problem-Type", ""),
                 detail=detail,
             )

@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import Any
 
 import jsonschema
 import pytest
@@ -10,11 +11,11 @@ from referencing import Registry, Resource
 SCHEMA_DIR = Path(__file__).resolve().parents[2] / "protocol" / "schema"
 
 
-def _registry() -> "Registry":
-    """按 $id 注册全部 schema，供消息间 $ref 解析（schema 结构已固定）。"""
+def _registry() -> Registry:
+    """按 $id 注册全部 schema，供消息间 $ref 解析。"""
     registry = Registry()
-    for f in SCHEMA_DIR.glob("*.json"):
-        doc = json.loads(f.read_text(encoding="utf-8"))
+    for path in SCHEMA_DIR.glob("*.json"):
+        doc = json.loads(path.read_text(encoding="utf-8"))
         registry = registry.with_resource(doc["$id"], Resource.from_contents(doc))
     return registry
 
@@ -37,7 +38,7 @@ KNOWN_TYPES = [
     "bridge.close",
 ]
 
-SAMPLES: dict[str, dict] = {
+SAMPLES: dict[str, dict[str, Any]] = {
     "link.hello": {
         "payload": {
             "device_id": "1c94310a536777d6",
@@ -57,7 +58,7 @@ SAMPLES: dict[str, dict] = {
     },
     "link.ping": {"payload": {"sender_time": "2026-09-30T12:00:00.000Z"}},
     "link.pong": {"payload": {"sender_time": "2026-09-30T12:00:00.000Z"}},
-    "link.error": {"payload": {"code": "auth.invalid_token", "message": "x"}},
+    "link.error": {"payload": {"code": "proto.bad_json", "message": "x"}},
     "door.snapshot": {
         "payload": {
             "snapshot_id": "11111111-1111-4111-8111-111111111111",
@@ -71,7 +72,12 @@ SAMPLES: dict[str, dict] = {
     "config.update": {"payload": {"revision": 1, "config": {"heartbeat_interval_s": 30}}},
     "config.ack": {"payload": {"revision": 1}},
     "ota.upgrade_available": {
-        "payload": {"version": "0.2.4", "version_code": 6, "url": "/ota/download/0.2.4", "mandatory": False}
+        "payload": {
+            "version": "0.2.4",
+            "version_code": 6,
+            "url": "/api/v1/ota/releases/0.2.4/download",
+            "mandatory": False,
+        }
     },
     "ota.progress": {"payload": {"version": "0.2.4", "stage": "downloading", "detail": ""}},
     "bridge.open": {"payload": {"device_id": "1c94310a536777d6", "nonce": "8f14e45fceea167a"}},
@@ -79,7 +85,7 @@ SAMPLES: dict[str, dict] = {
 }
 
 
-def _envelope(msg_type: str, payload: dict) -> dict:
+def _envelope(msg_type: str, payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "v": 1,
         "type": msg_type,
@@ -95,18 +101,16 @@ def test_every_known_type_has_schema() -> None:
 
 
 def test_no_extra_schemas() -> None:
-    files = {p.stem for p in SCHEMA_DIR.glob("*.json")} - {"envelope"}
+    files = {path.stem for path in SCHEMA_DIR.glob("*.json")} - {"envelope"}
     assert files == set(KNOWN_TYPES), f"schema 文件与消息清单不一致: {files ^ set(KNOWN_TYPES)}"
 
 
 @pytest.mark.parametrize("msg_type", KNOWN_TYPES)
 def test_sample_messages_validate(msg_type: str) -> None:
+    """每个消息类型的样例帧必须通过对应 schema 校验。"""
     schema = json.loads((SCHEMA_DIR / f"{msg_type}.json").read_text(encoding="utf-8"))
-    envelope = (
-        _envelope(msg_type, SAMPLES[msg_type]["payload"])
-        if msg_type in SAMPLES
-        else _envelope(msg_type, SAMPLES.get(msg_type, {}).get("payload", {}))
-    )
+    envelope = _envelope(msg_type, SAMPLES[msg_type]["payload"])
+
     jsonschema.validate(envelope, schema, registry=_registry())
 
 
@@ -114,5 +118,6 @@ def test_rejected_unknown_type_pattern() -> None:
     """type 不符合 <层>.<名> 规范的信封必须校验失败。"""
     schema = json.loads((SCHEMA_DIR / "envelope.json").read_text(encoding="utf-8"))
     bad = _envelope("no_dot_type", {})
+
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(bad, schema)

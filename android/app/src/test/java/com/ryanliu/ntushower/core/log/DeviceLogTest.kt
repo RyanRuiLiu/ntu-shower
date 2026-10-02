@@ -1,5 +1,6 @@
 package com.ryanliu.ntushower.core.log
 
+import com.ryanliu.ntushower.core.logfile.CappedLogFile
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -89,7 +90,7 @@ class DeviceLogTest {
         repeat(200) { log.received("cmd-$it", "ui.touch") }
 
         val file = File(folder.root, DeviceLog.FILE_NAME)
-        assertTrue(file.length() <= DeviceLog.MAX_BYTES)
+        assertTrue(file.length() <= CappedLogFile.DEFAULT_MAX_BYTES)
         // 裁剪后最后一行仍是完整 JSON：按行硬切会留半条，读的人直接崩
         val last = readLines(file).last()
         assertEquals("command.received", last.getString("event"))

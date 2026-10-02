@@ -43,7 +43,7 @@ object ScreenCapture {
 
     /** 执行截图并返回 JPEG 的 Base64（NO_WRAP）；失败返回 null。 */
     fun captureJpegBase64(): String? {
-        val videoPath = "/sdcard/sc_video_${System.currentTimeMillis()}.mp4"
+        val videoPath = "/sdcard/sc_video_${Uptime.nowMs()}.mp4"
         return try {
             RootShell.control.exec(
                 "/system/bin/screenrecord --time-limit $SCREENRECORD_TIME_LIMIT_S " +

@@ -1,11 +1,8 @@
 """两端配置键集合的对账。
 
 服务端的 `spec.CONFIG_SPECS`（scope=device）与设备端的 `RuntimeConfig.appliers`
-是同一个契约的两侧实现，各有一份默认值。任何一侧加了键而另一侧没跟上，都会
-表现为"服务端下发了配置，设备却不认"——而且不会报错，只是静默无效。
-
-这里通过解析设备端源码来对账，而不是让 Kotlin 导出一份清单：前者在 Python 侧
-就能跑，后者要额外的构建与产物搬运。
+是同一个契约的两侧实现。任何一侧加了键而另一侧没跟上，表现为"服务端下发了配置，
+设备却不认"，静默无效。通过解析设备端源码对账。
 """
 
 import re
@@ -15,7 +12,6 @@ import pytest
 
 from app.modules.config.spec import DEVICE_KEYS, SPECS_BY_KEY
 
-#: 设备端配置实现的位置（相对仓库根）。
 ANDROID_RUNTIME_CONFIG = (
     Path(__file__).resolve().parents[2]
     / "android"
@@ -68,11 +64,11 @@ def test_device_keys_are_all_scoped_to_device() -> None:
 
 def test_every_spec_has_a_unique_key() -> None:
     keys = [spec.key for spec in SPECS_BY_KEY.values()]
-    assert len(keys) == len(set(keys)), "登记表里有重复的键"
+    assert len(keys) == len(set(keys))
 
 
-def test_every_spec_has_a_description() -> None:
-    """登记表要生成文档与界面提示，没有说明的键等于没登记。"""
+def test_every_spec_has_a_title_and_description() -> None:
+    """登记表要生成界面提示与文档，没有说明的键等于没登记。"""
     undescribed = [spec.key for spec in SPECS_BY_KEY.values() if not spec.description or not spec.title]
     assert not undescribed, f"缺少标题或说明的键：{undescribed}"
 

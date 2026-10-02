@@ -3,11 +3,12 @@ package com.ryanliu.ntushower.features.selfmanage
 import android.content.Context
 import android.util.Log
 import com.ryanliu.ntushower.BuildConfig
+import com.ryanliu.ntushower.core.a11y.A11yRuntime
 import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.identity.DeviceIdentity
 import com.ryanliu.ntushower.core.log.DeviceLog
 import com.ryanliu.ntushower.core.shell.RootShell
-import com.ryanliu.ntushower.service.A11yService
+import com.ryanliu.ntushower.transport.OtaContract
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -40,7 +41,7 @@ class OtaUpdater(
      * 自动化执行期间不启动，避免打断分配/结算（推送方会重试或下轮轮询覆盖）。
      */
     fun checkAndInstall(): Boolean {
-        if (A11yService.automationInProgress) {
+        if (A11yRuntime.automationInProgress) {
             Log.i(TAG, "automation in progress, ota deferred")
             return false
         }
@@ -77,7 +78,7 @@ class OtaUpdater(
 
     private fun applyUpdate(manifest: JSONObject) {
         val version = manifest.getString("version")
-        if (!VERSION_PATTERN.matches(version)) {
+        if (!Regex(OtaContract.VERSION_PATTERN).matches(version)) {
             // 版本号参与文件名构造，所以这里先按允许的形状校验一遍：设备这一侧自己成立，
             // 不依赖服务端先拦
             throw IllegalStateException("unexpected version format: $version")
@@ -214,8 +215,5 @@ class OtaUpdater(
 
         /** 安装日志文件名（位于 `AppConfig.WORK_DIR`）。安装是脱手执行的，成败只在这里留痕。 */
         private const val INSTALL_LOG_NAME = "ota-install.log"
-
-        /** 与服务端 `ota/service.py` 的 VERSION_PATTERN 保持一致的版本号形状。 */
-        private val VERSION_PATTERN = Regex("""^\d+\.\d+\.\d+$""")
     }
 }

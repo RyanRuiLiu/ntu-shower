@@ -7,6 +7,7 @@
 | 动作名与执行通道 | `app/core/actions.py` |
 | 喷头状态取值 | `app/modules/doors/schemas.py` 的 `DoorState` |
 | 配置键规格 | `app/modules/config/spec.py` |
+| 版本号形状 | `app/modules/ota/service.py` 的 `VERSION_PATTERN` |
 
 Kotlin 与 JavaScript 都不能 import Python，所以另两端拿到的是**生成产物**。
 在此之前两端各手写一份、靠测试事后对账——漂移是必然的，只是早晚。
@@ -36,12 +37,14 @@ from app.core.outcomes import ALL as OUTCOME_STATUSES
 from app.core.reason_codes import REGISTRY as REASON_CODES
 from app.modules.config.spec import BOOL, CONFIG_SPECS, DEVICE, INT, TEXT, ConfigKind, ConfigSpec
 from app.modules.doors.schemas import DoorState
+from app.modules.ota.service import VERSION_PATTERN as OTA_VERSION_PATTERN
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 KOTLIN_ACTIONS = REPO_ROOT / "android/app/src/main/java/com/ryanliu/ntushower/transport/SupportedActions.kt"
 KOTLIN_OUTCOMES = REPO_ROOT / "android/app/src/main/java/com/ryanliu/ntushower/transport/OutcomeStatus.kt"
 KOTLIN_REASONS = REPO_ROOT / "android/app/src/main/java/com/ryanliu/ntushower/transport/ReasonCodes.kt"
+KOTLIN_OTA = REPO_ROOT / "android/app/src/main/java/com/ryanliu/ntushower/transport/OtaContract.kt"
 KOTLIN_DEFAULTS = REPO_ROOT / "android/app/src/main/java/com/ryanliu/ntushower/core/config/ConfigDefaults.kt"
 WEB_CONTRACT = REPO_ROOT / "server/web/core/contract.js"
 
@@ -249,6 +252,34 @@ def _kotlin_outcomes() -> str:
     return "\n".join(lines)
 
 
+def _kotlin_ota() -> str:
+    """设备端校验版本号用的形状。
+
+    版本号由服务端的发布流程铸造、拼进文件路径（见 ota/service.py 顶部的安全注释）。
+    设备端下载前按同一形状校验 manifest 的 `version` 字段——此前设备端手抄了一份正则、
+    靠注释提醒两边保持一致，漂移是静默的；生成之后形状只有这一个来源。
+    """
+    # Kotlin 字符串字面量：转义反斜杠与引号（正则里的 \d 落进字面量是 \\d）
+    pattern = OTA_VERSION_PATTERN.replace("\\", "\\\\").replace('"', '\\"')
+    lines = [
+        "package com.ryanliu.ntushower.transport",
+        "",
+        "/**",
+        " * OTA 版本号的形状：服务端发布时铸造、拼进文件路径，设备端下载前按它校验",
+        " * manifest 的 `version` 字段（版本号参与文件名构造，先校验形状）。",
+        " *",
+        " * **本文件由 tools/sync_contracts.py 生成，不要手改**——改了会在下一轮生成时被",
+        " * 覆盖，而 `tests/test_contract_sync.py` 也会立刻失败。要动版本号形状，改服务端的",
+        " * `app/modules/ota/service.py` 后重新生成。",
+        " */",
+        "object OtaContract {",
+        f'    const val VERSION_PATTERN = "{pattern}"',
+        "}",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def _javascript() -> str:
     """网页端要用的契约常量。
 
@@ -301,6 +332,7 @@ def artifacts() -> dict[Path, str]:
         KOTLIN_ACTIONS: _kotlin(),
         KOTLIN_OUTCOMES: _kotlin_outcomes(),
         KOTLIN_REASONS: _kotlin_reason_codes(),
+        KOTLIN_OTA: _kotlin_ota(),
         KOTLIN_DEFAULTS: _kotlin_config_defaults(),
         WEB_CONTRACT: _javascript(),
     }

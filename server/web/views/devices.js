@@ -10,17 +10,22 @@
  * 与普通操作区分开（危险按钮），并且各自要一次确认——误点的代价是跑一趟现场。
  */
 import { api } from '../core/api.js'
+import { hasIdentity } from '../core/api.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
 import { outcomeText, problemText, report } from '../core/outcome.js'
-import { refreshDevices, store, subscribe } from '../core/store.js'
+import { refreshDevices, refreshRuntime, store, subscribe } from '../core/store.js'
 import { toast } from '../core/toast.js'
 
 function renderTable() {
-  if (store.devices.length === 0) {
+  if (!hasIdentity()) {
+    $('deviceTable').innerHTML = '<div class="empty">运维档案需要管理身份，请在顶栏填写身份标识</div>'
+    return
+  }
+  if (store.runtime.length === 0) {
     $('deviceTable').innerHTML = '<div class="empty">暂无设备接入</div>'
     return
   }
-  const rows = store.devices
+  const rows = store.runtime
     .map(
       (device) => `
       <tr data-id="${esc(device.device_id)}">
@@ -32,10 +37,12 @@ function renderTable() {
         <td class="mono">${esc(device.os_version)}</td>
         <td>${device.online ? '<span class="badge badge-green">在线</span>' : '<span class="badge badge-red">离线</span>'}</td>
         <td>${device.trusted ? '<span class="badge badge-green">已信任</span>' : '<span class="badge badge-amber">未信任</span>'}</td>
-        <td class="mono">${esc(device.capabilities?.length ?? 0)}</td>
+        <td class="mono" title="${esc((device.capabilities || []).join(', '))}">${esc(
+          (device.capabilities || []).length > 0 ? device.capabilities.length : '未声明',
+        )}</td>
         <td>
           <div class="btn-row">
-            <button type="button" class="btn btn-ghost btn-sm" data-act="rename">改名</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-act="rename">重命名</button>
             <button type="button" class="btn btn-ghost btn-sm" data-act="trust">${device.trusted ? '撤销信任' : '授予信任'}</button>
           </div>
         </td>
@@ -43,7 +50,7 @@ function renderTable() {
     )
     .join('')
   $('deviceTable').innerHTML = `<table class="table"><thead><tr>
-      <th>设备</th><th>版本</th><th>系统</th><th>网关</th><th>信任</th><th>能力位</th><th>操作</th>
+      <th>设备</th><th>应用版本</th><th>系统版本</th><th>状态</th><th>信任</th><th>能力位</th><th>操作</th>
     </tr></thead><tbody>${rows}</tbody></table>`
 }
 
@@ -65,24 +72,24 @@ function renderCurrent() {
 }
 
 async function rename(deviceId) {
-  const device = store.devices.find((item) => item.device_id === deviceId)
+  const device = store.runtime.find((item) => item.device_id === deviceId)
   const name = window.prompt('请输入新名称', device?.name || '')
   if (!name) return
   try {
     await api.patchDevice(deviceId, { name })
-    await refreshDevices()
-    toast('已改名')
+    await refreshRuntime()
+    toast('已重命名')
   } catch (error) {
     report('maintResult', problemText(error), 'err')
   }
 }
 
 async function toggleTrust(deviceId) {
-  const device = store.devices.find((item) => item.device_id === deviceId)
+  const device = store.runtime.find((item) => item.device_id === deviceId)
   try {
     await api.patchDevice(deviceId, { trusted: !device?.trusted })
-    await refreshDevices()
-    toast(device?.trusted ? '已取消信任' : '已信任')
+    await refreshRuntime()
+    toast(device?.trusted ? '已撤销信任' : '已授予信任')
   } catch (error) {
     report('maintResult', problemText(error), 'err')
   }
@@ -131,7 +138,7 @@ async function doRestart() {
 }
 
 async function doUninstall() {
-  if (!window.confirm('卸载设备端程序？设备将断开连接，只能到现场重装。')) return
+  if (!window.confirm('卸载设备端程序？卸载后设备将断开连接，需至现场重新安装。')) return
   report('maintResult', '正在卸载…', 'info')
   try {
     await api.uninstall(store.deviceId)
@@ -142,13 +149,10 @@ async function doUninstall() {
 }
 
 /**
- * 填出在**你自己电脑上**执行的两条命令，并把它们显示出来。
+ * 填出在本机执行的两条连接命令并显示。
  *
- * 端口从状态里取真值，不写占位符——那正是这块此前的问题：界面上写的是
- * `adb connect <服务器>:<端口>`，而那是给人看的示意，复制过去跑不起来，得再去翻文档。
- *
- * 第一条用 `-L 端口:127.0.0.1:端口`（两侧同号）：本地也占同一个端口号，与 RUNBOOK
- * 里的写法一致，省得记两个数。
+ * 端口从状态里取真值，不写占位示意。第一条用 `-L 端口:127.0.0.1:端口`（两侧同号），
+ * 与 RUNBOOK 的写法一致，不必记两个数。
  */
 function showConnectSteps(status) {
   if (typeof status.port !== 'number') {
@@ -166,22 +170,21 @@ function showConnectSteps(status) {
 /**
  * 拉一次桥状态，更新状态行与本机连接命令。三个动作都以它收尾。
  *
- * 查状态、开桥、关桥都会改变桥的状态，而状态行与那两条命令都依赖它。此前开桥与关桥
- * 各自拼一句文案、且都不给命令，于是"开完了怎么连"只能去查文档。
+ * 查状态、开桥、关桥都会改变桥的状态，而状态行与那两条命令都依赖它。
  */
 async function refreshBridge() {
   const status = await api.bridgeStatus(store.deviceId)
   if (!status.open) {
-    report('bridgeResult', '桥未开启', 'info')
+    report('bridgeResult', '通道未开启', 'info')
     $('bridgeSteps').hidden = true
     return
   }
   // 只有异常项才值得占位置，正常时保持简短
   const parts = [`世代 ${status.generation}`]
-  if (!status.device_connected) parts.push('设备侧未连入')
-  if (!status.adb_client_connected) parts.push('本机 adb 未连接')
+  if (!status.device_connected) parts.push('设备端未接入')
+  if (!status.adb_client_connected) parts.push('本机 ADB 未连接')
   parts.push(`${status.expires_in_s} 秒后到期`)
-  report('bridgeResult', `桥已开启 · ${parts.join(' · ')}`, 'info')
+  report('bridgeResult', `通道已开启 · ${parts.join(' · ')}`, 'info')
   showConnectSteps(status)
 }
 
@@ -196,7 +199,7 @@ async function bridgeStatus() {
 async function bridgeOpen() {
   try {
     await api.bridgeOpen(store.deviceId)
-    toast('已开桥')
+    toast('通道已开启')
     await refreshBridge()
   } catch (error) {
     report('bridgeResult', problemText(error), 'err')
@@ -206,7 +209,7 @@ async function bridgeOpen() {
 async function bridgeClose() {
   try {
     await api.bridgeClose(store.deviceId)
-    toast('已关桥')
+    toast('通道已关闭')
     await refreshBridge()
   } catch (error) {
     report('bridgeResult', problemText(error), 'err')
@@ -216,8 +219,8 @@ async function bridgeClose() {
 /**
  * 复制一个只读输入框里的内容。
  *
- * `navigator.clipboard` 在非安全上下文或用户拒绝授权时会失败，那时退到"选中让手动复制"
- * ——本条命令很短，手动复制是可行的；直接失败什么都不发生才是让人困惑的。
+ * navigator.clipboard 在非安全上下文或未授权时失败，退到"选中让手动复制"；
+ * 直接失败且无提示才让人困惑。
  */
 async function copyFrom(id) {
   const input = $(id)
@@ -268,8 +271,7 @@ export const devicesView = {
               <div class="field">
                 <label for="inCommand">在设备上执行的命令<span class="muted"> · 以 root 身份，回车执行</span></label>
                 <div class="field-row">
-                  <input id="inCommand" class="mono" type="text" autocomplete="off" spellcheck="false"
-                         placeholder="例：ls -l /sdcard/ntu-shower">
+                  <input id="inCommand" class="mono" type="text" autocomplete="off" spellcheck="false">
                   <button type="button" class="btn btn-sm" id="btnExec">执行</button>
                 </div>
               </div>
@@ -282,23 +284,23 @@ export const devicesView = {
         <section class="panel">
           <div class="panel-head">
             <span class="panel-title">调试通道</span>
-            <span class="panel-note">把设备的 ADB 开到你自己电脑上</span>
+            <span class="panel-note">将设备的 ADB 端口转发至本机</span>
           </div>
           <div class="panel-body">
             <div class="btn-row">
-              <button type="button" class="btn btn-ghost btn-sm" id="btnBridgeStatus">查状态</button>
-              <button type="button" class="btn btn-sm" id="btnBridgeOpen">开桥</button>
-              <button type="button" class="btn btn-ghost btn-sm" id="btnBridgeClose">关桥</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnBridgeStatus">查询状态</button>
+              <button type="button" class="btn btn-sm" id="btnBridgeOpen">开启通道</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnBridgeClose">关闭通道</button>
             </div>
             <div class="result" id="bridgeResult"></div>
 
             <div class="muted" id="bridgeHint">
-              点「开桥」，然后照这里给出的命令在你自己的电脑上连。连上之后，
-              <code class="mono">adb devices</code> 里会多出这台设备。
+              点击「开启通道」，然后在本机执行此处给出的连接命令。连接成功后，
+              <code class="mono">adb devices</code> 中将出现该设备。
             </div>
 
             <div class="field" id="bridgeSteps" hidden>
-              <label>在你自己的电脑上执行这两条</label>
+              <label>在本机执行以下两条命令</label>
               <div class="field-row">
                 <input class="mono" id="bridgeTunnelCmd" type="text" readonly>
                 <button type="button" class="btn btn-ghost btn-sm" data-copy="bridgeTunnelCmd">复制</button>
@@ -308,8 +310,8 @@ export const devicesView = {
                 <button type="button" class="btn btn-ghost btn-sm" data-copy="bridgeAdbCmd">复制</button>
               </div>
               <div class="muted">
-                第一条保持运行、不要关，它把服务器上的端口转发到你本机；第二条另开一个终端执行。
-                连上之后，<code class="mono">adb devices</code> 里会出现这台设备。
+                第一条命令需保持运行，用于将服务器端口转发至本机；第二条请在另一终端中执行。
+                连接成功后，<code class="mono">adb devices</code> 中将出现该设备。
               </div>
             </div>
           </div>
@@ -317,12 +319,19 @@ export const devicesView = {
       </div>`
 
     dispose = disposer()
-    dispose.add(subscribe('devices', renderTable))
+    dispose.add(subscribe('runtime', renderTable))
     dispose.add(subscribe('device', renderCurrent))
     dispose.add(subscribe('view', (id) => { if (id !== 'devices') dispose.dispose() }))
 
     dispose.add(
-      listen(root.querySelector('#btnReload'), 'click', () => refreshDevices().catch((error) => toast(problemText(error)))),
+      listen(root.querySelector('#btnReload'), 'click', () => {
+        refreshDevices().catch((error) => toast(problemText(error)))
+        refreshRuntime()
+          .then((ok) => {
+            if (!ok) report('maintResult', '需要管理身份，请在顶栏填写身份标识', 'err')
+          })
+          .catch((error) => toast(problemText(error)))
+      }),
     )
     dispose.add(listen($('btnExec'), 'click', runExec))
     dispose.add(listen($('btnRestart'), 'click', doRestart))

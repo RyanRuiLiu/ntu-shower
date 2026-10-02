@@ -10,12 +10,6 @@ class Settings(BaseSettings):
     max_ota_bytes: int = 50 * 1024 * 1024  # OTA 上传/存储的单文件上限
     ota_dir: str = "ota_releases"  # APK 发布文件目录（相对 server 工作目录）
 
-    # ── 微信小程序 ──
-    # 用于 wx.login 的 code 换 openid；未配置时登录接口不可用（查看类接口不受影响）
-    wechat_appid: str = ""
-    wechat_secret: str = ""
-    wechat_api_timeout_s: float = 10.0
-
     # ── 日志 ──
     # 应用日志级别（DEBUG/INFO/WARNING/ERROR）；uvicorn 的访问日志级别另由
     # systemd 单元决定（见 deploy/nginx 与 docs/RUNBOOK.md）
@@ -44,8 +38,7 @@ class Settings(BaseSettings):
     # 不同的端口段，硬编码会让"本机已占用该端口"变成测试失败。
     bridge_base_port: int = 15655
 
-    # ── 鉴权 ──
-    ops_token: str = "change-me"  # 管理后台静态令牌（运维通道），占位值会在启动自检中被拒绝
+    # ── 命令确认等待 ──
     config_ack_timeout_s: float = 15.0  # 等待设备 config.ack 的时限
 
 

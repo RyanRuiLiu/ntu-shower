@@ -38,8 +38,8 @@ android {
         applicationId = "com.ryanliu.ntushower"
         minSdk = 19          // 设备 ROM 固定 Android 4.4，运行时下限不可动
         targetSdk = 19       // 目标设备冻结在 4.4，无升级路径
-        versionCode = 57
-        versionName = "0.4.13"
+        versionCode = 58
+        versionName = "0.4.14"
         buildConfigField("String", "SERVER_DOMAIN", "\"${providers.gradleProperty("serverDomain").get()}\"")
         buildConfigField("String", "APP_VERSION", "\"$versionName\"")
         buildConfigField("int", "VERSION_CODE", "$versionCode")
@@ -127,6 +127,11 @@ val frameworkBoundClasses = listOf(
     "**/features/automation/PageElement*",
     "**/features/automation/CommandScheduler*",
     "**/features/automation/CoverOverlay*",
+    // 界面操作原语（自 service/ 迁入）：ShellUiChannel 依赖真实 su 进程与系统 Resources，
+    // A11yUiChannel / UiTreeCodec 依赖无障碍节点树与窗口管理器
+    "**/features/automation/A11yUiChannel*",
+    "**/features/automation/ShellUiChannel*",
+    "**/features/automation/UiTreeCodec*",
     "**/features/automation/PhotoCapture*",
     "**/features/automation/AssignAction*",
     "**/features/automation/SettleAction*",

@@ -3,8 +3,8 @@
  *
  * ## 主辅结构（业界标准的设置继承模式）
  *
- * **全局默认是主编辑位**——它就是"配置"二字的默认含义；**设备覆盖是辅助**，
- * 同页切换，不是平铺的第二份表单。两个视图用**同一套**卡片表单控件（一套实现，
+ * 全局默认是主编辑位——它就是"配置"二字的默认含义；设备覆盖是辅助，
+ * 同页切换，不是平铺的第二份表单。两个视图用同一套卡片表单控件（一套实现，
  * 两种数据源），切换按钮（全部设备 / 当前设备）决定编辑的是哪一级。
  *
  * 设备视图下每个键带「继承/覆盖」徽标：继承跟随全局，改动即成为本设备覆盖，
@@ -12,7 +12,7 @@
  *
  * ## 小卡片网格
  *
- * 一个功能模块一张**小卡**（不整页一张大卡），auto-fill 网格自动多列排布；
+ * 一个功能模块一张小卡（不整页一张大卡），auto-fill 网格自动多列排布；
  * 卡内键少（2~7 个），一眼看完一个模块。
  *
  * ## 控件形态按 kind
@@ -31,7 +31,7 @@ import { toast } from '../core/toast.js'
 
 let groups = []
 let specs = []
-/** 分区清单（基础能力/拓展功能），来自服务端登记表。 */
+/** 分区清单（业务功能/运行基础），来自服务端登记表。 */
 let SECTIONS = []
 /** 设备覆盖项的键集合（设备视图下其余键处于继承态）。 */
 let overriddenKeys = new Set()
@@ -66,7 +66,7 @@ function controlHtml(spec, value, id, isOverridden) {
         <label for="${esc(id)}">${esc(spec.title)}${badgeHtml}${resetButton}
           <span class="muted"> · 一行一个：学号=密码</span></label>
         <textarea id="${esc(id)}" data-key="${esc(spec.key)}" data-kind="text_map" rows="3"
-                  spellcheck="false" placeholder="2530110052=000000">${esc(lines)}</textarea>
+                  spellcheck="false" placeholder="学号=密码">${esc(lines)}</textarea>
       </div>${desc}`
   }
   if (spec.kind === 'text') {
@@ -93,7 +93,7 @@ function resetOne(key) {
   if (spec.kind === 'bool') input.checked = Boolean(spec.default)
   else if (spec.kind === 'text_map') input.value = ''
   else input.value = spec.default
-  toast(`已重填「${spec.title}」默认值（记得保存）`)
+  toast(`已将「${spec.title}」恢复为默认值（尚未保存）`)
 }
 
 /** 整组恢复默认：重填该组全部键。 */
@@ -105,9 +105,9 @@ function resetGroup(groupKey) {
 
 /** 全部恢复默认：整表重填默认值（记得保存才生效）。 */
 function resetAll() {
-  if (!window.confirm('把表单里的全部键重填为默认值？（还需点「保存」才会生效）')) return
+  if (!window.confirm('将表单中的全部配置项恢复为默认值？（仍需点击「保存」方可生效）')) return
   for (const spec of specs) resetOne(spec.key)
-  toast('已全部重填为默认值（记得保存）')
+  toast('已将全部配置项恢复为默认值（尚未保存）')
 }
 
 function renderForm(values) {
@@ -124,7 +124,7 @@ function renderForm(values) {
           return `<section class="cfg-card">
           <div class="cfg-card-title">
             ${esc(title)}
-            <button type="button" class="btn btn-ghost btn-sm cfg-reset" data-reset-group="${esc(groupKey)}" title="恢复这个模块的全部键为默认值">恢复默认</button>
+            <button type="button" class="btn btn-ghost btn-sm cfg-reset" data-reset-group="${esc(groupKey)}" title="将该模块的全部配置项恢复为默认值">恢复默认</button>
           </div>
           ${groupSpecs.map((spec) => controlHtml(spec, values[spec.key], `cfg-${spec.key}`, overriddenKeys.has(spec.key))).join('')}
         </section>`
@@ -147,7 +147,7 @@ function parseTextMap(text) {
     const trimmed = line.trim()
     if (!trimmed) continue
     const eq = trimmed.indexOf('=')
-    if (eq <= 0) throw new Error(`格式不对：${trimmed}（应为 学号=密码）`)
+    if (eq <= 0) throw new Error(`格式错误：${trimmed}（应为「学号=密码」）`)
     result[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim()
   }
   return result
@@ -193,7 +193,7 @@ async function reload() {
     $('cfgNote').textContent = view.overrides
       ? `${store.deviceId} · ${overriddenKeys.size} 项单独设置，其余跟随全局`
       : `${store.deviceId} · 全部跟随全局`
-    $('btnSave').textContent = '保存到这台设备'
+    $('btnSave').textContent = '保存至当前设备'
   } catch (error) {
     report('configResult', problemText(error), 'err')
   }
@@ -207,7 +207,7 @@ async function save() {
       const result = await api.saveGlobalConfig(values)
       const notified = result.notified || []
       const applied = notified.filter((item) => item.applied).length
-      report('configResult', `已保存并推送：${notified.length} 台设备收到，${applied} 台已生效`, 'ok')
+      report('configResult', `已保存并推送：${notified.length} 台设备已接收，${applied} 台已生效`, 'ok')
     } else {
       const result = await api.saveDeviceConfig(store.deviceId, values)
       report('configResult', result.applied ? '已保存，设备已生效' : `已保存，${result.reason || '设备暂未生效'}`, 'ok')
@@ -218,8 +218,9 @@ async function save() {
   }
 }
 
-/** 整组恢复默认：重填该组全部键。 */
-
+/**
+ * 切换编辑目标：global（全部设备）或 device（单台覆盖）。切换后整表重载。
+ */
 function setTarget(next) {
   if (target === next) return
   target = next
@@ -248,7 +249,7 @@ export const configView = {
           </div>
         </div>
         <div class="panel-body">
-          <div class="muted" style="margin-bottom:8px">全局为主，设备覆盖为辅。设备视图下：标记「继承」的键跟随全局默认，改动即成为本设备覆盖（可一键回落）。各模块与单项都有「恢复默认」，重填后需点保存。</div>
+          <div class="muted" style="margin-bottom:8px">全局默认为主，设备覆盖为辅。在单台设备视图下，标记「继承」的配置项跟随全局默认值，修改后即成为该设备的覆盖项，可恢复为继承。各模块与单项均提供「恢复默认」，恢复后需点击「保存」方可生效。</div>
           <div id="configGrid"><div class="empty">正在加载…</div></div>
         </div>
       </section>

@@ -1,20 +1,24 @@
 """ntu-shower 服务端入口：装配设备网关平面与各领域模块。
 
-- gateway            设备 WS 网关（/gateway/device）
-- modules.doors      喷头现态（/api/v1/doors，含 /api/v1/stream 实时推送）
-- modules.sessions   分配 / 结算 / 拍照（/api/v1/sessions）与命令审计（/ops/commands）
-- modules.shadow     设备影子（reported / desired / metadata）
-- modules.access     身份与能力位（/api/v1/identity、/ops/identities）
-- modules.devices    设备注册表（/ops/devices）与远程操作（exec / capture / ui.*）
-- modules.config     远程配置（/ops/config、/ops/devices/{id}/config）
-- modules.ota        版本清单 / 下载 / 发布（/ota/*、/ops/releases）
-- modules.bridge     真实 ADB 桥接（/ops/devices/{id}/bridge/*，经 443 透传）
+## 接口组织（版本化的统一资源树）
 
-网页端（`web/`）挂在根路径：合并自旧系统的调试面板与画面查看器，零构建静态文件。
-服务端同时是 API 与这个界面的宿主，因此入口只有一个。
+对外 HTTP 面统一挂 `/api/v1` 前缀（路径版本化，对外契约的破坏性变更升 v2）；
+URL 只表达资源，不表达权限——谁能调用由能力位守卫决定（统一身份制，
+X-Identity 头）：
 
-访问控制见 core/security 与 modules/access：查看类接口无需凭据，
-操作类需 `X-Identity` 标识 + 能力位，管理面用 `X-Ops-Token`（docs/DECISIONS.md）。
+- /api/v1/devices、/api/v1/doors     设备域：精简清单公开；runtime 档案与远程
+                                      操作 admin；分配/结算/拍照按 session/photo 能力位
+- /api/v1/config                     配置域（admin）
+- /api/v1/identities                 身份域（admin）
+- /api/v1/ota、/ota/manifest         发布域：清单与下载公开，发布/下架/重推 admin；
+                                      manifest 为设备硬编码契约（无前缀，路径冻结）
+- /api/v1/audit                      审计域（admin）
+- /api/v1/stream                     实时推送（公开，可按 device_id 过滤）
+- /gateway/device                    设备 WS 网关（设备硬编码契约，路径冻结）
+
+模块按领域划分（modules/<域>），URL 按资源组织：/devices/* 由 devices、
+sessions、bridge、config 各域按资源归属提供端点。网页端（web/）挂在根路径，
+API 路由先注册，不会被静态文件抢走。
 """
 
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -29,38 +33,33 @@ from .core import audit, db
 from .core.config import settings
 from .core.errors import install_error_handlers
 from .core.logging import configure_logging
-from .core.security import assert_ops_token_configured
 from .core.version import APP_VERSION
 from .gateway.routes import router as gateway_router
 from .modules.access import repository as access_repository
-from .modules.access.routes import ops_router as access_ops_router
-from .modules.access.routes import router as access_router
-from .modules.audit.routes import ops_router as audit_ops_router
-from .modules.bridge.routes import ops_router as bridge_ops_router
+from .modules.access.routes import admin_router as identities_admin_router
+from .modules.audit import repository as command_audit_repository
+from .modules.audit.routes import admin_router as audit_admin_router
+from .modules.bridge.routes import admin_router as bridge_admin_router
 from .modules.bridge.routes import router as bridge_router
 from .modules.config import store as config_store
-from .modules.config.routes import ops_router as config_ops_router
+from .modules.config.routes import admin_router as config_admin_router
 from .modules.devices import repository as devices_repository
-from .modules.devices.routes import ops_router as devices_ops_router
+from .modules.devices.routes import admin_router as devices_admin_router
+from .modules.devices.routes import router as devices_router
 from .modules.doors import repository as doors_repository
-from .modules.doors.routes import ops_router as doors_ops_router
 from .modules.doors.routes import router as doors_router
 from .modules.ota import repository as ota_repository
-from .modules.ota.routes import ops_router as ota_ops_router
+from .modules.ota.routes import device_router as ota_device_router
 from .modules.ota.routes import router as ota_router
 from .modules.sessions import auto_settle
-from .modules.sessions import repository as sessions_repository
-from .modules.sessions.routes import ops_router as sessions_ops_router
 from .modules.sessions.routes import router as sessions_router
-from .modules.shadow.routes import ops_router as shadow_ops_router
-from .modules.shadow.routes import router as shadow_router
 
 #: 要求浏览器每次回来验证的前端资源后缀。
 STATIC_SUFFIXES = (".html", ".js", ".css")
 
 
 class HealthStatus(TypedDict):
-    """存活探针的应答；`version` 让运维能一眼确认线上跑的是哪一版。"""
+    """存活探针的应答；version 让运维能一眼确认线上跑的是哪一版。"""
 
     status: str
     name: str
@@ -70,21 +69,17 @@ class HealthStatus(TypedDict):
 def init_schema() -> None:
     """建全部表。
 
-    各领域仓储持有自己的表结构，这里是**唯一**的装配点：应用启动与测试夹具都调它。
-    这段原先内联在 `create_app` 里，于是不经过应用启动的用例（服务层的纯 asyncio 测试）
-    会连到默认路径那个库——而它的 schema 是旧的，报出来是"列不存在"而不是"表不存在"，
-    看着像代码错了，实则是那些用例根本没建表。
-
-    全部用 `CREATE TABLE IF NOT EXISTS`，重复调用没有副作用。
+    各领域仓储持有自己的表结构，这里是唯一的装配点：应用启动与测试夹具都调它。
+    全部用 CREATE TABLE IF NOT EXISTS，重复调用没有副作用。
     """
     db.init_db()
     devices_repository.init_tables()
     doors_repository.init_tables()
-    sessions_repository.init_tables()
     access_repository.init_tables()
     ota_repository.init_tables()
     config_store.init_tables()
     audit.init_tables()
+    command_audit_repository.init_tables()
 
 
 def create_app() -> FastAPI:
@@ -95,10 +90,8 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        # 启动自检：配置不合法时拒绝启动，而非带着占位密钥对外服务
-        assert_ops_token_configured()
         auto_settle.start()
-        audit.start_prune()  # 审计保留期清理（NIST SP 800-92），过期行每日删除
+        audit.start_prune()
         yield
         audit.stop_prune()
         auto_settle.stop()
@@ -109,37 +102,28 @@ def create_app() -> FastAPI:
 
     app.include_router(gateway_router)
     app.include_router(doors_router)
-    app.include_router(doors_ops_router)
     app.include_router(sessions_router)
-    app.include_router(sessions_ops_router)
-    app.include_router(shadow_router)
-    app.include_router(shadow_ops_router)
-    app.include_router(devices_ops_router)
-    app.include_router(config_ops_router)
+    app.include_router(devices_router)
+    app.include_router(devices_admin_router)
+    app.include_router(config_admin_router)
     app.include_router(ota_router)
-    app.include_router(ota_ops_router)
+    app.include_router(ota_device_router)
     app.include_router(bridge_router)
-    app.include_router(bridge_ops_router)
-    app.include_router(audit_ops_router)
-    app.include_router(access_router)
-    app.include_router(access_ops_router)
+    app.include_router(bridge_admin_router)
+    app.include_router(audit_admin_router)
+    app.include_router(identities_admin_router)
 
     @app.get("/healthz", tags=["meta"])
     def health() -> HealthStatus:
         return {"status": "ok", "name": "ntu-shower", "version": APP_VERSION}
 
-    # 网页端挂在根路径：它就是这个服务唯一的人机界面，而 API 在 /api、/ops、
-    # /ota、/gateway 下，路由已在前注册，不会被静态文件抢走。
-    #
+    # 网页端挂在根路径：它就是这个服务唯一的人机界面，而 API 路由已在前注册。
     # 必须放在最后注册：Starlette 按注册顺序匹配，mount("/") 排在最后。
     web_dir = Path(__file__).resolve().parent.parent / "web"
     app.mount("/", StaticFiles(directory=str(web_dir), html=True), name="web")
 
-    # 前端资源要求浏览器每次都回来验一遍。
-    #
-    # `no-cache` **不是**"不缓存"：浏览器仍会带上 ETag 来问，没变就是 304（很快），
-    # 变了才重新下载。没有它时 Starlette 只给 `Last-Modified`，浏览器据此走启发式
-    # 缓存——改完样式刷新，看到的还是旧的那一份，得手动强刷才行。
+    # 前端资源要求浏览器每次都回来验一遍：no-cache 不是"不缓存"，而是带 ETag
+    # 协商，没变 304，变了才重新下载。
     @app.middleware("http")
     async def revalidate_web_assets(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         response = await call_next(request)

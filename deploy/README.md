@@ -26,4 +26,4 @@ ssh root@iseekdream.com "systemctl daemon-reload && systemctl restart ntu-shower
   （`Upgrade` + `Connection "upgrade"` + `proxy_http_version 1.1`）：
   前者服务用户页 `/api/v1/stream`，后者服务设备网关 `/gateway/device`。
 - `proxy_read_timeout 3600s`：设备网关与实时推送都是长连接，默认 60s 会被 nginx 掐断。
-- `.env`（含 OPS_TOKEN）只在服务器上，不入仓库。
+- `.env`（数据库路径等生产配置）只在服务器上，不入仓库。

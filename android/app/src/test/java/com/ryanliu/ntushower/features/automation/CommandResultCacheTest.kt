@@ -70,16 +70,6 @@ class CommandResultCacheTest {
     }
 
     @Test
-    fun `clear drops all entries`() {
-        val cache = CommandResultCache(capacity = 4)
-        cache.remember(outcome("cmd-1"))
-        cache.clear()
-
-        assertEquals(0, cache.size())
-        assertNull(cache.recall("cmd-1"))
-    }
-
-    @Test
     fun `shrinking the capacity trims immediately`() {
         // 上限是配置项、可以在运行中变小；removeEldestEntry 只在写入时被调用，
         // 不主动裁的话"窗口已经调小"要等下一次写入才成立

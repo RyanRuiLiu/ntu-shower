@@ -58,9 +58,4 @@ class CommandResultCache(private var capacity: Int) {
 
     /** 当前缓存的条数（测试用）。 */
     fun size(): Int = outcomes.size
-
-    /** 清空（服务重连后旧命令不会再被重发，无需保留）。 */
-    fun clear() {
-        outcomes.clear()
-    }
 }

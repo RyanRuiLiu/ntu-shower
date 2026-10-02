@@ -1,13 +1,13 @@
 /**
  * 发布：OTA 的注册与下架。
  *
- * 上传走 multipart，**不能预设 Content-Type**——boundary 必须由浏览器自己生成，
+ * 上传走 multipart，不能预设 Content-Type——boundary 必须由浏览器自己生成，
  * 这一点由 `core/api.js` 的 `raw` 选项处理，这里只管把 `FormData` 递过去。
  *
  * ## 两个开关的语义
  *
  * - `mandatory`：设备端视为必须安装（当前实现未强制，但记录在案）
- * - `force`：**无视版本号**，调试期反复推同一版本用。正式升级不要勾——它会让所有
+ * - `force`：无视版本号，调试期反复推同一版本用。正式升级不要勾——它会让所有
  *   目标设备重新装一遍，即使版本号没变
  *
  * 下架是紧急止损：发出去才发现有问题时，用它终止后续设备继续安装。
@@ -16,7 +16,7 @@ import { api } from '../core/api.js'
 import { problemText, report } from '../core/outcome.js'
 import { fmtFullDateTime } from '../core/clock.js'
 import { $, disposer, esc, listen } from '../core/dom.js'
-import { store } from '../core/store.js'
+import { store, subscribe } from '../core/store.js'
 import { toast } from '../core/toast.js'
 
 function render(list) {
@@ -36,7 +36,7 @@ function render(list) {
         <td class="mono">${esc(fmtFullDateTime(item.created_at))}</td>
         <td>
           <div class="btn-row">
-            <button type="button" class="btn btn-ghost btn-sm" data-act="rearm">重推</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-act="rearm">重新推送</button>
             <button type="button" class="btn btn-danger btn-sm" data-act="delete">下架</button>
           </div>
         </td>
@@ -74,7 +74,7 @@ async function upload() {
   report('releaseResult', '正在上传…', 'info')
   try {
     const result = await api.uploadRelease(form)
-    report('releaseResult', `已发布 ${result.version}，通知 ${result.notified_devices.length} 台`, 'ok')
+    report('releaseResult', `已发布 ${result.version}，已通知 ${result.notified_devices.length} 台设备`, 'ok')
     await reload()
   } catch (error) {
     report('releaseResult', problemText(error), 'err')
@@ -105,11 +105,11 @@ export const releasesView = {
           <div class="grid grid-3">
             <div class="field">
               <label for="inVersion">版本名（形如 0.3.16）</label>
-              <input id="inVersion" type="text" placeholder="0.3.16">
+              <input id="inVersion" type="text">
             </div>
             <div class="field">
               <label for="inVersionCode">版本号（整数，必须递增）</label>
-              <input id="inVersionCode" type="number" min="1" placeholder="23">
+              <input id="inVersionCode" type="number" min="1">
             </div>
             <div class="field">
               <label for="apkFile">APK 文件</label>
@@ -117,12 +117,12 @@ export const releasesView = {
             </div>
           </div>
           <div class="field">
-            <label for="inTarget">目标（留空为全部设备，或填设备 ID）</label>
-            <input id="inTarget" type="text" placeholder="留空表示全部">
+            <label for="inTarget">目标设备（留空表示全部设备，或填写设备 ID）</label>
+            <input id="inTarget" type="text" placeholder="留空表示全部设备">
           </div>
           <label class="field-row" style="margin-bottom:12px">
             <input id="inForce" type="checkbox">
-            <span>强制推送<span class="muted"> · 无视版本号，调试期用</span></span>
+            <span>强制推送<span class="muted"> · 忽略版本号，仅用于调试</span></span>
           </label>
           <div class="btn-row">
             <button type="button" class="btn btn-sm" id="btnUpload">发布</button>
@@ -147,9 +147,9 @@ export const releasesView = {
               return
             }
             const result = await api.rearmRelease(version, store.deviceId)
-            report('releaseResult', result.rearmed ? '已清除该设备的安装确认' : '该设备本就没有安装确认', 'info')
+            report('releaseResult', result.rearmed ? '已清除该设备的安装确认' : '该设备无安装确认记录', 'info')
           } else {
-            if (!window.confirm(`下架 ${version}？在途设备将不再收到它。`)) return
+            if (!window.confirm(`下架 ${version}？安装途中的设备将不再接收该版本。`)) return
             await api.deleteRelease(version)
             toast('已下架')
             await reload()
