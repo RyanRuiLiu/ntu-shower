@@ -133,9 +133,12 @@ SOURCE_DB_WATCH = "db_watch"
 
 #: 快照来源：重连或开机后推的一遍全貌，与状态是否变化无关。
 #:
-#: 这一类**只刷新现态**。它回答的是"当前是什么样"，不是"刚刚发生了什么"：拿它派生，
-#: 每次断线重连都会记出一串从未发生的迁移，并把会话起点拖到重连那一刻——而真实起点
-#: 在此之前。
+#: 它与另外两种的区别只在**能不能用来记事件**：它回答的是"当前是什么样"，不是"刚刚
+#: 发生了什么"，拿它写 `door_state_event` 会记出一串从未在那一刻发生的迁移——离线期间
+#: 的变化会被记到重连这一刻。**会话照常派生**：那一帧带着设备当时的完整读数，占用中的
+#: 门能从 `open_time` 平移出真实起点（见 [_assigned_at]），空闲的门能把开着的那场结掉。
+#: 曾经连会话一起跳过，代价是"重连时正有人洗着"的那一场整场消失——2026-10-02 门 4
+#: 就是这么丢的。
 SOURCE_STARTUP = "startup"
 
 #: 快照来源：从旧系统（`ntu-remote-shower`）的历史记录重放进来的。
@@ -352,12 +355,9 @@ def _apply_snapshot(device_id: str, payload: JsonObject) -> JsonObject:
             )
 
         # 先派生、再落现态：会话维护要读**上一帧**的段起点（`old` 里那份），而
-        # `upsert_door_live` 会把它覆盖掉。全貌帧不派生，沿用旧值。
-        segment = ""
-        if not snapshot_only:
-            segment = _maintain_session(device_id, door_no, state, door, occurred_at, old)
-        elif old is not None:
-            segment = str(old["segment_started_at"])
+        # `upsert_door_live` 会把它覆盖掉。全貌帧同样要派生——它挡住的只是事件流水
+        # （见 SOURCE_STARTUP），会话跟着一起跳过就会丢掉重连时正在进行的那一场。
+        segment = _maintain_session(device_id, door_no, state, door, occurred_at, old)
         repository.upsert_door_live(device_id, door_no, state.value, door, occurred_at, segment)
         processed += 1
 
