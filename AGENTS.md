@@ -42,7 +42,7 @@ ruff format . && ruff check . --fix && mypy app --strict
 pytest -q --cov=app --cov-report=term-missing
 
 cd ../android
-./gradlew detekt :app:testDebugUnitTest :app:jacocoUnitTestCoverageVerification
+./gradlew detekt :app:lintDebug :app:testDebugUnitTest :app:jacocoUnitTestCoverageVerification
 ```
 
 覆盖率与测试数由 CI 实时产出，**不写进任何文档**——写死的数字必然过期。
