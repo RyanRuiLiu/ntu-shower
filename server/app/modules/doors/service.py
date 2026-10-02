@@ -220,7 +220,7 @@ def _occupant(door: JsonObject) -> tuple[int, str]:
     return as_int(door.get("card_no")), cert_no or str(door.get("acc_no") or "")
 
 
-def _assigned_at(door: JsonObject, at: str, device_id: str) -> tuple[str, str]:
+def _assigned_at(door: JsonObject, at: str, device_id: str, previous: Row | None) -> tuple[str, str]:
     """会话起点与它的来源，一起返回。
 
     **优先**：把设备报的 `open_time` 加上钟偏差平移过来。那是**刷卡那一刻**设备写下的，
@@ -234,11 +234,42 @@ def _assigned_at(door: JsonObject, at: str, device_id: str) -> tuple[str, str]:
     **退路**：设备还没回过 pong、或这一帧没带 `open_time`、或格式解析不了——退回本帧
     时刻，并如实标成观测下界（真实起点更早）。两种来源的强度不同，统计时必须分得清：
     `inferred` 的跨度可以用，`observed` 的天然偏小。
+
+    ## 平移值要先过自洽检验
+
+    偏差是**一个数**，而 `open_time` 是设备在**写下它的那一刻**用**当时那口钟**写的——
+    两者分属不同时刻。只要中间设备钟被改过而我们没跟上，算出来的起点就会偏掉整个钟差。
+    2026-10-02 实测：断链期间有人刷卡，重连前设备钟被拨快一小时，算出来的起点 `11:01`
+    比开阀还早一小时。
+
+    三条判据，任一不成立就退回观测下界（真实起点只会更晚，标成下界是诚实的）：
+
+    1. 起点不晚于本帧——刷卡不可能发生在我们看见它之后；
+    2. 起点不早于**上次看见这个门**的时刻——更早的会话我们已经见过了；
+    3. 与同帧 `in_time` 的平移值相差不超过 [SESSION_MAX_S]——两个读数出自同一口钟，而
+       一次占用压在 20 分钟内。
+
+    第 3 条是**唯一能识破"拨钟时我们离线"**的：那时第 2 条没有参照（前一帧可能远在
+    几小时前、或根本不存在），只剩它。
     """
     shifted = device_clock.to_server(door.get("open_time"), device_id)
-    if shifted is None:
+    if shifted is None or not _start_readings_agree(shifted, door, at, device_id, previous):
         return at, SESSION_ASSIGNED_OBSERVED
     return shifted, SESSION_ASSIGNED_INFERRED
+
+
+def _start_readings_agree(start: str, door: JsonObject, at: str, device_id: str, previous: Row | None) -> bool:
+    """`open_time` 平移出的起点，与同一帧里其他读数是否自洽（判据见 [_assigned_at]）。
+
+    与 `in_time` 那一条用 [seconds_between]，它把"结束早于开始"归零——换人时新人的
+    `open_time` 晚于仍在延续的前人那一段，那是对的，不该被这条判成坏值。
+    """
+    if start > at:
+        return False
+    if previous is not None and start < str(previous["reported_at"]):
+        return False
+    opened = device_clock.to_server(door.get("in_time"), device_id)
+    return opened is None or seconds_between(start, opened) <= SESSION_MAX_S
 
 
 def _clean(raw_door: JsonObject) -> JsonObject | None:
@@ -491,7 +522,7 @@ def _maintain_session(
     open_session = repository.get_open_session(device_id, door_no)
     card_no, cert_no = _occupant(door)
     if open_session is None:
-        assigned, source = _assigned_at(door, at, device_id)
+        assigned, source = _assigned_at(door, at, device_id, previous)
         session_id = repository.open_session(device_id, door_no, card_no, cert_no, assigned, source)
         prior_flow = 0
     elif str(open_session["cert_no"]) != cert_no:
@@ -503,7 +534,7 @@ def _maintain_session(
         # 换人判据用证件号而不是卡号——这台设备无卡，实测 235270 个门帧里 cardno 非 0
         # 的一个都没有，拿卡号比等于没比（那 13 次换人会全漏）。
         _close(open_session, door, at, previous, segment)
-        assigned, source = _assigned_at(door, at, device_id)
+        assigned, source = _assigned_at(door, at, device_id, previous)
         session_id = repository.open_session(device_id, door_no, card_no, cert_no, assigned, source)
         prior_flow = 0
         # 这一帧的开阀证据属于**前人**那一段（`segment` 是它的起点），不能记到新人名下：
