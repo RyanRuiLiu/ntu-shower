@@ -2,11 +2,18 @@
 
 ## 时刻只有一个来源
 
-会话的起点、终点、首次出水、出水时长，全部取自**帧的采集时刻**（`captured_at`，由
-设备锚在服务端时间上，见设备侧 core/clock/ServerClock）。设备的三个时间字段
-（open/in/close）只用来判断"在不在出水、有没有关过阀"，它们的值逐字保留供溯源，
-**不参与任何时刻**——那是设备的墙上时钟，实测自然漂移 8.5 秒/天，还会被人为回拨一小时
-（代价是把自动释放推后），100 天里 16.6% 的时间锚点落在被改过的时段。
+落库的每一个时刻都表达在**服务端时间轴**上。取值按可信度分三种：
+
+- **帧的采集时刻**（`captured_at`，设备锚在服务端时间上，见设备侧 core/clock/ServerClock）
+  ——它在库变化那一刻就定了，不受积压与重发影响；
+- **设备钟平移**：设备报的 `openTime`（整场会话不变，就是刷卡那一刻）与 `in_time`
+  （本次开阀时刻），各自加上当时的钟偏差（core/device_clock）；
+- 拿不到偏差时退回帧时刻，并如实标明那只是观测下界。
+
+设备那口钟的**绝对值**不可信：自然漂移 8.5 秒/天，还会被人为回拨一小时（代价是把自动
+释放推后），100 天里 16.6% 的时间锚点落在被改过的时段。但**偏差在一次会话的 20 分钟
+窗口里是常量**（20 分钟里的漂移只 0.03 秒），所以平移成立；跳变只有 23:5x 那一处，
+而设备 23:53 自动释放所有喷头，任何会话都不会跨过它。
 
 ## 七态
 
@@ -46,9 +53,9 @@ selected > free。"有人" = `cardno ≠ 0` **或** `accno` 既非空串也非 `
 
 ## 首帧与两条帧结构规则
 
-首次见到某个门时没有前态：占用态就开会话（`assigned_at` 只是**观测下界**，真实开始
-可能更早），空闲态不动。**首帧不记事件**——没有"从哪来"，记一条来源不明的 `from_state`
-会污染转换统计。
+首次见到某个门时没有前态：占用态就开会话（`assigned_at` 由 [_assigned_at] 给出，
+能平移就是真实刷卡时刻，否则是观测下界），空闲态不动。**首帧不记事件**——没有"从哪来"，
+记一条来源不明的 `from_state` 会污染转换统计。
 
 - 同一帧内重复门号取**最后一条**（见 `_clean` 的调用点）；
 - 门在后续帧里消失时**保留原状态**，不判成空闲——漏报一个门不等于那个门空了。
@@ -61,9 +68,10 @@ selected > free。"有人" = `cardno ≠ 0` **或** `accno` 既非空串也非 `
 
 ## 设备字段的语义
 
-`inTime` 是本次开阀时刻，暂停时清空、恢复时重写——所以它**不能**当会话起点，跟着它走
-会把起点拽到最后一次恢复那一刻。`bathTime` 只在暂停那一刻累加本次出水，出水期间不动，
-释放时整体归零。两者的**存在性**都是可靠判据，值都不可靠。
+`inTime` 是本次开阀时刻，暂停时清空、恢复时重新填入。它的**值**经偏差平移到服务端时间
+轴后可用于推导开阀时刻（见 [_opened_at]），但**不能**当会话起点——跟着它走会把起点拽到
+最后一次恢复那一刻。`bathTime` 只在暂停那一刻累加本次出水，出水期间不动，释放时整体
+归零；它是**时长不是时刻**，与钟的读数无关，所以可靠。
 
 `flow_s > 0` 才是"算不算一次使用"的判据，不是 `opened_at IS NOT NULL`：设备在离线期间
 完成的"开阀→结算"我们两个帧都收不到，只见得到结算后的 free，那时 `in_time` 已清零、
@@ -71,12 +79,13 @@ selected > free。"有人" = `cardno ≠ 0` **或** `accno` 既非空串也非 `
 
 ## 算不出来的三样
 
-写在注释里承认，不找办法硬凑：
+在注释里承认，不找办法硬凑：
 
-- **会话因何结束**——主动出门与四种超时释放写的是同一套清零语句，数据库层面完全同形
+- **会话因何结束**——主动出门与四种超时释放用的是同一套清零语句，数据库层面完全同形
   （见 [_close]）；
-- **盲区内的出水秒数**——那段既没进 `bathTime`、也没被我们看见（见 [_elapsed_flow_s]）；
-- **用户真实刷卡时刻**——只有设备的 `openTime`，而那口钟不可信。
+- **盲区内的出水秒数**——那段既没进 `bathTime`、也没被我们看见（见 [_flow_after]）；
+- **第二次暂停之后的首次开阀时刻**——设备只在暂停那一刻留下"关阀时刻"与"累计出水秒数"，
+  两者相减得到本段起点；多段之后那个和已经混了，无从分辨（见 [_opened_at]）。
 
 另外两件不归本模块管：**设备什么时候在线**由 `device_link_event` 回答（帧是事件驱动
 的，空闲时不上报，"没消息"无法区分"没人用"与"离线"）；**用了多少水、花了多少钱**只有
@@ -87,7 +96,7 @@ import threading
 from sqlite3 import Row
 
 from app.core import device_clock, events
-from app.core.clock import now_rfc3339, parse_rfc3339, seconds_between
+from app.core.clock import now_rfc3339, parse_rfc3339, seconds_between, shift_rfc3339
 from app.core.protocol import JsonObject, as_int, text_of
 from app.modules.devices import service as devices_service
 from app.modules.doors import repository
@@ -414,6 +423,32 @@ def _flow_after(
     return flow, ""
 
 
+def _opened_at(door: JsonObject, at: str, device_id: str, assigned_at: str, segment: str) -> str:
+    """这一帧能给出的**开阀时刻**；没有证据时给空串。
+
+    **正在出水**（`in_time` 非空）：取本段的观测起点 `segment`——它优先由设备报的
+    `in_time` 平移而来，退回本帧时刻。与出水时长同源，两者不会分叉。
+
+    **已经暂停**（设备把 `in_time` 清空了）：它只留下"这次关阀的时刻"与"累计出水秒数"。
+    后者是**时长**，与钟的读数无关，所以"关阀时刻减累计秒数"就是本段起点。这条推导只在
+    "这是全场第一次暂停"时成立——第二段之后 `bath_time_s` 是多段之和，算出来会比真实
+    开阀更早。用 `[assigned_at, 本帧]` 区间筛掉那些：开阀不可能早于会话起点，也不可能
+    晚于此刻。
+
+    冷启动接手时（人已经洗到一半我们才上线），这是唯一还能拿回开阀时刻的途径。
+    """
+    if door.get("in_time"):
+        return segment or at
+    closed = device_clock.to_server(door.get("close_time"), device_id)
+    bath_s = as_int(door.get("bath_time_s"))
+    if closed is None or bath_s <= 0:
+        return ""
+    opened = shift_rfc3339(closed, -bath_s)
+    if opened is None or not (assigned_at <= opened <= at):
+        return ""
+    return opened
+
+
 def _maintain_session(
     device_id: str,
     door_no: int,
@@ -427,8 +462,8 @@ def _maintain_session(
     四类情形：进入占用态开会话；占用态内部推进里程碑（`opened_at` 与 `flow_s` 只增
     不减）；离开占用态结束会话；与占用无关的迁移不涉及会话。
 
-    `assigned_at` 取**本帧的采集时刻**，不取设备的 `openTime`：那是设备的墙上时钟，
-    实测自然漂移 8.5 秒/天、还会被人为回拨一小时，而帧时刻只差一个网络往返。
+    `assigned_at` 与它的来源由 [_assigned_at] 一起给出：优先把设备报的 `openTime` 加上
+    钟偏差平移回真实刷卡时刻，拿不到偏差时退回本帧时刻并如实标明那只是观测下界。
 
     返回值由调用方写回 `door_live`。段起点是**跨帧**的状态：下一帧要知道"这段水从哪
     开始的"，而进程重启后内存里什么都没有，所以它必须落库。
@@ -470,16 +505,20 @@ def _maintain_session(
         assigned, source = _assigned_at(door, at, device_id)
         session_id = repository.open_session(device_id, door_no, card_no, cert_no, assigned, source)
         prior_flow = 0
-        repository.touch_session(session_id, bool(door.get("in_time")), True, at, 0)
+        # 这一帧的开阀证据属于**前人**那一段（`segment` 是它的起点），不能记到新人名下：
+        # 新人此刻才进门，他名下的开阀时刻最早只能是这一刻。段起点本身仍要延续给
+        # `flow_s`（那段水从上一帧就开始了），两者在这一处必须分开。
+        repository.touch_session(session_id, at if door.get("in_time") else "", True, at, 0)
         if not door.get("in_time"):
             return ""
         return segment if segment and _gap(previous, at) <= SESSION_MAX_S else at
     else:
         session_id = int(open_session["id"])
         prior_flow = int(open_session["flow_s"])
+        assigned = str(open_session["assigned_at"])
 
     flow, segment = _flow_after(door, previous, prior_flow, at, True, segment)
-    repository.touch_session(session_id, bool(door.get("in_time")), True, at, flow)
+    repository.touch_session(session_id, _opened_at(door, at, device_id, assigned, segment), True, at, flow)
     return segment
 
 
@@ -499,5 +538,11 @@ def _close(open_session: Row, door: JsonObject, at: str, previous: Row | None, s
     """
     session_id = int(open_session["id"])
     flow, _ = _flow_after(door, previous, int(open_session["flow_s"]), at, False, segment_start)
-    repository.touch_session(session_id, bool(door.get("in_time")), False, at, flow)
+    repository.touch_session(
+        session_id,
+        _opened_at(door, at, str(open_session["device_id"]), str(open_session["assigned_at"]), segment_start),
+        False,
+        at,
+        flow,
+    )
     repository.close_session(session_id, at)

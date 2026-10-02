@@ -64,3 +64,16 @@ def seconds_between(start: object, end: object) -> int:
     if first is None or second is None:
         return 0
     return max(0, int((second - first).total_seconds()))
+
+
+def shift_rfc3339(text: object, seconds: float) -> str | None:
+    """把一个 RFC 3339 时刻平移 seconds 秒；无法解析时返回 None。
+
+    与 `rfc3339_after` / `rfc3339_ago` 的区别是基准：那两个以此刻为基准，这个以给定
+    时刻为基准。设备钟的偏差校正（core/device_clock）与"时刻减去一段时长"这类换算
+    都走它，不要在各处自行拼时间字符串。
+    """
+    moment = parse_rfc3339(text)
+    if moment is None:
+        return None
+    return format_rfc3339(moment + timedelta(seconds=seconds))
