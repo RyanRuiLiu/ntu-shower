@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from tests import helpers
 
-from app.core import db
+from app.core import db, device_clock
 from app.core.clock import rfc3339_after
 from app.modules.doors import repository, service
 from app.modules.doors.schemas import DoorState
@@ -346,22 +346,32 @@ def test_stream_client_close_ends_session_cleanly(client: TestClient, fresh_db: 
         ws.close()
 
 
-def test_startup_snapshot_refreshes_live_without_deriving(fresh_db: str) -> None:
-    """全貌帧（`source=startup`）只刷新现态，不记迁移、不动会话。
+def test_startup_snapshot_keeps_events_out_but_still_runs_the_session(fresh_db: str) -> None:
+    """全貌帧（`source=startup`）不记迁移，但会话照常派生。
 
-    它与"状态是否变化"无关——重连与开机都会推一遍，而设备侧状态可能一直没变。拿它
-    派生，每次断线重连都会凭空记出一串从未发生的迁移，并把会话起点拽到重连那一刻，
-    而真实起点在此之前。
+    它与"状态是否变化"无关——重连与开机都会推一遍，而设备侧状态可能一直没变，拿它写
+    `door_state_event` 会记出一串从未在那一刻发生的迁移。**会话是另一回事**：那一帧带着
+    设备当时的完整读数，占用中的门能从 `open_time` 平移出真实起点。曾经连会话一起跳过，
+    代价是"重连时正有人洗着"的那一场整场消失。
     """
     device_id = "dev-startup-1"
+    device_clock.load(device_id, 0.0)
     # 起始是空闲：这一帧走 db_watch，且它不涉及占用
     service.process_snapshot(device_id, _snapshot([_door(1)], "2026-09-30T12:00:00.000Z"))
 
-    # 全貌帧里门突然显示被占着。它是"当前是什么样"，不是"刚刚有人刷卡进来"
+    # 全貌帧里门显示被占着、正在出水。它是"当前是什么样"，不是"刚刚有人刷卡进来"
     service.process_snapshot(
         device_id,
         _snapshot(
-            [_door(1, card_no=1, cert_no="A", in_time="2026-09-30T12:00:00.000Z")],
+            [
+                _door(
+                    1,
+                    card_no=1,
+                    cert_no="A",
+                    open_time="2026-09-30T11:59:00.000Z",
+                    in_time="2026-09-30T12:04:00.000Z",
+                )
+            ],
             "2026-09-30T12:05:00.000Z",
             service.SOURCE_STARTUP,
         ),
@@ -369,7 +379,29 @@ def test_startup_snapshot_refreshes_live_without_deriving(fresh_db: str) -> None
 
     assert repository.get_all_live(device_id)[1]["state"] == DoorState.BATHING.value  # 现态确实刷新了
     assert db.get_conn().execute("SELECT COUNT(*) FROM door_state_event").fetchone()[0] == 0  # 但没有迁移
-    assert repository.get_open_session(device_id, 1) is None  # 也没有会话
+    session = repository.get_open_session(device_id, 1)
+    assert session is not None, "会话照常开出来"
+    assert session["assigned_at"] == "2026-09-30T11:59:00.000Z"  # 起点由 open_time 平移
+    assert session["opened_at"] == "2026-09-30T12:04:00.000Z"  # 开阀时刻由 in_time 平移
+
+
+def test_startup_snapshot_closes_the_session_it_finds_abandoned(fresh_db: str) -> None:
+    """全貌帧发现门已经空了，就把开着的那场结掉。
+
+    设备离线期间人走了，重连时看到的是收尾后的样子。不结的话那场会话永远挂在"进行中"，
+    每一个"当前占用"的统计都多算一条；等下一个 db_watch 帧才结，结束时刻还会再晚一截。
+    """
+    device_id = "dev-startup-2"
+    service.process_snapshot(device_id, _snapshot([_door(1, card_no=1, cert_no="A")], "2026-09-30T12:00:00.000Z"))
+
+    service.process_snapshot(
+        device_id,
+        _snapshot([_door(1)], "2026-09-30T12:30:00.000Z", service.SOURCE_STARTUP),
+    )
+
+    assert repository.get_open_session(device_id, 1) is None
+    row = db.get_conn().execute("SELECT * FROM usage_session WHERE device_id = ?", (device_id,)).fetchone()
+    assert row["ended_at"] == "2026-09-30T12:30:00.000Z"
 
 
 def test_last_seen_stops_at_the_last_occupied_frame(fresh_db: str) -> None:
