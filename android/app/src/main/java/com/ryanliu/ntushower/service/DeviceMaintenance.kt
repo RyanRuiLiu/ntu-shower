@@ -3,7 +3,9 @@ package com.ryanliu.ntushower.service
 import android.util.Log
 import com.ryanliu.ntushower.BuildConfig
 import com.ryanliu.ntushower.core.shell.RootShell
+import com.ryanliu.ntushower.features.automation.BathAppRestart
 import com.ryanliu.ntushower.features.automation.CommandOutcome
+import com.ryanliu.ntushower.features.selfmanage.TimeSync
 import com.ryanliu.ntushower.transport.OutcomeStatus
 import com.ryanliu.ntushower.transport.ReasonCodes
 import com.ryanliu.ntushower.transport.SupportedActions
@@ -27,6 +29,8 @@ object DeviceMaintenance {
         SupportedActions.DEVICE_RESTART,
         SupportedActions.DEVICE_EXEC,
         SupportedActions.DEVICE_UNINSTALL,
+        SupportedActions.BATH_RESTART,
+        SupportedActions.CLOCK_SET,
     )
 
     /**
@@ -89,6 +93,16 @@ object DeviceMaintenance {
                     onOutcome(CommandOutcome(commandId, OutcomeStatus.OK, "", ""))
                     reported = true
                     uninstallAgent()
+                }
+
+                SupportedActions.BATH_RESTART -> {
+                    onOutcome(bathRestartOutcome(commandId))
+                    reported = true
+                }
+
+                SupportedActions.CLOCK_SET -> {
+                    onOutcome(clockSetOutcome(params, commandId))
+                    reported = true
                 }
             }
         } catch (e: Throwable) {
@@ -165,6 +179,36 @@ object DeviceMaintenance {
     /** 卸载本 agent。同样脱手：卸载会杀掉本进程。 */
     private fun uninstallAgent() {
         RootShell.execDetached("sleep 2; pm uninstall ${BuildConfig.APPLICATION_ID}")
+    }
+
+    /** 重启浴室 App：强停与冷启动都不杀本进程，可以同步等结果再回报。 */
+    private fun bathRestartOutcome(commandId: String): CommandOutcome {
+        val ok = BathAppRestart.restart()
+        return if (ok) {
+            CommandOutcome(commandId, OutcomeStatus.OK, "", "")
+        } else {
+            CommandOutcome(
+                commandId,
+                OutcomeStatus.FAILED,
+                ReasonCodes.DEVICE_INTERNAL_ERROR,
+                "重启浴室 App 的 shell 提交失败",
+            )
+        }
+    }
+
+    /** 设置设备系统时钟：datetime 由网页端给定（设备本地墙钟时间）。 */
+    private fun clockSetOutcome(params: JSONObject, commandId: String): CommandOutcome {
+        val ok = TimeSync.setWallClock(params.optString("datetime", ""))
+        return if (ok) {
+            CommandOutcome(commandId, OutcomeStatus.OK, "", "")
+        } else {
+            CommandOutcome(
+                commandId,
+                OutcomeStatus.FAILED,
+                ReasonCodes.DEVICE_INTERNAL_ERROR,
+                "设置系统时钟失败（格式或写入有误，见 device.log）",
+            )
+        }
     }
 
     /**

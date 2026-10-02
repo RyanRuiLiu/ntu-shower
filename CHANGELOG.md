@@ -3,6 +3,24 @@
 本项目所有显著变更记录于此。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)；
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.4.15] - 2026-10-02
+
+### 新增
+
+- **开机时间自校正**（设备端 TimeSync）：设备无 NTP，墙上时钟靠 RTC 维持、会跑偏
+  （实测快过整 1 小时）。每次开机后以 `link.hello_ack` 的 `server_time` 为准校正
+  系统时钟（偏差 ≥5 秒才动作），并重启浴室 App 让它带着正确时钟重读每日定时
+  开关机计划；每次开机只校正一次，重连不重复
+- **手动校时与浴室 App 重启接口**：`POST /api/v1/devices/{id}/clock/set`（网页端
+  可设任意时刻，HTTP 边界校验格式）与 `POST /api/v1/devices/{id}/bath/restart`；
+  设备页新增「校正时间」「重启浴室 App」按钮，两个动作均记入命令审计与
+  device.log（`clock.set`、`bath.restarted`）
+
+### 修复
+
+- 设备时钟写入命令实证：本 ROM 的 toolbox `date` 只认 `date -s "YYYYMMDD.HHMMSS"`
+  （设备本地时区），ISO 与 BSD 两种常见写法分别被静默忽略或解析出错误年份
+
 ## [0.4.14] - 2026-10-02
 
 ### 修复

@@ -42,6 +42,20 @@ DEVICE_RESTART = "device.restart"
 DEVICE_UNINSTALL = "device.uninstall"
 """卸载设备上的 agent（退役或排障用）。同样先回报再动作。"""
 
+# ── 浴室 App ──
+# 强停与冷启动由 root shell 完成，即时执行。过程会中断进行中的会话，网页端有确认。
+
+BATH_RESTART = "bath.restart"
+"""重启浴室 App（com.datalook.bath）：先强停再冷启动。开机时间校正后让它重读
+每日定时开关机计划；它状态异常时排障用。"""
+
+CLOCK_SET = "clock.set"
+"""设置设备系统时钟。params.datetime 为设备本地墙钟时间（YYYY-MM-DD HH:MM:SS）。
+
+浴室 App 按系统时钟装载每日定时开关机计划，而设备无 NTP：开机自动校正
+（设备端 TimeSync）与网页端手动设置共用本动作。
+"""
+
 # ── 调试通道 ──
 # 设备端启动 adbd，服务端在 443 上透传真实 ADB。开桥返回一次性 nonce 供设备
 # 认证端口归属；每次开桥递增世代号，旧 TCP 客户端被断开。
@@ -101,6 +115,8 @@ ALL_ACTIONS: tuple[str, ...] = (
     DEVICE_EXEC,
     DEVICE_RESTART,
     DEVICE_UNINSTALL,
+    BATH_RESTART,
+    CLOCK_SET,
     BRIDGE_OPEN,
     BRIDGE_CLOSE,
     UI_DUMP,
@@ -138,6 +154,8 @@ ACTION_CHANNELS: dict[str, str] = {
     DEVICE_EXEC: CHANNEL_MAINTENANCE,
     DEVICE_RESTART: CHANNEL_MAINTENANCE,
     DEVICE_UNINSTALL: CHANNEL_MAINTENANCE,
+    BATH_RESTART: CHANNEL_MAINTENANCE,
+    CLOCK_SET: CHANNEL_MAINTENANCE,
     BRIDGE_OPEN: CHANNEL_MAINTENANCE,
     BRIDGE_CLOSE: CHANNEL_MAINTENANCE,
 }

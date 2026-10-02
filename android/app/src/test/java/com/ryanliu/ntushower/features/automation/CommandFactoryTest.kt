@@ -125,6 +125,8 @@ class CommandFactoryTest {
             SupportedActions.DEVICE_EXEC,
             SupportedActions.DEVICE_RESTART,
             SupportedActions.DEVICE_UNINSTALL,
+            SupportedActions.BATH_RESTART,
+            SupportedActions.CLOCK_SET,
             SupportedActions.BRIDGE_OPEN,
             SupportedActions.BRIDGE_CLOSE,
         )
@@ -135,13 +137,15 @@ class CommandFactoryTest {
 
     @Test
     fun `every action has a handler on the device`() {
-        // 上一个测试只查「工厂认不认」，而这五个走的是绕开工厂的独立路径。
+        // 上一个测试只查「工厂认不认」，而这些走的是绕开工厂的独立路径。
         // 这里把它们也钉住：任何一个漏掉，设备收到它都会回 proto.unknown_action——
         // 那说明能力集合（设备对服务端的自我声明）已经和实现脱节了。
         val maintenance = setOf(
             SupportedActions.DEVICE_EXEC,
             SupportedActions.DEVICE_RESTART,
             SupportedActions.DEVICE_UNINSTALL,
+            SupportedActions.BATH_RESTART,
+            SupportedActions.CLOCK_SET,
         )
         maintenance.forEach { action ->
             assertTrue("$action 没有维护类处理器", DeviceMaintenance.handles(action))
