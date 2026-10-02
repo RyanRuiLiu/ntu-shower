@@ -1,6 +1,6 @@
 # /etc/systemd/system/ntu-shower.service
 [Unit]
-Description=NTU Shower Server (gateway + api + ops + ota)
+Description=NTU Shower Server (gateway + api + admin + ota)
 After=network.target
 
 [Service]
