@@ -1,23 +1,32 @@
-"""设备管理 API：档案维护与远程调试入口。
+"""设备域 API：精简清单（公开）、运维档案与远程操作（admin）。
 
 ## 路径规则
 
-集合用复数无动词（`/devices`）；**对单个资源施加动作**用
-`<资源>/<动词>`（`/devices/{id}/exec`）。改档案用 `PATCH /devices/{id}`
-带字段，而不是为每个字段开一个端点。
+资源用复数名词；对单个资源施加动作用 `<资源>/{id}/<动词>`；改档案用 PATCH
+带字段。目标设备一律在路径里，请求体只放动作参数。
+
+## 两种表示，各自一个端点
+
+- `GET /devices`：精简视图（id、名称、在线、actions）——查看语义，公开；
+  `actions` 由 access.user_actions 按调用方能力位与作用域算出，客户端不复制
+  判定规则。
+- `GET /devices/runtime`：运维档案（版本、信任、IP、时钟偏差等诊断字段），
+  admin 专属，管理台设备表专用。
 
 ## 守卫
 
-整个 ops_router 要求 `X-Ops-Token`；下发命令的端点额外要求设备已信任
-且在线（`require_trusted_online_device`）——把命令发给一台离线设备只会白等超时。
+admin 端点统一挂 require_admin；下发命令的端点额外要求设备已信任且在线
+（require_trusted_online_device）——把命令发给离线设备只会白等超时。
 """
 
 from fastapi import APIRouter, Depends
 
-from app.core import actions, events
+from app.core import actions
 from app.core.problems import DEVICE_NOT_FOUND, ApiProblemError
-from app.core.protocol import as_int
-from app.core.security import require_ops_token
+from app.core.protocol import JsonObject, as_int
+from app.modules.access.capabilities import user_actions
+from app.modules.access.dependencies import optional_identity, require_admin
+from app.modules.access.schemas import IdentityRecord
 from app.modules.config import store as config_store
 from app.modules.sessions import service as sessions_service
 from app.modules.sessions.schemas import CommandOutcome
@@ -34,7 +43,8 @@ from .schemas import (
     DeviceUiTouchRequest,
 )
 
-ops_router = APIRouter(prefix="/ops", dependencies=[Depends(require_ops_token)], tags=["devices-ops"])
+router = APIRouter(prefix="/api/v1", tags=["devices"])
+admin_router = APIRouter(prefix="/api/v1/devices", dependencies=[Depends(require_admin)], tags=["devices-admin"])
 
 # 设备动作的默认超时：覆盖 root shell 执行、截图编解码这类耗时动作。
 DEVICE_ACTION_TIMEOUT_S = 30.0
@@ -44,184 +54,149 @@ def _ui_timeout_s(device_id: str) -> float:
     """界面操作的等待上限，取该设备的配置项 `ui_operation_timeout_s`。
 
     每个 `ui.*` 命令都要等设备完成一次节点遍历或一次手势注入，耗时随界面复杂度
-    变化；做成配置项后现场改一次即对全部设备生效，不必改代码重发版。
+    变化；做成配置项后现场改一次即对全部设备生效。
     """
     timeout_s = as_int(config_store.effective(device_id)["ui_operation_timeout_s"], int(DEVICE_ACTION_TIMEOUT_S))
     return float(timeout_s)
 
 
-@ops_router.get("/devices")
-def list_devices() -> list[DeviceRecord]:
+async def _device_action(device_id: str, action: str, params: JsonObject, timeout_s: float) -> CommandOutcome:
+    """远程动作的公共路径：设备须已信任在线，命令经统一下发与等待取回结果。
+
+    全部 admin 动作端点共用——差别只在动作名、参数与超时，守卫与下发只有这一份。
+    """
+    require_trusted_online_device(device_id)
+    return await sessions_service.send_command_and_wait(device_id, action, params, timeout_s=timeout_s)
+
+
+# ── 查询 ──
+
+
+@router.get("/devices")
+def list_devices(caller: IdentityRecord | None = Depends(optional_identity)) -> list[dict[str, object]]:
+    """精简设备清单：id、名称、在线，以及该调用方对每台可执行的用户动作。
+
+    匿名调用 actions 恒为空；判定经 access 的唯一实现，客户端不复制作用域规则。
+    """
+    items: list[dict[str, object]] = []
+    for record in service.list_devices():
+        summary: dict[str, object] = dict(service.to_summary(record))
+        summary["actions"] = (
+            user_actions(caller["capabilities"])
+            if caller is not None and ("*" in caller["device_scope"] or record["device_id"] in caller["device_scope"])
+            else []
+        )
+        items.append(summary)
+    return items
+
+
+@admin_router.get("/runtime")
+def list_runtime() -> list[DeviceRecord]:
+    """全部设备的运维档案（版本、信任、来源 IP、时钟偏差等诊断字段）。"""
     return service.list_devices()
 
 
-@ops_router.patch("/devices/{device_id}")
+# ── 档案 ──
+
+
+@admin_router.patch("/{device_id}")
 def patch_device(device_id: str, req: DevicePatchRequest) -> DeviceRecord:
-    """改设备档案：改名、改信任位。
+    """改设备档案：改名、改信任位，只改传了的字段。
 
-    只改传了的字段。改名与信任原本各有一个端点（外加一个 `/untrust`），
-    但它们做的是同一件事——调整这台设备的档案。
-
-    改完推一条 `device.update`：改的那一端自己会刷新，这里管的是**其它**打开的页面——
-    设备下拉里的名字、列表里的信任徽标，不推的话它们要等下一次 30 秒轮询才对得上。
+    改完推一条 `device.update`（精简载荷）：其它打开的页面要靠它更新设备名与
+    在线标记，不推就要等轮询。
     """
     if req.name is not None:
         service.rename_device(device_id, req.name)
     if req.trusted is not None:
         service.set_trusted(device_id, req.trusted)
     record = _require_device(device_id)
-    events.publish(events.DEVICE_UPDATE, dict(record))
+    service.publish_device_update(device_id)
     return record
 
 
-@ops_router.post("/devices/{device_id}/exec")
+# ── 远程动作 ──
+
+
+@admin_router.post("/{device_id}/exec")
 async def exec_command(device_id: str, req: DeviceExecRequest) -> CommandOutcome:
     """远程调试：在设备上以 root 执行 shell 命令并取回输出（审计留痕）。"""
-    require_trusted_online_device(device_id)
-    return await sessions_service.send_command_and_wait(
-        device_id,
-        actions.DEVICE_EXEC,
-        {"command": req.command},
-        timeout_s=DEVICE_ACTION_TIMEOUT_S,
-    )
+    return await _device_action(device_id, actions.DEVICE_EXEC, {"command": req.command}, DEVICE_ACTION_TIMEOUT_S)
 
 
-@ops_router.post("/devices/{device_id}/capture")
+@admin_router.post("/{device_id}/capture")
 async def capture_screen(device_id: str) -> CommandOutcome:
     """抓取设备全屏画面，结果在 data.image_base64（JPEG，NO_WRAP）。
 
-    设备端走 screenrecord + MediaCodec 解码首帧——本机 framebuffer/screencap
-    取不到画面（硬件合成器直出），实现见 features/remote/ScreenCapture.kt。
+    设备端走 screenrecord + MediaCodec 解码首帧：本机 framebuffer 与 screencap
+    取不到画面（硬件合成器直出）。
     """
-    require_trusted_online_device(device_id)
-    return await sessions_service.send_command_and_wait(
-        device_id,
-        actions.SCREEN_CAPTURE,
-        {},
-        timeout_s=DEVICE_ACTION_TIMEOUT_S,
-    )
+    return await _device_action(device_id, actions.SCREEN_CAPTURE, {}, DEVICE_ACTION_TIMEOUT_S)
 
 
-@ops_router.post("/devices/{device_id}/restart")
+@admin_router.post("/{device_id}/restart")
 async def restart_agent(device_id: str) -> CommandOutcome:
     """重启设备上的 agent 进程（不重启整机）。"""
-    require_trusted_online_device(device_id)
-    return await sessions_service.send_command_and_wait(
-        device_id,
-        actions.DEVICE_RESTART,
-        {},
-        timeout_s=DEVICE_ACTION_TIMEOUT_S,
-    )
+    return await _device_action(device_id, actions.DEVICE_RESTART, {}, DEVICE_ACTION_TIMEOUT_S)
 
 
-@ops_router.post("/devices/{device_id}/uninstall")
+@admin_router.post("/{device_id}/uninstall")
 async def uninstall_agent(device_id: str) -> CommandOutcome:
-    """卸载设备上的 agent（用于退役或排障）。"""
-    require_trusted_online_device(device_id)
-    return await sessions_service.send_command_and_wait(
-        device_id,
-        actions.DEVICE_UNINSTALL,
-        {},
-        timeout_s=DEVICE_ACTION_TIMEOUT_S,
-    )
+    """卸载设备上的 agent（退役或排障用）。"""
+    return await _device_action(device_id, actions.DEVICE_UNINSTALL, {}, DEVICE_ACTION_TIMEOUT_S)
 
 
-# ── 设备界面（无障碍服务）──
-#
-# 这一组是"看到并操作设备界面"的能力，与 capture 的区别是：capture 给的是
-# 一张图，这里给的是**结构**（节点树）与**动作**（点击/按键/输入）。
-# 排查"设备卡在某个弹窗"时，节点树比截图更有用。
+# ── 设备界面 ──
+# 这一组是"看到并操作设备界面"：dump 给结构（节点树），touch/scroll/key/input
+# 给动作，与 capture（一张图）互补。排查"设备卡在某个弹窗"时节点树比截图有用。
 
 
-@ops_router.post("/devices/{device_id}/dump")
+@admin_router.post("/{device_id}/dump")
 async def dump_ui_tree(device_id: str) -> CommandOutcome:
-    """导出设备当前界面的节点树，结果在 `data.xml`（字符串）。
+    """导出设备当前界面的节点树，结果在 data.xml。
 
-    格式与 `uiautomator dump` 完全一致：`<hierarchy>` 嵌套 `<node>`，
-    `bounds` 写作 `[left,top][right,bottom]`，`index` 是**同级中的序号**。
-    节点上限取配置项 `ui_dump_max_nodes`，达到上限即停止遍历。
+    格式与 uiautomator dump 一致；节点上限取配置项 ui_dump_max_nodes。
     """
-    require_trusted_online_device(device_id)
-    return await sessions_service.send_command_and_wait(
-        device_id,
-        actions.UI_DUMP,
-        {},
-        timeout_s=_ui_timeout_s(device_id),
-    )
+    return await _device_action(device_id, actions.UI_DUMP, {}, _ui_timeout_s(device_id))
 
 
-@ops_router.post("/devices/{device_id}/touch")
+@admin_router.post("/{device_id}/touch")
 async def touch(device_id: str, req: DeviceUiTouchRequest) -> CommandOutcome:
-    """按屏幕坐标点击或滑动设备界面。
+    """按屏幕坐标点击或滑动：不给 to_x/to_y 是点击，给了是滑动。
 
-    坐标由调用方给：先 `/dump` 读节点树，从元素的 `bounds` 算出中心点。
-    不给 `to_x`/`to_y` 就是点击，给了就是滑动。
+    定位先经 dump 读节点树、由 bounds 求中心点，不使用遍历序号。
     """
-    require_trusted_online_device(device_id)
     params: dict[str, int] = {"x": req.x, "y": req.y}
     if req.to_x is not None and req.to_y is not None:
         params["to_x"] = req.to_x
         params["to_y"] = req.to_y
     if req.duration_ms is not None:
         params["duration_ms"] = req.duration_ms
-    return await sessions_service.send_command_and_wait(
-        device_id,
-        actions.UI_TOUCH,
-        params,
-        timeout_s=_ui_timeout_s(device_id),
-    )
+    return await _device_action(device_id, actions.UI_TOUCH, params, _ui_timeout_s(device_id))
 
 
-@ops_router.post("/devices/{device_id}/scroll")
+@admin_router.post("/{device_id}/scroll")
 async def scroll(device_id: str, req: DeviceUiScrollRequest) -> CommandOutcome:
-    """滚动设备的可滚动容器。
-
-    与 `/touch` 的滑动分开：这条作用于**容器**而不是坐标，语义不同——滑动的
-    落点取决于起点，滚动只表达"往哪边滚"。
-    """
-    require_trusted_online_device(device_id)
-    return await sessions_service.send_command_and_wait(
-        device_id,
-        actions.UI_SCROLL,
-        {"direction": req.direction},
-        timeout_s=_ui_timeout_s(device_id),
-    )
+    """滚动可滚动容器。与 touch 的滑动分开：作用于容器而非坐标。"""
+    return await _device_action(device_id, actions.UI_SCROLL, {"direction": req.direction}, _ui_timeout_s(device_id))
 
 
-@ops_router.post("/devices/{device_id}/key")
+@admin_router.post("/{device_id}/key")
 async def send_key(device_id: str, req: DeviceUiKeyRequest) -> CommandOutcome:
-    """发送系统按键：back / home / recents / notifications。"""
-    require_trusted_online_device(device_id)
-    return await sessions_service.send_command_and_wait(
-        device_id,
-        actions.UI_KEY,
-        {"key": req.key},
-        timeout_s=_ui_timeout_s(device_id),
-    )
+    """发送系统按键（闭集，路由层 422 挡下非法值）。"""
+    return await _device_action(device_id, actions.UI_KEY, {"key": req.key}, _ui_timeout_s(device_id))
 
 
-@ops_router.post("/devices/{device_id}/input")
+@admin_router.post("/{device_id}/input")
 async def input_text(device_id: str, req: DeviceUiTextRequest) -> CommandOutcome:
-    """向设备的当前焦点控件输入文本。
-
-    `channel` 选注入通路：`clipboard`（粘贴，支持中文）或 `keys`（按键注入，仅
-    ASCII、无空格问题）。两条是并列通路，见 `DeviceUiTextRequest`。
-    """
-    require_trusted_online_device(device_id)
-    return await sessions_service.send_command_and_wait(
-        device_id,
-        actions.UI_INPUT,
-        {"text": req.text, "channel": req.channel},
-        timeout_s=_ui_timeout_s(device_id),
+    """向当前焦点控件输入文本；channel 在两条并列通路中显式选择。"""
+    return await _device_action(
+        device_id, actions.UI_INPUT, {"text": req.text, "channel": req.channel}, _ui_timeout_s(device_id)
     )
 
 
 def _require_device(device_id: str) -> DeviceRecord:
-    """取设备档案；不存在时 404。
-
-    此前改名/信任接口返回 `{"found": false}`，让调用方自己判断——那等于把
-    "设备不存在"这个错误藏在成功响应里。
-    """
+    """取设备档案；不存在时 404，不用成功响应体里的 found: false 掩盖错误。"""
     device = service.get_device(device_id)
     if device is None:
         raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {device_id}")

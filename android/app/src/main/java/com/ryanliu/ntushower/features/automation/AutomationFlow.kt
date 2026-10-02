@@ -1,10 +1,11 @@
 package com.ryanliu.ntushower.features.automation
 
 import android.util.Log
+import com.ryanliu.ntushower.core.a11y.A11yNodeSource
+import com.ryanliu.ntushower.core.a11y.A11yRuntime
 import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.shell.RootShell
-import com.ryanliu.ntushower.service.A11yService
 import com.ryanliu.ntushower.transport.ReasonCodes
 
 /**
@@ -45,10 +46,10 @@ object AutomationFlow {
          * 整条流程里最长，不细分就看不出它的耗时落在哪一步——真机上它在 101ms 与 807ms 之间
          * 跳，而每一步做了什么只有它自己知道。
          */
-        fun perform(a11y: A11yService, trace: AutomationTrace.Trace?): FlowError?
+        fun perform(a11y: A11yNodeSource, trace: AutomationTrace.Trace?): FlowError?
     }
 
-    fun run(a11y: A11yService, action: Action, overlay: CoverOverlay): FlowOutcome {
+    fun run(a11y: A11yNodeSource, action: Action, overlay: CoverOverlay): FlowOutcome {
         // 开关关闭时 trace 为 null，各标记点退化成空操作——两条路径跑的是同一套代码
         val trace = AutomationTrace.begin(action.traceLabel)
         // 让状态尽快重算一次，但**不等它**。重算跑在自己的线程上，真机上量过，等一次要 165ms，
@@ -113,7 +114,7 @@ object AutomationFlow {
     }
 
     /** 流程收尾：等回首页 → 撤遮盖 → input tap 清除网格选中态。在结果回报之后调用。 */
-    fun finish(a11y: A11yService, overlay: CoverOverlay) {
+    fun finish(a11y: A11yNodeSource, overlay: CoverOverlay) {
         try {
             BathAppNavigator.waitForPage(a11y, PageState.HOME, 10_000L)
         } finally {
@@ -144,14 +145,14 @@ object AutomationFlow {
      *
      * 拉回前台走 [BathAppNavigator.ensureForeground]（含关系统面板），不是裸的热切前台。
      */
-    private fun awaitTerminal(a11y: A11yService): Terminal {
+    private fun awaitTerminal(a11y: A11yNodeSource): Terminal {
         val start = Uptime.nowMs()
         var leftForeground = false
         var rebuiltAfterLeave = false
         var unknownRounds = 0
         while (Uptime.nowMs() - start < RuntimeConfig.serverResponseTimeoutMs) {
-            val mark = A11yService.pageChangeMark()
-            val inForeground = A11yService.bathAppInForeground
+            val mark = A11yRuntime.pageChangeMark()
+            val inForeground = A11yRuntime.bathAppInForeground
             if (!inForeground) leftForeground = true
             val snapshot = BathAppPage.snapshot()
             if (leftForeground && inForeground && snapshot.state == PageState.UNKNOWN) {
@@ -176,10 +177,10 @@ object AutomationFlow {
                     // 反复被切走不会被误判成"落在无法识别的页面"。
                     if (!inForeground) {
                         BathAppNavigator.ensureForeground(a11y)
-                        A11yService.awaitPageChangeAfter(mark, RuntimeConfig.pollIntervalMs)
+                        A11yRuntime.awaitPageChangeAfter(mark, RuntimeConfig.pollIntervalMs)
                         continue
                     }
-                    // 这三类页面不会自己变成 HOME：预约页要人点，UNKNOWN 多半是启动闪屏或
+                    // 这三类页面不会自己变成 HOME：预约页要人点，UNKNOWN 通常是启动闪屏或
                     // 渲染到一半的树。宽限几轮让闪屏过去，仍认不出来就判失败并把设备收拾回首页
                     // ——空等到超时只会让浴室 App 一直停在陌生页面上给现场学生看。
                     //
@@ -192,7 +193,7 @@ object AutomationFlow {
                     }
                 }
             }
-            A11yService.awaitPageChangeAfter(mark, RuntimeConfig.pollIntervalMs)
+            A11yRuntime.awaitPageChangeAfter(mark, RuntimeConfig.pollIntervalMs)
         }
         BathAppNavigator.navigateToHome(a11y, RuntimeConfig.homeBudgetMs)
         return Terminal(false, "服务器响应超时")

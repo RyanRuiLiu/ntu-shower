@@ -5,9 +5,9 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.os.IBinder
-import android.os.SystemClock
 import android.util.Log
 import com.ryanliu.ntushower.BuildConfig
+import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.config.ConfigCache
 import com.ryanliu.ntushower.core.config.RuntimeConfig
@@ -28,11 +28,14 @@ import com.ryanliu.ntushower.features.selfmanage.OtaUpdater
 import com.ryanliu.ntushower.receiver.WatchdogReceiver
 import com.ryanliu.ntushower.transport.Envelope
 import com.ryanliu.ntushower.transport.GatewayClient
+import com.ryanliu.ntushower.transport.MessageTypes
 import com.ryanliu.ntushower.transport.OutcomeStatus
 import com.ryanliu.ntushower.transport.ReasonCodes
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 
 /**
  * 设备主服务：无界面、后台常驻（START_STICKY）。
@@ -68,7 +71,7 @@ class AgentService : Service() {
      * 25 秒，随后发的重启排在其后，服务端看到的仍是超时，而那一次重启其实一次都没执行。
      */
     private val terminatingExecutor = Executors.newSingleThreadExecutor()
-    private var otaCheckFuture: java.util.concurrent.ScheduledFuture<*>? = null
+    private var otaCheckFuture: ScheduledFuture<*>? = null
     private var otaUpdater: OtaUpdater? = null
     private lateinit var client: GatewayClient
     private lateinit var sender: DoorSnapshotSender
@@ -149,13 +152,13 @@ class AgentService : Service() {
 
         override fun onMessage(envelope: Envelope) {
             when (envelope.type) {
-                "door.snapshot_ack" -> worker.execute {
+                MessageTypes.DOOR_SNAPSHOT_ACK -> worker.execute {
                     sender.onAcked(envelope.payload.optString("snapshot_id"), client)
                 }
 
-                "session.command" -> dispatchCommand(envelope)
+                MessageTypes.SESSION_COMMAND -> dispatchCommand(envelope)
 
-                "config.update" -> applyConfig(envelope)
+                MessageTypes.CONFIG_UPDATE -> applyConfig(envelope)
 
                 // 调试桥也要离开主线程：openAdbBridge 里的 setprop / stop adbd / start adbd
                 // 是同步 shell 调用，closeAdbBridge 的关闭回调里还藏着一条——两条都会把
@@ -164,7 +167,7 @@ class AgentService : Service() {
                 // 与 device.restart/uninstall 不再互斥（那两个走 terminatingExecutor）：
                 // 重启会打断正在进行的调试桥字节流，而重启的用途本就是"设备已经不通了"，
                 // 那时打断一条调试桥不是代价。
-                "bridge.open" -> maintenanceExecutor.execute {
+                MessageTypes.BRIDGE_OPEN -> maintenanceExecutor.execute {
                     // 这两条不产生命令结果（服务端发出即返回，不等答复），但崩了必须留痕：
                     // 静默失败会让服务端一直等一个永远连不上来的设备，而日志里什么都没有
                     try {
@@ -174,7 +177,7 @@ class AgentService : Service() {
                     }
                 }
 
-                "bridge.close" -> maintenanceExecutor.execute {
+                MessageTypes.BRIDGE_CLOSE -> maintenanceExecutor.execute {
                     try {
                         closeAdbBridge("server requested")
                     } catch (e: Throwable) {
@@ -182,7 +185,7 @@ class AgentService : Service() {
                     }
                 }
 
-                "ota.upgrade_available" -> {
+                MessageTypes.OTA_UPGRADE_AVAILABLE -> {
                     // 实时推送：立即触发一次检查（自动化期间 OtaUpdater 自行推迟）
                     worker.execute { otaUpdater?.checkAndInstall() }
                 }
@@ -222,7 +225,7 @@ class AgentService : Service() {
         //
         // 用 rejected 而不是 failed：被拒的命令**没有产生任何副作用**，服务端据此可以
         // 安全重试；failed 意味着可能已经改了一半。
-        val checkpoint = System.nanoTime() / 1_000_000
+        val checkpoint = Uptime.nowMs()
         val timeoutMs = payload.optLong("timeout_ms", 0L)
         CommandFactory.create(action, params, commandId)?.let {
             scheduler.enqueue(it, checkpoint + timeoutMs)
@@ -263,7 +266,7 @@ class AgentService : Service() {
         // 看门狗间隔变更：重建监视器与看门狗
         startWatchdog()
         restartDoorMonitor()
-        client.send("config.ack", JSONObject().put("revision", revision), replyTo = envelope.id)
+        client.send(MessageTypes.CONFIG_ACK, JSONObject().put("revision", revision), replyTo = envelope.id)
         deviceLog.lifecycle("config.applied", "revision=$revision")
         Log.i(TAG, "config applied revision=$revision heartbeat=${RuntimeConfig.heartbeatIntervalS}s")
     }
@@ -280,7 +283,7 @@ class AgentService : Service() {
                     if (client.isReady()) {
                         val payload = JSONObject().put("version", version)
                             .put("stage", stage).put("detail", detail)
-                        client.send("ota.progress", payload)
+                        client.send(MessageTypes.OTA_PROGRESS, payload)
                     }
                 },
             )
@@ -290,7 +293,7 @@ class AgentService : Service() {
             { worker.execute { otaUpdater?.checkAndInstall() } },
             FIRST_OTA_CHECK_DELAY_S,
             RuntimeConfig.otaCheckIntervalS.toLong(),
-            java.util.concurrent.TimeUnit.SECONDS,
+            TimeUnit.SECONDS,
         )
     }
 
@@ -377,7 +380,7 @@ class AgentService : Service() {
             TAG,
             "command result: id=${outcome.commandId} status=${outcome.status} reason=${outcome.reasonCode}",
         )
-        client.send("session.command_result", payload, replyTo = outcome.commandId)
+        client.send(MessageTypes.SESSION_COMMAND_RESULT, payload, replyTo = outcome.commandId)
     }
 
     /**
@@ -404,7 +407,7 @@ class AgentService : Service() {
         val intervalMs = RuntimeConfig.watchdogIntervalS * 1000
         alarm.setExact(
             AlarmManager.ELAPSED_REALTIME_WAKEUP,
-            SystemClock.elapsedRealtime() + intervalMs,
+            Uptime.nowMs() + intervalMs,
             pending,
         )
     }

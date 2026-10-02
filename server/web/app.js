@@ -3,18 +3,17 @@
  *
  * ## 目录结构
  *
- * - `core/` —— 基础设施，**每样只有一份**：请求封装、状态、DOM 助手、时间同步、
+ * - `core/` —— 基础设施，每样只有一份：请求封装、状态、DOM 助手、时间同步、
  *   结果呈现。视图不直接碰 `fetch`，网络访问一律经 `core/api.js`。
  * - `views/` —— 一个能力域一个模块，导出 `{ id, title, mount(root), unmount? }`。
  * - `style/` —— `tokens.css` 是颜色与间距的唯一来源，其余按域分文件。
  *
- * 这里是**唯一**的装配点。加一个视图 = 在 `views/` 下加一个模块 + 在 [VIEWS] 里排
- * 一个位置，别处都不用动。导航按钮由注册表生成，不写死在 HTML 里——两处维护的
- * 导航迟早会对不上。
+ * 这里是唯一的装配点。加一个视图 = 在 `views/` 下加一个模块 + 在 [VIEWS] 里排
+ * 一个位置，别处都不用动。导航按钮由注册表生成，不写死在 HTML 里。
  *
  * `mount` 在切入时调用，`unmount` 负责停掉自己起的轮询与监听。
  */
-import { api, getToken, setToken } from './core/api.js'
+import { api, getIdentity, hasIdentity, setIdentity } from './core/api.js'
 import { fmtDateTime, fmtDuration, fmtServerTimeNow, fmtUptime } from './core/clock.js'
 import { EVENT_TYPES } from './core/contract.js'
 import { $, esc, listen, PLACEHOLDER } from './core/dom.js'
@@ -22,8 +21,10 @@ import { problemText } from './core/outcome.js'
 import { toast } from './core/toast.js'
 import {
   currentDevice,
+  currentRuntime,
   emit,
   refreshDevices,
+  refreshRuntime,
   selectDevice,
   upsertDevice,
   setDoors,
@@ -43,15 +44,14 @@ import { releasesView } from './views/releases.js'
 /**
  * 运行时报错直接弹提示。
  *
- * 现场用平板或手机打开时没有控制台，报错若不落到页面上，表现只是"某个按钮没反应"，
- * 无从判断是脚本挂了还是后端没回。异步失败（`unhandledrejection`）同样要接——
- * `fetch` 抛出的错误大多走那条路，只记进日志等于没有提示（日志区早已不存在）。
+ * 现场用平板或手机打开时没有控制台，报错若不落到页面上，表现只是"某个按钮没反应"。
+ * 异步失败（`unhandledrejection`）同样要接：`fetch` 抛出的错误大多走那条路。
  */
 window.addEventListener('error', (event) => {
-  toast(`脚本错误：${event.message}`)
+  toast(`页面运行异常：${event.message}`)
 })
 window.addEventListener('unhandledrejection', (event) => {
-  toast(`未处理的失败：${event.reason?.message || event.reason}`)
+  toast(`页面运行异常：${event.reason?.message || event.reason}`)
 })
 
 /** 视图注册表：id → 模块。顺序不代表导航顺序，导航见 [NAV_GROUPS]。 */
@@ -68,13 +68,12 @@ const VIEWS = [
 /**
  * 导航分组。数组的每一项是一组，组内相邻渲染，组间画一条分隔。
  *
- * 分的是**作用范围**，不是功能类别：
+ * 分的是作用范围，不是功能类别：
  *
- * - 前一组都作用于**当前选中的那台设备**（它的喷头现状、它的档案与命令、它的界面）；
- * - 后一组是**全局的**，作用范围跨越所有设备（改配置、管权限、发版本、查流水）。
+ * - 前一组都作用于当前选中的那台设备（它的喷头现状、它的档案与命令、它的界面）；
+ * - 后一组是全局的，作用范围跨越所有设备（改配置、管权限、发版本、查流水）。
  *
- * 这么分的实际意义在设备选择器上：切了设备，前一组的内容跟着换，后一组不换。七个按钮
- * 等宽平铺时看不出这条界线，而"我接下来点的东西是不是针对这台设备"，是现场最常要判断的。
+ * 实际意义在设备选择器上：切了设备，前一组的内容跟着换，后一组不换。
  */
 const NAV_GROUPS = [
   ['overview', 'devices', 'inspector'],
@@ -149,14 +148,14 @@ function renderDevicePicker() {
  * 顺序即重要程度：先认身份（名称、ID），再看它能不能收命令（在线、信任、跑了多久），
  * 最后是排障要拿去搜日志的那几项（版本、系统、能力、最后上报、来源 IP）。
  *
- * 面板里的每一行都会渲染，缺值给占位符——不按有没有值增减行数。行数忽多忽少会让人
- * 以为"这一项没有了"，而实际情况是"这一项没值"，两者要分得开。
+ * 面板里的每一行都会渲染，缺值给占位符——不按有没有值增减行数，行数忽多忽少会让人
+ * 分不清"这一项没有了"与"这一项没值"。
  */
 /**
  * 设备时钟偏差的说明文案。
  *
- * 存的是"服务端时刻减设备时刻"，所以**负值表示设备快**——那个符号方向反直觉，界面上
- * 必须把它翻成一句能直接读的话，而不是把数字摊出来。
+ * 存的是"服务端时刻减设备时刻"，所以负值表示设备快——那个符号方向反直觉，界面上
+ * 必须把它翻成一句能直接读的话。
  *
  * 秒级以内算已对齐：校正本身的目标就是这个量级（设备 date 只精确到秒，加上传输延迟，
  * 实测残差约 0.6 秒）。
@@ -169,28 +168,39 @@ function skewText(seconds) {
 }
 
 function renderDeviceInfo() {
-  const device = currentDevice()
-  const rows = device
+  const summary = currentDevice()
+  const diag = currentRuntime()
+  const caps = diag ? diag.capabilities || [] : null
+  // 诊断字段（版本、IP、时钟偏差）只在持有管理身份时可得；缺失给占位符，
+  // 不隐藏行——行数忽多忽少会让人以为"这一项没有了"
+  const rows = summary
     ? [
-        ['名称', device.name || PLACEHOLDER],
-        ['设备 ID', device.device_id],
-        ['状态', device.online ? '在线' : '离线'],
-        ['信任', device.trusted ? '已信任' : '未信任'],
-        ['应用版本', `${device.app_version}（版本号 ${device.version_code}）`],
-        ['系统版本', device.os_version || PLACEHOLDER],
-        ['能力位', `${(device.capabilities || []).length} 项`],
-        ['已运行', fmtUptime(device.booted_at)],
-        ['时钟偏差', skewText(device.clock_skew_s)],
-        ['最后上报', fmtDateTime(device.last_seen_at)],
-        ['来源 IP', device.last_ip || PLACEHOLDER],
+        ['名称', summary.name || PLACEHOLDER],
+        ['设备 ID', summary.device_id],
+        ['状态', summary.online ? '在线' : '离线'],
+        ['信任', diag ? (diag.trusted ? '已信任' : '未信任') : PLACEHOLDER],
+        ['应用版本', diag ? `${diag.app_version}（版本号 ${diag.version_code}）` : PLACEHOLDER],
+        ['系统版本', diag ? diag.os_version || PLACEHOLDER : PLACEHOLDER],
+        // 空数组是"设备未声明能力集"（升级前的旧版本设备），不是"没有能力"，措辞要分开
+        ['能力位', caps ? (caps.length > 0 ? `${caps.length} 项` : '未声明') : PLACEHOLDER],
+        ['已运行', diag ? fmtUptime(diag.booted_at) : PLACEHOLDER],
+        ['时钟偏差', diag ? skewText(diag.clock_skew_s) : PLACEHOLDER],
+        ['最后上报', diag ? fmtDateTime(diag.last_seen_at) : PLACEHOLDER],
+        ['来源 IP', diag ? diag.last_ip || PLACEHOLDER : PLACEHOLDER],
       ]
     : [['设备', '未选择']]
 
   $('deviceInfo').innerHTML = rows
     .map(([key, value]) => {
       // "已运行"要每秒重算，标出来给 tickDeviceInfo 更新；其余几行是快照，渲染一次就够
-      const live = key === '已运行' ? ' data-uptime' : ''
-      return `<div class="kv"><span class="k">${esc(key)}</span><span class="v"${live}>${esc(value)}</span></div>`
+      const live = key === '已运行' && diag ? ' data-uptime' : ''
+      // 只报数量不够排障："命令被 device.unsupported_action 拒绝"时要对着设备声明逐项核对。
+      // 动作名照原样显示，与审计页同一原则——翻译成中文反而搜不到
+      const capsHtml =
+        key === '能力位' && caps && caps.length > 0
+          ? `<div class="info-caps">${caps.map((cap) => `<span class="badge">${esc(cap)}</span>`).join('')}</div>`
+          : ''
+      return `<div class="kv"><span class="k">${esc(key)}</span><span class="v"${live}>${esc(value)}</span></div>${capsHtml}`
     })
     .join('')
 }
@@ -205,8 +215,8 @@ function tickDeviceInfo() {
   const panel = $('deviceInfo')
   if (panel.hidden) return
   const cell = panel.querySelector('[data-uptime]')
-  const device = currentDevice()
-  if (cell && device) cell.textContent = fmtUptime(device.booted_at)
+  const diag = currentRuntime()
+  if (cell && diag) cell.textContent = fmtUptime(diag.booted_at)
 }
 
 /** 开合设备信息面板。按钮的 `aria-expanded` 跟着走，读屏才知道它是收起的还是展开的。 */
@@ -233,7 +243,12 @@ function bindTopbar() {
 
   subscribe('devices', () => {
     renderDevicePicker()
-    // 面板开着时设备清单变了（改名、信任位、上下线），内容要跟着变，否则看的是旧的
+    // 面板开着时设备清单变了（改名、上下线），内容要跟着变，否则看的是旧的
+    if (!$('deviceInfo').hidden) renderDeviceInfo()
+  })
+
+  subscribe('runtime', () => {
+    // 运维档案到达（或因身份缺失清空）时刷新诊断面板
     if (!$('deviceInfo').hidden) renderDeviceInfo()
   })
 
@@ -256,9 +271,9 @@ function bindTopbar() {
     if (event.key === 'Escape') toggleDeviceInfo(false)
   })
 
-  // 设备相关的接口都要 X-Ops-Token，没它连清单都读不到——所以入口放在顶栏，
-  // 而不是某个视图里（那是全局凭证，不是某个功能的设置）
-  listen($('btnToken'), 'click', askForToken)
+  // 管理面接口都要 X-Identity（admin 能力位的身份），没它连清单都读不到——所以
+  // 入口放在顶栏，而不是某个视图里（那是全局凭证，不是某个功能的设置）
+  listen($('btnIdentity'), 'click', askForIdentity)
 
   // 顶部显示服务端时间，便于与设备日志对齐
   setInterval(() => {
@@ -281,22 +296,18 @@ function streamUrl() {
 /**
  * 处理服务端推送。
  *
- * 消息形状是 `{ type, payload }`（见 `server/app/core/events.py`）。服务端只推变化，
- * 所以首次进页面必须先 REST 拉一次全量。
+ * 消息形状是 `{ type, payload }`（见 `server/app/core/events.py`）。
  */
 function handle(message) {
   switch (message.type) {
     case EVENT_TYPES.DOOR_UPDATE:
-      // 推送里只有"哪几个喷头变了"（`door_no` / `state` / `card_no`），**不是完整
-      // 现态**——分配时间、学号都不在其中。拿它替换列表会让喷头卡片上的明细一夜之间
-      // 全变成占位符，所以收到通知后重新拉一次全量。
-      scheduleDoorRefresh()
+      // 载荷是该设备的完整现态行（与 GET /doors 同构）：是当前选中设备的就直接
+      // 整体替换，不回拉。不是当前设备的（管理台可能多开设备视图）忽略。
+      if (message.payload.device_id === store.deviceId) setDoors(message.payload.doors)
       break
 
     case EVENT_TYPES.DEVICE_UPDATE:
-      // payload 是**完整的设备记录**，直接替换本地那一条。上线、下线、改名、调整信任
-      // 位都走这一个事件——它们是同一个问题（这台设备的档案变了）的四种情形，拆成多个
-      // 事件名只会让这里多几个做同样事情的分支。
+      // payload 是精简档案（名称、在线），两份设备状态里属于该设备的那条同步更新。
       upsertDevice(message.payload)
       break
 
@@ -316,9 +327,18 @@ function connect() {
     return
   }
 
+  let everConnected = false
+
   socket.onopen = () => {
     clearTimeout(reconnectTimer)
     setStreaming(true)
+    // 断线期间错过的通知无法补发（通知不含状态）：按"通知+重拉"模型的标准
+    // 行为，重连成功的第一个动作是重拉权威快照；首次连接由 main() 负责，不重复
+    if (everConnected) {
+      refreshDevicesSafely()
+      refreshDoors()
+    }
+    everConnected = true
   }
   socket.onmessage = (event) => {
     try {
@@ -338,65 +358,61 @@ function connect() {
 // ── 启动 ───────────────────────────────────────────────────
 
 /**
- * 提示填写访问令牌。
+ * 提示填写身份标识。
  *
- * 顶栏按钮与"收到 401"两条路径共用它。填完立刻重拉设备与喷头——否则用户填了令牌
+ * 顶栏按钮与"收到 401"两条路径共用它。填完立刻重拉设备与喷头——否则用户填了标识
  * 还得自己再刷一次页面。
  */
-function askForToken() {
-  const input = window.prompt('访问令牌（X-Ops-Token）', getToken())
+function askForIdentity() {
+  const input = window.prompt('身份标识（X-Identity，须具备管理能力位）', getIdentity())
   if (input === null) return
-  setToken(input.trim())
-  toast(input.trim() ? '令牌已保存' : '令牌已清除')
+  setIdentity(input.trim())
+  toast(input.trim() ? '身份标识已保存' : '身份标识已清除')
   refreshDevicesSafely()
+  refreshRuntimeSafely()
   refreshDoors()
 }
 
 /**
- * 处理鉴权失败：说明原因并请用户补令牌。
+ * 处理鉴权失败：说明原因并请用户补身份标识。
  *
- * **必须集中处理**。此前每个调用方各自 `catch`，而 401 与其它失败一样只留下一个空列表
- * ——看起来就是"设备离线、刷新也没用"，真正的原因（缺令牌）一个字都看不到。
+ * 集中处理：401 若按普通失败只留下一个空列表，真正的原因（缺身份）一个字都看不到。
  * 返回 true 表示已处理，调用方不必再自己提示。
  */
 function handleAuthError(error) {
   if (error?.status !== 401) return false
-  toast('访问令牌缺失或无效，请在顶栏填写')
-  askForToken()
+  toast('身份缺失或未授权，请在顶栏填写身份标识')
+  askForIdentity()
   return true
+}
+
+/**
+ * 刷新运维档案（admin）。仅在已填身份时发起；未填身份不打扰——管理数据
+ * 的加载失败不该打断公开视图，也不该一开页就弹输入框。
+ */
+async function refreshRuntimeSafely() {
+  if (!hasIdentity()) return
+  try {
+    await refreshRuntime()
+  } catch (error) {
+    if (!handleAuthError(error)) toast(`获取运维档案 · ${problemText(error)}`)
+  }
 }
 
 async function refreshDoors() {
   try {
     setDoors(await api.doors(store.deviceId))
   } catch (error) {
-    // 401 由 handleAuthError 引导补令牌；其余错误此前只进日志，而日志区已不存在，
-    // 于是页面只剩一个空列表、看起来跟"设备离线"一样——现在弹出来
+    // 401 由 handleAuthError 引导补身份标识；其余错误直接弹出来，不留一个无声的空列表
     if (!handleAuthError(error)) toast(`获取喷头状态 · ${problemText(error)}`)
   }
-}
-
-/**
- * 合并短时间内的多次刷新请求。
- *
- * 设备按秒级上报，一屋子喷头同时变动会瞬间推来一串通知。逐条去拉全量既浪费往返，
- * 也会让界面在几百毫秒里反复重排；合并成一次就够了。
- */
-let refreshTimer = null
-
-function scheduleDoorRefresh() {
-  if (refreshTimer) return
-  refreshTimer = setTimeout(() => {
-    refreshTimer = null
-    refreshDoors()
-  }, 800)
 }
 
 async function refreshDevicesSafely() {
   try {
     await refreshDevices()
   } catch (error) {
-    if (!handleAuthError(error)) toast(`获取设备清单 · ${problemText(error)}`)
+    toast(`获取设备清单 · ${problemText(error)}`)
   }
 }
 
@@ -405,12 +421,13 @@ async function main() {
   bindTopbar()
   connect()
 
+  // 公开数据（设备精简清单、喷头现态）无需身份，始终加载；
+  // 运维档案仅在已填管理身份时加载，缺失不打扰。
+  // 持续更新全部由推送完成（door.update 数据承载、device.update 在场变化、
+  // 重连即重拉），不再有定期轮询。
   await refreshDevicesSafely()
   await refreshDoors()
-
-  // 设备清单与喷头现态各 30 秒兜一次：WS 断线期间也要能纠正在线状态
-  setInterval(refreshDevicesSafely, 30_000)
-  setInterval(refreshDoors, 30_000)
+  await refreshRuntimeSafely()
 }
 
 main()

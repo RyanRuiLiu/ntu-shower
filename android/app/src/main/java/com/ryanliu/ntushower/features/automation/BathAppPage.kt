@@ -6,11 +6,10 @@ package com.ryanliu.ntushower.features.automation
 
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
-import com.ryanliu.ntushower.service.A11yService
+import com.ryanliu.ntushower.core.a11y.A11yRuntime
+import com.ryanliu.ntushower.core.clock.Uptime
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.atomic.AtomicBoolean
-
-private const val TAG = "BathAppPage"
 
 /** 浴室 App 页面状态（resId 特征判定）。 */
 enum class PageState {
@@ -241,29 +240,31 @@ object BathAppPage {
             } finally {
                 // 放行等待者必须在 finally：重算失败时它们也得醒过来重新读状态，
                 // 否则会白等一整个超时。
-                A11yService.onPageRefreshed()
+                A11yRuntime.onPageRefreshed()
             }
         }
     }
 
     private fun recompute() {
-        val startedAt = System.nanoTime() / 1_000_000
+        val startedAt = Uptime.nowMs()
         val next = compute()
-        AutomationTrace.recordRefresh(System.nanoTime() / 1_000_000 - startedAt, next.state.name, next != cached)
+        AutomationTrace.recordRefresh(Uptime.nowMs() - startedAt, next.state.name, next != cached)
         if (next == cached) return
         cached = next
         Log.d(TAG, "page -> ${next.state}${if (next.message.isEmpty()) "" else " (${next.message})"}")
     }
 
     private fun compute(): PageSnapshot {
-        val a11y = A11yService.instance ?: return PageSnapshot(PageState.UNKNOWN)
-        val root = a11y.rootInActiveWindow ?: return PageSnapshot(PageState.UNKNOWN)
+        val a11y = A11yRuntime.source ?: return PageSnapshot(PageState.UNKNOWN)
+        val root = a11y.activeWindowRoot() ?: return PageSnapshot(PageState.UNKNOWN)
         try {
             return PageRules.decide(A11yProbe(root))
         } finally {
             root.recycle()
         }
     }
+
+    private const val TAG = "BathAppPage"
 }
 
 /**
@@ -304,12 +305,12 @@ private class A11yProbe(private val root: AccessibilityNodeInfo) : PageProbe {
      */
     private fun table(): Map<String, String> {
         index?.let { return it }
-        val startedAt = System.nanoTime()
+        val startedAt = Uptime.nowMs()
         val built = HashMap<String, String>()
         try {
             collect(root, built)
         } finally {
-            AutomationTrace.recordQueryTime((System.nanoTime() - startedAt) / 1_000_000)
+            AutomationTrace.recordQueryTime(Uptime.nowMs() - startedAt)
         }
         index = built
         return built

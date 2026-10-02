@@ -1,12 +1,11 @@
 /**
  * 命令结果的呈现：状态的中文名，以及"该显示哪句话"。
  *
- * 概览、设备、审计三个视图都要显示 `session.command_result`，各写一份必然分叉——
- * 历史上它们对同一个 `failed` 就给出过两种说法。
+ * 概览、设备、审计三个视图都要显示 `session.command_result`，集中在这里避免各写一份。
  *
  * ## 为什么不显示 reason_code
  *
- * `reason_code` 是**给机器分支用的**（登记表在服务端的 `core/reason_codes.py`），
+ * `reason_code` 是给机器分支用的（登记表在服务端的 `core/reason_codes.py`），
  * 拿它当提示会把 `device.a11y_unavailable` 这种字符串摊在用户面前。人看的是
  * `terminal_message`，服务端已保证它非空（见 `sessions/service.py` 的 `_with_message`）。
  *
@@ -41,8 +40,8 @@ export function statusBadgeClass(status) {
   return OUTCOME_BADGE[status] || 'badge-red'
 }
 
-/** 状态 → 显示前缀。与 [OUTCOME_STATUS] 分开：那个是**状态名**（用在表里），
- * 这个是**已经发生的事**（用在一句话的开头）。"被拒"当句子前缀不通顺。 */
+/** 状态 → 显示前缀。与 [OUTCOME_STATUS] 分开：那个是状态名（用在表里），
+ * 这个是已经发生的事（用在一句话的开头）。"被拒"当句子前缀不通顺。 */
 const OUTCOME_PREFIX = {
   ok: '已完成',
   failed: '失败',
@@ -53,9 +52,8 @@ const OUTCOME_PREFIX = {
 /**
  * 一条结果里最该显示给用户的那句话。
  *
- * 格式统一为 `前缀 · 说明`，**成功与失败都一样**。此前只有成功带前缀，失败直接显示
- * 设备给的原文——那句话是设备从浴室 App 界面上读来的（"校验失败"、"请使用1号喷头"），
- * 单看它分不出这次到底成没成，也分不出话是谁说的。
+ * 格式统一为 `前缀 · 说明`，成功与失败都一样：设备给的原文（浴室 App 界面上的话）
+ * 单看它分不出这次到底成没成。
  *
  * `terminal_message` 为空时只显示前缀。
  */
@@ -78,9 +76,6 @@ export function problemText(error) {
 
 /**
  * 往某个结果区写一句话。
- *
- * 原先概览与设备两个视图各写了一份逐字相同的实现——这类东西一旦有两份，改一处忘另一处
- * 只是时间问题，而表现是"两个页面对同一件事的说法不一样"。
  *
  * `kind` 取 `ok` / `err` / `info`，与样式表的 `.result-*` 对应。
  */

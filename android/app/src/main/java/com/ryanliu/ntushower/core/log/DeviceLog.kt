@@ -29,7 +29,7 @@ import java.io.File
  *
  * 写失败一律吞掉（[CappedLogFile] 的约定）：日志比不上命令本身重要。
  */
-class DeviceLog(dir: File, private val maxBytes: Long = MAX_BYTES) {
+class DeviceLog(dir: File, private val maxBytes: Long = CappedLogFile.DEFAULT_MAX_BYTES) {
     private val file = File(dir, FILE_NAME)
 
     /** 命令被受理（重复接收记 [duplicate]，见 AgentService 的幂等接收）。 */
@@ -93,8 +93,5 @@ class DeviceLog(dir: File, private val maxBytes: Long = MAX_BYTES) {
 
     companion object {
         const val FILE_NAME = "device.log"
-
-        /** 与 crash.log / automation.log 同一量级：留最近几轮现场，不撑爆存储。 */
-        const val MAX_BYTES = 256 * 1024L
     }
 }

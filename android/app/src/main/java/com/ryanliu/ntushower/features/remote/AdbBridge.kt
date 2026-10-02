@@ -9,6 +9,9 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
+import java.net.InetSocketAddress
+import java.net.Socket
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * ADB 桥接会话（设备侧）：
@@ -30,14 +33,14 @@ class AdbBridge(
 
     private val client: OkHttpClient = HttpClientFactory.create(appContext, readTimeoutSeconds = 0)
     private var ws: WebSocket? = null
-    private var adbSocket: java.net.Socket? = null
+    private var adbSocket: Socket? = null
 
     /** 桥接建立成功（两端都已连通）。 */
     @Volatile
     var ready = false
         private set
 
-    private val closed = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val closed = AtomicBoolean(false)
 
     /** 启动：先连 adbd（重试），再连桥接 WS，成功后开始互泵。 */
     fun start() {
@@ -67,11 +70,11 @@ class AdbBridge(
     }
 
     /** 连接本地 adbd：start adbd 后端口就绪需要一点时间，按旧项目实测节奏重试。 */
-    private fun connectLocalAdb(): java.net.Socket? {
+    private fun connectLocalAdb(): Socket? {
         for (attempt in 1..RETRY_MAX) {
             try {
-                val socket = java.net.Socket()
-                socket.connect(java.net.InetSocketAddress("127.0.0.1", LOCAL_ADB_PORT), 2000)
+                val socket = Socket()
+                socket.connect(InetSocketAddress("127.0.0.1", LOCAL_ADB_PORT), 2000)
                 socket.soTimeout = 0
                 return socket
             } catch (e: Exception) {

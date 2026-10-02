@@ -59,6 +59,9 @@ object ReasonCodes {
     /** 服务端同时处理的命令过多，请稍后再试 */
     const val SERVER_OVERLOADED = "server.overloaded"
 
+    /** 调试通道端口绑定失败 */
+    const val SERVER_PORT_BIND_FAILED = "server.port_bind_failed"
+
     /** 命令超时，设备未在时限内给出结果 */
     const val COMMAND_DEADLINE_EXCEEDED = "command.deadline_exceeded"
 

@@ -9,6 +9,7 @@ import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.storage.AgentDatabase
 import com.ryanliu.ntushower.transport.GatewayClient
+import com.ryanliu.ntushower.transport.MessageTypes
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
@@ -129,7 +130,7 @@ class DoorSnapshotSender(context: Context) {
                 continue
             }
             Log.d(TAG, "sending snapshot ${row.snapshotId}")
-            gateway.send("door.snapshot", payload)
+            gateway.send(MessageTypes.DOOR_SNAPSHOT, payload)
             return
         }
     }

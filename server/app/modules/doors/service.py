@@ -1,27 +1,15 @@
-"""喷头状态派生与落库：t_doorlist 解析规则的单一来源（protocol/schema/）。
+"""喷头状态派生与洗浴会话维护：t_doorlist 解析规则的单一来源。
 
-派生优先级：repair > disabled > bathing > paused > waiting > selected > free。
-判定"使用中"的真据是 cardno/accno 与 inTime/closeTime 组合，status 字段不可靠。
+状态派生优先级：repair > disabled > bathing > paused > waiting > selected > free。
+"使用中"的判据是 cardno 与 accno 的组合，status 字段不可靠（详见 derive_state）。
 
-## 会话是怎么记下来的
+洗浴会话由快照序列推导，设备只上报快照、不报事件。两条规则：
+- 边界取自状态的进出：进入占用态开会话，离开即结束（占用态见 OCCUPIED_STATES）；
+- 里程碑取自字段：分配、开阀、出水时长直接由协议字段算出。字段是幂等的，任何
+  一帧带着 inTime 都能把 opened_at 补回来，不依赖去抖后可能漏掉的转移帧。
 
-设备上报的是**快照**（每个喷头此刻的字段），不是事件流——浴室 App 也不会通知"某人洗完了"。
-所以洗浴会话由服务端从快照序列里推导，两条规矩：
-
-**边界取自状态的进出**：门进入占用态即开会话，离开即结束。占用态见 `OCCUPIED_STATES`，
-与旧系统 `t_doorlist` 里 `openTime <> ''` 的语义等价。
-
-**里程碑取自字段**：分配时刻、开阀时刻、累计出水时长都直接由协议字段算出，不依赖
-"观察到某个状态转移"。设备端有上报去抖，会合并短时间内的多次变化，漏一帧转移就永久
-丢一次记录；而字段是幂等的——任何一帧带着 `inTime` 都能把 `opened_at` 补回来。
-
-两个字段的实时语义容易看错（据旧系统逆向确认）：
-
-- `inTime` 是**本次**开阀时刻，暂停时被清空、恢复时重写，不是"首次开阀"；
-- `bathTime` **只在暂停那一刻**累加本次出水，出水期间不动，结束时整体归零。
-
-所以"这次洗了多久"必须实时算（见 `_elapsed_flow_s`），直接取 `bathTime` 会在
-"正在洗浴时直接出门"那一帧拿到 0。
+两个字段的实时语义：inTime 是本次开阀时刻，暂停时清空、恢复时重写；bathTime
+只在暂停那一刻累加本次出水，出水期间不动，结束时归零。
 """
 
 from sqlite3 import Row
@@ -29,46 +17,34 @@ from sqlite3 import Row
 from app.core import events, reason_codes
 from app.core.clock import now_rfc3339, seconds_between
 from app.core.device_clock import correct_rfc3339
-from app.core.protocol import JsonObject
+from app.core.protocol import JsonObject, as_int
 from app.modules.devices import service as devices_service
 from app.modules.doors import repository
 from app.modules.doors.schemas import OCCUPIED_STATES, DoorState, DoorView
 
-# t_doorlist.status 原始值（设备上报的 int，不可靠，仅作辅助判据）
+# t_doorlist.status 的原始值（设备上报的 int，仅作辅助判据）
 RAW_STATUS_REPAIR = 1
 RAW_STATUS_SELECTED = 2
 RAW_STATUS_DISABLED = 3
 
 
 def list_doors(device_id: str | None = None) -> list[DoorView]:
-    """喷头现态列表。**两个列表端点与 shadow 都走这里**，不再各自调仓储。
-
-    联表拿到的只有所属设备的档案；`device_online` 由内存连接表填入——那是它的唯一来源，
-    档案表里没有这个列（见 `devices/service` 的模块注释）。
-    """
+    """喷头现态列表。两个列表端点与 shadow 都走这里；device_online 由
+    core/connections 的连接表填入。"""
     doors = repository.list_doors(device_id)
     for door in doors:
         door["device_online"] = devices_service.is_online(door["device_id"])
     return doors
 
 
-def _safe_int(value: object, default: int = 0) -> int:
-    """把设备上报的 JSON 标量转成 int；类型不符或不可转换时取默认值。"""
-    if isinstance(value, (int, float, str)):
-        try:
-            return int(value)
-        except (ValueError, TypeError):
-            return default
-    return default
-
-
 def derive_state(door: JsonObject) -> DoorState:
-    status = _safe_int(door.get("status_raw"))
-    card_no = _safe_int(door.get("card_no"))
+    """由一帧设备快照派生喷头状态（判据见模块注释）。"""
+    status = as_int(door.get("status_raw"))
+    card_no = as_int(door.get("card_no"))
     acc_no = str(door.get("acc_no") or "")
     in_time = door.get("in_time")
     close_time = door.get("close_time")
-    bath_time = _safe_int(door.get("bath_time_s"))
+    bath_time = as_int(door.get("bath_time_s"))
 
     if status == RAW_STATUS_REPAIR:
         return DoorState.REPAIR
@@ -88,7 +64,7 @@ def derive_state(door: JsonObject) -> DoorState:
 
 
 def process_snapshot(device_id: str, payload: JsonObject) -> JsonObject:
-    """处理 door.snapshot：派生状态 → diff 记事件 → 更新现态 → 维护洗浴会话。"""
+    """处理 door.snapshot：派生状态、diff 记事件、更新现态、维护洗浴会话。"""
     doors = payload.get("doors")
     if not isinstance(doors, list) or not doors:
         return {
@@ -102,12 +78,11 @@ def process_snapshot(device_id: str, payload: JsonObject) -> JsonObject:
     occurred_at = now_rfc3339()
     prev_live = repository.get_all_live(device_id)
     processed = 0
-    changed: list[JsonObject] = []
 
     for raw_door in doors:
         if not isinstance(raw_door, dict):
             continue
-        door_no = _safe_int(raw_door.get("door_no"))
+        door_no = as_int(raw_door.get("door_no"))
         if door_no <= 0:
             continue
         state = derive_state(raw_door)
@@ -127,15 +102,17 @@ def process_snapshot(device_id: str, payload: JsonObject) -> JsonObject:
                 door_no,
                 old_state,
                 state,
-                {"card_no": _safe_int(door.get("card_no"))},
+                {"card_no": as_int(door.get("card_no"))},
             )
 
         repository.upsert_door_live(device_id, door_no, state.value, door, occurred_at)
         _maintain_session(device_id, door_no, state, door, occurred_at)
-        changed.append({"door_no": door_no, "state": state, "card_no": _safe_int(door.get("card_no"))})
         processed += 1
 
-    events.publish(events.DOOR_UPDATE, {"device_id": device_id, "doors": changed, "at": occurred_at})
+    # 载荷是该设备的完整现态行，与 GET /doors 同一 service 路径产出（构造上同源）。
+    # WS 单连接有序投递，数据承载推送是行业标准（Supabase/Firebase 同型）：客户端
+    # 收到后直接应用，请求量与事件量解耦；无变化的上报也照发，充当状态再同步。
+    events.publish(events.DOOR_UPDATE, {"device_id": device_id, "at": occurred_at, "doors": list_doors(device_id)})
     return {"status": "ok", "processed": processed}
 
 
@@ -147,17 +124,11 @@ def _as_text(value: object) -> str | None:
 def _elapsed_flow_s(door: JsonObject, now: str) -> int:
     """截至此刻的累计出水秒数。
 
-    设备的 `bathTime` **只在暂停那一刻**把本次出水累加进去：出水期间它保持不动，
-    会话结束（用户出门或四种自动关阀）时又整体归零。所以必须实时算：
-
-    - 正在出水（`inTime` 非空）→ `bathTime + (now - inTime)`
-    - 暂停中（`inTime` 为空）  → `bathTime`
-
-    与旧系统 `BathMainActivity` 的 `bathtimetmp = |inTime - nowTime| + bathTime`
-    是同一个公式。不这么算，「正在洗浴时直接刷卡出门」那一帧取到的会是 0——那次
-    真实出水就被记成 0 秒了。
+    设备的 bathTime 只在暂停那一刻累加本次出水，结束时整体归零，本身不单调，
+    必须实时计算：正在出水（inTime 非空）为 bathTime 加 now 减 inTime；暂停中
+    就是 bathTime。不这样算，"正在洗浴时直接出门"那一帧取到的会是 0。
     """
-    accumulated = _safe_int(door.get("bath_time_s"))
+    accumulated = as_int(door.get("bath_time_s"))
     in_time = str(door.get("in_time") or "")
     if not in_time:
         return accumulated
@@ -165,18 +136,11 @@ def _elapsed_flow_s(door: JsonObject, now: str) -> int:
 
 
 def _maintain_session(device_id: str, door_no: int, state: DoorState, door: JsonObject, now: str) -> None:
-    """维护洗浴会话：**边界取自状态的进出，里程碑取自字段**。
+    """维护洗浴会话：边界取自状态的进出，里程碑取自字段。
 
-    四类情形在这里合流：
-
-    1. 进入占用态 → 开会话（`assigned_at` 取设备的 `openTime`，即刷卡入门时刻）；
-    2. 占用态内部迁移 → 推进里程碑，`opened_at` / `flow_s` 都只增不减；
-    3. 离开占用态 → 结束会话并判定原因；
-    4. 不涉及会话的迁移 → 门只是在可用性之间切换，什么都不做。
-
-    里程碑之所以从字段取而不从"观察到的转移"取：设备端有上报去抖，会合并短时间内的
-    多次变化，漏掉一帧转移就永久丢一次记录。字段是幂等的——任何一帧带着 `inTime`，
-    `touch_session` 都能把 `opened_at` 补上。
+    四类情形：进入占用态开会话（assigned_at 取设备的 openTime）；占用态内部迁移
+    推进里程碑（opened_at 与 flow_s 只增不减）；离开占用态结束会话；与占用无关的
+    迁移不涉及会话。
     """
     open_session = repository.get_open_session(device_id, door_no)
 
@@ -185,12 +149,12 @@ def _maintain_session(device_id: str, door_no: int, state: DoorState, door: Json
             _close(open_session, door, now)
         return
 
-    card_no = _safe_int(door.get("card_no"))
+    card_no = as_int(door.get("card_no"))
     if open_session is None:
         assigned_at = str(door.get("open_time") or "") or now
         session_id = repository.open_session(device_id, door_no, card_no, str(door.get("cert_no") or ""), assigned_at)
-    elif _safe_int(open_session["card_no"]) != card_no:
-        # 占用者中途变化：先把旧账结掉再开新账，否则两个人的时长会并进同一条记录。
+    elif as_int(open_session["card_no"]) != card_no:
+        # 占用者中途变化：先结旧账再开新账，避免两个人的时长并进同一条记录
         _close(open_session, door, now)
         session_id = repository.open_session(device_id, door_no, card_no, str(door.get("cert_no") or ""), now)
     else:
@@ -200,13 +164,11 @@ def _maintain_session(device_id: str, door_no: int, state: DoorState, door: Json
 
 
 def _close(open_session: Row, door: JsonObject, now: str) -> None:
-    """结束一次会话。
+    """结束一次会话：先推进里程碑再收尾。
 
-    **先推进里程碑再收尾**：结束这一帧本身可能带着新的 `inTime`（例如刚开阀就出门），
-    不补这一下会让 `opened_at` 丢掉，那次使用随即被判成"从没出过水"。
-
-    不记结束原因——浴室 App 在"用户主动出门"和三种超时释放下写的是同一套清零语句，
-    服务端没有依据区分（详见 `repository.close_session`）。
+    结束这一帧本身可能带着新的 inTime（例如刚开阀就出门），不补这一下会让
+    opened_at 丢失，那次使用被判成"从没出过水"。不记结束原因：浴室 App 在主动
+    出门与超时释放下写同一套清零语句，服务端没有依据区分，硬分就是编造。
     """
     session_id = int(open_session["id"])
     repository.touch_session(session_id, str(door.get("in_time") or ""), _elapsed_flow_s(door, now))

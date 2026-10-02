@@ -1,41 +1,31 @@
-"""SQLite 连接管理：每线程独立连接，WAL + busy_timeout。
+"""SQLite 连接管理：每线程独立连接，WAL 与 busy_timeout。
 
-为什么是每线程连接而非进程内单连接：Python 的 sqlite3.Connection 不是线程安全的，
-而 FastAPI 会把同步路由与 run_in_threadpool 调用分发到工作线程池。共享单连接时
-"execute → commit" 两步之间会被其他线程插入，造成事务边界错乱（数据一致性问题，
-非理论风险）。SQLite 官方建议每个线程使用各自的连接，写冲突交由 WAL +
-busy_timeout 仲裁。
+Python 的 sqlite3.Connection 非线程安全，而同步路由与 run_in_threadpool 会把
+调用分发到工作线程；每线程持有独立连接，写冲突交由 WAL 与 busy_timeout 仲裁。
+连接登记在全局表而非 threading.local：测试需要在任意线程关闭全部连接。
 
-连接登记在全局表中（而非 threading.local）：测试隔离需要在任意线程关闭全部连接，
-threading.local 只能清理当前线程自见的副本。
+表结构由各领域仓储的 init_tables 建立，本模块只负责连接生命周期与读写出口。
 
-各领域模块持有自己的表结构（modules/*/repository.py 的 init_tables），
-本模块只负责连接生命周期。
+## 库内命名约定
 
-## 命名约定
-
-新增表与字段一律照此。**一个概念只有一个名字**，禁止为它造第二个——库里出现两个
-叫法的同一件事，查询和维护成本会翻倍。
-
-- 表名：单数 snake_case，带领域前缀避免歧义（`door_live`、`ota_release`、`device_config`）
-- 字段名：snake_case；**时间字段一律 `_at` 后缀**（`reported_at`、`applied_at`、`last_seen_at`）
-- 时间取值：一律 RFC 3339 UTC 毫秒字符串，唯一来源是 `core/clock.py`
-- 主键：自增用 `id`（不叫 `seq`、不叫 `pk`）
-- 索引：`idx_<表>_<列>`
-
-**唯一例外**是协议映射表 `door_live`：它保留协议字段名（`open_time` 而非
-`opened_at`）——那些列就是设备上报的字段，改名只会让人对不上协议。
+表名单数 snake_case 带领域前缀；字段名 snake_case，时间字段一律 _at 后缀，取值
+一律 RFC 3339 UTC 毫秒字符串（core/clock 是唯一来源）；自增主键叫 id；索引叫
+idx_<表>_<列>。唯一例外是协议映射表 door_live：列名保留设备上报的协议字段名，
+改名会与协议对不上。
 """
 
 import contextlib
 import sqlite3
 import threading
+from collections.abc import Sequence
 from pathlib import Path
+from sqlite3 import Row
+from typing import cast
 
 from .config import settings
 
 _lock = threading.Lock()
-# (线程标识, 数据库路径) → 连接。键含线程标识，故同一路径在不同线程各有连接。
+# (线程标识, 数据库路径) → 连接。键含线程标识，同一路径在不同线程各有连接。
 _conns: dict[tuple[int, str], sqlite3.Connection] = {}
 
 
@@ -63,11 +53,28 @@ def get_conn() -> sqlite3.Connection:
     return created
 
 
+def write(sql: str, params: Sequence[object] = ()) -> sqlite3.Cursor:
+    """执行一条写语句并提交，返回游标（rowcount 与 lastrowid 可用）。
+
+    单条语句加提交是这个库的常态事务边界，收敛于此。多条语句一个事务的批量写
+    不经过它：调用方自己持有 get_conn()，显式控制提交时机。
+    """
+    conn = get_conn()
+    cursor = conn.execute(sql, params)
+    conn.commit()
+    return cursor
+
+
+def read_one(sql: str, params: Sequence[object] = ()) -> Row | None:
+    """单行查询。sqlite3 将 fetchone 的返回声明为 Any，在此收窄为实际行类型。"""
+    return cast("Row | None", get_conn().execute(sql, params).fetchone())
+
+
 def close_all_connections() -> None:
     """关闭并清空全部线程的连接（测试隔离与应用关闭时使用）。
 
-    跨线程关闭是安全的：连接以 check_same_thread=False 创建，且此处只在
-    调用方确认无并发使用的情况下执行（测试用例边界、进程退出）。
+    跨线程关闭是安全的：连接以 check_same_thread=False 创建，且此处只在调用方
+    确认无并发使用时执行（测试用例边界、进程退出）。
     """
     with _lock:
         conns = list(_conns.values())

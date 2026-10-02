@@ -33,7 +33,7 @@ import org.json.JSONObject
  *
  * ## 一条连接，几类消息：字段该走哪一条
  *
- * 判定依据是**那个字段多久变一次**，以及接收方**需要它多新**——不是"顺手塞进已有的那条"。
+ * 判定依据是**那个字段多久变一次**，以及接收方**需要它多新**——而不是塞进碰巧已有的那一条。
  *
  * | 通道 | 时机 | 放什么 |
  * |---|---|---|
@@ -143,7 +143,7 @@ class GatewayClient(context: Context, private val callback: Callback) {
                 // 自开机以来的秒数。服务端拿它反推开机时刻——本机没有 NTP，墙上时钟的
                 // 绝对值不可信；而这是个单调量，不受那个偏差影响。
                 .put("uptime_s", Uptime.nowMs() / 1000)
-            webSocket.send(MessageCodec.encode("link.hello", hello))
+            webSocket.send(MessageCodec.encode(MessageTypes.LINK_HELLO, hello))
             scheduleHandshakeTimeout()
         }
 
@@ -154,16 +154,16 @@ class GatewayClient(context: Context, private val callback: Callback) {
                 return
             }
             when (env.type) {
-                "link.ping" -> {
+                MessageTypes.LINK_PING -> {
                     // 服务端时钟偏差测量：pong 带设备侧时间
                     send(
-                        "link.pong",
+                        MessageTypes.LINK_PONG,
                         JSONObject().put("sender_time", Clock.nowRfc3339()),
                         replyTo = env.id,
                     )
                 }
 
-                "link.hello_ack" -> {
+                MessageTypes.LINK_HELLO_ACK -> {
                     authenticated = true
                     cancelHandshakeTimeout()
                     reconnectAttempt = 0
@@ -180,10 +180,10 @@ class GatewayClient(context: Context, private val callback: Callback) {
                     handler.post { callback.onConnected(trusted, config, upgrade) }
                 }
 
-                "link.pong" -> Unit
+                MessageTypes.LINK_PONG -> Unit
 
                 // 心跳回包，链路层消化
-                "link.error" -> Log.w(TAG, "server error: ${env.payload}")
+                MessageTypes.LINK_ERROR -> Log.w(TAG, "server error: ${env.payload}")
 
                 else -> handler.post { callback.onMessage(env) }
             }
@@ -217,7 +217,7 @@ class GatewayClient(context: Context, private val callback: Callback) {
     private fun scheduleHeartbeat() {
         val runnable = Runnable {
             if (authenticated) {
-                send("link.ping", JSONObject().put("sender_time", Clock.nowRfc3339()))
+                send(MessageTypes.LINK_PING, JSONObject().put("sender_time", Clock.nowRfc3339()))
                 scheduleHeartbeat()
             }
         }

@@ -1,9 +1,9 @@
 package com.ryanliu.ntushower.features.selfmanage
 
 import android.util.Log
+import com.ryanliu.ntushower.core.a11y.A11yRuntime
 import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.shell.RootShell
-import com.ryanliu.ntushower.service.A11yService
 
 /**
  * 无障碍链路守护：核对总开关与服务清单，不对就修。
@@ -66,7 +66,7 @@ object A11yGuard {
 
     /** 核对并按需修复；返回修复后链路是否完整。链路本已完整时是只读操作。 */
     fun ensureAvailable(): Boolean {
-        val bound = A11yService.instance != null
+        val bound = A11yRuntime.source != null
         val switch = readSwitch()
         val list = readServiceList()
         if (!A11yState.needsRepair(switch, list, COMPONENT, bound)) return true
@@ -93,7 +93,7 @@ object A11yGuard {
      * 等系统把服务绑回来，最多 [BIND_WAIT_MS]。
      *
      * `settings put` 之后系统的重绑是**异步**的，几百毫秒到数秒不等。写完就立刻读
-     * `A11yService.instance` 多半还是 null，于是刚刚修好的那一次被记成
+     * `A11yRuntime.source` 多半还是 null，于是刚刚修好的那一次被记成
      * `accessibility repair failed`——排障时把人往完全相反的方向带。
      *
      * 只做一轮等待，不做多层重试环：看门狗本身就是重试入口，60 秒后还会再来一次。
@@ -102,10 +102,10 @@ object A11yGuard {
     private fun waitForBind(): Boolean {
         val deadline = Uptime.nowMs() + BIND_WAIT_MS
         while (Uptime.nowMs() < deadline) {
-            if (A11yService.instance != null) return true
+            if (A11yRuntime.source != null) return true
             Thread.sleep(BIND_POLL_MS)
         }
-        return A11yService.instance != null
+        return A11yRuntime.source != null
     }
 
     /**

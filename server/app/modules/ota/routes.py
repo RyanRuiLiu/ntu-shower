@@ -1,4 +1,8 @@
-"""OTA API：设备面（manifest/下载）与管理面（发布上传）。
+"""发布域 API：清单、下载与发布管理，统一在 /api/v1/ota 下。
+
+权限分层：清单与下载公开（设备按 manifest 的 url 下载，服务器控制路径）；
+发布、下架、重推要求 admin；manifest 是设备的硬编码契约，保留无版本前缀的
+冻结路径。
 
 版本号在 HTTP 边界即按 VERSION_PATTERN 校验，service.release_path 按同一规则
 构造文件名——两处各自成立，不依赖对方先拦。
@@ -12,7 +16,7 @@ from fastapi.responses import FileResponse
 from app.core.config import settings
 from app.core.logging import log_event
 from app.core.problems import RELEASE_NOT_FOUND, RELEASE_TOO_LARGE, ApiProblemError
-from app.core.security import require_ops_token
+from app.modules.access.dependencies import require_admin
 from app.modules.ota import repository, service
 from app.modules.ota.schemas import (
     OtaManifest,
@@ -23,9 +27,10 @@ from app.modules.ota.schemas import (
 )
 from app.modules.ota.service import VERSION_PATTERN
 
-router = APIRouter(prefix="/ota", tags=["ota"])
+router = APIRouter(prefix="/api/v1/ota", tags=["ota"])
 
-ops_router = APIRouter(prefix="/ops", dependencies=[Depends(require_ops_token)], tags=["ota-ops"])
+# 设备硬编码契约：manifest 的路径不随版本前缀走（冻结，见 docs/ARCHITECTURE.md）
+device_router = APIRouter(tags=["ota"])
 
 # 路径/表单中的发布版本号：格式不合规由 FastAPI 返回 422
 ReleaseVersion = Annotated[str, Path(pattern=VERSION_PATTERN)]
@@ -37,33 +42,34 @@ def list_releases() -> list[ReleaseRecord]:
     return repository.list_releases()
 
 
-@router.get("/manifest")
+@device_router.get("/ota/manifest")
 def manifest(device_id: str, version_code: int) -> OtaManifest:
-    """设备定期轮询：返回是否有可用更新及其元数据。"""
+    """设备定期轮询：返回是否有可用更新及其元数据。路径为设备硬编码契约，冻结。"""
     rel = repository.latest_for(device_id, version_code)
     if rel is None:
         return {"up_to_date": True}
     path = service.release_path(rel["version"])
     if not path.is_file():
-        # 库里有记录、文件却不在（手工清理过目录之类）：当作没有更新，而不是给设备一个
-        # 下不动的地址——它那边会在下载时失败，而失败的原因与服务端实情对不上。
+        # 库里有记录、文件却不在（手工清理过目录之类）：当作没有更新，而不是给
+        # 设备一个下不动的地址
         log_event("WARNING", "ota.release-file-missing", "发布文件缺失", version=str(rel["version"]))
         return {"up_to_date": True}
     return {
         "up_to_date": False,
         "version": rel["version"],
         "version_code": rel["version_code"],
-        "url": f"/ota/download/{rel['version']}",
+        "url": f"/api/v1/ota/releases/{rel['version']}/download",
+        # sha256 是设备端发起下载前就要读的校验基准，缺了它升级在下载前即中止——
+        # manifest 的字段集是设备硬编码契约，tests/test_ota.py 逐字段断言锁死
         "sha256": rel["sha256"],
-        # 大小现取文件的，不在库里再存一列：那个数字是文件的属性，存一份就多一处可能对不上的
-        # 副本——手工替换过 APK 之后，库里那份就是错的，而错的方向是"设备收下了别的包"。
+        # 大小现取文件的：它是文件的属性，存一份副本会在手工替换后对不上
         "size": path.stat().st_size,
         "mandatory": bool(rel["mandatory"]),
         "force": bool(rel["force"]),
     }
 
 
-@router.get("/download/{version}")
+@router.get("/releases/{version}/download")
 def download(version: ReleaseVersion) -> FileResponse:
     path = service.release_path(version)
     if not path.is_file():
@@ -75,13 +81,13 @@ def download(version: ReleaseVersion) -> FileResponse:
     )
 
 
-@ops_router.post("/releases/{version}/rearm/{device_id}")
+@router.post("/releases/{version}/rearm/{device_id}", dependencies=[Depends(require_admin)])
 def rearm_release(version: str, device_id: str) -> ReleaseRearmed:
     """清除安装确认：force 发布对该设备重新生效（调试重推）。"""
     return {"version": version, "device_id": device_id, "rearmed": repository.rearm(device_id, version)}
 
 
-@ops_router.delete("/releases/{version}")
+@router.delete("/releases/{version}", dependencies=[Depends(require_admin)])
 def delete_release(version: str) -> ReleaseRemoved:
     """下架发布（紧急止损，如终止 OTA 循环）。注册行与 APK 文件一起删。"""
     deleted = repository.delete_release(version)
@@ -91,7 +97,7 @@ def delete_release(version: str) -> ReleaseRemoved:
     return {"version": version, "deleted": deleted}
 
 
-@ops_router.post("/releases")
+@router.post("/releases", dependencies=[Depends(require_admin)])
 async def upload_release(
     version: ReleaseVersionForm,
     version_code: Annotated[int, Form()],

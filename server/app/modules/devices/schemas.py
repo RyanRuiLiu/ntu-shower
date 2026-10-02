@@ -1,15 +1,8 @@
 """设备领域的 API 契约。
 
-## 一个资源一套模型
-
-`DeviceRecord` 是设备的**完整**读模型：管理面列表、改名/信任的响应、
-影子文档的 reported 部分共用它。
-
-此前改名与信任各有一个只含三个字段的响应模型（`DeviceRenameResult`、
-`DeviceTrustResult`），与完整模型是子集关系——同一个概念在多处各写一遍字段，
-改一处忘三处就漂移。现在统一返回 `DeviceRecord`，调用方拿到的始终是设备的当前全貌。
-
-"设备不存在"也不再靠响应里的 `found: false` 表达，而是 404（`DEVICE_NOT_FOUND`）。
+DeviceRecord 是设备的完整读模型：管理面列表、改名与信任的响应、影子文档的
+reported 部分共用它。"设备不存在"以 404（DEVICE_NOT_FOUND）表达，不用响应体
+里的 found: false。
 """
 
 from typing import Literal
@@ -18,15 +11,24 @@ from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
 
+class DeviceSummary(TypedDict):
+    """设备的精简视图：可辨识与在场状态，用户面与实时推送共用。
+
+    版本、来源 IP、时钟偏差等运维诊断字段不在此列，只出现在完整档案
+    （DeviceRecord）与管理面接口里。
+    """
+
+    device_id: str
+    name: str
+    online: bool
+
+
 class DeviceRecord(TypedDict):
     """一台设备的档案。
 
-    除 `online` 外都对应 repository 中 `_DEVICE_COLUMNS` 的列；`trusted` 是布尔语义，
-    repository 负责把 SQLite 的 0/1 转换好再返回。
-
-    `online` **不在档案表里**：它由 `devices.service` 从内存连接表填入，所以只有经过
-    service 的记录才带正确的值——直接调 repository 拿到的是恒假的占位。原因见
-    `devices/repository` 的模块注释。
+    除 online 外各字段对应 repository 的 _DEVICE_COLUMNS；trusted 的 0/1 到布尔的
+    转换在 repository 完成。online 不在档案表里，由 devices.service 从内存连接表
+    填入：只有经过 service 的记录才带正确的值。
     """
 
     device_id: str
@@ -40,31 +42,22 @@ class DeviceRecord(TypedDict):
     last_seen_at: str
     last_ip: str
     booted_at: str
-    """开机时刻（RFC 3339）。由设备上报的"已运行秒数"与服务端收到它的时刻反推而来。
+    """开机时刻（RFC 3339）：由设备上报的已运行秒数与服务端收到它的时刻反推。
 
-    存时刻而不是存那串秒数：秒数一离开它的采样瞬间就开始过期，而开机时刻是个不变的事实。
-    前端拿"现在减它"就能算出已运行多久，不必再让设备按周期上报。设备空着时为占位。
+    存时刻而不存秒数：秒数一离开采样瞬间就开始过期，开机时刻是不变的事实；
+    前端用"现在减它"得到已运行时长。
     """
 
     clock_skew_s: float
     """设备墙上时钟相对服务端的偏差（秒，正数表示设备快）。
 
-    由 `link.pong` 里的设备时间戳与收到它的时刻算出，取 EMA 平滑后**存库**。
-
-    它必须持久化：那台设备的墙钟可能一直不准（实测有一台快 59 分 47 秒，且系统设置里
-    自动对时是关的），而设备上报的 `openTime` / `inTime` / `closeTime` 都是它的墙上
-    时钟，服务端全靠这个值把它们校正到自己的基准上。只留在进程内存里的话，服务每次重启
-    都会退回 0——变成"不校正"，那些时间戳被原样写库，与用服务端时钟写的字段混在一起，
-    同一张表里的先后顺序就乱了（实测出现过"结束早于开始 55 分钟"）。
+    由 link.pong 的设备时间戳算出、EMA 平滑后存库；必须持久化的理由见
+    core/device_clock 的模块注释。
     """
 
 
 class DevicePatchRequest(BaseModel):
-    """改设备档案。字段都是可选的，只改传了的那些。
-
-    改名与改信任位本是同一件事——"调整这台设备的档案"——因此共用一个端点，
-    而不是 `/rename` 与 `/trust`、`/untrust` 三个。
-    """
+    """改设备档案。字段都可选，只改传了的那些；改名与信任共用一个端点。"""
 
     name: str | None = Field(default=None, min_length=1, max_length=64)
     trusted: bool | None = None
@@ -79,11 +72,8 @@ class DeviceExecRequest(BaseModel):
 class DeviceUiTouchRequest(BaseModel):
     """触摸：按屏幕坐标点击或滑动。
 
-    只认坐标。曾经有过 `index`（引用节点树里的第 n 个元素），但设备端的触摸
-    命令从来没有这个参数——带 `index` 的请求会退化成坐标 (0,0)，真机上就是
-    点到屏幕左上角。节点定位改由调用方承担：先 `ui.dump` 读节点树，从元素的
-    `bounds` 算出中心点。`index` 是同级序号，界面一变就指向别的元素，本来也
-    不该作为跨请求的引用。
+    只认坐标，不认节点序号：设备端从未有过 index 参数，坐标由调用方先经 ui.dump
+    读节点树、再从 bounds 求中心点得到。节点定位由调用方承担。
     """
 
     x: int = Field(description="屏幕坐标 X")
@@ -94,11 +84,7 @@ class DeviceUiTouchRequest(BaseModel):
 
 
 class DeviceUiScrollRequest(BaseModel):
-    """滚动可滚动容器。
-
-    `forward` 是"往列表后面滚"，视觉上内容上移；`backward` 相反。
-    方向是闭集，写错在路由层被 422 挡下，不发给设备。
-    """
+    """滚动可滚动容器。forward 是"往列表后面滚"，backward 相反；方向是闭集。"""
 
     direction: Literal["forward", "backward"] = Field(
         description="滚动方向。必填，无默认：调用方必须明确表达往哪边滚",
@@ -106,7 +92,7 @@ class DeviceUiScrollRequest(BaseModel):
 
 
 class DeviceUiKeyRequest(BaseModel):
-    """系统按键。方向键组与 Enter/Del 服务于焦点导航（对照旧项目 viewer 的按钮栏）。"""
+    """系统按键：方向键组与 Enter/Del 服务于焦点导航，其余为全局导航。"""
 
     key: Literal[
         "back",
@@ -126,9 +112,9 @@ class DeviceUiKeyRequest(BaseModel):
 class DeviceUiTextRequest(BaseModel):
     """向当前焦点控件输入文本。
 
-    channel 是**并列的两条通路**而非主备：`clipboard` 粘贴支持中文，但本 ROM 的
-    粘贴在同一字段第二次插入时会带出空格；`keys` 按键注入（仅 ASCII）无空格问题，
-    与旧项目行为一致。选哪条由网页端的使用者定。
+    channel 是并列的两条通路而非主备：clipboard 无障碍粘贴（支持中文，本 ROM 在
+    同一字段第二次插入时会带出空格）；keys 按键注入（仅 ASCII，无空格问题）。
+    由网页端使用者选择。
     """
 
     text: str = Field(min_length=1)

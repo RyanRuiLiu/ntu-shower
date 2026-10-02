@@ -81,7 +81,7 @@ object RuntimeConfig {
     /**
      * 是否记录自动化流程的分段耗时。
      *
-     * 默认关：每次记录都要开一次文件，长期开着是白花的开销，而它的用途本来就是
+     * 默认关：每次记录都要开一次文件，持续开启是无谓的开销，而它的用途本就是
      * "要量的时候量一轮"。见 [com.ryanliu.ntushower.features.automation.AutomationTrace]。
      */
     @Volatile var automationTraceEnabled = ConfigDefaults.AUTOMATION_TRACE_ENABLED
