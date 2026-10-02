@@ -371,7 +371,7 @@ def test_first_frame_already_occupied_marks_the_observation_bound(fresh_db: str)
     row = _sessions(device_id)[0]
     assert row["assigned_at"] == T0, "观测下界：我们确知它此刻占着，仅此而已"
     assert row["assigned_source"] == service.SESSION_ASSIGNED_OBSERVED, "这一帧没带 open_time，平移不了"
-    assert row["opened_at"] == T0, "首次观测到出水就是这一帧"
+    assert row["opened_at"] == T0, "无偏差可平移，开阀时刻退回首次观测到出水的那一帧"
     assert row["flow_s"] == 180, "但已经出的水一秒不少"
 
 
