@@ -1,46 +1,17 @@
 /**
- * 界面检视：看设备当前界面，并对它做原始注入。
+ * 界面检视：查看设备当前界面并对它做原始注入。
  *
- * ## 布局与交互照旧调试页
+ * 顶部工具条：截图、界面树、全局按键、方向键组（移动设备端焦点光标）、Enter/Del。
  *
- * 结构取自 `ntu-remote-shower` 的 `bridge-server/src/viewer.html`：顶部工具条，
- * 下面左右分栏，右列自上而下是节点树、属性面板、输入栏。样式在 `style/inspector.css`。
+ * 鼠标手势：左键按下即松为点击；按住超过 TAP_MAX_MS 为长按，时长按实际按住时间；
+ * 按住拖动为滑动；右键取消当前手势。时长一律照实上报。长按无需新协议：发起点
+ * 等于终点的滑动即长按，复用 ui.touch 的既有能力。
  *
- * 工具条四组：截图 / 界面树，Home/Back/Recent/Notify，方向键组（▲▼◀▶ 移动设备端
- * 的焦点光标、OK 按下焦点控件——原理照旧项目 viewer 的按钮栏，全走 `input keyevent`），
- * Enter/Del。旧版有的这批按键我们**现在也放了**：设备端 `UiKey` 已补齐方向键组，
- * 它们是逐字符删除与控件间导航的主要手段，不再是装饰。
+ * 每次操作后自动重截画面与重读节点树（各自可关，选择记 localStorage）。截图在飞
+ * 时不重发（screenrecord 一次约 3 秒且占住采集通道），期间到来的刷新并成一次尾随
+ * 重取；命令 failed/rejected 时画面不会变，不重取，timeout 结果未知照旧重取。
  *
- * ## 鼠标三种手势（照旧版）
- *
- * | 手势 | 结果 |
- * |---|---|
- * | 左键按一下就松 | 点击该点 |
- * | 左键按住不放（超过 [TAP_MAX_MS]）再松 | **长按**，时长按实际按住时间 |
- * | 左键按住拖动到别处再松 | **滑动**，时长同样按实际按住时间 |
- * | **右键** | **取消**当前手势，什么都不发 |
- *
- * 时长一律照实报，不写死：按住三秒就发三秒。按住期间画面上的圈会走满、并实时显示
- * 已按秒数——不然只能凭感觉，不知道这一下会被当成点击还是长按。
- *
- * 长按**不需要新协议**：设备端是"有 `to_x`/`to_y` 走滑动、否则走点击"，所以发
- * `{x, y, to_x: x, to_y: y, duration_ms: 按住时长}`（起点等于终点的滑动）就是长按。
- * 这条路径复用 `ui.touch` 的既有能力，双端代码都不用动。
- *
- * ## 每次操作后自动重截、重读（各自可关）
- *
- * 照旧版：点击 / 长按 / 滑动 / 按键 / 输入之后都自动刷新画面与树，两者并行发出。
- * 不刷的话，点完看到的还是旧画面，得自己再点一次截图才知道点没点中。工具条上给两个
- * 开关（自动画面 / 自动UI树），各自记在 localStorage——有人只想手动截图省掉每步 3 秒
- * 的采集，全写死就堵死了这条路。
- * 两条打磨：截图在飞时不重发（screenrecord 一次约 3 秒且占住采集通道，连点会把手势
- * 挤掉），期间到来的刷新并成一次尾随重取；命令 `failed`/`rejected`（没落到界面上，
- * 画面不会变）不重取，省一轮采集——`timeout` 结果未知，照旧重取。
- *
- * ## 画面与结构都不轮询
- *
- * 截图走 `screenrecord`，一次约 3 秒且占住设备端采集通道。定时拉取会让设备一直在
- * 编码，也把别人的操作挤掉。
+ * 画面与结构都不轮询：定时拉取会让设备持续编码，也挤占采集通道。
  */
 import { api } from '../core/api.js'
 import { problemText, statusLabel } from '../core/outcome.js'
@@ -52,7 +23,7 @@ import { toast } from '../core/toast.js'
  * 按住多久算长按而不是单击。
  *
  * 取 Android 系统判长按的标准值（`ViewConfiguration.getLongPressTimeout()`）——设备上的
- * 控件就是按这条线判断的，比它更短会被当成点击。它只决定**算哪种手势**，不决定发给
+ * 控件就是按这条线判断的，比它更短会被当成点击。它只决定算哪种手势，不决定发给
  * 设备的时长：那个照实报，按住多久发多久。
  */
 const TAP_MAX_MS = 500
@@ -64,8 +35,7 @@ const SWIPE_MIN = 8
 /** 节点列表（深度优先摊平，每项带 depth）。 */
 let nodes = []
 /**
- * 操作后要不要自动刷新画面 / UI 树。记在 localStorage，缺席视为开——
- * 这两步照旧版默认都做，开关只是给想省采集的人留的。
+ * 操作后要不要自动刷新画面 / UI 树。记在 localStorage，缺席视为开。
  */
 const AUTO_CAPTURE_KEY = 'ntu-shower.inspector.auto-capture'
 const AUTO_TREE_KEY = 'ntu-shower.inspector.auto-tree'
@@ -74,7 +44,7 @@ let autoTree = localStorage.getItem(AUTO_TREE_KEY) !== '0'
 
 /**
  * 文本注入通道：`clipboard` 粘贴（支持中文；同一字段第二次插入会多一个空格——ROM
- * 行为）与 `keys` 按键注入（无空格问题，仅英文/数字/符号）。两条**并列**、由使用者
+ * 行为）与 `keys` 按键注入（无空格问题，仅英文/数字/符号）。两条并列、由使用者
  * 按内容选择，选择记在 localStorage。
  */
 const INPUT_CHANNEL_KEY = 'ntu-shower.inspector.input-channel'
@@ -174,7 +144,7 @@ function parseTree(xml) {
   }
 }
 
-/** 搜索词支持 `id:` / `text:` / `class:` 前缀，与旧调试页一致。 */
+/** 搜索词支持 `id:` / `text:` / `class:` 前缀。 */
 function parseSearch(raw) {
   const text = (raw || '').trim()
   if (text.startsWith('id:') || text.startsWith('res:')) return { field: 'id', term: text.slice(3).trim().toLowerCase() }
@@ -237,7 +207,7 @@ function renderTree() {
   for (const root of children.get(-1) || []) walk(root)
 
   $('treeContent').innerHTML = lines.join('') || '<div class="empty">暂无节点</div>'
-  $('treeCount').textContent = filtering ? `${hit.size} / ${nodes.length}` : `${nodes.length} nodes`
+  $('treeCount').textContent = filtering ? `${hit.size} / ${nodes.length}` : `${nodes.length} 个节点`
 }
 
 // ── 选中、面包屑、高亮 ─────────────────────────────────────
@@ -330,14 +300,11 @@ async function act(label, run, options = {}) {
     const result = await run(deviceId)
     const ok = result.status === 'ok'
     const detail = result.terminal_message || result.reason_code || ''
-    // 状态词取自 core.outcome，不自建：这里原先自己拼了"完成"/"失败："两套词，
-    // 而概览页用的是 core 那套（"已完成"），同一个系统两种说法。
-    // 加上动作名前缀是因为这块面板会连着点好几个动作，光看"已完成"不知道是哪个。
+    // 状态词取自 core.outcome 不自建；加动作名前缀是因为这块面板会连点多个动作
     const state = statusLabel(result.status)
     setOpState(detail ? `${label} · ${state} · ${detail}` : `${label} · ${state}`, ok ? 'ok' : 'err')
-    // 操作改变了界面，画面与树都要跟着更新，否则看的是操作前的样子。
-    // failed/rejected 是命令没落到界面上（被拒或执行失败），画面不会变，重取只是白花
-    // 一轮 3 秒的采集；timeout 的结果未知（命令可能迟达生效），照旧重取。
+    // 操作改变了界面，画面与树都要跟着更新。failed/rejected 未落到界面，重取只是
+    // 白花一轮采集；timeout 结果未知，照旧重取。
     if (options.refresh !== false && (ok || result.status === 'timeout')) refreshBoth()
   } catch (error) {
     setOpState(problemText(error), 'err')
@@ -407,7 +374,7 @@ async function refreshTree() {
   }
 }
 
-/** 画面与树一起刷新，照旧版：只刷一边会看到不匹配的两份状态。
+/** 画面与树一起刷新：只刷一边会看到不匹配的两份状态。
  *  两个开关各自决定要不要刷，全关就不刷（用户明确要手动控制）。
  *  在飞时不重发，期间的请求并成一次尾随重取——连点五下只产生两轮采集，不是五轮。 */
 async function refreshBoth() {
@@ -429,7 +396,7 @@ async function refreshBoth() {
   }
 }
 
-/** 画面上的坐标换算。越界时夹到边缘，与旧版一致——拖到画面外也要能结束滑动。 */
+/** 画面上的坐标换算。越界时夹到边缘：拖到画面外也要能结束滑动。 */
 function toDevice(clientX, clientY) {
   if ($('screenFrame').hidden || !deviceWidth) return null
   const rect = $('screenshot').getBoundingClientRect()
@@ -448,8 +415,7 @@ function toDevice(clientX, clientY) {
 /**
  * 按下指示：一圈进度 + 实时秒数。
  *
- * 进度环走满一圈代表到了长按的界线，秒数照实显示按了多久——没有它就只能凭感觉，
- * 不知道这一下会被当成点击还是长按、更不知道会发出去多长。
+ * 进度环走满一圈代表到了长按的界线，秒数照实显示按了多久。
  */
 function pressIndicator(at) {
   const size = 46
@@ -517,11 +483,9 @@ function tapAt(x, y) {
 }
 
 /**
- * 长按。
- *
- * 起点等于终点的滑动就是长按——设备端按"有没有 `to_x`"分派，所以这条路不需要新的
- * 动作名，也不用改设备端。`durationMs` 照实取按住时间，不写死：按住三秒就该按住三秒，
- * 写死一个值会让"按住多久"变成无从表达的东西，而某些界面确实靠按多久区分行为。
+ * 长按：起点等于终点的滑动就是长按，设备端按有无 to_x 分派，无需新协议。
+ * durationMs 照实取按住时间：某些界面靠按住时长区分行为，写死会让"按住多久"
+ * 无法表达。
  */
 function longPressAt(x, y, durationMs) {
   act(`长按 ${x},${y} ${(durationMs / 1000).toFixed(1)}s`, (deviceId) =>
@@ -601,14 +565,14 @@ export const inspectorView = {
   mount(root) {
     root.innerHTML = `
       <div class="tb">
-        <button type="button" class="primary" data-act="capture">Screenshot</button>
-        <button type="button" data-act="tree">UI Tree</button>
+        <button type="button" class="primary" data-act="capture">截图</button>
+        <button type="button" data-act="tree">界面树</button>
         <span class="sep"></span>
         <span class="grp">
-          <button type="button" data-key="home">Home</button>
-          <button type="button" data-key="back">Back</button>
-          <button type="button" data-key="recents">Recent</button>
-          <button type="button" data-key="notifications">Notify</button>
+          <button type="button" data-key="home">主页</button>
+          <button type="button" data-key="back">返回</button>
+          <button type="button" data-key="recents">最近任务</button>
+          <button type="button" data-key="notifications">通知栏</button>
         </span>
         <span class="sep"></span>
         <span class="grp">
@@ -616,19 +580,19 @@ export const inspectorView = {
           <button type="button" data-key="dpad_down" title="焦点下移">▼</button>
           <button type="button" data-key="dpad_left" title="焦点左移">◀</button>
           <button type="button" data-key="dpad_right" title="焦点右移">▶</button>
-          <button type="button" data-key="dpad_center" title="按下焦点控件">OK</button>
+          <button type="button" data-key="dpad_center" title="按下焦点控件">确认</button>
         </span>
         <span class="sep"></span>
         <span class="grp">
-          <button type="button" data-key="enter">Enter</button>
-          <button type="button" data-key="del">Del</button>
+          <button type="button" data-key="enter">回车</button>
+          <button type="button" data-key="del">删除</button>
         </span>
         <div class="tb-right">
           <label class="tb-toggle" title="操作后自动重截画面">
-            <input type="checkbox" id="autoCaptureToggle"> 自动画面
+            <input type="checkbox" id="autoCaptureToggle"> 自动截图
           </label>
           <label class="tb-toggle" title="操作后自动重读界面结构">
-            <input type="checkbox" id="autoTreeToggle"> 自动UI树
+            <input type="checkbox" id="autoTreeToggle"> 自动界面树
           </label>
           <span class="tb-status" id="opState">就绪</span>
         </div>
@@ -636,7 +600,7 @@ export const inspectorView = {
 
       <div class="stage">
         <div class="screen-panel" id="screenPanel">
-          <span class="muted" id="screenHint">点「Screenshot」加载画面，之后可直接在画面上操作</span>
+          <span class="muted" id="screenHint">点击「截图」加载画面，随后可直接在画面上操作</span>
           <div class="screen-frame" id="screenFrame" hidden>
             <img id="screenshot" alt="设备屏幕" draggable="false">
             <div class="overlay" id="overlay"></div>
@@ -653,7 +617,7 @@ export const inspectorView = {
 
         <div class="tree-panel" id="treePanel">
           <div class="panel-header" id="panelHeader">
-            <span class="panel-title-btn" id="panelCollapse" title="收起右侧面板，画面占满整行">UI Tree</span>
+            <span class="panel-title-btn" id="panelCollapse" title="收起右侧面板，画面占满整行">界面树</span>
             <span class="count" id="treeCount"></span>
             <span class="actions">
               <button type="button" data-act="collapse" title="折叠选中节点的子树">[-]</button>
@@ -662,7 +626,7 @@ export const inspectorView = {
           </div>
           <input type="text" class="tree-search" id="treeSearch" placeholder="搜索  class:Button  text:确认  id:btn  …">
           <div class="breadcrumb" id="breadcrumb"></div>
-          <div class="tree-content" id="treeContent"><div class="empty">点击「UI Tree」加载</div></div>
+          <div class="tree-content" id="treeContent"><div class="empty">点击「界面树」加载</div></div>
 
           <div class="prop-panel">
             <div class="prop-header">属性</div>
@@ -684,23 +648,23 @@ export const inspectorView = {
               <div class="prop-tags" id="propTags"></div>
             </div>
             <div class="prop-section" style="padding-bottom:10px">
-              <button type="button" class="prop-tap" id="propTap" disabled>Tap Element</button>
+              <button type="button" class="prop-tap" id="propTap" disabled>点击所选元素</button>
             </div>
           </div>
 
           <div class="input-bar">
             <span class="input-channel" id="inputChannel">
               <button type="button" data-channel="clipboard" title="剪贴板粘贴：支持中文；同一字段第二次插入会多一个空格（ROM 行为）">粘贴</button>
-              <button type="button" data-channel="keys" title="按键注入：无空格问题，仅英文/数字/符号">按键</button>
+              <button type="button" data-channel="keys" title="按键注入：无多余空格问题，仅支持英文、数字与符号">按键</button>
             </span>
-            <input type="text" id="textInput" placeholder="输入文本后按 Enter 发送…">
+            <input type="text" id="textInput" placeholder="输入文本后按回车发送">
             <button type="button" data-act="send">发送</button>
           </div>
         </div>
       </div>
 
       <!-- 右面板收起后的恢复把手：贴在画面区右缘 -->
-      <button type="button" class="tree-restore" id="treeRestore" title="展开 UI 树面板" hidden>‹ UI树</button>
+      <button type="button" class="tree-restore" id="treeRestore" title="展开界面树面板" hidden>‹ 界面树</button>
 
       <div class="ctx-menu" id="ctxMenu" hidden>
         <div class="item" data-ctx="tap">点击元素<span class="shortcut">双击</span></div>
@@ -746,7 +710,7 @@ export const inspectorView = {
         setOpState('按键通道仅支持英文、数字与符号，中文请切换到粘贴通道', 'err')
         return
       }
-      // 发送后清空输入框，与旧版一致：一屏通常要连着输几次
+      // 发送后清空输入框：一屏通常要连着输几次
       act('输入文本', (deviceId) => api.input(deviceId, text, inputChannel)).then(() => {
         $('textInput').value = ''
       })

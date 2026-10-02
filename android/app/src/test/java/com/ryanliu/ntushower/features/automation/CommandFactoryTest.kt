@@ -169,6 +169,14 @@ class CommandFactoryTest {
         assertEquals(SupportedActions.ALL, queued + maintenance + bridge)
     }
 
+    @Test
+    fun `direction constants match the protocol values`() {
+        // 执行器按这两个常量分派（CommandScheduler.executeScroll），改值等于改协议；
+        // 工厂只透传方向、校验在执行器，所以这里把取值本身钉住
+        assertEquals("forward", CommandFactory.DIRECTION_FORWARD)
+        assertEquals("backward", CommandFactory.DIRECTION_BACKWARD)
+    }
+
     private companion object {
         const val COMMAND_ID = "cmd-1"
     }

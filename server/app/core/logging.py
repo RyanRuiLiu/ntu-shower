@@ -1,32 +1,14 @@
-"""应用日志装配：stdout JSON 事件流（依 The Twelve-Factor App §XI 与
-OpenTelemetry Log Data Model 的字段命名）。
+"""应用日志装配：stdout JSON 事件流，字段名照 OpenTelemetry Log Data Model。
 
-## 为什么必须显式配置
+显式配置是必须的：uvicorn 只配置它自己的 logger，应用 logger 没有 handler 时
+INFO 级日志被静默丢弃。按 Twelve-Factor 写 stdout 不写文件，收集与归档由
+运行环境（systemd/journald）负责。
 
-uvicorn 启动时只配置它自己的 logger，应用的 logger 没有 handler。Python 的
-logging 对"没有 handler 的 logger"只在 WARNING 及以上经 `lastResort` 输出，
-于是 `logger.info(...)` 会被静默丢弃——日志写了却看不到，等于没写。
+每行一个 JSON 对象：ts（RFC 3339，唯一来源 core/clock）、level、logger、message、
+event（给机器检索的稳定代号）、trace_id 与 request_id（有值才输出，与 api_call
+审计行互通）、其余属性逐键并入顶层。
 
-## 落点与格式
-
-按 12-Factor 要求写 stdout，**不写文件、不做轮转**：收集与归档由运行环境
-（systemd/journald）负责。这是应用不该操心的职责。
-
-每行一个 JSON 对象，字段名照 OpenTelemetry Log Data Model：
-
-- `ts`：RFC 3339 UTC（唯一来源 core/clock）
-- `level`：SeverityText（INFO/WARNING/...）
-- `logger`：发出者（`ntu-shower.<域>`）
-- `message`：人读的一句话
-- `event`：给机器检索的稳定事件代号（有值才输出）
-- `trace_id` / `request_id`：有值才输出——HTTP 审计中间件置位，事件由此与
-  `api_call` 审计行互通
-- 其余 `**attrs` 逐键并入顶层（只允许标量，见 [log_event]）
-
-## 记录原则（2026-10-01 用户决定）
-
-**如实记录，不脱敏**：本系统是单运维者工具，日志与审计的价值就在于如实——
-令牌、标识、参数原文都可以落。字段名照 OTel，内容由调用方给什么写什么。
+日志如实记录、不脱敏：单运维者工具，内容由调用方给什么写什么。
 """
 
 import contextvars
@@ -44,7 +26,7 @@ ROOT_LOGGER_NAME = "ntu-shower"
 request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="")
 trace_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("trace_id", default="")
 
-#: 允许作为属性的标量类型；容器类型拒收——嵌套结构会让人检索不到任何键。
+#: 允许作为属性的标量类型；容器类型拒收，嵌套结构无法检索。
 _SCALARS = (str, int, float, bool)
 
 
@@ -76,10 +58,7 @@ class JsonFormatter(logging.Formatter):
 
 
 def configure_logging(level: str = "INFO") -> None:
-    """给应用 logger 装配 stdout handler。
-
-    幂等：重复调用不会叠加 handler（应用工厂可能被多次执行，测试尤甚）。
-    """
+    """给应用 logger 装配 stdout handler。幂等：应用工厂可能被多次执行。"""
     root = logging.getLogger(ROOT_LOGGER_NAME)
     root.setLevel(level.upper())
     # 自带 handler 后不再向根 logger 冒泡，避免与 uvicorn 的 handler 重复输出
@@ -94,11 +73,9 @@ def configure_logging(level: str = "INFO") -> None:
 def log_event(level: str, event: str, message: str, /, **attrs: Any) -> None:  # noqa: ANN401
     """按稳定事件名写一条结构化日志。
 
-    `level` 是标准级别名（INFO/WARNING/ERROR/...）；`event` 是给机器检索的
-    稳定代号（kebab-case），`message` 是给人读的中文——两者分开，改文案不能
-    破坏检索。属性必须全是标量，容器类型直接拒收：嵌套结构会让人检索不到
-    任何键，展开成平铺的键值才查得动。签名收 `Any` 是设计本身——约束在
-    运行时执行（见下面的校验），不是不设防。
+    `event` 是给机器检索的稳定代号（kebab-case），`message` 是给人读的中文，两者
+    分开，改文案不破坏检索。属性必须全是标量：嵌套结构无法检索，展开成平铺的
+    键值才查得动。签名收 Any 是设计本身，约束在运行时执行。
     """
     for key, value in attrs.items():
         if not isinstance(value, _SCALARS):

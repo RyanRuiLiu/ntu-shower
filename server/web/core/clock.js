@@ -1,9 +1,9 @@
 /**
  * 时间与时长：基准、格式化。
  *
- * **全站唯一一份。** 时长的基准是"现在减开始时刻"，而设备时间已按服务端时钟校准过
- * （docs/DECISIONS.md）。若用浏览器时钟，两边基准就不一致，显示的时长会整体偏一个固定
- * 值——本机时钟快三分钟，每个"分配时长"就都多三分钟，而看的人无从察觉。
+ * 全站唯一一份。时长的基准是"现在减开始时刻"，而设备时间已按服务端时钟校准过
+ * （docs/DECISIONS.md）。若用浏览器时钟，两边基准不一致，显示的时长会整体偏一个
+ * 固定值，而看的人无从察觉。
  *
  * 对时取自 HTTP 响应的 `Date` 头：它由服务端产生，不需要为此加接口。精度到秒，而这里
  * 要消除的偏差以分钟计，够用。
@@ -23,7 +23,7 @@ export function syncClock(response) {
   if (!Number.isNaN(serverTime)) skewMs = Date.now() - serverTime
 }
 
-/** 服务端此刻的时间戳（毫秒）。**所有"现在"都必须从这里取，不用 `Date.now()`。**
+/** 服务端此刻的时间戳（毫秒）。所有"现在"都必须从这里取，不用 `Date.now()`。
  *
  * 只除一处：`syncClock` 自己算偏差时要用原始时钟，那是它的定义。
  */
@@ -45,9 +45,8 @@ export function fmtTime(value) {
 /**
  * 服务端此刻的 `HH:MM:SS`。顶栏时钟用。
  *
- * 单独给一个入口而不是让调用方自己拼 `fmtTime(new Date(serverNowMs()))`：那样很容易顺手
- * 写成 `fmtTime(new Date())`——顶栏时钟原本就是这么写的，注释还写着"显示服务端时间"，
- * 而它显示的是浏览器时间，拿它去对设备日志会一直差着几分钟。
+ * 单独给入口而不让调用方拼 `fmtTime(new Date(serverNowMs()))`：那样容易顺手写成
+ * `fmtTime(new Date())`，显示的是浏览器时间，与设备日志对齐时恒差本机偏差。
  */
 export function fmtServerTimeNow() {
   return fmtTime(serverNowMs())
@@ -56,9 +55,9 @@ export function fmtServerTimeNow() {
 /**
  * RFC 3339 转 `MM-DD HH:MM:SS`；缺值或解析不出来时给占位符。
  *
- * 月日 + 秒。喷头卡片上的"上次使用"与设备面板里的"最后上报"都可能发生在几天前，
- * 只给时分看不出是哪天；而**秒是这类信息的精度**——"最后上报 3 秒前"与"1 分钟前"
- * 对判断链路还活着没有是两回事，压到分钟就把那个区别抹掉了。
+ * 月日 + 秒。"上次使用"与"最后上报"都可能发生在几天前，只给时分看不出是哪天；
+ * 而秒是这类信息的精度——"最后上报 3 秒前"与"1 分钟前"对判断链路还活着没有是
+ * 两回事。
  *
  * 需要年份的地方（审计流水、发布记录）用 [fmtFullDateTime]。
  */
@@ -75,9 +74,9 @@ export function fmtDateTime(value) {
 /**
  * RFC 3339 转 `YYYY-MM-DD HH:MM:SS`；缺值或解析不出来时给占位符。
  *
- * 与 [fmtDateTime] 的差别只有年份：审计流水与发布记录要跨月甚至跨年比对，没有年份就
- * 排不出先后。不用 `toLocaleString`：那会随浏览器的区域设置与版本变化，同一份记录在
- * 不同机器上显示成不同样子，而这里要的正是可比对。
+ * 与 [fmtDateTime] 的差别只有年份：审计流水与发布记录要跨月甚至跨年比对，没有年份
+ * 就排不出先后。不用 `toLocaleString`：那会随浏览器的区域设置变化，同一份记录在不同
+ * 机器上显示成不同样子，而这里要的正是可比对。
  */
 export function fmtFullDateTime(value) {
   if (!value) return PLACEHOLDER
@@ -92,11 +91,9 @@ export function fmtFullDateTime(value) {
 /**
  * 从开机时刻算出的"已运行多久"，给到分钟。
  *
- * 用 [serverNowMs] 而不是 `Date.now()`：`bootedAt` 是**服务端**时刻，拿浏览器时钟去减
- * 它，本机时钟快几分钟就会把运行时长整体算少几分钟——而看的人无从察觉。这个模块存在的
- * 全部理由就是消除那个偏差。
- *
- * 只给到分钟：面板是点开看一眼就收起来的东西，秒级跳动既看不出来也没有意义。
+ * 用 [serverNowMs] 而不是 `Date.now()`：`bootedAt` 是服务端时刻，拿浏览器时钟去减它
+ * 会把运行时长整体算偏。只给到分钟：面板是点开看一眼就收起来的东西，秒级跳动既看
+ * 不出来也没有意义。
  */
 export function fmtUptime(bootedAt) {
   if (!bootedAt) return PLACEHOLDER

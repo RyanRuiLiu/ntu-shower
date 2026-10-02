@@ -8,10 +8,11 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Rect
 import android.view.accessibility.AccessibilityNodeInfo
+import com.ryanliu.ntushower.core.a11y.A11yNodeSource
+import com.ryanliu.ntushower.core.a11y.A11yRuntime
 import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.config.RuntimeConfig
-import com.ryanliu.ntushower.service.A11yService
 
 /**
  * 浴室 App 的导航与元素操作。
@@ -28,19 +29,19 @@ object BathAppNavigator {
     // ── 导航 ──
 
     /** 从任意页面回到 HOME；总预算 [budgetMs]。 */
-    fun navigateToHome(a11y: A11yService, budgetMs: Long): Boolean {
+    fun navigateToHome(a11y: A11yNodeSource, budgetMs: Long): Boolean {
         // 已经在 HOME 就直接收工。ensureForeground 要读一次活动窗口的根节点（一次同步 IPC，
         // 实测 35~70ms），而 HOME 只可能是浴室 App 自己的页面——它在，就说明它在前台。
         // 每个流程都从"回首页"开始，而绝大多数时候本来就在首页，所以这一下省的是常态开销。
         //
         // 两个条件都要：快照可能是旧值（重算只在事件到达时发生），而 bathAppInForeground 由
         // 窗口状态事件维护，它才是"浴室 App 此刻在前台"的即时依据。
-        if (A11yService.bathAppInForeground && BathAppPage.snapshot().state == PageState.HOME) return true
+        if (A11yRuntime.bathAppInForeground && BathAppPage.snapshot().state == PageState.HOME) return true
         ensureForeground(a11y)
         val start = Uptime.nowMs()
         while (Uptime.nowMs() - start < budgetMs) {
             // 标记取在检测之前：检测本身要遍历一遍节点树，那期间发生的变化也该算数
-            val mark = A11yService.pageChangeMark()
+            val mark = A11yRuntime.pageChangeMark()
             when (BathAppPage.snapshot().state) {
                 PageState.HOME -> return true
 
@@ -49,7 +50,7 @@ object BathAppNavigator {
 
                 PageState.HINT, PageState.VF_RESULT -> Unit // 等待自动消失
             }
-            A11yService.awaitPageChangeAfter(mark, RuntimeConfig.pollIntervalMs)
+            A11yRuntime.awaitPageChangeAfter(mark, RuntimeConfig.pollIntervalMs)
         }
         return false
     }
@@ -79,8 +80,8 @@ object BathAppNavigator {
     // 目标 API 19 上发送本广播无需任何权限（当年第三方应用即如此使用）。lint 按 compileSdk
     // 判定，不适用于本设备的运行时下限。
     @SuppressLint("MissingPermission")
-    fun ensureForeground(a11y: A11yService) {
-        val root = a11y.rootInActiveWindow
+    fun ensureForeground(a11y: A11yNodeSource) {
+        val root = a11y.activeWindowRoot()
         if (root == null) {
             a11y.launchBathApp()
             return
@@ -92,12 +93,12 @@ object BathAppNavigator {
         }
         if (pkg == AppConfig.BATH_APP_PACKAGE) return
         a11y.sendBroadcast(Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS))
-        A11yService.awaitPageChange(RuntimeConfig.pollIntervalMs)
+        A11yRuntime.awaitPageChange(RuntimeConfig.pollIntervalMs)
         a11y.launchBathApp()
     }
 
-    private fun clickBack(a11y: A11yService) {
-        val root = a11y.rootInActiveWindow ?: return
+    private fun clickBack(a11y: A11yNodeSource) {
+        val root = a11y.activeWindowRoot() ?: return
         try {
             val back = findNode(root, BathAppResIds.BACK_TO_PREVIOUS)
             if (back != null) {
@@ -115,23 +116,23 @@ object BathAppNavigator {
      * 等待页面到达指定状态；期间只要浴室 App 不在前台就把它拉回来。
      *
      * 拉回来走 [ensureForeground]（含关系统面板），不是裸的 `launchBathApp`：离开前台的常见
-     * 起因是学生拉下了通知栏或进了最近任务，那时前台是 SystemUI——热切前台拗不过压在最上面
-     * 的系统面板，只有先把面板关掉才回得来。
+     * 起因是学生拉下了通知栏或进了最近任务，那时前台是 SystemUI，系统面板压在最上层，
+     * 热切前台无济于事，只有先把面板关掉才回得来。
      *
      * **不限制恢复次数**：反复拉面板的场面这套流程该扛住，而它本来就有总超时收口；[ensureForeground]
      * 在浴室 App 已在前台时什么都不做，重试不会空转。
      */
-    fun waitForPage(a11y: A11yService, target: PageState, timeoutMs: Long): Boolean {
+    fun waitForPage(a11y: A11yNodeSource, target: PageState, timeoutMs: Long): Boolean {
         val start = Uptime.nowMs()
         while (Uptime.nowMs() - start < timeoutMs) {
-            val mark = A11yService.pageChangeMark()
+            val mark = A11yRuntime.pageChangeMark()
             if (BathAppPage.snapshot().state == target) return true
-            if (!A11yService.bathAppInForeground) {
+            if (!A11yRuntime.bathAppInForeground) {
                 ensureForeground(a11y)
-                A11yService.awaitPageChangeAfter(mark, RuntimeConfig.pollIntervalMs)
+                A11yRuntime.awaitPageChangeAfter(mark, RuntimeConfig.pollIntervalMs)
                 continue
             }
-            A11yService.awaitPageChangeAfter(mark, RuntimeConfig.pollIntervalMs)
+            A11yRuntime.awaitPageChangeAfter(mark, RuntimeConfig.pollIntervalMs)
         }
         return false
     }
@@ -139,8 +140,8 @@ object BathAppNavigator {
     // ── 动作原语 ──
 
     /** HOME 页喷头网格中按标题文本定位指定编号的喷头项。 */
-    fun findDoor(a11y: A11yService, doorNo: Int): AccessibilityNodeInfo? {
-        val root = a11y.rootInActiveWindow ?: return null
+    fun findDoor(a11y: A11yNodeSource, doorNo: Int): AccessibilityNodeInfo? {
+        val root = a11y.activeWindowRoot() ?: return null
         try {
             val grid = findNode(root, BathAppResIds.SPRINKLER_GRID) ?: return null
             try {
@@ -217,10 +218,10 @@ object BathAppNavigator {
     }
 
     /** 点击无卡模式按钮（分配）。 */
-    fun clickNoCardButton(a11y: A11yService): Boolean = clickInActiveWindow(a11y, BathAppResIds.NOCARD_BUTTON)
+    fun clickNoCardButton(a11y: A11yNodeSource): Boolean = clickInActiveWindow(a11y, BathAppResIds.NOCARD_BUTTON)
 
     /** 点击结算按钮。 */
-    fun clickSettleButton(a11y: A11yService): Boolean = clickInActiveWindow(a11y, BathAppResIds.SETTLE_BUTTON)
+    fun clickSettleButton(a11y: A11yNodeSource): Boolean = clickInActiveWindow(a11y, BathAppResIds.SETTLE_BUTTON)
 
     /**
      * 验证页输入账号密码并确认。
@@ -230,8 +231,8 @@ object BathAppNavigator {
      * 出口上，而不是挂在成功分支里。Android 4.4 的剪贴板任何应用可读，而这台设备就挂在
      * 公共浴室的墙上。
      */
-    fun inputCredentialsAndConfirm(a11y: A11yService, certNo: String, password: String): Boolean {
-        val root = a11y.rootInActiveWindow ?: return false
+    fun inputCredentialsAndConfirm(a11y: A11yNodeSource, certNo: String, password: String): Boolean {
+        val root = a11y.activeWindowRoot() ?: return false
         try {
             return try {
                 fillCredentials(a11y, root, certNo, password)
@@ -245,7 +246,7 @@ object BathAppNavigator {
 
     /** 逐个字段写入并点确认。任一环节失败即返回 false，由调用方负责收尾。 */
     private fun fillCredentials(
-        a11y: A11yService,
+        a11y: A11yNodeSource,
         root: AccessibilityNodeInfo,
         certNo: String,
         password: String,
@@ -299,8 +300,8 @@ object BathAppNavigator {
     }
 
     /** 取 tv_nowdate 中心坐标（供 input tap 注入真实触摸清除网格选中态）。 */
-    fun getDateViewCenter(a11y: A11yService): Pair<Int, Int>? {
-        val root = a11y.rootInActiveWindow ?: return null
+    fun getDateViewCenter(a11y: A11yNodeSource): Pair<Int, Int>? {
+        val root = a11y.activeWindowRoot() ?: return null
         try {
             val node = findNode(root, BathAppResIds.DATE_VIEW) ?: return null
             try {
@@ -315,8 +316,8 @@ object BathAppNavigator {
         }
     }
 
-    private fun clickInActiveWindow(a11y: A11yService, resId: String): Boolean {
-        val root = a11y.rootInActiveWindow ?: return false
+    private fun clickInActiveWindow(a11y: A11yNodeSource, resId: String): Boolean {
+        val root = a11y.activeWindowRoot() ?: return false
         try {
             val node = findNode(root, resId) ?: return false
             return try {

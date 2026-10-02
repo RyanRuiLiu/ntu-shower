@@ -1,1 +1,1 @@
-"""审计域：接口调用的查询出口（写入在 core/audit，见 docs/decisions/0037-observability.md）。"""
+"""审计域：接口调用的查询出口（写入在 core/audit，标准依据见 docs/DECISIONS.md「可观测性」）。"""

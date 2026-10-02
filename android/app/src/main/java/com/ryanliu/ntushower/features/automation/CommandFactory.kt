@@ -65,7 +65,10 @@ object CommandFactory {
     /** 取一个可空整数：键不存在返回 null，存在则返回值（含 0）。 */
     private fun JSONObject.optIntOrNull(key: String): Int? = if (has(key)) optInt(key) else null
 
-    /** 滚动方向在协议里的取值。方向是必填的闭集，执行器按这两个字面量显式分派。 */
+    /**
+     * 滚动方向在协议里的取值。方向是必填的闭集，执行器（[CommandScheduler.executeScroll]）
+     * 按这两个常量分派——字面量只在这里出现一次。
+     */
     const val DIRECTION_FORWARD = "forward"
     const val DIRECTION_BACKWARD = "backward"
 

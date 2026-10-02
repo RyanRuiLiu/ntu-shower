@@ -1,34 +1,15 @@
 /**
  * 审计：接口调用审计（api_call）与命令流水（command_audit），标签切换、主从式。
  *
- * ## 交互：标签切换 + 选中行看详情
+ * 两个数据源是两种审计，用标签切换：接口调用回答"谁、从哪个 IP、调了什么、结果
+ * 如何"，命令流水回答"设备执行得怎么样"。
  *
- * 两个数据源是**两种审计**，用标签切换而不是上下堆两张表——堆叠会把页面撑得很长，
- * 且看一个表时另一个在视野里纯属干扰：
- * - **接口调用**：每一次后台请求——谁、从哪个 IP、调了什么、结果如何。查"有人
- *   动过什么、从哪里动的"来这里；
- * - **命令流水**：每条发到设备的命令——参数、结果、设备回报。查"设备执行得
- *   怎么样"来这里。
+ * 表格只放关键列；点行选中，右侧详情面板常驻显示该行全部字段——详情在右栏常驻，
+ * 比对几行时眼睛不用上下跑。详情面板遍历行对象的全部键渲染，后台加列自动出现，
+ * 点值即复制，另有整行 JSON 复制。
  *
- * 表格只放关键列；**点行 = 选中**（高亮），
- * 右侧详情面板随即显示该行的全部字段——详情在右栏**常驻**而不是页面底部：
- * 比对几行时眼睛不用上下跑。不做"点行展开/再点收起"——那个交互点击
- * 目标小、表格忽长忽短、字段藏在点击之后，连续比对几行会非常累。
- *
- * ## 展示：库里有什么就展示什么
- *
- * 详情面板直接遍历行对象的**全部键**渲染——后台加列这里自动出现，不存在
- * "表格挑过几列、其余看不到"的摘要化损失。每个字段一张小卡：标签 + 全量折行的值，
- * **点值即复制**；另有整行 JSON 复制，带出去比对不用手抄。
- *
- * ## 残留与冲突的防位
- *
- * 只有一个表格容器（`#auditTable`），切换标签时整体重渲染——没有"隐藏的表"留着
- * 旧 DOM；详情面板内容随选中整体重建，事件监听用面板级代理只挂一次。视图切走时
- * 全部监听经 dispose 摘除。
- *
- * 设备显示名字（名字是人在意的），id 在详情卡里。动作名与原因码**照原样显示**：
- * 这是开发者页面，读它的人要拿这两个值去日志和代码里搜，翻译成中文反而搜不到。
+ * 动作名与原因码照原样显示：这是开发者页面，读它的人要拿这两个值去日志里搜，
+ * 翻译成中文反而搜不到。
  */
 import { api } from '../core/api.js'
 import { fmtFullDateTime } from '../core/clock.js'
@@ -68,7 +49,7 @@ function detailCard(key, value) {
 function renderDetail(row, title) {
   const panel = $('detailPanel')
   if (!row) {
-    panel.innerHTML = '<div class="empty">点击上方任一行查看全部字段（点字段值可复制）</div>'
+    panel.innerHTML = '<div class="empty">点击上方任一行查看全部字段，点击字段值可复制</div>'
     return
   }
   const cards = Object.entries(row)
@@ -177,7 +158,7 @@ async function reload() {
       api.commands({ device_id: deviceId, limit }),
     ])
     refreshDeviceNames()
-    state.rows.api = calls.calls
+    state.rows.api = calls
     state.rows.command = commands
     state.selected.api = -1
     state.selected.command = -1
@@ -186,7 +167,7 @@ async function reload() {
     report('auditResult', `接口 ${state.rows.api.length} 条 · 命令 ${state.rows.command.length} 条`, 'info')
   } catch (error) {
     if (error?.status === 401) {
-      report('auditResult', '访问令牌缺失或无效，请在顶栏填写', 'err')
+      report('auditResult', '身份缺失或未授权，请在顶栏填写身份标识', 'err')
       return
     }
     report('auditResult', problemText(error), 'err')
@@ -210,11 +191,11 @@ export const auditView = {
                   `<span class="audit-tab${key === state.tab ? ' is-active' : ''}" data-tab="${key}" title="${esc(tab.title)}">${esc(tab.label)}</span>`,
               )
               .join('')}
-            <span class="panel-note">点行看详情</span>
+            <span class="panel-note">点击行查看详情</span>
             <div class="panel-tools">
               <select id="inScope">
-                <option value="device">当前设备</option>
                 <option value="all">全部设备</option>
+                <option value="device">当前设备</option>
               </select>
               <input id="inLimit" type="number" min="1" max="500" value="50" style="width:90px">
               <button type="button" class="btn btn-ghost btn-sm" id="btnReload">刷新</button>
@@ -224,7 +205,7 @@ export const auditView = {
         </section>
 
         <section class="panel" id="detailPanel">
-          <div class="empty">点击左侧任一行，详情显示在这里</div>
+          <div class="empty">点击左侧任一行，此处显示其详情</div>
         </section>
       </div>
       <div class="result" id="auditResult" style="padding:0 4px"></div>`

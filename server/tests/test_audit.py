@@ -1,208 +1,222 @@
-"""接口调用审计：写入、关联、查询与保留期清理。"""
+"""审计域：/audit/calls 与 /audit/commands 只读出口、actor 原文、体入库规则与 device_id 来源。
+
+api_call 的写入面由 core/audit 的路径前缀决定，前缀必须覆盖统一资源树全部域
+（跨域钉子测试保证新增域漏登时立刻失败）；device_id 的取值规则（路径段或
+query）与数据重型端点的响应排除用纯函数直接钉住。
+"""
 
 import json
 
-import pytest
 from fastapi.testclient import TestClient
+from tests import helpers
 
 from app.core import audit
-
-OPS_HEADERS = {"X-Ops-Token": "test-token"}
-GHOST_ID = "dev-audit-ghost"
+from app.modules.audit import repository as command_audit
 
 
-def _calls(client: TestClient, **params: str) -> list[dict]:
-    r = client.get("/ops/audit", headers=OPS_HEADERS, params=params or None)
-    assert r.status_code == 200, r.text
-    return r.json()["calls"]
+def _calls(client: TestClient, admin_headers: dict[str, str], **params: object) -> list[dict[str, object]]:
+    """取 /audit/calls 裸数组（admin 专属）。
+
+    审计行在响应生成之后写入，因此结果里不含本次查询自身，rows[0] 即上一个请求。
+    """
+    r = client.get("/api/v1/audit/calls", headers=admin_headers, params=params or None)
+    assert r.status_code == 200
+    body = r.json()
+    assert isinstance(body, list)
+    return body
 
 
-def test_ops_call_is_audited_with_masked_actor(client: TestClient) -> None:
-    r = client.get("/ops/devices", headers=OPS_HEADERS)
+def test_every_domain_is_audited(client: TestClient, admin_headers: dict[str, str]) -> None:
+    """资源树每个域的调用都必须留痕（含 401/403）：漏登一个前缀即在此失败。"""
+    probes = [
+        ("/api/v1/devices", None),
+        ("/api/v1/doors", None),
+        ("/api/v1/config", None),
+        ("/api/v1/identities", None),
+        ("/api/v1/ota/releases", None),
+        ("/api/v1/audit/commands", None),
+    ]
+    for path, _headers in probes:
+        # 每个探测都不带身份：401 也必须留痕（OWASP 要求认证失败必记）
+        client.get(path)
+    audited = _calls(client, admin_headers, limit=500)
+    recorded_paths = {str(row["path"]) for row in audited}
+    for path, _headers in probes:
+        assert path in recorded_paths, f"域 {path} 的调用没有审计行"
+
+
+def test_audit_surface_requires_admin(client: TestClient, ops_headers: dict[str, str]) -> None:
+    """审计域 admin 专属：无身份 401，非 admin 403。"""
+    assert client.get("/api/v1/audit/calls").status_code == 401
+    assert client.get("/api/v1/audit/commands").status_code == 401
+    assert client.get("/api/v1/audit/calls", headers=ops_headers).status_code == 403
+
+
+def test_identity_call_records_raw_actor(client: TestClient, admin_headers: dict[str, str]) -> None:
+    r = client.get("/api/v1/ota/releases", headers=admin_headers)
     assert r.status_code == 200
 
-    calls = _calls(client, actor_kind="ops")
-    assert len(calls) == 1
-    row = calls[0]
+    row = _calls(client, admin_headers)[0]
     assert row["method"] == "GET"
-    assert row["path"] == "/ops/devices"
+    assert row["path"] == "/api/v1/ota/releases"
     assert row["status_code"] == 200
-    assert row["actor_kind"] == "ops"
-    # 不脱敏：调用方令牌与来源如实落库（2026-10-01 用户决定）
-    assert row["actor"] == "test-token"
+    assert row["actor_kind"] == "identity"
+    assert row["actor"] == "admin-identity-0001"
     assert row["duration_ms"] >= 0
 
 
-def test_unauthorized_call_is_audited(client: TestClient) -> None:
-    """认证失败必须留痕（OWASP：认证事件是必记项）。无令牌是匿名、错令牌是 ops。"""
-    assert client.get("/ops/devices").status_code == 401
-    assert client.get("/ops/devices", headers={"X-Ops-Token": "wrong"}).status_code == 401
+def test_anonymous_call_recorded_without_identity(client: TestClient, admin_headers: dict[str, str]) -> None:
+    """未带标识记 anonymous：actor 为空串（OWASP：匿名访问同样留痕）。"""
+    assert client.get("/api/v1/ota/releases").status_code == 200
 
-    rows = _calls(client, limit=500)
-    failed = [row for row in rows if row["status_code"] == 401]
-    assert len(failed) == 2
-    kinds = {row["actor_kind"] for row in failed}
-    assert kinds == {"anonymous", "ops"}
-    # 错的令牌也原文落库：审计的价值就在于如实（2026-10-01 不脱敏决定）
-    ops_row = next(row for row in failed if row["actor_kind"] == "ops")
-    assert ops_row["actor"] == "wrong"
+    row = _calls(client, admin_headers)[0]
+    assert row["actor_kind"] == "anonymous"
+    assert row["actor"] == ""
 
 
-def test_device_call_records_device_problem_and_body(client: TestClient) -> None:
-    r = client.post(f"/ops/devices/{GHOST_ID}/exec", headers=OPS_HEADERS, json={"command": "id"})
+def test_successful_response_body_is_stored(client: TestClient, admin_headers: dict[str, str]) -> None:
+    """JSON 响应体原文入库。"""
+    assert client.get("/api/v1/ota/releases", headers=admin_headers).status_code == 200
+
+    row = _calls(client, admin_headers)[0]
+    assert isinstance(json.loads(str(row["response_body"])), list)
+
+
+def test_multipart_request_body_is_not_stored(client: TestClient, admin_headers: dict[str, str]) -> None:
+    """请求体只对 JSON 形态落库：multipart 本体不进审计行。"""
+    r = client.post(
+        "/api/v1/ota/releases",
+        headers=admin_headers,
+        data={"version": "0.1.0", "version_code": 1},
+        files={"file": ("x.apk", b"PK")},
+    )
+    assert r.status_code == 200
+
+    row = _calls(client, admin_headers)[0]
+    assert row["request_body"] is None
+
+
+def test_problem_response_records_type_detail_and_body(client: TestClient, admin_headers: dict[str, str]) -> None:
+    """problem 响应带 problem_type 与 detail，响应体同样入库。"""
+    r = client.get("/api/v1/ota/releases/9.9.9/download", headers=admin_headers)
     assert r.status_code == 404
 
-    row = _calls(client)[0]
-    assert row["device_id"] == GHOST_ID
-    assert row["status_code"] == 404
-    assert row["problem_type"]
-    # 请求体原文落库不截断：发了什么命令审计里就是什么（语义比较，不依赖序列化空格）
-    assert json.loads(row["request_body"]) == {"command": "id"}
-
-
-def test_validation_failure_records_problem_type_and_detail(client: TestClient) -> None:
-    """失败行的 detail 是给审计人看的中文答案——只有 type 代号等于没记。"""
-    r = client.post("/ops/devices/dev-audit-1/input", headers=OPS_HEADERS, json={"text": "hi"})
-    assert r.status_code == 422
-
-    row = _calls(client)[0]
-    assert row["status_code"] == 422
-    assert row["problem_type"] == "validation-failed"
+    row = _calls(client, admin_headers)[0]
+    assert row["problem_type"] == "release-not-found"
     assert row["detail"]
+    assert json.loads(str(row["response_body"]))["type"].endswith("/problems/release-not-found")
 
 
-def test_response_body_is_stored_for_json(client: TestClient) -> None:
-    """成功响应的 JSON 体全文入库——审计要有问也有答。"""
-    r = client.get("/ops/devices", headers=OPS_HEADERS)
-    assert r.status_code == 200
+def test_query_string_is_recorded(client: TestClient, admin_headers: dict[str, str]) -> None:
+    client.get("/ota/manifest", headers=admin_headers, params={"device_id": "dev-q", "version_code": 6})
 
-    row = _calls(client)[0]
-    assert row["response_body"]
-    assert isinstance(json.loads(row["response_body"]), list)
+    row = _calls(client, admin_headers)[0]
+    assert "device_id=dev-q" in str(row["query"])
 
 
-def test_data_heavy_endpoints_skip_response_body(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    """截图/UI 树这类数据重型且可重取的响应不落库（与媒体同一处理）。"""
-    from app.gateway.manager import manager as gateway_manager
-    from app.modules.devices import repository as devices_repository
-    from app.modules.devices import routes as devices_routes
-
-    devices_repository.register(GHOST_ID, "0.4.8", 52, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
-    devices_repository.set_trusted(GHOST_ID, True)
-    monkeypatch.setattr(gateway_manager, "_connections", {GHOST_ID: object()})
-
-    async def _fake_wait(*_args: object, **_kwargs: object) -> dict:
-        return {"status": "ok", "reason_code": "", "terminal_message": "", "data": {"xml": "<hierarchy/>"}}
-
-    monkeypatch.setattr(devices_routes.sessions_service, "send_command_and_wait", _fake_wait)
-
-    r = client.post(f"/ops/devices/{GHOST_ID}/dump", headers=OPS_HEADERS)
-    assert r.status_code == 200
-
-    row = _calls(client)[0]
-    assert row["response_body"] is None
-
-
-def test_query_string_is_recorded(client: TestClient) -> None:
-    r = client.get("/ops/devices", headers=OPS_HEADERS, params={"limit": 7})
-    assert r.status_code == 200
-
-    row = _calls(client)[0]
-    assert "limit=7" in row["query"]
-
-
-def test_traceparent_is_honored_and_request_id_returned(client: TestClient) -> None:
-    """W3C Trace Context：调用方带 traceparent 就沿用其 trace-id；响应回 X-Request-ID。"""
+def test_traceparent_is_honored_and_request_id_returned(client: TestClient, admin_headers: dict[str, str]) -> None:
+    """W3C Trace Context：调用方带合法 traceparent 就沿用其 trace-id；响应回 X-Request-ID。"""
     trace_id = "4bf92f3577b34da6a3ce929d0e0e4736"
-    headers = {**OPS_HEADERS, "traceparent": f"00-{trace_id}-00f067aa0ba902b7-01"}
-    r = client.get("/ops/devices", headers=headers)
+    headers = {**admin_headers, "traceparent": f"00-{trace_id}-00f067aa0ba902b7-01"}
+    r = client.get("/api/v1/ota/releases", headers=headers)
     assert r.status_code == 200
     request_id = r.headers["X-Request-ID"]
     assert request_id
 
-    row = _calls(client)[0]
+    row = _calls(client, admin_headers)[0]
     assert row["trace_id"] == trace_id
     assert row["request_id"] == request_id
 
 
-def test_invalid_traceparent_falls_back_to_generated(client: TestClient) -> None:
-    r = client.get("/ops/devices", headers={**OPS_HEADERS, "traceparent": "garbage"})
-    assert r.status_code == 200
+def test_invalid_traceparent_falls_back_to_generated(client: TestClient, admin_headers: dict[str, str]) -> None:
+    client.get("/api/v1/ota/releases", headers={**admin_headers, "traceparent": "garbage"})
 
-    row = _calls(client)[0]
-    assert len(row["trace_id"]) == 32
-
-
-def test_device_id_is_resolved_from_all_three_sources(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    """设备列的取值规则（锁定）："本次调用作用于哪台设备就记哪台"。
-
-    三种落点各自解析：路径段（设备动作）、query（列表类）、JSON 体（动作类，
-    如 assign）。都没有（设备清单本身）为空——这是规则，不是漏提取。
-    """
-    # ① 路径段
-    client.post(f"/ops/devices/{GHOST_ID}/exec", headers=OPS_HEADERS, json={"command": "id"})
-    assert _calls(client)[0]["device_id"] == GHOST_ID
-
-    # ② query
-    client.get("/ops/doors", headers=OPS_HEADERS, params={"device_id": "dev-from-query"})
-    assert _calls(client)[0]["device_id"] == "dev-from-query"
-
-    # ③ JSON 体（assign 对不存在的设备报 404，但审计照记 body 里的 device_id）
-    client.post("/ops/sessions/assign", headers=OPS_HEADERS, json={"device_id": "dev-from-body", "door_no": 1})
-    assign_row = next(row for row in _calls(client, limit=500) if row["path"] == "/ops/sessions/assign")
-    assert assign_row["device_id"] == "dev-from-body"
-
-    # 无设备：设备清单本身
-    client.get("/ops/devices", headers=OPS_HEADERS)
-    assert _calls(client)[0]["device_id"] is None
+    row = _calls(client, admin_headers)[0]
+    assert len(str(row["trace_id"])) == 32
 
 
-def test_static_and_health_are_not_audited(client: TestClient) -> None:
-    assert client.get("/healthz").status_code == 200
-    assert client.get("/ops/devices", headers=OPS_HEADERS).status_code == 200
+def test_gateway_lifecycle_is_recorded(client: TestClient, admin_headers: dict[str, str]) -> None:
+    """设备网关接入记一行 connect（kind=gateway，status 0=连接 1=断开），可按类别过滤。"""
+    device_id = "dev-gw-audit"
+    with client.websocket_connect("/gateway/device") as ws:
+        ws.send_text(helpers.hello_frame(device_id))
+        helpers.recv_until(ws, "link.hello_ack")
 
-    # 只有 API 前缀进审计表：healthz 与静态资源是无安全语义的噪音
-    calls = _calls(client, limit=500)
-    assert [row["path"] for row in calls if row["path"] == "/healthz"] == []
-
-
-def test_gateway_lifecycle_rows_use_gateway_kind(client: TestClient) -> None:
-    """网关行 kind=gateway、path 干净（事件语义在 kind/status，不塞进 path）。"""
-    from app.core.audit import record_gateway
-
-    record_gateway("dev-x", "connect")
-    record_gateway("dev-x", "disconnect")
-
-    rows = _calls(client, kind="gateway")
-    # 倒序：最新在前——断开行(1)先于连接行(0)
-    assert [row["status_code"] for row in rows] == [1, 0]
-    assert all(row["path"] == "/gateway/device" for row in rows)
+    rows = _calls(client, admin_headers, kind="gateway")
+    connect_rows = [row for row in rows if row["device_id"] == device_id and row["status_code"] == 0]
+    assert connect_rows
     assert all(row["actor_kind"] == "device" for row in rows)
 
-
-def test_audit_query_filters(client: TestClient) -> None:
-    assert client.get("/ops/devices", headers=OPS_HEADERS).status_code == 200
-    assert client.get("/ops/audit", headers=OPS_HEADERS).status_code == 200
-
-    by_kind = _calls(client, actor_kind="ops")
-    assert all(row["actor_kind"] == "ops" for row in by_kind)
-
-    by_device = _calls(client, device_id="dev-audit-1")
-    assert all(row["device_id"] == "dev-audit-1" for row in by_device)
+    # 断开行由网关在连接收尾时写入；测试客户端的断开会取消网关协程，直接验证写入路径
+    audit.record_gateway(device_id, "disconnect")
+    rows = _calls(client, admin_headers, kind="gateway")
+    disconnect_rows = [row for row in rows if row["device_id"] == device_id and row["status_code"] == 1]
+    assert disconnect_rows
 
 
-def test_prune_removes_only_expired_rows(client: TestClient) -> None:
-    """NIST SP 800-92：保留期之外的可删，之内的必须留。"""
-    assert client.get("/ops/devices", headers=OPS_HEADERS).status_code == 200
+def test_calls_filters_by_actor_kind_and_device(client: TestClient, admin_headers: dict[str, str]) -> None:
+    """查询参数按列过滤：device_id 与 actor_kind。"""
+    client.get("/ota/manifest", headers=admin_headers, params={"device_id": "dev-filter-1", "version_code": 6})
+
+    by_device = _calls(client, admin_headers, device_id="dev-filter-1")
+    assert by_device
+    assert all(row["device_id"] == "dev-filter-1" for row in by_device)
+
+    by_actor = _calls(client, admin_headers, actor_kind="identity", limit=1)
+    assert by_actor
+    assert all(row["actor_kind"] == "identity" for row in by_actor)
+
+
+def test_commands_lists_command_audit_rows(client: TestClient, admin_headers: dict[str, str]) -> None:
+    """GET /audit/commands 裸数组：命令流水，可按设备过滤。"""
+    command_audit.insert_command("cmd-audit-1", "dev-audit-cmd", "session.assign")
+
+    rows = client.get("/api/v1/audit/commands", headers=admin_headers, params={"device_id": "dev-audit-cmd"}).json()
+    assert isinstance(rows, list)
+    assert [row["command_id"] for row in rows] == ["cmd-audit-1"]
+    assert rows[0]["device_id"] == "dev-audit-cmd"
+
+
+def test_device_of_resolves_path_segment_then_query() -> None:
+    """审计行的 device_id 只来自路径段或 query：路径优先，都没有为空。"""
+    assert audit._device_of("/api/v1/devices/dev-1/exec", "") == "dev-1"
+    assert audit._device_of("/api/v1/devices/dev-1/exec", "x=1") == "dev-1"
+    assert audit._device_of("/api/v1/devices/dev-1/exec", "device_id=dev-from-query") == "dev-1"  # 路径优先
+    assert audit._device_of("/ota/manifest", "device_id=dev-from-query") == "dev-from-query"
+    assert audit._device_of("/api/v1/config", "") == ""
+    assert audit._device_of("/api/v1/devices", "") == ""
+
+
+def test_data_heavy_paths_are_excluded_from_response_storage() -> None:
+    """截图、拍照、UI 节点树端点的响应不落库（数据重型且可重取）。"""
+    assert audit._DATA_HEAVY_PATH.search("/api/v1/devices/dev-1/capture")
+    assert audit._DATA_HEAVY_PATH.search("/api/v1/devices/dev-1/dump")
+    assert audit._DATA_HEAVY_PATH.search("/api/v1/devices/dev-1/photo")
+    assert audit._DATA_HEAVY_PATH.search("/api/v1/devices/dev-1/exec") is None
+    assert audit._DATA_HEAVY_PATH.search("/ota/manifest") is None
+
+
+def test_prune_removes_only_expired_rows(client: TestClient, admin_headers: dict[str, str]) -> None:
+    """保留期之内必须留，之外的可删（NIST SP 800-92）；清理幂等。"""
+    assert client.get("/api/v1/ota/releases", headers=admin_headers).status_code == 200
     assert audit.prune(retention_days=90) == 0
-    assert len(_calls(client, limit=500)) >= 1
+    assert len(_calls(client, admin_headers, limit=500)) == 1
 
-    # requested_at 直接改老：模拟 90 天前的一行
     from app.core.db import get_conn
 
-    get_conn().execute(
+    conn = get_conn()
+    conn.execute(
         "UPDATE api_call SET requested_at = datetime('now', '-91 days') WHERE id = (SELECT MIN(id) FROM api_call)"
     )
-    get_conn().commit()
+    conn.commit()
+
     assert audit.prune(retention_days=90) == 1
     assert audit.prune(retention_days=90) == 0
+
+
+def test_store_body_replaces_oversize_payload() -> None:
+    """超限的体以占位说明入库，绝不截断；限内原文返回。"""
+    body = "x" * (audit.BODY_MAX_BYTES + 1)
+
+    assert audit.store_body("compact") == "compact"
+    assert audit.store_body(body).startswith("[JSON 体")

@@ -156,8 +156,7 @@
 
 /*
  * 喷头卡片里的六格与设备信息面板里的各行是同一个视觉结构：左边一个次要色的标签，
- * 右边一个等宽字体的值。写两遍就会分叉——事实上已经分叉过一次，喷头卡片里那格
- * 少了等宽字体，读起来像另一类信息。所以只留这一份。
+ * 右边一个等宽字体的值。只留这一份，两处才不会分叉。
  */
 .kv {
   display: flex;
@@ -268,7 +267,7 @@
   vertical-align: 1px;
 }
 
-/* 大区分隔：基础能力 / 拓展功能，各自带标题与小卡片网格 */
+/* 大区分隔：业务功能 / 运行基础，各自带标题与小卡片网格 */
 .cfg-section {
   margin-bottom: var(--sp-4);
 }
@@ -403,7 +402,7 @@ tr.audit-row.is-selected td {
 
 /*
  * 顶栏那个按钮点开的浮层。放设备 ID、IP、版本这些**排障时才看**的字段——它们常驻
- * 显示会挤掉真正需要一直盯着的东西（在线状态、令牌）。
+ * 显示会挤掉真正需要一直盯着的东西（在线状态、身份）。
  */
 .info-panel {
   position: absolute;
@@ -438,6 +437,14 @@ tr.audit-row.is-selected td {
   word-break: break-all;
 }
 
+/* 能力位明细：跟在「能力位」计数行下，逐项列出设备声明的能力。
+   左对齐排列——它是一组并列项，不是与标签成对的值 */
+.info-caps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
 /* ── 表格：设备、身份、发布、审计都用它 ─────────────────── */
 
 .table {
@@ -468,6 +475,12 @@ tr.audit-row.is-selected td {
 
 .table tbody tr:hover {
   background: var(--elevated);
+}
+
+/* 行选中态：与页面其他区域联动的行（如身份页正在编辑的那一行）用它标出对应关系。
+   只换背景色不动结构，选中与取消都不引起列宽行高变化 */
+.table tbody tr.is-selected td {
+  background: var(--accent-bg-strong);
 }
 
 .table code {

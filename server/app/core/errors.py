@@ -1,17 +1,9 @@
 """HTTP 错误响应：对齐 RFC 9457 Problem Details（application/problem+json）。
 
-## 两个成员的职责划分
-
-- `type`：问题类型的 URI 引用，取自 `core.problems` 登记表（RFC 9457 §3.1 要求
-  不同问题有不同 type）。客户端据此分支，不解析文案；
-- `title`：该类型的稳定简述；`detail`：本次请求的具体信息，允许变化。
-
-未登记的问题（框架抛的 404/405 等）退回按状态码生成 type——这类问题没有
-可分支的语义，客户端本就不该依赖其文案。
-
-生产环境经 PUBLIC_BASE_URL 注入正式域名前缀；未配置时输出相对引用，
-相对引用按 RFC 3986 相对于请求 URI 解析。任何情况下都不硬编码域名
-（AGENTS.md 禁止硬编码环境值）。
+type 取自 core.problems 登记表，客户端据此分支不解析文案；title 是该类型的
+稳定简述，detail 是本次请求的具体信息。未登记的问题（框架抛出的 404、405 等）
+按状态码生成 type：这类问题没有可分支的语义。生产环境经 PUBLIC_BASE_URL 注入
+正式域名前缀，未配置时输出相对引用；任何情况下不硬编码域名。
 """
 
 from fastapi import FastAPI, Request
@@ -60,11 +52,10 @@ def install_error_handlers(app: FastAPI) -> None:
 
 
 def _unregistered(status: int) -> Problem:
-    """框架/第三方抛出的问题：按状态码生成 type，无可分支语义。
+    """框架或第三方抛出的问题：按状态码生成 type，无可分支语义。
 
-    文案不区分状态码——这类问题（404 路径不存在、405 方法不对）都是"请求本身
-    打错了"，对使用者没有可操作的区别，而逐个状态码维护中文短语只是复刻
-    HTTP 标准表。具体状态码在 `status` 成员里，需要时看得到。
+    文案不区分状态码：404 与 405 都是"请求本身打错了"，逐个状态码维护中文短语
+    只是复刻 HTTP 标准表，状态码本身在 status 成员里。
     """
     code = f"http-{status}"
     return Problem(code, status, "请求失败")

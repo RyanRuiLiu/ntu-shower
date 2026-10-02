@@ -1,18 +1,16 @@
-"""授权服务：换取标识、登记标识、解析请求标识。
+"""授权服务：登记标识、解析请求标识、吊销。
 
-## 一个概念一套函数
+名单里的东西是标识（identity），两种来源（微信 openid / 我方签发的网页标识）只是
+`kind` 不同，登记只有一个入口 `put_identity`。所有返回标识的函数都返回同一个
+`IdentityRecord`，形状与名单一致。
 
-名单里的东西是**标识**（identity），两种来源（微信 openid / 我们签发）只是
-`kind` 不同。因此登记只有一个入口 `put_identity`，而不是
-`authorize_openid` 与 `issue_web_identity` 两个几乎相同的函数。
-
-所有返回标识的函数都返回同一个 `IdentityRecord`，形状与名单一致。
+本项目不含任何微信交互（code 换 openid 在 status-panel）；这里的 `kind=openid`
+只是名单里的来源标记，openid 的值由管理员在身份页手工登记。
 """
 
 import secrets
 
 from app.core.logging import log_event
-from app.core.wechat import WeChatNotConfiguredError, code_to_openid
 
 from . import repository
 from .identity import IdentityKind
@@ -26,18 +24,23 @@ def put_identity(
     kind: IdentityKind,
     capabilities: list[str],
     label: str = "",
-    openid: str = "",
+    identity: str = "",
     device_scope: list[str] | None = None,
 ) -> IdentityRecord:
     """登记一个标识并授予能力与设备作用域。
 
-    - `kind=OPENID`：用微信给的 `openid` 作标识（登记，随后该用户可登录）
-    - `kind=WEB`：服务端签发一个不可枚举的标识（网页拿不到 openid，
-      标识本身就是它的身份）
+    - `kind=OPENID`：`identity` 即小程序用户的 openid（status-panel 转发请求时就带它）
+    - `kind=WEB`：`identity` 为空由服务端签发不可枚举的标识（网页拿不到 openid，
+      标识即身份）；给了值就是自创标识，原样采用
 
-    两种来源写进同一张表、出现在同一份名单，一眼能看到"这个标识是谁在用"。
+    两种来源写进同一张表、出现在同一份名单。编辑既有标识走 [update_identity]，
+    不走这里：登记时 web 标识必须新生成或显式自创，编辑时必须沿用原标识。
     """
-    identity = openid if kind is IdentityKind.OPENID else secrets.token_urlsafe(WEB_IDENTITY_BYTES)
+    if kind is IdentityKind.OPENID and not identity:
+        message = "openid identity requires a value"
+        raise ValueError(message)
+    if not identity:
+        identity = secrets.token_urlsafe(WEB_IDENTITY_BYTES)
     record = repository.put_identity(identity, kind, capabilities, label, device_scope)
     log_event(
         "INFO",
@@ -50,26 +53,23 @@ def put_identity(
     return record
 
 
-def login_with_wx_code(code: str) -> IdentityRecord | None:
-    """小程序登录：用 wx.login 的 code 换取身份。
-
-    返回 openid 本身作为标识，**不另发令牌**：openid 由微信签发、稳定不变，
-    再包一层只是徒增过期与重登的处理。客户端存下它，之后每次请求带上。
-
-    未授权返回 None——"换不到 openid"与"不在名单里"对外不区分，
-    以免泄漏谁在名单中。
-    """
-    try:
-        openid = code_to_openid(code)
-    except WeChatNotConfiguredError:
-        log_event("WARNING", "access.wx-not-configured", "微信登录未配置 appid/secret")
-        return None
-    if openid is None:
-        return None
-
-    record = repository.find_identity(openid)
-    if record is None:
-        log_event("INFO", "access.login-rejected", "登录被拒：未获授权", identity=openid)
+def update_identity(
+    identity: str,
+    kind: IdentityKind,
+    capabilities: list[str],
+    label: str = "",
+    device_scope: list[str] | None = None,
+) -> IdentityRecord:
+    """编辑既有标识的能力位、作用域与备注；标识本身不变，下一次请求即生效。"""
+    record = repository.put_identity(identity, kind, capabilities, label, device_scope)
+    log_event(
+        "INFO",
+        "access.identity-put",
+        "身份已登记",
+        kind=kind.value,
+        identity=identity,
+        capabilities=",".join(capabilities),
+    )
     return record
 
 

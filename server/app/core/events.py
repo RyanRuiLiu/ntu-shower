@@ -1,22 +1,10 @@
-"""进程内事件总线：领域变化 → /api/v1/stream 订阅者推送。
+"""进程内事件总线：领域变化推送给 /stream 的订阅者。
 
-单进程内使用，模块间解耦的最小实现；将来拆分进程时此接口可平滑替换为
-Redis pub/sub。
+跨线程语义：publish 可能来自事件循环线程或工作线程，而 asyncio.Queue 只能在其
+所属循环上操作，投递一律经 loop.call_soon_threadsafe 回到订阅者所在循环。
 
-跨线程语义：publish 可能来自事件循环线程（网关）或工作线程（
-run_in_threadpool 里的领域服务），而 asyncio.Queue 只允许在其所属事件循环上
-操作。因此投递一律经 loop.call_soon_threadsafe 回到订阅者所在循环，而不是
-在工作线程里直接 put_nowait。
-
-## 事件类型登记
-
-事件的**唯一来源**在这里：服务端 `publish` 用下面这些常量，网页端从
-`core/contract.js` 取由本模块生成的那一份（`tools/sync_contracts.py`）。此前两边
-各自硬编码字符串——改名时改了一边忘另一边，表现是界面上某些状态再也不更新，而且
-哪里都不报错。
-
-命名用点号，与设备协议（`link.hello`、`door.snapshot`）一致。此前这里是下划线，
-同一套系统两种分隔符。
+事件类型常量在此登记，网页端 core/contract.js 由 tools/sync_contracts.py 从本
+模块生成；命名用点号，与设备协议一致。
 """
 
 import asyncio
@@ -30,19 +18,16 @@ from .protocol import JsonObject
 
 QUEUE_MAX_SIZE = 256
 
-#: 一台设备的档案变了：上线、下线、改名、调整信任位都推它。
-#:
-#: payload 是**完整**的 `DeviceRecord`。不做成 `device_online` / `device_offline` 两个
-#: 事件：那是同一个字段的两个值，前端要写两个做同样事情的分支，而设备重连时变的不只是
-#: `online`——版本号、来源 IP、开机时刻都在服务端这一侧刚更新过，只推状态词的话它们
-#: 到不了界面。
+#: 一台设备的在场或名称变了（上线、下线、改名）。payload 是精简档案
+#: （device_id、name、online、at）：版本、IP、时钟偏差等运维诊断字段不进公开
+#: 推送，管理台要详情走 /devices/runtime。发布只经 devices.service 的
+#: publish_device_update 一处。
 DEVICE_UPDATE = "device.update"
 
-#: 喷头状态变了。
-#:
-#: payload 只列**哪几个**喷头变了（`door_no` / `state` / `card_no`），不是完整现态：
-#: 完整的里面还有分配时间、学号等十几个字段，逐条推会把 payload 撑大，而前端收到后本
-#: 来就要重拉一次全量。
+#: 喷头现态变了。payload 是该设备的**完整现态行**（device_id、at、doors：与
+#: GET /doors 同一 service 路径产出的 DoorView 数组）——WS 单连接有序投递，
+#: 数据承载推送是行业标准（Supabase/Firebase 同型）：客户端直接应用、不回拉，
+#: 请求量与事件量解耦。无变化的上报也照发，充当状态再同步。
 DOOR_UPDATE = "door.update"
 
 

@@ -14,6 +14,13 @@ import java.io.File
  */
 object CappedLogFile {
 
+    /**
+     * 三个落盘文件（device.log / crash.log / automation.log）共用的上限：都只留最近
+     * 几轮现场，不撑爆存储。数字只在这里出现一次；某个文件要另行取舍时，由调用方传入
+     * 自己的 maxBytes。
+     */
+    const val DEFAULT_MAX_BYTES = 256 * 1024L
+
     /** 追加一段文本；超限时先裁掉最旧的一半。 */
     fun append(file: File, text: String, maxBytes: Long) {
         try {

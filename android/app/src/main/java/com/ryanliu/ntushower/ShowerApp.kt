@@ -5,8 +5,9 @@ import android.app.Application
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.os.SystemClock
 import android.util.Log
+import com.ryanliu.ntushower.core.clock.Clock
+import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.logfile.CappedLogFile
 import com.ryanliu.ntushower.service.AgentService
@@ -33,8 +34,8 @@ class ShowerApp : Application() {
             val dir = File(AppConfig.WORK_DIR).apply { mkdirs() }
             CappedLogFile.append(
                 File(dir, CRASH_LOG_NAME),
-                "\n==== ${System.currentTimeMillis()} ====\n" + Log.getStackTraceString(throwable) + "\n",
-                MAX_CRASH_LOG_BYTES,
+                "\n==== ${Clock.nowRfc3339()} ====\n" + Log.getStackTraceString(throwable) + "\n",
+                CappedLogFile.DEFAULT_MAX_BYTES,
             )
             try {
                 val alarm = getSystemService(Context.ALARM_SERVICE) as AlarmManager
@@ -47,7 +48,7 @@ class ShowerApp : Application() {
                 )
                 alarm.setExact(
                     AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                    SystemClock.elapsedRealtime() + RESTART_DELAY_MS,
+                    Uptime.nowMs() + RESTART_DELAY_MS,
                     pending,
                 )
             } catch (_: Exception) {}
@@ -63,9 +64,6 @@ class ShowerApp : Application() {
 
         /** 崩溃堆栈落在这个文件里，管理台 `device.exec` 直接 cat 取回。 */
         private const val CRASH_LOG_NAME = "crash.log"
-
-        /** crash.log 上限：超出即裁掉最旧的一半，避免崩溃循环把存储写满。 */
-        private const val MAX_CRASH_LOG_BYTES = 256 * 1024L
 
         /** 崩溃到重启之间的间隔：留一点时间让系统把进程收干净。 */
         private const val RESTART_DELAY_MS = 1_000L

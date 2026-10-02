@@ -2,9 +2,10 @@
 // 但在 19 上不回收会造成节点泄漏。本文件取到的节点都要回收。
 @file:Suppress("DEPRECATION")
 
-package com.ryanliu.ntushower.service
+package com.ryanliu.ntushower.features.automation
 
 import android.view.accessibility.AccessibilityNodeInfo
+import com.ryanliu.ntushower.core.a11y.A11yNodeSource
 
 /**
  * 文本输入的**粘贴通道**：剪贴板 + `ACTION_PASTE` 写入焦点输入框。与按键注入
@@ -19,7 +20,7 @@ import android.view.accessibility.AccessibilityNodeInfo
  * 代价：本 ROM 的粘贴在同一字段**第二次**插入时会带出一个空格——要连着发英文数字
  * 时用按键通道。两条通路的取舍与选择机制见 `executeUiAction`。
  *
- * 自动化流程（分配/结算）不经过这里：它走 [A11yService.performSetText] 按**节点**
+ * 自动化流程（分配/结算）不经过这里：它走 [A11yNodeSource.performSetText] 按**节点**
  * 写入，那条路会真的扣钱，需要精确落到 `et_id_code` / `et_id_pwd` 上。
  *
  * ## API 19 的约束
@@ -31,23 +32,23 @@ object A11yUiChannel {
     /**
      * 向当前焦点控件输入文本；无焦点时取第一个可编辑节点。
      *
-     * 写入本身交给 [A11yService.performSetText]：那一份已经处理了 4.4 上
+     * 写入本身交给 [A11yNodeSource.performSetText]：那一份已经处理了 4.4 上
      * 「ClipboardManager 必须在主线程构造」这条约束（经 MainThread 投递并同步等待），
      * 而它也是自动化流程正在用的同一条路径。这里再写一遍，就多出一条不受那条约束
      * 保护的路——而调用方跑在后台线程，正好踩中。
      *
      * 写进去的内容不留在剪贴板里：远程帮人打字可能是任何东西，没理由让它留在那里。
      */
-    fun typeIntoFocus(service: A11yService, text: String): Boolean {
-        val root = service.rootInActiveWindow ?: return false
+    fun typeIntoFocus(source: A11yNodeSource, text: String): Boolean {
+        val root = source.activeWindowRoot() ?: return false
         try {
             val target = findFocusOrEditable(root) ?: return false
             if (target == root) return false
             return try {
-                service.performSetText(target, text)
+                source.performSetText(target, text)
             } finally {
                 target.recycle()
-                service.clearClipboard()
+                source.clearClipboard()
             }
         } finally {
             root.recycle()

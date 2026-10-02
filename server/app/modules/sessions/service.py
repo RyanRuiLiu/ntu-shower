@@ -1,4 +1,4 @@
-"""命令下发与结果等待：asyncio Future + 超时（单 worker 语义下安全）。"""
+"""命令下发与结果等待：asyncio Future 加超时（单 worker 语义下安全）。"""
 
 import asyncio
 import json
@@ -7,11 +7,11 @@ from dataclasses import dataclass
 
 from app.core import actions, outcomes, protocol, reason_codes
 from app.core.config import settings
+from app.core.connections import manager
 from app.core.logging import log_event, trace_id_var
 from app.core.protocol import JsonObject
-from app.gateway.manager import manager
+from app.modules.audit import repository as command_audit
 from app.modules.devices import service as devices_service
-from app.modules.sessions import repository
 
 from .schemas import CommandOutcome, ConfigPushResult
 
@@ -19,13 +19,9 @@ DEFAULT_TIMEOUT_S = 30.0
 
 
 def _with_message(outcome: CommandOutcome) -> CommandOutcome:
-    """设备没给中文说明时，用登记表补齐。
+    """设备没给中文说明时用登记表补齐，保证 terminal_message 可直接显示。
 
-    前端只显示 `terminal_message`（`reason_code` 是给机器分支用的），所以它不能是
-    空的——设备端偶尔漏给（内部错误那种），补在这里比让界面显示空白强。
-
-    只在**空**的时候补：设备端给的具体说法（"喷头 3 不存在"）比登记表里的
-    通用说法（"找不到这个喷头"）更有用。
+    只在为空时补：设备端给的具体说法比登记表的通用说法更有用。
     """
     if outcome["terminal_message"] or not outcome["reason_code"]:
         return outcome
@@ -39,7 +35,7 @@ def _with_message(outcome: CommandOutcome) -> CommandOutcome:
 
 @dataclass
 class PendingResult:
-    """挂起中的跨线程可回填 Future（resolve 可能来自其他线程/事件循环）。"""
+    """挂起中的跨线程可回填 Future（resolve 可能来自其他线程或事件循环）。"""
 
     loop: asyncio.AbstractEventLoop
     future: asyncio.Future[JsonObject]
@@ -66,35 +62,25 @@ def _set(future: asyncio.Future[JsonObject], value: JsonObject) -> None:
 # command_id → 挂起中的命令结果
 _pending: dict[str, PendingResult] = {}
 
-# 通道内的排队状态。
-#
-# 设备端把命令分到几条互不阻塞的路径上跑（划分见 `core/actions.py` 的执行通道一节），
-# 服务端按同一划分**排队**：同一通道内每台设备串行执行，不同通道互不影响。
-#
-# 此前是"同通道已有在途就拒绝"，那个粒度是错的——它连**正常的先后操作**都拒。拒绝真正
-# 该管的是过载，不是串行。而设备端的 `SerialCommandQueue` 本来就是排队、从不丢弃，
-# 服务端那层拒绝不但多余，还比设备端更严：设备端有能力做的事被服务端拦掉了。
+# 通道排队状态。设备端把命令分到几条互不阻塞的路径（见 core/actions 的执行通道），
+# 服务端按同一划分排队：同一通道内每台设备串行，跨通道并行。限流只针对过载，
+# 不针对串行——串行由通道锁承担。
 #: (device_id, channel) → 正在等这条通道的命令数（含正在执行的那条）。
 _channel_waiting: dict[tuple[str, str], int] = {}
 
 #: (device_id, channel) → 串行锁。同通道的命令在这里排队。
 _channel_locks: dict[tuple[str, str], asyncio.Lock] = {}
 
-#: 同通道允许排队的命令数上限。
-#:
-#: 上限必须存在：队列无限增长时，排在后面的早就超过客户端的超时了，让它继续等没有
-#: 意义——不如立刻告诉调用方现在很挤，它好换个时间再试。
+#: 同通道允许排队的命令数上限。无限增长时后排命令必然已超客户端超时，不如立刻
+#: 告知调用方过载，让它换个时间再试。
 CHANNEL_QUEUE_MAX = 4
 
-# device_id → 挂起中的配置确认（一设备同时至多一个待确认推送，后到的覆盖先到的）
+# device_id → 挂起中的配置确认（一设备同时至多一个待确认推送，后到覆盖先到）
 _config_pending: dict[str, PendingResult] = {}
 
 
 def is_device_busy(device_id: str, channel: str) -> bool:
-    """该设备在该通道上是否正在执行命令。
-
-    只用于观测与测试；限流本身靠 [send_command_and_wait] 里的排队，不靠这个判断。
-    """
+    """该设备在该通道上是否正在执行命令。仅用于观测与测试；限流靠排队实现。"""
     return _channel_waiting.get((device_id, channel), 0) > 0
 
 
@@ -109,7 +95,7 @@ def _lock_for(device_id: str, channel: str) -> asyncio.Lock:
 
 
 def _supported_actions(device_id: str) -> list[str]:
-    """设备在 link.hello 中声明的能力集合（未声明或设备不存在时为空）。"""
+    """设备在 link.hello 中声明的能力集合；未声明或设备不存在时为空。"""
     device = devices_service.get_device(device_id)
     if device is None:
         return []
@@ -123,10 +109,7 @@ async def send_command_and_wait(
     params: JsonObject,
     timeout_s: float = DEFAULT_TIMEOUT_S,
 ) -> CommandOutcome:
-    """下发命令并等待结果；出口保证 `terminal_message` 有中文。
-
-    调用方（路由、自动结算）拿到的一定是"可以原样显示"的结果，见 [_with_message]。
-    """
+    """下发命令并等待结果；出口保证 terminal_message 有中文，可原样显示。"""
     return _with_message(await _send_and_wait(device_id, action, params, timeout_s))
 
 
@@ -136,19 +119,18 @@ async def _send_and_wait(
     params: JsonObject,
     timeout_s: float = DEFAULT_TIMEOUT_S,
 ) -> CommandOutcome:
-    """下发 session.command 并等待 session.command_result 或超时。
+    """下发 session.command 并等待结果或超时。
 
-    **同通道内串行排队**：后来的等前面那条做完再执行。只有队列满了才拒绝（见
-    [CHANNEL_QUEUE_MAX]）——那是过载信号，与"通道正忙"不是一回事。
+    同通道内串行排队，后来者等前面那条做完；仅当队列满时拒绝（过载信号）。
     """
     command_id = str(uuid.uuid4())
     supported = _supported_actions(device_id)
-    # 空能力集表示设备未声明（旧版本）：不据此拦截，否则升级服务端会锁死在网设备
+    # 空能力集表示设备未声明：不据此拦截，否则升级服务端会锁死在网设备
     if supported and action not in supported:
-        repository.insert_command(
+        command_audit.insert_command(
             command_id, device_id, action, trace_id_var.get(), json.dumps(params, ensure_ascii=False)
         )
-        repository.finish(command_id, outcomes.FAILED.value, reason_codes.DEVICE_UNSUPPORTED_ACTION.code, "")
+        command_audit.finish(command_id, outcomes.FAILED.value, reason_codes.DEVICE_UNSUPPORTED_ACTION.code, "")
         return {
             "status": outcomes.FAILED.value,
             "reason_code": reason_codes.DEVICE_UNSUPPORTED_ACTION.code,
@@ -159,7 +141,7 @@ async def _send_and_wait(
     channel = actions.ACTION_CHANNELS[action]
     key = (device_id, channel)
     if _channel_waiting.get(key, 0) >= CHANNEL_QUEUE_MAX:
-        repository.insert_command(
+        command_audit.insert_command(
             command_id, device_id, action, trace_id_var.get(), json.dumps(params, ensure_ascii=False)
         )
         log_event(
@@ -171,27 +153,27 @@ async def _send_and_wait(
             action=action,
             channel=channel,
         )
-        repository.finish(command_id, outcomes.REJECTED.value, reason_codes.SERVER_OVERLOADED.code, "")
+        command_audit.finish(command_id, outcomes.REJECTED.value, reason_codes.SERVER_OVERLOADED.code, "")
         return {
             "status": outcomes.REJECTED.value,
             "reason_code": reason_codes.SERVER_OVERLOADED.code,
-            # 用登记表里那句话，不自己拼：拼出来的会把内部通道名（automation 之类）摊给用户
+            # 用登记表里的措辞，不自己拼：拼出来的会把内部通道名摊给用户
             "terminal_message": reason_codes.SERVER_OVERLOADED.message,
             "data": None,
         }
 
     _channel_waiting[key] = _channel_waiting.get(key, 0) + 1
     loop = asyncio.get_running_loop()
-    # 排队与执行共用一个时间预算：等锁的时间也算在内。否则服务端还在等，客户端早超时了
+    # 排队与执行共用一个时间预算：等锁的时间也算在内
     deadline = loop.time() + timeout_s
     try:
         async with _lock_for(device_id, channel):
             remaining = deadline - loop.time()
             if remaining <= 0:
-                repository.insert_command(
+                command_audit.insert_command(
                     command_id, device_id, action, trace_id_var.get(), json.dumps(params, ensure_ascii=False)
                 )
-                repository.finish(command_id, outcomes.TIMEOUT.value, reason_codes.DEADLINE_EXCEEDED.code, "")
+                command_audit.finish(command_id, outcomes.TIMEOUT.value, reason_codes.DEADLINE_EXCEEDED.code, "")
                 return CommandOutcome(
                     status=outcomes.TIMEOUT.value,
                     reason_code=reason_codes.DEADLINE_EXCEEDED.code,
@@ -219,7 +201,7 @@ async def _dispatch(
     pending = PendingResult(loop, loop.create_future())
     _pending[command_id] = pending
     started_at = loop.time()
-    # 取消时的终值：协程被取消时它就是最终状态，审计记为 aborted 而不是留一行永不收尾的记录
+    # 协程被取消时它是最终状态：审计记为 aborted，不留永不收尾的记录
     outcome = CommandOutcome(
         status=outcomes.FAILED.value,
         reason_code=reason_codes.COMMAND_ABORTED.code,
@@ -233,15 +215,14 @@ async def _dispatch(
             {
                 "action": action,
                 "params": params,
-                # 相对时长而不是绝对时刻：设备没有 NTP，两边的墙上时钟可能差几秒甚至几分钟。
-                # 传绝对时刻会让「设备时钟走得快」这一件事直接导致所有命令被判为已过期——
-                # 而那与命令本身还值不值得执行毫无关系。设备按「从收到算起」判定，能挡住
-                # 的主要是「排在自己队列里等太久」这种情形，那正是这条限制想管的事。
+                # 相对时长而非绝对时刻：设备无 NTP，传绝对时刻会让设备时钟偏差直接
+                # 导致所有命令被判过期。设备按"从收到算起"判定，挡住的是在设备侧
+                # 队列里等太久的命令。
                 "timeout_ms": int(timeout_s * 1000),
             },
             frame_id=command_id,
         )
-        repository.insert_command(
+        command_audit.insert_command(
             command_id, device_id, action, trace_id_var.get(), json.dumps(params, ensure_ascii=False)
         )
         if not await manager.send_to(device_id, envelope):
@@ -288,9 +269,8 @@ async def _dispatch(
             )
         return outcome
     finally:
-        # 清理必须覆盖**整个** await 周期。登记发生在下发之前，而下发本身是 await 点——
-        # 调用方在这期间断开连接会取消整个协程，清理若只罩住"等结果"那一段，
-        # 挂起项会一直留着。
+        # 清理覆盖整个 await 周期：登记发生在下发之前，下发本身是 await 点，调用方
+        # 在此期间断开会取消整个协程，挂起项只能靠 finally 摘除。
         _pending.pop(command_id, None)
         elapsed_ms = int((loop.time() - started_at) * 1000)
         log_event(
@@ -304,24 +284,26 @@ async def _dispatch(
             reason_code=str(outcome["reason_code"] or "-"),
             elapsed_ms=elapsed_ms,
         )
-        repository.finish(
+        # 审计行与函数出口同用登记表补齐规则：失败行 terminal_message 不为空。
+        # 补齐在此处做而不是只靠 _with_message，否则纯超时的审计行会留空。
+        terminal_message = outcome["terminal_message"] or (
+            reason_codes.describe(outcome["reason_code"]) if outcome["reason_code"] else ""
+        )
+        command_audit.finish(
             command_id,
             outcome["status"],
             outcome["reason_code"],
-            outcome["terminal_message"],
+            terminal_message,
             audit_data(action, outcome["data"]),
         )
 
 
 def audit_data(action: str, data: object) -> str | None:
-    """命令结果里进审计的 data——取舍规则一句话：**记不可重现的文本结果**。
+    """命令结果里进审计的 data：只记不可重现的文本结果。
 
-    - `device.exec` 的输出是排障最有价值、且**不可重现**的运维事实（设备此刻
-      在干什么的最直接答案），必须留痕；输出体积有配置上限（`max_output_bytes`），
-      增长有界。
-    - 其余一律不落：媒体（截图/拍照的 base64）与 `ui.dump` 的 XML 同属"数据重型
-      且可重取"（2026-10-01 用户决定：与媒体同一处理）；分配/结算走 HTTP 审计的
-      请求体留痕（如实不脱敏），命令审计只记结果。
+    device.exec 的输出是不可重现的运维事实，必须留痕，体积有配置上限；
+    媒体（截图、拍照的 base64）与 ui.dump 的 XML 属于数据重型且可重取，不落。
+    分配与结算的参数由 HTTP 审计的请求体留痕，命令审计只记结果。
     """
     if action != actions.DEVICE_EXEC or not isinstance(data, dict):
         return None
@@ -362,10 +344,8 @@ async def push_config_update(
         except asyncio.TimeoutError:
             return ConfigPushResult(notified=True, applied=False, reason="ack timeout")
     finally:
-        # 清理覆盖**整个** await 周期，理由与 _dispatch 相同：登记发生在下发之前，而下发
-        # 本身是 await 点，调用方在这期间断开连接会取消整个协程，那时既不返回成功也不返回
-        # 超时，挂起项只能靠 finally 摘。成功那条已由 resolve_config_ack 摘掉，
-        # 这里再摘一次是幂等的。
+        # 清理覆盖整个 await 周期，理由与 _dispatch 相同；成功路径已由
+        # resolve_config_ack 摘除，这里再摘一次是幂等的。
         _config_pending.pop(device_id, None)
 
 

@@ -19,12 +19,12 @@
 三层痕迹，以 `command_id` 与 `trace_id` 贯通（标准见 docs/DECISIONS.md「可观测性」）：
 
 ```bash
-# ① HTTP/网关审计（谁、何时、调了什么、结果）：本机直连后端
-TOKEN=$(grep "^OPS_TOKEN=" /opt/ntu-shower/server/.env | cut -d= -f2)
-curl -s -H "X-Ops-Token: $TOKEN"   "http://127.0.0.1:8001/ops/audit?device_id=<设备>&limit=100"
+# ① HTTP/网关审计（谁、何时、调了什么、结果）：本机直连后端。
+#    管理面凭 admin 身份（X-Identity 头），身份在网页端"身份"页签发
+curl -s -H "X-Identity: <admin身份标识>"   "http://127.0.0.1:8001/api/v1/audit/calls?device_id=<设备>&limit=100"
 
 # ② 命令级审计（trace_id 与 ① 互通）
-curl -s -H "X-Ops-Token: $TOKEN" "http://127.0.0.1:8001/ops/commands?device_id=<设备>"
+curl -s -H "X-Identity: <admin身份标识>" "http://127.0.0.1:8001/api/v1/audit/commands?device_id=<设备>"
 
 # ③ 设备端命令痕迹（与 ② 同一 command_id 呼应）
 #    经 ops 页设备面板的命令执行，或 bridge shell：
@@ -48,9 +48,8 @@ cd server && ruff check . && ruff format --check . && mypy app --strict && pytes
 # ② 本地：打包（务必排除运行时数据与本地配置）
 #
 # `--exclude=.env` 是必须的，不是可选的清理项：生产的 `.env` 是 systemd 的
-# EnvironmentFile，装着 OPS_TOKEN 与数据库路径。本地那份是 `.env.example` 抄来的占位值
-# （`OPS_TOKEN=change-me`），一旦随包上去就会覆盖生产配置，而服务启动自检会因此
-# 拒绝启动——2026-10-01 实际发生过一次，表现是 systemd 反复重启、healthz 无响应。
+# EnvironmentFile，装着数据库路径等生产配置。本地那份若混进包里会覆盖生产配置
+# （2026-10-01 实际发生过一次，表现是 systemd 反复重启、healthz 无响应）。
 # 排除只匹配 `.env` 这个整名，`.env.example` 照常随包发布。
 tar czf server_deploy.tar.gz -C server \
     --exclude=.venv --exclude=data --exclude=ota_releases --exclude=.env \
@@ -60,7 +59,7 @@ scp server_deploy.tar.gz <deploy-host>:/tmp/
 
 # ③ 服务器：备份现状（回滚点）
 #
-# 含 `.env`：它是 systemd 的 EnvironmentFile，装着 OPS_TOKEN 与数据库路径，而它不在仓库里
+# 含 `.env`：它是 systemd 的 EnvironmentFile，装着数据库路径等生产配置，而它不在仓库里
 # （gitignore），丢了就只能靠记忆重建。备份落在服务器本地 /tmp，不往外传。
 ssh <deploy-host> 'cd /opt/ntu-shower/server && tar czf /tmp/ntu-shower-backup-$(date +%s).tar.gz \
     app tests pyproject.toml requirements.txt requirements-dev.txt web .env'
@@ -177,7 +176,7 @@ print("install:", con.execute("SELECT * FROM ota_release_install").fetchall())
 PY'
 
 # 止损：下架该发布（最直接）
-curl -X DELETE -H "X-Ops-Token: $TOKEN" http://127.0.0.1:8001/ops/releases/<版本>
+curl -X DELETE -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/ota/releases/<版本>
 ```
 
 **预防**：`mark_installed_upto` 已在设备 hello 时调用（且早于 `latest_for`），
@@ -189,8 +188,6 @@ curl -X DELETE -H "X-Ops-Token: $TOKEN" http://127.0.0.1:8001/ops/releases/<版�
 ssh <deploy-host> 'systemctl is-active ntu-shower; journalctl -u ntu-shower -n 40 --no-pager'
 ```
 
-- 日志出现 `OpsTokenNotConfiguredError` → 服务器 `.env` 的 `OPS_TOKEN` 是占位值，
-  设置真实令牌后重启（这是有意的启动自检，不是故障）；
 - 日志出现 `PydanticUserError` / `ImportError` → 部署了与本机解释器版本不匹配的代码，
   按 §2 回滚，并补齐第 ④ 步预检。
 
@@ -204,15 +201,13 @@ ssh <deploy-host> 'systemctl is-active ntu-shower; journalctl -u ntu-shower -n 4
 - 若某命令被拒且 `reason_code=device.unsupported_action`，先看设备声明里有没有它：
 
 ```bash
-ssh <deploy-host> 'TOKEN=$(grep OPS_TOKEN /opt/ntu-shower/server/.env | cut -d= -f2);
-  curl -s -H "X-Ops-Token: $TOKEN" http://127.0.0.1:8001/ops/devices | python3 -m json.tool'
+ssh <deploy-host> 'curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/devices/runtime | python3 -m json.tool'
 ```
 
 ### 设备离线
 
 ```bash
-ssh <deploy-host> 'TOKEN=$(grep OPS_TOKEN /opt/ntu-shower/server/.env | cut -d= -f2); \
-  curl -s -H "X-Ops-Token: $TOKEN" http://127.0.0.1:8001/ops/devices'
+ssh <deploy-host> 'curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/devices/runtime'
 ```
 
 注意 `online` 字段是**最后一次上报值**，与内存中的活动连接可能不一致；
@@ -224,15 +219,15 @@ ssh <deploy-host> 'TOKEN=$(grep OPS_TOKEN /opt/ntu-shower/server/.env | cut -d= 
 
 ```bash
 # 打开（设备侧会 root 开启 adbd）
-curl -X POST -H "X-Ops-Token: $TOKEN" http://127.0.0.1:8001/ops/devices/<id>/bridge/open
+curl -X POST -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/devices/<id>/bridge/open
 # 本地隧道 + adb
 ssh -N -L 15655:127.0.0.1:15655 deploy@<deploy-host> &
 adb connect 127.0.0.1:15655 && adb devices
 
 # 查看状态：含 expires_in_s（距寿命到点还有多久）
-curl -s -H "X-Ops-Token: $TOKEN" http://127.0.0.1:8001/ops/devices/<id>/bridge/status
+curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/devices/<id>/bridge
 # 用毕关闭
-curl -X POST -H "X-Ops-Token: $TOKEN" http://127.0.0.1:8001/ops/devices/<id>/bridge/close
+curl -X POST -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/devices/<id>/bridge/close
 ```
 
 两个上限都可配（`bridge_idle_timeout_s` 默认 300 秒、`bridge_max_lifetime_s` 默认 3600 秒）。
@@ -255,8 +250,8 @@ curl -X POST -H "X-Ops-Token: $TOKEN" http://127.0.0.1:8001/ops/devices/<id>/bri
 
 ```bash
 cd android && ./gradlew detekt :app:testDebugUnitTest :app:jacocoUnitTestCoverageVerification assembleRelease
-curl -X POST https://<public-domain>/ops/releases \
-  -H "X-Ops-Token: $OPS_TOKEN" \
+curl -X POST https://<public-domain>/api/v1/ota/releases \
+  -H "X-Identity: <admin身份标识>" \
   -F "version=0.3.35" -F "version_code=42" -F "target=all" \
   -F "file=@app/build/outputs/apk/release/app-release.apk"
 ```
@@ -271,7 +266,7 @@ curl -X POST https://<public-domain>/ops/releases \
 | 服务状态 | `systemctl status ntu-shower` |
 | 实时日志 | `journalctl -u ntu-shower -f` |
 | 备份列表 | `ls -lh /opt/ntu-shower-backup/` |
-| 抓设备画面 | `POST /ops/devices/<id>/capture`（返回 `data.image_base64`） |
-| 远程执行 shell | `POST /ops/devices/<id>/exec`，body `{"command": "..."}` |
-| 重启设备端程序 | `POST /ops/devices/<id>/restart` |
-| 卸载设备端程序 | `POST /ops/devices/<id>/uninstall` |
+| 抓设备画面 | `POST /devices/<id>/capture`（返回 `data.image_base64`） |
+| 远程执行 shell | `POST /devices/<id>/exec`，body `{"command": "..."}` |
+| 重启设备端程序 | `POST /devices/<id>/restart` |
+| 卸载设备端程序 | `POST /devices/<id>/uninstall` |

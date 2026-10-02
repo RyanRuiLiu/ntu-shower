@@ -1,22 +1,11 @@
 /**
  * 概览：喷头现状 + 会话操作。
  *
- * ## 排版照旧状态面板
+ * KPI 六格 → 喷头卡片墙 → 控制操作两卡，样式在 style/overview.css。喷头卡片按
+ * 状态决定显示哪些明细行：占用中的喷头给出学号、分配/开阀/关阀时间与各项时长，
+ * 时长按当前时刻实时算——只显示一个状态词判断不出喷头是否卡住。
  *
- * 结构取自 `ntu-remote-shower/apps/shower-server/app/debug/index.html`：
- * KPI 六格（数字分色 + 占比条）→ 喷头卡片墙（三列）→ 控制操作（两列）。
- * 样式在 `style/overview.css`。
- *
- * 喷头卡片保留旧版最有用的一处：**按状态决定显示哪些明细行**。占用中的喷头给出学号、
- * 分配/开阀/关阀时间与各项时长，时长按当前时刻实时算——判断"这个喷头是不是卡住了"
- * 全靠它，而只显示一个状态词是判断不出来的。
- *
- * 第一版不做折叠区，也不预置"状态变化历史"那类区块。
- *
- * ## 数据取完整字段
- *
- * `GET /ops/doors`，不是 `/api/v1/doors`：后者是给小程序看的展示接口，不含占用者
- * 凭证与分配时间。
+ * 数据取 GET /doors，管理面写操作同域。
  */
 import { api } from '../core/api.js'
 import { elapsedSince, fmtDateTime, fmtDuration, fmtTime } from '../core/clock.js'
@@ -26,12 +15,9 @@ import { outcomeText, problemText, report } from '../core/outcome.js'
 import { store, subscribe } from '../core/store.js'
 
 /**
- * 七个状态的中文名。键取自契约（`core/contract.js`，由服务端生成），文案取自
- * 小程序那套（`status-panel/.../shower-utils.ts` 的 `STATUS_LABEL`）——同一批用户
- * 在两处看同一件事，各写一套必然漂移。
- *
- * 下面的校验是刻意的：服务端加了状态而这里没加文案时，**启动就失败**，而不是在
- * 喷头卡片上静默显示一个英文单词——那种问题没人会去报。
+ * 七个状态的中文名。键取自契约（core/contract.js），文案与小程序一致：同一批
+ * 用户在两处看同一件事，各写一套必然漂移。服务端加了状态而这里缺文案时启动
+ * 即失败，不在卡片上静默显示英文。
  */
 const LABELS = {
   free: '空闲',
@@ -50,7 +36,7 @@ for (const state of DOOR_STATES) {
 /** 占用中的状态：只有这些喷头卡片才展开明细。 */
 const OCCUPIED = new Set(['waiting', 'bathing', 'paused'])
 
-/** KPI 六格，顺序与配色照旧版，文案照小程序。 */
+/** KPI 六格。状态文案与小程序一致：同一批用户在两处看同一件事。 */
 const KPI = [
   { key: 'total', label: '总喷头', tone: 'tone-gray' },
   { key: 'free', label: '空闲', tone: 'tone-green' },
@@ -86,11 +72,11 @@ function renderKpi(doors) {
 /**
  * 喷头卡片上显示哪几格，由状态决定。
  *
- * 只列**进行中的会话**那几项——喷头空闲时这个网格整个不渲染，喷头卡片只剩头部一行。
+ * 只列进行中的会话那几项——喷头空闲时这个网格整个不渲染，喷头卡片只剩头部一行。
  * 上次使用不在这里，它固定在头部右侧（见 [renderDoors]）。
  *
- * 协议里 `open_time` / `in_time` / `close_time` 一直都有（未发生的为空），所以**按需
- * 取**即可：摆六格空位只是噪声，还盖住了"这个喷头现在没什么可看的"这个事实。
+ * 协议里 `open_time` / `in_time` / `close_time` 一直都有（未发生的为空），所以按需
+ * 取即可：摆六格空位只是噪声。
  */
 const DOOR_FIELDS = {
   waiting: ['open_time', 'assigned'],
@@ -108,11 +94,8 @@ const DOOR_LABELS = {
 }
 
 /**
- * 时间与时长同属"有效信息"，用正文色；只有**正在走的**时长带强调色。
- *
- * 旧版把时间压成次要灰（`--dim`），但那个亮度在暗底上看着像失效信息——而"分配
- * 时间"是这个喷头分配出去的时刻，和"分配时长"是同一组的两面，一暗一明会让它们看
- * 起来不像一组。要区分的只是"哪个数字在动"，不是"哪个更重要"。
+ * 时间与时长同属有效信息，用正文色；只有正在走的时长带强调色。要区分的是
+ * "哪个数字在动"，不是"哪个更重要"。
  */
 const FIELD_TONE = {
   open_time: 'time',
@@ -144,11 +127,7 @@ function durationOf(door, field) {
 }
 
 /**
- * 头部右侧那一格的文字：上次真正使用（开过阀）的时刻。
- *
- * 没使用过就显示占位符，**不写"从未使用"**：那句话是从 `last_used_at` 为空推断出来的，
- * 而它与"这台设备刚接入、还没上报过"是同一份数据；断言"从未"是把我们读不出来的事
- * 说成一个事实。
+ * 头部右侧那一格：上次真正使用（开过阀）的时刻。没使用过显示占位符。
  */
 function lastUsedText(door) {
   return fmtDateTime(door.last_used_at)
@@ -267,7 +246,7 @@ async function doAssign() {
   }
   report('resAction', '正在分配…', 'info')
   try {
-    const result = await api.assign({ device_id: store.deviceId, door_no: doorNo, ...base })
+    const result = await api.assign(store.deviceId, { door_no: doorNo, ...base })
     report('resAction', outcomeText(result), result.status === 'ok' ? 'ok' : 'err')
   } catch (error) {
     report('resAction', problemText(error), 'err')
@@ -279,7 +258,7 @@ async function doSettle() {
   if (!base) return
   report('resAction', '正在结算…', 'info')
   try {
-    const result = await api.settle({ device_id: store.deviceId, ...base })
+    const result = await api.settle(store.deviceId, base)
     report('resAction', outcomeText(result), result.status === 'ok' ? 'ok' : 'err')
   } catch (error) {
     report('resAction', problemText(error), 'err')
@@ -293,9 +272,8 @@ async function doPhoto() {
   }
   report('resPhoto', '正在拍照…', 'info')
   try {
-    const result = await api.photo({ device_id: store.deviceId })
-    // 先看命令成没成，再看画面在不在。此前只看 `image` 字段，于是命令失败却恰好带回了
-    // data 时会显示成成功——而"拍到了但没图片"本身也是一种失败，不该算成功。
+    const result = await api.photo(store.deviceId)
+    // 先看命令成没成，再看画面在不在：只看 image 字段会把"拍到了但没图"显示成成功
     if (result.status !== 'ok') {
       report('resPhoto', outcomeText(result), 'err')
       return
@@ -308,7 +286,7 @@ async function doPhoto() {
     $('photoImg').src = `data:image/jpeg;base64,${image}`
     $('photoImg').hidden = false
     $('photoHint').hidden = true
-    report('resPhoto', '已完成 · 画面已返回', 'ok')
+    report('resPhoto', '已完成 · 已获取画面', 'ok')
   } catch (error) {
     report('resPhoto', problemText(error), 'err')
   }
@@ -332,7 +310,7 @@ export const overviewView = {
           <button type="button" class="btn" id="btnPhoto">拍照</button>
           <div class="result" id="resPhoto"></div>
           <div class="photo-box">
-            <span class="muted" id="photoHint">点「拍照」获取现场画面</span>
+            <span class="muted" id="photoHint">点击「拍照」获取现场画面</span>
             <img id="photoImg" alt="设备摄像头画面" hidden>
           </div>
         </div>
@@ -341,11 +319,11 @@ export const overviewView = {
           <div class="act-title">分配 / 结算</div>
           <div class="fld">
             <label for="inDoor">喷头编号（仅分配时需要）</label>
-            <input id="inDoor" type="number" min="1" placeholder="例如：1">
+            <input id="inDoor" type="number" min="1">
           </div>
           <div class="fld">
             <label for="inSid">学号</label>
-            <input id="inSid" type="text" placeholder="例如：99990052">
+            <input id="inSid" type="text">
           </div>
           <div class="fld">
             <label for="inPwd">密码</label>

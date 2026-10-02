@@ -1,4 +1,4 @@
-package com.ryanliu.ntushower.service
+package com.ryanliu.ntushower.features.automation
 
 import android.content.res.Resources
 import android.util.Log
