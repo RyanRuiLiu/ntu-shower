@@ -182,7 +182,6 @@ def main(argv: list[str] | None = None) -> int:
 
     stats = rebuild(Path(args.db))
     print(f"读到 {stats['frames']} 帧，推导 {stats['processed']} 帧，跳过紧邻重复 {stats['skipped']} 帧")
-    print(f"收尾未结束会话 {stats['settled']} 条")
     for table in _DERIVED:
         print(f"  {table:<18} {stats[table]} 行")
     print(f"  flow_s 合计 {stats['flow_s']}")

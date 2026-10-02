@@ -368,7 +368,7 @@ def test_startup_snapshot_keeps_events_out_but_still_runs_the_session(fresh_db: 
                     1,
                     card_no=1,
                     cert_no="A",
-                    open_time="2026-09-30T11:59:00.000Z",
+                    open_time="2026-09-30T12:01:00.000Z",
                     in_time="2026-09-30T12:04:00.000Z",
                 )
             ],
@@ -381,7 +381,7 @@ def test_startup_snapshot_keeps_events_out_but_still_runs_the_session(fresh_db: 
     assert db.get_conn().execute("SELECT COUNT(*) FROM door_state_event").fetchone()[0] == 0  # 但没有迁移
     session = repository.get_open_session(device_id, 1)
     assert session is not None, "会话照常开出来"
-    assert session["assigned_at"] == "2026-09-30T11:59:00.000Z"  # 起点由 open_time 平移
+    assert session["assigned_at"] == "2026-09-30T12:01:00.000Z"  # 起点由 open_time 平移
     assert session["opened_at"] == "2026-09-30T12:04:00.000Z"  # 开阀时刻由 in_time 平移
 
 
