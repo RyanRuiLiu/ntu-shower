@@ -55,7 +55,7 @@ import org.json.JSONObject
 class GatewayClient(context: Context, private val callback: Callback) {
 
     interface Callback {
-        fun onConnected(trusted: Boolean, config: JSONObject, upgrade: JSONObject?)
+        fun onConnected(trusted: Boolean, config: JSONObject, upgrade: JSONObject?, serverTime: String)
         fun onDisconnected(reason: String)
         fun onMessage(envelope: Envelope)
     }
@@ -176,8 +176,9 @@ class GatewayClient(context: Context, private val callback: Callback) {
                     } else {
                         null
                     }
+                    val serverTime = env.payload.optString("server_time")
                     Log.i(TAG, "hello_ack trusted=$trusted upgrade=${upgrade?.optString("version")}")
-                    handler.post { callback.onConnected(trusted, config, upgrade) }
+                    handler.post { callback.onConnected(trusted, config, upgrade, serverTime) }
                 }
 
                 MessageTypes.LINK_PONG -> Unit

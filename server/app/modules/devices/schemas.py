@@ -69,6 +69,16 @@ class DeviceExecRequest(BaseModel):
     command: str = Field(min_length=1)
 
 
+class DeviceClockSetRequest(BaseModel):
+    """设置设备系统时钟。datetime 是设备本地墙钟时间（秒级精度）。
+
+    浴室 App 按系统时钟装载每日定时开关机计划；设备无 NTP，开机自动校正与网页端
+    手动设置共用本参数形状。格式在 HTTP 边界即拦（RFC 9457 422），不发给设备。
+    """
+
+    datetime: str = Field(pattern=r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
+
+
 class DeviceUiTouchRequest(BaseModel):
     """触摸：按屏幕坐标点击或滑动。
 

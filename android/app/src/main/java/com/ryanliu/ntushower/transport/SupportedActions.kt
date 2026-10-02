@@ -31,6 +31,12 @@ object SupportedActions {
     const val DEVICE_RESTART = "device.restart"
     const val DEVICE_UNINSTALL = "device.uninstall"
 
+    // ── bath ──
+    const val BATH_RESTART = "bath.restart"
+
+    // ── clock ──
+    const val CLOCK_SET = "clock.set"
+
     // ── 调试通道 ──
     const val BRIDGE_OPEN = "bridge.open"
     const val BRIDGE_CLOSE = "bridge.close"
@@ -51,6 +57,8 @@ object SupportedActions {
         DEVICE_EXEC,
         DEVICE_RESTART,
         DEVICE_UNINSTALL,
+        BATH_RESTART,
+        CLOCK_SET,
         BRIDGE_OPEN,
         BRIDGE_CLOSE,
         UI_DUMP,

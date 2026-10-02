@@ -25,6 +25,7 @@ import com.ryanliu.ntushower.features.doors.DoorSnapshotSender
 import com.ryanliu.ntushower.features.remote.AdbBridge
 import com.ryanliu.ntushower.features.selfmanage.A11yGuard
 import com.ryanliu.ntushower.features.selfmanage.OtaUpdater
+import com.ryanliu.ntushower.features.selfmanage.TimeSync
 import com.ryanliu.ntushower.receiver.WatchdogReceiver
 import com.ryanliu.ntushower.transport.Envelope
 import com.ryanliu.ntushower.transport.GatewayClient
@@ -118,10 +119,15 @@ class AgentService : Service() {
     }
 
     private val callback = object : GatewayClient.Callback {
-        override fun onConnected(trusted: Boolean, config: JSONObject, upgrade: JSONObject?) {
+        override fun onConnected(trusted: Boolean, config: JSONObject, upgrade: JSONObject?, serverTime: String) {
             this@AgentService.trusted = trusted
             deviceLog.gateway(connected = true, detail = "trusted=$trusted")
             Log.i(TAG, "gateway connected, trusted=$trusted")
+            // 开机时间自校正优先于一切业务：浴室 App 的开关机计划依赖正确时钟，
+            // 校正与浴室 App 重启（若有偏差）在 TimeSync 内部串行完成。
+            if (serverTime.isNotEmpty()) {
+                worker.execute { TimeSync.syncFrom(serverTime) }
+            }
             // hello_ack 里的配置已经由 GatewayClient 写进 RuntimeConfig，这里做两件事：
             // 落到依赖配置的组件上，以及存一份供下次启动直接用。
             ConfigCache.save(this@AgentService, config)

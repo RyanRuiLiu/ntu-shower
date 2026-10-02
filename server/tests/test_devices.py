@@ -252,13 +252,15 @@ def test_device_action_endpoints_require_admin(client: TestClient) -> None:
 
 
 @pytest.mark.parametrize(
-    ("path", "action"),
+    ("path", "action", "payload"),
     [
-        ("exec", actions.DEVICE_EXEC),
-        ("capture", actions.SCREEN_CAPTURE),
-        ("restart", actions.DEVICE_RESTART),
-        ("uninstall", actions.DEVICE_UNINSTALL),
-        ("dump", actions.UI_DUMP),
+        ("exec", actions.DEVICE_EXEC, {"command": "id"}),
+        ("capture", actions.SCREEN_CAPTURE, None),
+        ("restart", actions.DEVICE_RESTART, None),
+        ("uninstall", actions.DEVICE_UNINSTALL, None),
+        ("dump", actions.UI_DUMP, None),
+        ("bath/restart", actions.BATH_RESTART, None),
+        ("clock/set", actions.CLOCK_SET, {"datetime": "2026-10-02 12:00:00"}),
     ],
 )
 def test_action_endpoints_dispatch_registered_actions(
@@ -267,15 +269,21 @@ def test_action_endpoints_dispatch_registered_actions(
     ready: dict[str, Any],
     path: str,
     action: str,
+    payload: dict[str, Any] | None,
 ) -> None:
-    """九个动作端点共用同一条下发路径：差别只在动作名、参数与超时。"""
-    r = client.post(
-        f"/api/v1/devices/{DEVICE_ID}/{path}", headers=admin_headers, json={"command": "id"} if path == "exec" else None
-    )
+    """动作端点共用同一条下发路径：差别只在动作名、参数与超时。"""
+    r = client.post(f"/api/v1/devices/{DEVICE_ID}/{path}", headers=admin_headers, json=payload)
 
     assert r.status_code == 200
     assert ready["action"] == action
     assert ready["device_id"] == DEVICE_ID
+
+
+def test_clock_set_rejects_malformed_datetime(client: TestClient, admin_headers: dict[str, str]) -> None:
+    """datetime 形状在 HTTP 边界即拦（422），不发给设备。"""
+    r = client.post("/api/v1/devices/ghost/clock/set", headers=admin_headers, json={"datetime": "nope"})
+
+    assert r.status_code == 422
 
 
 def test_exec_dispatches_command_payload(

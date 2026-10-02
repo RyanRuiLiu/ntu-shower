@@ -30,6 +30,8 @@ export const CHANNELS = Object.freeze({
   'device.exec': 'maintenance',
   'device.restart': 'maintenance',
   'device.uninstall': 'maintenance',
+  'bath.restart': 'maintenance',
+  'clock.set': 'maintenance',
   'bridge.open': 'maintenance',
   'bridge.close': 'maintenance',
 })

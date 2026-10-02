@@ -6,14 +6,14 @@ import java.util.Locale
 import java.util.TimeZone
 
 /**
- * 设备侧的 RFC 3339 时间格式化。
+ * 设备侧的 RFC 3339 时间格式化与解析。
  *
  * 对应协议信封的 `ts`——两端的时间字符串都经由此处，格式不会各自漂移。
  *
- * **只有格式化，没有解析**：设备一旦需要"判断某个时刻过了没有"就会依赖两台机器的
- * 时钟一致，而这台设备没有 NTP。命令的有效期因此改用相对时长下发（见
- * `protocol/schema/session.command.json` 的 `timeout_ms`），设备侧不再有解析对端时刻
- * 的需求。留着解析只会诱使后来者再去比绝对时刻。
+ * **解析只有一个消费者**：开机时间自校正（TimeSync）拿 `link.hello_ack` 的
+ * `server_time` 与本机墙钟比一次偏差。它仍然不得用于"判断某个时刻过了没有"——
+ * 那类判定依赖两台机器的时钟一致，而这台设备没有 NTP；命令的有效期因此仍是相对
+ * 时长（见 `protocol/schema/session.command.json` 的 `timeout_ms`）。
  */
 object Clock {
 
@@ -29,7 +29,18 @@ object Clock {
 
     /**
      * 把给定的时刻格式化为协议时间。格式串因此只在本文件出现一份：浴室 App 的本地
-     * 时间转协议时间（features.doors 的 DoorRaw）用的就是这里。解析依然不设，理由见类注释。
+     * 时间转协议时间（features.doors 的 DoorRaw）用的就是这里。
      */
     fun formatRfc3339(date: Date): String = formatter.get()!!.format(date)
+
+    /**
+     * 解析服务端输出的 RFC 3339 毫秒字符串（Z 后缀，与服务端 core/clock.py 的输出
+     * 同型）。格式不符返回 null，由调用方决定是否留痕——解析失败的处置是调用方的
+     * 业务语义，这里不记日志（core 层不依赖任何日志设施）。
+     */
+    fun parseRfc3339(value: String): Date? = try {
+        formatter.get()!!.parse(value)
+    } catch (e: Exception) {
+        null
+    }
 }
