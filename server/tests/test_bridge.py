@@ -169,6 +169,10 @@ def test_bridge_open_reports_port_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """端口被占：退避重试后仍失败 → 409，且不残留桥状态。"""
+    # 重试次数与节奏是模块常量：等真实退避要 3 秒，测试把节奏压到毫秒级，
+    # 只验证"重试穷尽后失败"这一行为本身
+    monkeypatch.setattr("app.modules.bridge.manager.BIND_ATTEMPTS", 3)
+    monkeypatch.setattr("app.modules.bridge.manager.BIND_BACKOFF_S", 0.01)
     _register_online(monkeypatch)
     holder = socket.socket()
     holder.bind(("127.0.0.1", settings.bridge_base_port))

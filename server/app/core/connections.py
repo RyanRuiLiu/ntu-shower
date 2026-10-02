@@ -19,9 +19,19 @@ class ConnectionManager:
         self._connections[device_id] = ws
         return replaced
 
-    def unregister(self, device_id: str, ws: WebSocket) -> None:
+    def unregister(self, device_id: str, ws: WebSocket) -> bool:
+        """注销连接，返回**它是否确实是当前那条**。
+
+        返回值就是"这次断开是否意味着设备离线"的判据：重连是**新连接顶替旧连接**，
+        被顶替的那条随后走收尾，此时设备仍在线，返回 False。
+
+        不能用 `is_online` 代替：那回答的是"现在有没有连接"。重连之后旧连接收尾时，
+        如果新连接也已断开，`is_online` 同样是假，于是同一次离线被记两遍。
+        """
         if self._connections.get(device_id) is ws:
             del self._connections[device_id]
+            return True
+        return False
 
     def get(self, device_id: str) -> WebSocket | None:
         return self._connections.get(device_id)

@@ -77,9 +77,6 @@ object ReasonCodes {
     /** 该学号没有正在使用的喷头 */
     const val DOOR_NO_OCCUPIED = "door.no_occupied"
 
-    /** 上报的喷头快照结构不合法 */
-    const val DOOR_INVALID_SNAPSHOT = "door.invalid_snapshot"
-
     /** 该位置没有可点击的控件 */
     const val UI_NO_TARGET_AT_POINT = "ui.no_target_at_point"
 
