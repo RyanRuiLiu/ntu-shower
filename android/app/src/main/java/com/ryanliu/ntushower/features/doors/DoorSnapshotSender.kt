@@ -5,6 +5,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.util.Log
 import com.ryanliu.ntushower.core.clock.Clock
+import com.ryanliu.ntushower.core.clock.ServerClock
 import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.storage.AgentDatabase
@@ -43,21 +44,35 @@ class DoorSnapshotSender(context: Context) {
     /**
      * 采集并入队；有变化才会入队，入队后立即尝试发送。
      *
+     * [source] 由调用方如实标注这一帧为什么产生，服务端据此区分"事件"与"全貌"：
+     * - `db_watch`——浴室 App 写库触发，状态真的变了；
+     * - `startup`——重连或开机后推的一遍全貌，与状态是否变化无关（见 [forgetLastState]）。
+     *
      * 注意：喷头状态无变化时本方法直接返回（去重），因此**不能**把它当作重传入口——
      * 断网期间积压的快照与喷头状态是否变化无关，重连时必须直接调 [flush]。
+     *
+     * 读库返回空也照常入队：设备端的职责是如实送达"库现在是什么"，而"读到空"本身
+     * 就是一条事实（这台设备的 t_doorlist 恒有它的全部喷头行），由服务端判断它意味着
+     * 什么。此前在这里直接返回，结果是服务端现态一直停在旧值，而设备端与日志里都看
+     * 不出发生过这件事。
      */
-    fun captureAndEnqueue(gateway: GatewayClient) {
+    fun captureAndEnqueue(gateway: GatewayClient, source: String) {
+        // 时刻取在读库之前：采到的内容是那条 SELECT 建立读视图那一刻的数据库，读完
+        // 再取会把读的耗时算进去（真机实测几百毫秒），而这是个恒定偏晚的系统偏差。
+        val capturedAt = ServerClock.nowRfc3339()
         val doors = DoorSnapshotReader.readAll()
-        if (doors.isEmpty()) return
         val hash = doors.map { it.fingerprint() }.hashCode()
         if (hash == lastHash) return
         lastHash = hash
         val snapshotId = UUID.randomUUID().toString()
         val payload = JSONObject()
             .put("snapshot_id", snapshotId)
-            .put("source", "db_watch")
+            .put("source", source)
             .put("doors", JSONArray().apply { doors.forEach { put(it.toPayload()) } })
-        db.insertWithOnConflict(
+        if (capturedAt != null) {
+            payload.put("captured_at", capturedAt)
+        }
+        val rowId = db.insertWithOnConflict(
             AppConfig.OUTBOX_TABLE,
             null,
             ContentValues().apply {
@@ -67,7 +82,18 @@ class DoorSnapshotSender(context: Context) {
             },
             SQLiteDatabase.CONFLICT_REPLACE,
         )
-        Log.i(TAG, "snapshot $snapshotId enqueued (${doors.size} doors)")
+        // 序号取自增主键：它单调，且只在最旧的被裁掉时才跳号，服务端据此看得出"中间
+        // 少了 N 条"。载荷定稿在插入之前，所以回填一次。
+        if (rowId > 0) {
+            payload.put("seq", rowId)
+            db.update(
+                AppConfig.OUTBOX_TABLE,
+                ContentValues().apply { put("payload", payload.toString()) },
+                "id = ?",
+                arrayOf(rowId.toString()),
+            )
+        }
+        Log.i(TAG, "snapshot $snapshotId enqueued (${doors.size} doors, source=$source)")
         trimOutbox()
         flush(gateway)
     }
@@ -155,5 +181,11 @@ class DoorSnapshotSender(context: Context) {
 
     companion object {
         private const val TAG = "DoorSnapshotSender"
+
+        /** 采集来源：浴室 App 写库触发，状态真的变了。 */
+        const val SOURCE_DB_WATCH = "db_watch"
+
+        /** 采集来源：重连或开机后推的一遍全貌，与状态是否变化无关。 */
+        const val SOURCE_STARTUP = "startup"
     }
 }

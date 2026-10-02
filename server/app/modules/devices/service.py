@@ -8,9 +8,11 @@ device.update 的 payload 是精简档案（DeviceSummary）：版本、来源 I
 一处，网关生命周期与档案修改共用。
 """
 
-from app.core import events
+from app.core import device_clock, events
 from app.core.clock import now_rfc3339
 from app.core.connections import manager
+from app.core.protocol import as_int
+from app.modules.config import store as config_store
 
 from . import repository
 from .schemas import DeviceRecord, DeviceSummary
@@ -69,6 +71,36 @@ def set_device_offline(device_id: str) -> None:
     repository.touch_seen(device_id)
 
 
+def record_link_event(device_id: str, event: str) -> None:
+    """记一次上下线（event 取 schemas 的 LINK_ONLINE / LINK_OFFLINE）。
+
+    与 [set_device_offline] 分工不同：那个刷新档案上的"最后见到"一列，只记得住最后一次；
+    这个留下一串历史，回答"这台设备什么时候在线过"——它是设备利用率的分母，也是
+    "这段时间为什么没有数据"唯一能给出的答案。
+    """
+    repository.insert_link_event(device_id, event, now_rfc3339())
+
+
+def load_clock_skew(device_id: str) -> None:
+    """把持久化的钟偏差载入内存。设备上线时调一次。
+
+    不载入的话，从上线到首次 pong 之间偏差读出来是 0，等于这段时间不做平移——而
+    "我们刚接手、那边已经在洗"恰恰最常发生在这个窗口里。
+    """
+    device_clock.load(device_id, repository.get_clock_skew(device_id))
+
+
+def update_clock_skew(device_id: str, device_time: object, received_at: str) -> None:
+    """用设备回 pong 时带的墙上时刻更新钟偏差，并落库。
+
+    阈值取自配置：单次观测与当前值差得超过它，说明设备钟被动了（重启归零、被手动改
+    钟），直接采信新值而不平滑——继续平滑会让之后几次映射都按错误的偏差算。
+    """
+    threshold = as_int(config_store.effective(device_id).get("clock_jump_threshold_s"), default=60)
+    skew = device_clock.update(device_id, device_time, received_at, threshold)
+    repository.set_clock_skew(device_id, skew)
+
+
 def rename_device(device_id: str, name: str) -> bool:
     return repository.set_name(device_id, name)
 
@@ -79,12 +111,3 @@ def set_trusted(device_id: str, trusted: bool) -> bool:
 
 def is_online(device_id: str) -> bool:
     return manager.is_online(device_id)
-
-
-def get_clock_skew(device_id: str) -> float:
-    """该设备时钟偏差的读取出口（网关经服务层访问领域，不直触仓储）。"""
-    return repository.get_clock_skew(device_id)
-
-
-def set_clock_skew(device_id: str, skew_s: float) -> None:
-    repository.set_clock_skew(device_id, skew_s)

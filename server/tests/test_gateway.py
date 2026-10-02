@@ -11,7 +11,10 @@ from fastapi.testclient import TestClient
 from starlette.testclient import WebSocketTestSession
 from tests import helpers
 
-from app.core import device_clock, events
+from app.core import db, events
+from app.core.clock import now_rfc3339, rfc3339_ago
+from app.modules.devices import repository as devices_repository
+from app.modules.devices.schemas import LINK_OFFLINE, LINK_ONLINE
 from app.modules.ota import repository as ota_repository
 
 
@@ -51,6 +54,59 @@ def test_unknown_type_gets_error_but_stays_connected(client: TestClient, fresh_d
         assert helpers.recv_until(ws, "link.pong")["reply_to"]
 
 
+def test_device_pong_updates_clock_skew(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:
+    """设备回 pong 时带上自己的墙上时刻，服务端据此算出钟偏差并落库。
+
+    偏差（符号是「服务端时刻 − 设备时刻」）是把快照里的 `open_time` / `in_time` 平移到
+    服务端时间轴的依据——那两个字段是"这次会话从什么时候开始"的唯一线索，而设备钟的
+    绝对值不可信（自然漂移 8.5 秒/天、还会被人为回拨一小时）。
+
+    断言用相对量：设备报"此刻"，偏差就贴近 0；设备报"两分钟前"，偏差就贴近 120 秒。
+    绝对值取决于测试运行的真实时刻，那是控制不了的。
+    """
+    device_id = "dev-pong-skew"
+    with helpers.trusted_online(client, device_id, admin_headers) as ws:
+        ws.send_text(helpers.frame("link.pong", {"device_time": now_rfc3339()}))
+        _settle(ws)
+        skew_now = devices_repository.get_clock_skew(device_id)
+        assert abs(skew_now) < 5, "设备报的就是此刻，两边差不出几秒"
+
+        # 相隔两分钟：超过跳变阈值，直接采信新值而不做 EMA
+        ws.send_text(helpers.frame("link.pong", {"device_time": rfc3339_ago(120)}))
+        _settle(ws)
+        skew_past = devices_repository.get_clock_skew(device_id)
+        assert skew_past > 100, "设备报的是两分钟前，偏差随之变大"
+        assert skew_past > skew_now, "落库的确实是新算出来的那个"
+
+
+def _settle(ws: WebSocketTestSession) -> None:
+    """等前面发出的帧被处理完。
+
+    `send_text` 是发出去就返回的，服务端在另一个线程里处理——不设同步点的话，紧接着读库
+    很可能读到的是处理前的值。帧在同一连接上是顺序处理的，所以一帧 ping 等到它的 pong，
+    就说明之前那些帧都已经走完了。
+    """
+    ws.send_text(helpers.frame("link.ping", {"sender_time": now_rfc3339()}))
+    helpers.recv_until(ws, "link.pong")
+
+
+def test_device_pong_without_device_time_keeps_the_previous_skew(
+    client: TestClient, admin_headers: dict[str, str], fresh_db: str
+) -> None:
+    """pong 没带时刻（或带了个坏值）时偏差不动——一次坏观测不该污染已经稳住的值。"""
+    device_id = "dev-pong-no-time"
+    with helpers.trusted_online(client, device_id, admin_headers) as ws:
+        ws.send_text(helpers.frame("link.pong", {"device_time": now_rfc3339()}))
+        _settle(ws)
+        settled = devices_repository.get_clock_skew(device_id)
+
+        ws.send_text(helpers.frame("link.pong", {}))
+        ws.send_text(helpers.frame("link.pong", {"device_time": "not-a-time"}))
+        _settle(ws)
+
+    assert devices_repository.get_clock_skew(device_id) == settled
+
+
 def test_unknown_command_id_replies_error(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:
     """回执找不到对应的在途命令：回 command.unknown_id 保持协议反馈。"""
     with helpers.trusted_online(client, "dev-frames-cmd", admin_headers) as ws:
@@ -59,12 +115,21 @@ def test_unknown_command_id_replies_error(client: TestClient, admin_headers: dic
         assert err["payload"]["code"] == "command.unknown_id"
 
 
-def test_invalid_snapshot_rejected(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:
-    """已信任设备上报坏快照 → link.error(door.invalid_snapshot)。"""
+def test_unparsable_snapshot_is_acknowledged_and_recorded(
+    client: TestClient, admin_headers: dict[str, str], fresh_db: str
+) -> None:
+    """坏快照照收回执，并如实落进原始层。
+
+    回错误会让设备端不删发件箱里那一行、把队列堵死，而它对内容能否解析无能为力——
+    设备端只管送达，判断是服务端的事。原始层留下"设备报过这么一帧"，派生跳过即可。
+    """
     with helpers.trusted_online(client, "dev-bad-snap", admin_headers) as ws:
-        ws.send_text(helpers.frame("door.snapshot", {"snapshot_id": "x", "doors": "not-a-list"}))
-        err = helpers.recv_until(ws, "link.error")
-        assert err["payload"]["code"] == "door.invalid_snapshot"
+        ws.send_text(helpers.frame("door.snapshot", {"snapshot_id": "bad-1", "doors": "not-a-list"}))
+        ack = helpers.recv_until(ws, "door.snapshot_ack")
+        assert ack["payload"]["snapshot_id"] == "bad-1"
+
+    rows = db.get_conn().execute("SELECT doors FROM door_snapshot WHERE snapshot_id = ?", ("bad-1",)).fetchall()
+    assert [row["doors"] for row in rows] == ["[]"]
 
 
 def test_valid_snapshot_gets_ack(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:
@@ -91,20 +156,20 @@ def test_untrusted_device_business_frames_are_ignored(client: TestClient, fresh_
         assert helpers.recv_until(ws, "link.pong")["reply_to"]
 
 
-def test_link_roundtrip_updates_clock_skew(client: TestClient, fresh_db: str) -> None:
-    """ping/pong 回路工作，pong 的设备时间戳被消化为时钟偏差观测。"""
+def test_link_roundtrip_replies_empty_pong(client: TestClient, fresh_db: str) -> None:
+    """ping/pong 回路工作：pong 是回执，载荷为空。
+
+    设备的时间锚点取自服务端发来的 ping，反方向不需要任何信息——pong 只回答
+    "我还活着"，判活用它，时刻不从它取。
+    """
     with client.websocket_connect("/gateway/device") as ws:
         ws.send_text(helpers.hello_frame("dev-link-1"))
         helpers.recv_until(ws, "link.hello_ack")
 
         ws.send_text(helpers.frame("link.ping", {"sender_time": "2026-09-30T12:00:01.000Z"}))
-        assert helpers.recv_until(ws, "link.pong")["reply_to"]
-
-        ws.send_text(helpers.frame("link.pong", {"sender_time": "2020-01-01T00:00:00.000Z"}))
-        ws.send_text(helpers.frame("link.ping", {"sender_time": "2026-09-30T12:00:02.000Z"}))
-        helpers.recv_until(ws, "link.pong")
-
-    assert device_clock.get_skew("dev-link-1") != 0.0
+        pong = helpers.recv_until(ws, "link.pong")
+        assert pong["reply_to"]
+        assert pong["payload"] == {}
 
 
 def test_trust_flow_and_device_listing(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:
@@ -321,14 +386,15 @@ def test_server_ping_loop_probes_and_enforces_pong(
     """服务端按配置间隔主动 ping：回 pong 则链路保持，一个周期无 pong 则主动关链。"""
     from starlette.websockets import WebSocketDisconnect
 
-    monkeypatch.setattr("app.modules.config.store.effective", lambda _device_id: {"ping_interval_s": 1})
+    # 间隔给 0.2 秒：两个完整周期亚秒级跑完，行为与真实间隔无关
+    monkeypatch.setattr("app.modules.config.store.effective", lambda _device_id: {"ping_interval_s": 0.2})
     device_id = "dev-ping-loop"
     with client.websocket_connect("/gateway/device") as ws:
         ws.send_text(helpers.hello_frame(device_id))
         helpers.recv_until(ws, "link.hello_ack")
 
         ping1 = helpers.recv_until(ws, "link.ping")
-        ws.send_text(helpers.frame("link.pong", {"sender_time": "2026-09-30T12:00:01.000Z"}, reply_to=ping1["id"]))
+        ws.send_text(helpers.frame("link.pong", {"device_time": now_rfc3339()}, reply_to=ping1["id"]))
         helpers.recv_until(ws, "link.ping")  # 回了 pong：下一个周期照常探测
 
         # 不再回 pong：一个完整周期后服务端主动关闭链路
@@ -338,3 +404,51 @@ def test_server_ping_loop_probes_and_enforces_pong(
 
         with pytest.raises(WebSocketDisconnect):
             _recv_until_closed()
+
+
+def test_link_events_record_connect_and_disconnect(client: TestClient, fresh_db: str) -> None:
+    """设备上线与下线各留一条记录。
+
+    帧是**事件驱动**的（状态变化才上报，空闲时不上报），所以"没消息"既可能是"没人用"
+    也可能是"设备离线"——两者在数据里长得一模一样、事后无法区分。这张表是唯一的分辨
+    依据。
+    """
+    device_id = "dev-link-events"
+    with client.websocket_connect("/gateway/device") as ws:
+        ws.send_text(helpers.hello_frame(device_id))
+        helpers.recv_until(ws, "link.hello_ack")
+
+    rows = (
+        db.get_conn()
+        .execute("SELECT event FROM device_link_event WHERE device_id = ? ORDER BY id", (device_id,))
+        .fetchall()
+    )
+    assert [row["event"] for row in rows] == [LINK_ONLINE, LINK_OFFLINE]
+
+
+def test_reconnect_does_not_record_a_false_offline(client: TestClient, fresh_db: str) -> None:
+    """重连顶替旧连接时，不记假的 offline。
+
+    新连接顶替旧连接之后，被顶替的那条才走收尾。那一刻设备是在线的——记 offline 会让
+    序列变成 online→online→offline，而最后那个 offline 是假的。实测这台设备一天重连
+    两百次上下，假 offline 会占掉绝大多数。
+    """
+    device_id = "dev-reconnect"
+    with client.websocket_connect("/gateway/device") as first:
+        first.send_text(helpers.hello_frame(device_id))
+        helpers.recv_until(first, "link.hello_ack")
+
+        # 第二条连接顶替第一条，此时设备仍在线
+        with client.websocket_connect("/gateway/device") as second:
+            second.send_text(helpers.hello_frame(device_id))
+            helpers.recv_until(second, "link.hello_ack")
+
+    events = [
+        row["event"]
+        for row in db.get_conn().execute(
+            "SELECT event FROM device_link_event WHERE device_id = ? ORDER BY id", (device_id,)
+        )
+    ]
+    assert events.count(LINK_ONLINE) == 2
+    # 两条连接都收尾了，但设备全程在线——只有最后真正断开那一次才算
+    assert events.count(LINK_OFFLINE) == 1

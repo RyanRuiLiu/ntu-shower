@@ -151,22 +151,6 @@ function renderDevicePicker() {
  * 面板里的每一行都会渲染，缺值给占位符——不按有没有值增减行数，行数忽多忽少会让人
  * 分不清"这一项没有了"与"这一项没值"。
  */
-/**
- * 设备时钟偏差的说明文案。
- *
- * 存的是"服务端时刻减设备时刻"，所以负值表示设备快——那个符号方向反直觉，界面上
- * 必须把它翻成一句能直接读的话。
- *
- * 秒级以内算已对齐：校正本身的目标就是这个量级（设备 date 只精确到秒，加上传输延迟，
- * 实测残差约 0.6 秒）。
- */
-function skewText(seconds) {
-  if (typeof seconds !== 'number' || !Number.isFinite(seconds)) return PLACEHOLDER
-  if (Math.abs(seconds) < 1) return '已对齐'
-  const magnitude = fmtDuration(Math.abs(seconds))
-  return seconds < 0 ? `快 ${magnitude}` : `慢 ${magnitude}`
-}
-
 function renderDeviceInfo() {
   const summary = currentDevice()
   const diag = currentRuntime()
@@ -184,7 +168,6 @@ function renderDeviceInfo() {
         // 空数组是"设备未声明能力集"（升级前的旧版本设备），不是"没有能力"，措辞要分开
         ['能力位', caps ? (caps.length > 0 ? `${caps.length} 项` : '未声明') : PLACEHOLDER],
         ['已运行', diag ? fmtUptime(diag.booted_at) : PLACEHOLDER],
-        ['时钟偏差', diag ? skewText(diag.clock_skew_s) : PLACEHOLDER],
         ['最后上报', diag ? fmtDateTime(diag.last_seen_at) : PLACEHOLDER],
         ['来源 IP', diag ? diag.last_ip || PLACEHOLDER : PLACEHOLDER],
       ]

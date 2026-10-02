@@ -13,14 +13,14 @@ import contextlib
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.concurrency import run_in_threadpool
 
-from ..core import audit, outcomes, protocol, reason_codes
+from ..core import audit, protocol, reason_codes
 from ..core.clock import now_rfc3339, rfc3339_ago
 from ..core.connections import manager
-from ..core.device_clock import load_skew, ping_payload, update_skew
 from ..core.logging import log_event
 from ..core.protocol import JsonObject, as_int, list_of, payload_of, text_of
 from ..modules.config import store as config_store
 from ..modules.devices import service as devices_service
+from ..modules.devices.schemas import LINK_OFFLINE, LINK_ONLINE
 from ..modules.doors import service as doors_service
 from ..modules.ota import repository as ota_repository
 from ..modules.sessions import service as sessions_service
@@ -73,6 +73,10 @@ async def device_gateway(ws: WebSocket) -> None:
         # 「下发→下载→安装→重启→再下发」的无限重装循环。
         await run_in_threadpool(ota_repository.mark_installed_upto, device_id, version_code)
         manager.register(device_id, ws)
+        # 载入上次记下的钟偏差。从上线到首次 pong 之间有一小段窗口，不载入的话那段时间
+        # 读到的是 0（等于不平移）——而"我们刚接手、那边已经在洗"恰恰最常落在窗口里。
+        await run_in_threadpool(devices_service.load_clock_skew, device_id)
+        await run_in_threadpool(devices_service.record_link_event, device_id, LINK_ONLINE)
         await run_in_threadpool(audit.record_gateway, device_id, "connect", ip)
         log_event(
             "INFO",
@@ -98,10 +102,9 @@ async def device_gateway(ws: WebSocket) -> None:
             )
         )
 
-        # 偏差从库里恢复后立刻主动探测一轮：不载入则服务重启后按 0 校正，不主动
-        # 探测则首轮 ping 要等 ping_interval_s，期间的快照全部没校正。
-        load_skew(device_id, await run_in_threadpool(devices_service.get_clock_skew, device_id))
-        await ws.send_text(ping_payload())
+        # 立刻主动探测一轮，不等 ping_interval_s：设备刚连上时手上还没有时间锚点，而
+        # 它采集的每一帧都要带采集时刻——越早把服务端时刻交给它，最初那几帧时刻越准。
+        await ws.send_text(protocol.envelope("link.ping", {"sender_time": now_rfc3339()}))
 
         devices_service.publish_device_update(device_id)
         ping_task = asyncio.create_task(_server_ping_loop(ws, device_id, pong_seen))
@@ -130,7 +133,11 @@ async def device_gateway(ws: WebSocket) -> None:
         if ping_task is not None:
             ping_task.cancel()
         if device_id:
-            manager.unregister(device_id, ws)
+            # 只有"我这条连接确实是当前那条"才算一次真离线。重连是新连接顶替旧连接，
+            # 被顶替的那条随后走这里收尾——那一刻设备仍在线，不该记 offline。实测这台
+            # 设备一天重连两百次上下，假 offline 会占掉绝大多数。
+            if manager.unregister(device_id, ws):
+                await run_in_threadpool(devices_service.record_link_event, device_id, LINK_OFFLINE)
             await run_in_threadpool(devices_service.set_device_offline, device_id)
             await run_in_threadpool(audit.record_gateway, device_id, "disconnect", ip)
             log_event("INFO", "gateway.device-disconnected", "设备断开", device_id=device_id)
@@ -150,33 +157,42 @@ async def _handle_frame(
     payload = payload_of(msg)
 
     if mtype == "link.ping":
-        # 先记录再回 pong：反过来时 pong 已发出而记录未落，外部会看到时序颠倒
+        # 先记录再回 pong：反过来时 pong 已发出而记录未落，外部会看到时序颠倒。
+        # 服务端回的这一份 pong 载荷为空——反方向那份才带 device_time，那是给服务端
+        # 算钟偏差用的（见下一条分支）。
         await run_in_threadpool(devices_service.touch_seen, device_id)
-        await ws.send_text(protocol.envelope("link.pong", {"sender_time": now_rfc3339()}, reply_to=frame_id))
+        await ws.send_text(protocol.envelope("link.pong", {}, reply_to=frame_id))
     elif mtype == "link.pong":
-        config = await run_in_threadpool(config_store.effective, device_id)
-        threshold = as_int(config.get("clock_jump_threshold_s"), default=300)
-        skew = update_skew(device_id, text_of(payload, "sender_time"), threshold)
-        await run_in_threadpool(devices_service.set_clock_skew, device_id, skew)
+        # 两件事：判活，以及用设备带回来的墙上时刻更新钟偏差。那个偏差把快照里的
+        # open_time / in_time 平移到服务端时间轴——那两个字段是"这次会话从什么时候
+        # 开始"的唯一线索（见 core/device_clock）。
+        #
+        # `received_at` 在这一层取一次就往下传：函数执行已经晚于报文到达，让下游再取
+        # 一次只会白添一个调用栈的误差。
         await run_in_threadpool(devices_service.touch_seen, device_id)
+        await run_in_threadpool(
+            devices_service.update_clock_skew,
+            device_id,
+            payload.get("device_time"),
+            now_rfc3339(),
+        )
         pong_seen.set()
     elif mtype == "config.ack":
         sessions_service.resolve_config_ack(device_id, as_int(payload.get("revision")))
     elif mtype == "door.snapshot":
         if not trusted:
             return
-        result = await run_in_threadpool(doors_service.process_snapshot, device_id, payload)
-        if result["status"] == outcomes.OK.value:
-            await ws.send_text(
-                protocol.envelope(
-                    "door.snapshot_ack",
-                    {"snapshot_id": text_of(payload, "snapshot_id")},
-                    reply_to=frame_id,
-                )
+        # 回执与派生结果解耦：原始帧是 process_snapshot 落的第一样东西，那之后无论派生
+        # 出什么岔子，"这一帧已经收下"都成立。回错误会让设备端不删发件箱里那一行，把
+        # 整个队列堵死，而它对派生失败无能为力——设备端只管送达，判断是服务端的事。
+        await run_in_threadpool(doors_service.process_snapshot, device_id, payload)
+        await ws.send_text(
+            protocol.envelope(
+                "door.snapshot_ack",
+                {"snapshot_id": text_of(payload, "snapshot_id")},
+                reply_to=frame_id,
             )
-        else:
-            error = result["error"]
-            await ws.send_text(protocol.error(str(error["code"]), str(error["message"]), reply_to=frame_id))
+        )
     elif mtype == "session.command_result":
         if not trusted:
             return
@@ -191,14 +207,17 @@ async def _handle_frame(
 
 
 async def _server_ping_loop(ws: WebSocket, device_id: str, pong_seen: asyncio.Event) -> None:
-    """按设备有效配置的间隔向设备发服务器 ping，并据此判断链路是否存活。
+    """按设备有效配置的间隔向设备发服务器 ping：判活，并给设备刷新时间锚点。
 
-    这是连接唯一的存活探针：TCP 半开时 receive_text 不会抛错，没有它服务端会长期
-    以为设备在线。每轮发 ping 前清掉标记，最多等一个 ping 周期；没等到 pong 就主动
-    断开，让 finally 里的 device.update 正常推出。等待时长取 ping 间隔本身：设备
-    处理 pong 是即时的，一个完整周期没有回应不是慢，是断了。
+    两个职责共用同一条报文：ping 里带着服务端此刻的时刻，设备收到就更新自己的时间
+    锚点（core/clock/ServerClock），它采集的每一帧都带上那个时刻。
 
-    连接关闭即正常退出；其他异常记录后退出，静默吞掉会让时钟校准无声失效。
+    判活靠它，是因为这是连接唯一的存活探针：TCP 半开时 receive_text 不会抛错，没有它
+    服务端会长期以为设备在线。每轮发 ping 前清掉标记，最多等一个 ping 周期；没等到
+    pong 就主动断开，让 finally 里的 device.update 正常推出。等待时长取 ping 间隔
+    本身：设备处理 pong 是即时的，一个完整周期没有回应不是慢，是断了。
+
+    连接关闭即正常退出；其他异常记录后退出，静默吞掉会让存活判定无声失效。
     """
     while True:
         config = await run_in_threadpool(config_store.effective, device_id)
@@ -207,7 +226,7 @@ async def _server_ping_loop(ws: WebSocket, device_id: str, pong_seen: asyncio.Ev
         await asyncio.sleep(interval)
         pong_seen.clear()
         try:
-            await ws.send_text(ping_payload())
+            await ws.send_text(protocol.envelope("link.ping", {"sender_time": now_rfc3339()}))
         except (WebSocketDisconnect, RuntimeError) as exc:
             log_event(
                 "DEBUG",
