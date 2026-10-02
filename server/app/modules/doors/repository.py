@@ -289,12 +289,13 @@ def open_session(
     return int(cursor.lastrowid or 0)
 
 
-def touch_session(session_id: int, opened: bool, seen: bool, at: str, flow_s: int) -> None:
+def touch_session(session_id: int, opened_at: str, seen: bool, at: str, flow_s: int) -> None:
     """推进会话的里程碑。几个字段都只增不减，重复调用无副作用。
 
-    `opened` 由调用方按"这一帧在不在出水"给出，写入的时刻是 `at`（帧的采集时刻）。
-    **不用设备的 `inTime`**：它是设备的墙上时钟，实测偏差可达 24 小时；而且它会在
-    暂停时清空、恢复时重写，跟着它走会让会话起点漂到最后一次恢复那一刻。
+    `opened_at` 是这一帧能给出的**开阀时刻**，由调用方推导（见 service 的 `_opened_at`）；
+    空串表示这一帧没有开阀证据。本会话已有开阀时刻时不再改动——首次开阀只发生一次。
+    它落的是服务端时间轴上的值，绝不直接取设备报的 `inTime`：那是设备钟，实测偏差可达
+    24 小时，而且它会在暂停时清空、恢复时重写，跟着它走会让起点漂到最后一次恢复那一刻。
 
     `seen` 表示"这一帧确认了它仍然被占着"。结束那一帧要传假——它恰恰证明门已经不占
     了，而 `last_seen_at` 记的是最后一次确认占着的那一刻，两者的差就是盲区大小。
@@ -304,11 +305,11 @@ def touch_session(session_id: int, opened: bool, seen: bool, at: str, flow_s: in
     """
     write(
         "UPDATE usage_session SET"
-        " opened_at = CASE WHEN opened_at IS NULL AND ? THEN ? ELSE opened_at END,"
+        " opened_at = CASE WHEN opened_at IS NULL AND ? <> '' THEN ? ELSE opened_at END,"
         " last_seen_at = CASE WHEN ? THEN ? ELSE last_seen_at END,"
         " flow_s = MAX(flow_s, ?)"
         " WHERE id = ?",
-        (opened, at, seen, at, flow_s, session_id),
+        (opened_at, opened_at, seen, at, flow_s, session_id),
     )
 
 

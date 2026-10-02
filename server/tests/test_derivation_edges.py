@@ -12,12 +12,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
 
 from app.core import db, device_clock
+from app.core.clock import shift_rfc3339
 from app.modules.doors import repository, service
 
 T0 = "2026-09-30T12:00:00.000Z"
@@ -53,9 +53,10 @@ def _frame(doors: list[dict[str, Any]], at: str) -> dict[str, Any]:
 
 
 def _plus(rfc3339: str, seconds: int) -> str:
-    """RFC 3339 加秒。测试里只需要"某个时刻之后多少秒"，自己算比引入依赖干净。"""
-    moment = datetime.fromisoformat(rfc3339.replace("Z", "+00:00")) + timedelta(seconds=seconds)
-    return moment.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    """RFC 3339 加秒。与被测系统走同一个工具，免得两边对时刻的理解分叉。"""
+    shifted = shift_rfc3339(rfc3339, seconds)
+    assert shifted is not None
+    return shifted
 
 
 def _sessions(device_id: str) -> list[Any]:
@@ -466,5 +467,126 @@ def test_takeover_session_has_duration_greater_than_span(fresh_db: str) -> None:
     span = 300  # 12:00:00 → 12:05:00，我们只看了这五分钟
     assert row["flow_s"] == 900, "设备累计的 600，加上上一帧到现在那 300 秒"
     assert row["flow_s"] > span, "所以时长大于跨度——起点只是下界"
-    assert row["assigned_source"] == service.SESSION_ASSIGNED_OBSERVED
-    assert row["ended_at"] == "2026-09-30T12:05:00.000Z", "但结束时刻是准的"
+
+
+# ════════════════════════════════════════════════════════════════════════
+# 六、开阀时刻：三条来源与它们的边界
+# ════════════════════════════════════════════════════════════════════════
+
+
+def test_takeover_while_paused_recovers_the_open_time(fresh_db: str) -> None:
+    """接手时人已经洗到一半（暂停态）：从关阀时刻与累计秒数里把开阀时刻拿回来。
+
+    这是冷启动时唯一还能拿回它的途径——出水那一帧我们没看见，而 `in_time` 已经被设备
+    清空（见 service 的 [_opened_at]）。两个量都来自同一口钟，绝对值不可信，但"关阀
+    时刻"经偏差平移到服务端轴之后，"累计秒数"是纯时长，两者相减就是本段起点。
+    """
+    device_id = "dev-takeover-paused"
+    device_clock.load(device_id, 60.0)  # 设备钟比服务端慢 60 秒
+
+    service.process_snapshot(
+        device_id,
+        _frame(
+            [
+                _door(
+                    acc_no="A",
+                    cert_no="C",
+                    bath_time_s=120,
+                    open_time="2026-09-30T11:58:00.000Z",  # 刷卡（设备钟）
+                    close_time="2026-09-30T12:01:00.000Z",  # 关阀（设备钟）
+                )
+            ],
+            "2026-09-30T12:10:00.000Z",
+        ),
+    )
+
+    row = _sessions(device_id)[0]
+    assert row["assigned_at"] == "2026-09-30T11:59:00.000Z", "刷卡平移"
+    assert row["opened_at"] == "2026-09-30T12:00:00.000Z", "关阀 12:02 减 120 秒"
+    assert row["flow_s"] == 120
+
+
+def test_opened_at_comes_from_the_shifted_in_time(fresh_db: str) -> None:
+    """正在出水时，开阀时刻取 `in_time` 的平移值，不是我们看见它的那一帧。
+
+    两者差着"设备检测加上报"的那一段。它同时就是出水时长的段起点——同一份证据喂给两个
+    字段，不再各算各的。
+    """
+    device_id = "dev-open-shift"
+    device_clock.load(device_id, 60.0)
+
+    service.process_snapshot(
+        device_id,
+        _frame(
+            [
+                _door(
+                    acc_no="A",
+                    cert_no="C",
+                    open_time="2026-09-30T11:58:00.000Z",
+                    in_time="2026-09-30T12:00:00.000Z",  # 开阀（设备钟）
+                )
+            ],
+            "2026-09-30T12:10:00.000Z",
+        ),
+    )
+
+    row = _sessions(device_id)[0]
+    assert row["opened_at"] == "2026-09-30T12:01:00.000Z", "设备 12:00 平移到服务端 12:01"
+    assert row["opened_at"] != "2026-09-30T12:10:00.000Z", "不是我们看见它的那一帧"
+    assert row["flow_s"] == 540
+
+
+def test_out_of_range_open_time_is_not_adopted(fresh_db: str) -> None:
+    """算出来的开阀时刻落在会话起点之前就不采用——多段之和会把它推得过早。
+
+    判据是 `[assigned_at, 本帧]`：开阀不可能早于进门，也不可能晚于此刻。拿不准就留空，
+    宁可没有。
+    """
+    device_id = "dev-open-out-of-range"
+    device_clock.load(device_id, 60.0)
+
+    service.process_snapshot(
+        device_id,
+        _frame(
+            [
+                _door(
+                    acc_no="A",
+                    cert_no="C",
+                    bath_time_s=3600,  # 两段之和，远超本段
+                    open_time="2026-09-30T11:58:00.000Z",
+                    close_time="2026-09-30T12:01:00.000Z",
+                )
+            ],
+            "2026-09-30T12:10:00.000Z",
+        ),
+    )
+
+    row = _sessions(device_id)[0]
+    assert row["assigned_at"] == "2026-09-30T11:59:00.000Z"
+    assert row["opened_at"] is None, "12:02 减 3600 秒得到 11:02，早于进门"
+    assert row["flow_s"] == 3600
+
+
+def test_takeover_does_not_inherit_the_previous_open_time(fresh_db: str) -> None:
+    """换人时，新会话的开阀时刻不得沿用前人的段起点。
+
+    段起点仍要延续给 `flow_s`（那段水从上一帧就开始了），但开阀时刻是"这个人"的：
+    新人此刻才进门，他名下的最早值只能是这一刻。两者在这一处必须分开。
+    """
+    device_id = "dev-takeover-opened"
+    service.process_snapshot(
+        device_id,
+        _frame([_door(acc_no="A", cert_no="甲", open_time="2026-09-30T11:50:00.000Z", in_time=IN)], T0),
+    )
+    service.process_snapshot(
+        device_id,
+        _frame([_door(acc_no="B", cert_no="乙", open_time="2026-09-30T12:02:00.000Z", in_time=IN)], T2),
+    )
+
+    first, second = _sessions(device_id)
+    assert first["cert_no"] == "甲"
+    assert second["cert_no"] == "乙"
+    assert second["assigned_at"] == "2026-09-30T12:02:00.000Z"
+    assert second["opened_at"] == "2026-09-30T12:02:00.000Z", "新人名下的开阀时刻不得早于他进门"
+    assert first["assigned_source"] == service.SESSION_ASSIGNED_OBSERVED, "这一帧没带偏差，起点是观测下界"
+    assert first["ended_at"] == "2026-09-30T12:02:00.000Z", "旧账在换人那一刻结清，结束时刻是准的"

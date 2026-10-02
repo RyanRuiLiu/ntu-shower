@@ -6,10 +6,9 @@
 """
 
 import asyncio
-from datetime import datetime, timezone
 
 from app.core import actions, outcomes
-from app.core.clock import parse_rfc3339
+from app.core.clock import now_rfc3339, seconds_between
 from app.core.connections import manager
 from app.core.logging import log_event
 from app.core.protocol import JsonObject, as_int
@@ -26,10 +25,7 @@ def _duration_s(assigned_at: str) -> int:
 
     以分配时刻起算而不是开阀时刻：占用是从刷卡入门那刻开始的。
     """
-    moment = parse_rfc3339(assigned_at)
-    if moment is None:
-        return 0
-    return int((datetime.now(timezone.utc) - moment).total_seconds())
+    return seconds_between(assigned_at, now_rfc3339())
 
 
 def pick_auto_settle_candidate(config: JsonObject) -> tuple[str, str, str, int] | None:

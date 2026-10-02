@@ -26,9 +26,7 @@
 时间字符串的解析与格式化一律经 core.clock。
 """
 
-from datetime import datetime, timezone
-
-from app.core.clock import format_rfc3339, parse_rfc3339
+from app.core.clock import parse_rfc3339, shift_rfc3339
 
 #: EMA 平滑系数。偏差变化很慢，取小一点滤掉单次往返的抖动。
 EMA_ALPHA = 0.3
@@ -80,11 +78,9 @@ def to_server(device_time: object, device_id: str) -> str | None:
     这台设备还没有偏差记录时返回 None——调用方据此退回观测时刻。**两种来源的强度不同**：
     平移过来的是事实起点，退回的是观测下界，数据里要分得清（见 doors 的 assigned_source）。
     """
-    moment = parse_rfc3339(device_time)
-    if moment is None or device_id not in _skew:
+    if device_id not in _skew:
         return None
-    shifted = datetime.fromtimestamp(moment.timestamp() + _skew[device_id], timezone.utc)
-    return format_rfc3339(shifted)
+    return shift_rfc3339(device_time, _skew[device_id])
 
 
 def clear() -> None:

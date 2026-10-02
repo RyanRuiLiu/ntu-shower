@@ -84,11 +84,16 @@ _MOMENT_KEYS = {"openTime": "open_time", "inTime": "in_time", "closeTime": "clos
 
 
 def _to_rfc3339(epoch_s: object) -> str | None:
-    """epoch 秒 → RFC 3339 UTC 毫秒；0 或坏值返回 None（调用方据此省略该键）。"""
+    """epoch 秒 → RFC 3339 UTC 毫秒；0 或坏值返回 None（调用方据此省略该键）。
+
+    格式化经 core.clock（AGENTS.md 规定它是时间的唯一来源）。本工具的导入时机早于
+    app，所以这一处的导入留在调用时。
+    """
+    from app.core.clock import format_rfc3339
+
     if not isinstance(epoch_s, int) or epoch_s <= 0:
         return None
-    moment = datetime.fromtimestamp(epoch_s, timezone.utc)
-    return moment.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return format_rfc3339(datetime.fromtimestamp(epoch_s, timezone.utc))
 
 
 def _adapt(raw: dict[str, Any]) -> dict[str, Any]:
