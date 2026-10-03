@@ -28,7 +28,6 @@ server/ota_releases/
 .gradle/
 .kotlin/
 build/
-android/local.properties
 
 # ── 编辑器与系统 ──────────────────────────────────────────
 .idea/
