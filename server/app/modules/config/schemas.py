@@ -14,7 +14,7 @@ ConfigValues = dict[str, int | bool | str | dict[str, str]]
 
 
 class ConfigSpecView(TypedDict):
-    """配置登记表中的一条（`GET /ops/config/spec`）。
+    """配置登记表中的一条（`GET /api/v1/config/spec`）。
 
     客户端据此渲染控件：`kind` 决定控件形态，`minimum`/`maximum` 决定输入约束，
     `unit` 用于提示，`scope` 让界面区分"下发给设备的"与"服务端自己的"。
