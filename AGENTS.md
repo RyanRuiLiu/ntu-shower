@@ -15,6 +15,7 @@
 - 配置键的类型与范围 → `server/app/modules/config/spec.py`
 - 协议消息格式 → `protocol/schema/*.json`（含中文 description）
 - 数据库命名与时间格式 → `server/app/core/db.py`
+- **算法规格的可执行表达**（时间轴与口径的参考模型）→ `tools/timeline_model/`
 - 精简与数据流 → `docs/ARCHITECTURE.md`
 - 部署与故障处置 → `docs/RUNBOOK.md`
 - 当时怎么想的 → `docs/DECISIONS.md`
