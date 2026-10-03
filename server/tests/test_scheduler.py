@@ -369,28 +369,63 @@ def _arm(
     scheduler._pending_assigns[("dev-1", 3)] = scheduler._PendingAssign(**fields)  # type: ignore[arg-type]
 
 
-def test_pending_assign_waits_while_the_door_is_still_occupied(monkeypatch: pytest.MonkeyPatch) -> None:
-    """分配的前置是服务端先看见门空了；门还占着就等下一帧。"""
+def test_pending_assign_is_handed_to_the_domain_layer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """帧到了就把待补的分配交给领域层——"门空没空"由它判，这里不再自写一遍判据。
+
+    所以即使门还占着，队列里也会有一项：那是"去试一次"，而试的结果由领域层的前置给。
+    它拒了也不丢待办（见 [test_a_wait_rejection_keeps_the_pending_assign]）。
+    """
 
     async def body() -> None:
         _arm(monkeypatch, live={3: {"state": "bathing", "close_time": ""}})
         scheduler._flush_pending_assign("dev-1")
 
-        # 还没轮到它：待办留着，队列也没建起来
         assert ("dev-1", 3) in scheduler._pending_assigns
-        assert scheduler._workers == {}
+        assert scheduler._workers["dev-1"].queue.qsize() == 1
 
     asyncio.run(body())
 
 
-def test_pending_assign_waits_while_the_session_is_open(monkeypatch: pytest.MonkeyPatch) -> None:
-    """会话还没被服务端收尾时分配会被拒：也等下一帧。"""
+def test_a_wait_rejection_keeps_the_pending_assign(monkeypatch: pytest.MonkeyPatch) -> None:
+    """领域层说"还轮不到"（门还占着、或他名下还有会话）→ 留着待办等下一帧。
+
+    命令根本没下发，所以留待办不是"重试"——重试指的是把同一条命令再发一遍。
+    """
 
     async def body() -> None:
-        _arm(monkeypatch, active_by_cert={"id": 7})
-        scheduler._flush_pending_assign("dev-1")
+        _arm(monkeypatch)
+
+        async def reject(_device_id: str, _req: object) -> object:
+            raise ApiProblemError(problems.DOOR_NOT_FREE, "还被占着")
+
+        monkeypatch.setattr(scheduler.sessions_routes, "perform_assign", reject)
+        await scheduler._perform_assign(
+            scheduler._AssignJob(device_id="dev-1", door_no=3, cert_no="2530110052", password="000000")
+        )
 
         assert ("dev-1", 3) in scheduler._pending_assigns
+
+    asyncio.run(body())
+
+
+def test_any_other_rejection_drops_the_pending_assign(monkeypatch: pytest.MonkeyPatch) -> None:
+    """其它拒绝（设备离线、通道积压……）→ 放弃这次分配。
+
+    单次执行的边界就在这里：等下一帧是给"还轮不到"的，不是给"发失败了"的。
+    """
+
+    async def body() -> None:
+        _arm(monkeypatch)
+
+        async def reject(_device_id: str, _req: object) -> object:
+            raise ApiProblemError(problems.DEVICE_OFFLINE, "设备离线")
+
+        monkeypatch.setattr(scheduler.sessions_routes, "perform_assign", reject)
+        await scheduler._perform_assign(
+            scheduler._AssignJob(device_id="dev-1", door_no=3, cert_no="2530110052", password="000000")
+        )
+
+        assert ("dev-1", 3) not in scheduler._pending_assigns
 
     asyncio.run(body())
 

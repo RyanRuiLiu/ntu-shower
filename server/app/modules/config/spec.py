@@ -21,7 +21,7 @@ class ConfigKind(str, Enum):
     BOOL = "bool"
     TEXT = "text"
     TEXT_MAP = "text_map"
-    """字符串到字符串的映射，目前只有 auto_settle_students 一例。"""
+    """字符串到字符串的映射，目前只有 student_passwords 一例。"""
 
 
 class ConfigScope(str, Enum):
