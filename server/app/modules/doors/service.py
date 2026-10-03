@@ -250,6 +250,12 @@ def _assigned_at(door: JsonObject, at: str, device_id: str, previous: Row | None
     时刻，并如实标成观测下界（真实起点更早）。两种来源的强度不同，统计时必须分得清：
     `inferred` 的跨度可以用，`observed` 的天然偏小。
 
+    **不要改退到同帧的 `in_time`**：两个读数出自同一口钟，钟被改过时它们一起偏，用哪个
+    都一样偏；而"本帧时刻"来自服务端钟，是这里唯一不依赖设备钟的锚。退回它是**有意的**，
+    不是将就——`tests/test_derivation_edges.py` 的 `test_start_far_from_in_time_is_not_adopted`
+    锁着这条。代价是"看见"那一场的时刻可能远晚于真实开阀（2026-07-02 实测晚一小时零五秒，
+    跨过午夜落进"凌晨"），而 `observed` 这个标记就是在说这件事。
+
     ## 平移值要先过自洽检验
 
     偏差是**一个数**，而 `open_time` 是设备在**写下它的那一刻**用**当时那口钟**写的——
