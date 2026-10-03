@@ -49,3 +49,17 @@ class IdentityRecord(TypedDict):
     device_scope: list[str]
     label: str
     created_at: str
+
+
+class CapabilityOption(TypedDict):
+    """一个能力位的对外描述：稳定 key + 人读名称（登记表派生，表单的唯一来源）。"""
+
+    key: str
+    label: str
+
+
+class IdentityCatalog(TypedDict):
+    """`GET /identities` 的读模型：能力位枚举 + 名单，身份页一次装载。"""
+
+    capabilities: list[CapabilityOption]
+    identities: list[IdentityRecord]

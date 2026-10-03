@@ -9,10 +9,10 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
-from app.core.audit import list_calls
-from app.core.protocol import JsonObject
+from app.core.audit import ApiCallRecord, list_calls
 from app.modules.access.dependencies import require_admin
 from app.modules.audit import repository as command_audit
+from app.modules.audit.schemas import CommandAuditRecord
 
 admin_router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_admin)], tags=["audit"])
 
@@ -23,7 +23,7 @@ def list_calls_endpoint(
     actor_kind: Annotated[str | None, Query(description="按调用方过滤：identity / device / anonymous")] = None,
     kind: Annotated[str | None, Query(description="按类别过滤：http / gateway")] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
-) -> list[JsonObject]:
+) -> list[ApiCallRecord]:
     """接口调用与网关生命周期审计。"""
     return list_calls(device_id=device_id, actor_kind=actor_kind, kind=kind, limit=limit)
 
@@ -32,6 +32,6 @@ def list_calls_endpoint(
 def list_commands_endpoint(
     device_id: Annotated[str | None, Query(description="按设备过滤")] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
-) -> list[JsonObject]:
+) -> list[CommandAuditRecord]:
     """命令级审计：参数、结果与设备回报（与 calls 以 trace_id 关联）。"""
     return command_audit.list_commands(device_id=device_id, limit=limit)

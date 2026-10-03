@@ -182,6 +182,21 @@ async def _handle_frame(
     elif mtype == "door.snapshot":
         if not trusted:
             return
+        # 帧自己带着"采集那一刻的设备钟读数"，与 captured_at 同刻——比 pong 那条通路准得多
+        # （pong 的两个读数隔着一个网络往返，是秒级）。所以偏差在**帧粒度**上刷新，会话起点
+        # 才有可能精确；pong 只负责在空闲时段把已经稳住的偏差维持住。
+        #
+        # 与 link.pong 分支对称：两处都只是把"设备报的时刻"和"服务端那一刻"交给同一个
+        # update_clock_skew。缺任一个就跳过——设备还没锚上时 captured_at 本来就没有。
+        device_clock_text = payload.get("device_clock")
+        captured_at = payload.get("captured_at")
+        if isinstance(device_clock_text, str) and isinstance(captured_at, str):
+            await run_in_threadpool(
+                devices_service.update_clock_skew,
+                device_id,
+                device_clock_text,
+                captured_at,
+            )
         # 回执与派生结果解耦：原始帧是 process_snapshot 落的第一样东西，那之后无论派生
         # 出什么岔子，"这一帧已经收下"都成立。回错误会让设备端不删发件箱里那一行，把
         # 整个队列堵死，而它对派生失败无能为力——设备端只管送达，判断是服务端的事。
