@@ -66,3 +66,8 @@
 `root@iseekdream.com`，服务 `ntu-shower`。
 旧系统 `ntu-remote-shower` 未下线，**用独立的库，不要动**。
 `deploy/` 是 nginx / systemd / backup 配置的唯一事实来源。
+
+**生产机上只读，不在它上面做任何测试。** 拷一份库到 `/tmp` 再跑重建、跑重放、跑脚本，
+同样是"在生产机上做测试"——吃的是线上机器的 CPU 与 IO，而线上正跑着服务。
+要验证重算结果，把库拷回**本地**再跑；本地有 `server/data/`（开发库）与 `archive/`（原始帧）。
+生产上允许的只有：读查询、看日志、`systemctl status`、以及 `docs/RUNBOOK.md` 里写明的运维动作。
