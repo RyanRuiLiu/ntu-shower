@@ -136,9 +136,8 @@ def test_snapshot_updates_live_state_and_records_events(fresh_db: str) -> None:
 def test_live_time_fields_are_on_the_server_axis(fresh_db: str) -> None:
     """现态的三个时间字段是**服务端轴**上的值，不是设备报的原话。
 
-    设备那口钟的读数只保留在原始帧里。同一个字段名在两处放两条轴的值，读的人分不出来
-    ——那正是"网页把入门时刻渲染成 00:55"那次事故的成因。这台设备还没有偏差记录
-    （帧比首次 pong 先到），所以换算不出来，字段是空的：给空值比给设备轴的原值安全。
+    设备那口钟的读数只保留在原始帧里。这台设备还没有偏差记录（帧比首次 pong 先到），
+    所以换算不出来，字段是空的：给空值比给设备轴的原值安全。
     """
     device_id = "dev-rawtime-01"
     opened = "2026-09-30T12:00:00.000Z"
