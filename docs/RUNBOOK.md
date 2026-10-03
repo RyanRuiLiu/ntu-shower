@@ -255,24 +255,14 @@ curl -X POST -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/d
 
 ### 发布新 APK
 
-版本号在**三处**，发布前必须一起改——`test_version_consistency.py` 会在门禁里拦住不一致，
-但知道要改哪三处能省一轮往返：
-
-| 位置 | 字段 |
-|---|---|
-| `android/app/build.gradle.kts` | `versionCode`（递增整数）与 `versionName` |
-| `server/app/core/version.py` | `APP_VERSION` |
-| `server/pyproject.toml` | `[project] version` |
-
-改完跑一遍门禁（版本一致性是其中一项），再构建、再发布：
-
-```bash
-cd android && ./gradlew detekt :app:testDebugUnitTest :app:jacocoUnitTestCoverageVerification assembleRelease
-curl -X POST https://ntu-shower.iseekdream.com/api/v1/ota/releases \
-  -H "X-Identity: <admin身份标识>" \
-  -F "version=0.3.35" -F "version_code=42" -F "target=all" \
-  -F "file=@app/build/outputs/apk/release/app-release.apk"
+```powershell
+.\deploy\publish_apk.ps1 -Identity <admin身份标识>
 ```
+
+脚本自己从 `android/app/build.gradle.kts` 读版本号、跑门禁、构建、上传（带 `-SkipBuild`
+可用已构建的 APK）。**版本号不手填**：手填等于把手里的值复制一次，而 OTA 覆盖安装要求新旧
+版本可比，填错的表现是设备不升级或反复升级，偏静默。版本号在哪几处、为什么合并不了，
+见 `docs/DECISIONS.md`「OTA 与版本」。
 
 响应里的 `notified_devices` 非空即表示在线设备已收到通知。设备会自行下载安装并重连，
 无需人工介入——实测约 10 秒完成。
