@@ -8,6 +8,8 @@
 依据是"事件发生时有没有一行 HTTP 审计能兜住它"，与动作重要性无关。
 """
 
+from typing import cast
+
 from app.core.clock import now_rfc3339
 from app.core.db import get_conn, write
 
@@ -71,4 +73,4 @@ def list_commands(device_id: str | None = None, limit: int = 50) -> list[Command
     sql += " ORDER BY id DESC LIMIT ?"
     params.append(limit)
     rows = get_conn().execute(sql, params).fetchall()
-    return [dict(r) for r in rows]
+    return cast("list[CommandAuditRecord]", [dict(r) for r in rows])
