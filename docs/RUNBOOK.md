@@ -42,8 +42,7 @@ journalctl -u ntu-shower --since "-1h" | grep '"trace_id":"<trace-id>"'
 ## 3. 部署
 
 ```bash
-# ① 本地：门禁必须全绿（与 CI 同一组命令，见 README「质量门」）
-cd server && ruff check . && ruff format --check . && mypy app --strict && pytest -q --cov=app
+# ① 本地：门禁必须全绿（命令见 README「质量门」，与 CI 逐条对应，此处不复述）
 
 # ② 本地：打包（务必排除运行时数据与本地配置）
 #
