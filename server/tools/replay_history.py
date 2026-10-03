@@ -163,12 +163,13 @@ def replay(source: Path, target: Path) -> dict[str, int]:
     from app.core.config import settings
 
     settings.db_path = str(target)
-    # 旧系统这份记录由它自己的服务端在同机上写，那些时刻**已经是服务端轴**，偏差恒为 0。
-    # 必须显式载入 0 而不是 `clear()`：`clear()` 让这台设备在偏差表里没有条目，于是
-    # `to_server` 返回 None、调用方退回"本帧观测时刻"——而采到 `in_time` 的那一帧可能
-    # 比 `in_time` 晚一小时（关阀后 `bathTime` 还在，说明门一直占着）。36,000 帧里有 36 次，
-    # 落在本地时已越过午夜，看起来像"凌晨有人在洗澡"。
-    device_clock.load(DEVICE_ID, 0.0)
+    # 清空而不载入 0：**旧库那些时刻的轴本身不可靠**，而 import 帧没有任何独立的偏差
+    # 测量可以用来纠正它（`device_clock` 这一列在旧系统里根本不存在）。载入 0 等于宣称
+    # "设备与原时钟就差 0 秒"，于是 `to_server` 原样返回，那些段被标成 `inferred`——
+    # 一个声称"这是真实起点"的标记。实测 36 个落在本地凌晨的段里有 13 个因此变成
+    # `inferred`，而它们的时刻与"能在非规定时间洗澡的不超过 5 个"直接冲突。
+    # 清空则退回观测下界（`observed`），那个标记说的是"我们看见它的时候"，是诚实的。
+    device_clock.clear()
 
     from app.main import init_schema
     from app.modules.doors import repository, service

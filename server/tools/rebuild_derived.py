@@ -165,13 +165,13 @@ def rebuild(db_path: Path) -> dict[str, int]:
 
     for device_id, at, source, device_clock_text, doors, snapshot_id in frames:
         if source == service.SOURCE_IMPORT:
-            in_import = True
-            # 旧系统的库在同机上由它自己的服务端写，那些时刻**已经是服务端轴**，偏差恒为 0。
-            # 这里必须 `load(0.0)` 而不是 `clear()`：`clear()` 让这台设备在偏差表里没有条目，
-            # `to_server` 于是返回 None，调用方退回"本帧观测时刻"——而采到 `in_time` 的那一帧
-            # 可能比 `in_time` 晚一小时（`bathTime` 还在累加，说明中间关过阀）。36 万帧里有
-            # 36 次，落在本地时已越过午夜，看起来像"凌晨有人在洗澡"。
-            device_clock.load(device_id, 0.0)
+            if not in_import:
+                # 清空而不载入 0：旧库那些时刻的轴本身不可靠，而 import 帧没有独立的偏差
+                # 测量可用来纠正（`device_clock` 在旧系统里根本不存在）。载入 0 会让
+                # `to_server` 原样返回、那些段被标成 `inferred`——一个声称"这是真实起点"
+                # 的标记。清空则退回观测下界（`observed`），那是诚实的。
+                device_clock.clear()
+                in_import = True
             # 与紧邻的前一帧相同：当年重放时就不进推导（理由见 replay_history），
             # 重建要复现同一份结论，这一步不能省。
             if doors == last_import_doors:
