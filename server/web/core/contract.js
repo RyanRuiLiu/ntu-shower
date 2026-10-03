@@ -16,26 +16,6 @@ export const DOOR_STATES = Object.freeze([
   'disabled',
 ])
 
-/** 执行通道：同通道内命令串行，跨通道并行。 */
-export const CHANNELS = Object.freeze({
-  'session.assign': 'automation',
-  'session.settle': 'automation',
-  'ui.touch': 'automation',
-  'ui.scroll': 'automation',
-  'ui.key': 'automation',
-  'ui.input': 'automation',
-  'ui.dump': 'automation',
-  'camera.capture': 'capture',
-  'screen.capture': 'capture',
-  'device.exec': 'maintenance',
-  'device.restart': 'maintenance',
-  'device.uninstall': 'maintenance',
-  'bath.restart': 'maintenance',
-  'clock.set': 'maintenance',
-  'bridge.open': 'maintenance',
-  'bridge.close': 'maintenance',
-})
-
 /** 命令结果状态 → 中文名。取值与中文都取自服务端的 core/outcomes.py。 */
 export const OUTCOME_LABELS = Object.freeze({
   'ok': '成功',
