@@ -211,12 +211,8 @@ ssh iseekdream.com 'systemctl is-active ntu-shower; journalctl -u ntu-shower -n 
 
 ### 设备能力集（capabilities）
 
-设备在 `link.hello` 中声明自己支持的 action 集合（`transport/SupportedActions.ALL`），
-服务端在下发命令前比对：**声明的范围内**才发，避免把设备不认识的命令发过去。
-
-- 空数组表示**未声明**（升级前的旧版本设备），此时不做拦截——否则升级服务端会把在网设备锁死；
-- 设备升级后 capabilities 会自动带上真实集合，拦截随之生效；
-- 若某命令被拒且 `reason_code=device.unsupported_action`，先看设备声明里有没有它：
+规则（设备怎么声明、服务端怎么比对、空数组为什么放行）见 `docs/DECISIONS.md`「协议与契约」。
+**排查**：若某命令被拒且 `reason_code=device.unsupported_action`，先看设备声明里有没有它：
 
 ```bash
 ssh iseekdream.com 'curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/devices/runtime | python3 -m json.tool'
