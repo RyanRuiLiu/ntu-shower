@@ -18,7 +18,7 @@
 - **算法规格的可执行表达**（时间轴与口径的参考模型）→ `tools/timeline_model/`
 - 精简与数据流 → `docs/ARCHITECTURE.md`
 - 部署与故障处置 → `docs/RUNBOOK.md`
-- 当时怎么想的 → `docs/DECISIONS.md`
+- 约束代码的结论与理由 → `docs/DECISIONS.md`
 
 **要把一件事写下来时，先问它能不能进代码注释。** 仓库文档只有上面那几份，
 **能删就删**——每一份都是未来的漂移来源。
