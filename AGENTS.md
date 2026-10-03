@@ -18,6 +18,7 @@
 - 数据库命名与时间格式 → `server/app/core/db.py`
 - **算法规格的可执行表达**（时间轴与口径的参考模型）→ `tools/timeline_model/`
 - 精简与数据流 → `docs/ARCHITECTURE.md`
+- **数据模型与接口**（字段语义、派生规则、状态变更、取数口径）→ `docs/REFERENCE.md`
 - 部署与故障处置 → `docs/RUNBOOK.md`
 - 约束代码的结论与理由 → `docs/DECISIONS.md`
 
