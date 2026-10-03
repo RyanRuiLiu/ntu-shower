@@ -49,3 +49,30 @@ export const EVENT_TYPES = Object.freeze({
   DEVICE_UPDATE: 'device.update',
   DOOR_UPDATE: 'door.update',
 })
+
+/** 系统按键（与服务端 `DeviceUiKeyRequest.key` 一致）。 */
+export const UI_KEYS = Object.freeze([
+  'back',
+  'home',
+  'recents',
+  'notifications',
+  'dpad_up',
+  'dpad_down',
+  'dpad_left',
+  'dpad_right',
+  'dpad_center',
+  'enter',
+  'del',
+])
+
+/** 文本注入的两条通路（clipboard 支持中文；keys 仅 ASCII）。 */
+export const INPUT_CHANNELS = Object.freeze([
+  'clipboard',
+  'keys',
+])
+
+/** 滚动方向。 */
+export const SCROLL_DIRECTIONS = Object.freeze([
+  'forward',
+  'backward',
+])
