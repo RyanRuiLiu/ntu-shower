@@ -42,15 +42,16 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
-from app.core import actions, outcomes
+from app.core import outcomes, problems
 from app.core.clock import now_rfc3339
 from app.core.logging import log_event
+from app.core.problems import ApiProblemError
 from app.core.protocol import as_int
 from app.modules.config import store as config_store
 from app.modules.doors import repository as doors_repository
-from app.modules.doors.schemas import DoorState
+from app.modules.doors.schemas import ASSIGNABLE_STATES, DoorState
 
-from . import service as sessions_service
+from . import routes as sessions_routes
 from .decision import (
     RENEWING_FEATURES,
     Candidate,
@@ -60,7 +61,7 @@ from .decision import (
     recheck,
     still_allowed,
 )
-from .schemas import CommandOutcome
+from .schemas import AssignRequest, CommandOutcome, SettleRequest
 
 #: 浴室 App 的"连续无水就释放"门槛（秒）：未开阀是 `maxinspacetime`、关阀后是
 #: `maxbathspacetime`，两者都是 300。它在这里的作用是**划断"同一串会话"**：喷头空着超过
@@ -75,9 +76,14 @@ NO_WATER_RELEASE_S = 300
 #: 它是机制的时限、不是业务旋钮，所以是常量：能调的话，调大只会让那种错更容易发生。
 ASSIGN_PENDING_TIMEOUT_S = 30.0
 
-#: 结算时服务端已经找不到"该学号占用中的喷头"。那正是"他已经走了、或者他自己已经结过账
-#: 了"，是正常收尾，不该刷告警。
-NO_OCCUPIED_DOOR = "no_occupied_door"
+#: 结算时服务端已经找不到"该学号占用中的喷头"（`problems.NO_OCCUPIED_DOOR`）。那正是"他已经
+#: 走了、或者他自己已经结过账了"，是正常收尾，不该刷告警。
+#:
+#: 另外两类**不是失败、只是"现在还不该做"**：门还被占着（`DOOR_NOT_FREE`）、他名下还有
+#: 未结束的会话（`DUPLICATE_SESSION`）。它们由领域层的前置检查给出，命令根本没下发，
+#: 所以等下一帧再来不是"重试"。
+_WAIT_PROBLEMS = frozenset({problems.DOOR_NOT_FREE.code, problems.DUPLICATE_SESSION.code})
+_DONE_PROBLEMS = frozenset({problems.NO_OCCUPIED_DOOR.code})
 
 #: `door_live.state` 里我们认识的取值。认不出来的当空闲——宁可不动手，也不要对一条没读懂
 #: 的现态下单。
@@ -134,8 +140,10 @@ _workers: dict[str, _DeviceWorker] = {}
 #: (设备, 喷头) → 待补的那一次分配。键含喷头，因为门是那个被释放的东西。
 _pending_assigns: dict[tuple[str, int], _PendingAssign] = {}
 
-#: (会话, 功能) → 已动手。每个会话每个功能只一次；会话结束时清掉。
-_attempted: set[tuple[int, str]] = set()
+#: (设备, 会话, 功能) → 已动手。每个会话每个功能只一次；会话结束时清掉。
+#: **键里必须带设备**：会话 id 是全库自增的，只按 (会话, 功能) 记，A 设备的帧会把
+#: B 设备的记录一起清掉。
+_attempted: set[tuple[str, int, str]] = set()
 
 _running = False
 
@@ -197,7 +205,7 @@ def _plan(device_id: str) -> dict[int, tuple[float, Candidate, Trigger]]:
         trigger = decide(candidate, config, now)
         if trigger is None:
             continue
-        if (candidate.session_id, trigger.feature) in _attempted:
+        if (candidate.device_id, candidate.session_id, trigger.feature) in _attempted:
             continue  # 这个会话这个功能已经动过手，不再排
         at = _now_s() + trigger.delay_s
         current = planned.get(candidate.door_no)
@@ -257,7 +265,7 @@ def _forget_closed_sessions(device_id: str) -> None:
     有自己的 `session_id`。
     """
     open_ids = {as_int(session["id"]) for session in doors_repository.list_open_sessions_of(device_id)}
-    for key in [item for item in _attempted if item[0] not in open_ids]:
+    for key in [item for item in _attempted if item[0] == device_id and item[1] not in open_ids]:
         _attempted.discard(key)
 
 
@@ -343,10 +351,14 @@ async def _worker_loop(device_id: str) -> None:
 
 
 async def _perform_settle(job: _SettleJob) -> None:
-    """结算一次。失败即停，不重试。"""
+    """结算一次。失败即停，不重试。
+
+    **走领域层**：`sessions.routes` 的 `perform_settle` 是"所有调用方共用"的那个入口，
+    它自带前置检查；在这里另写一份就等于同一个判据有两个出处。
+    """
     candidate = job.candidate
     feature = job.feature
-    _attempted.add((candidate.session_id, feature))
+    _attempted.add((candidate.device_id, candidate.session_id, feature))
 
     config = config_store.effective(candidate.device_id)
     still = still_allowed(candidate.cert_no, feature, config)
@@ -376,13 +388,18 @@ async def _perform_settle(job: _SettleJob) -> None:
         )
         return
 
-    result = await sessions_service.send_command_and_wait(
-        candidate.device_id,
-        actions.SESSION_SETTLE,
-        {"cert_no": candidate.cert_no, "password": password},
-    )
-    if not _settled_ok(result, candidate, feature):
+    try:
+        result = await sessions_routes.perform_settle(
+            candidate.device_id, SettleRequest(cert_no=candidate.cert_no, password=password)
+        )
+    except ApiProblemError as error:
+        _report_problem(error, candidate.device_id, candidate.door_no, candidate.cert_no, feature)
         return
+
+    if result.get("status") != outcomes.OK.value:
+        _report_outcome(result, candidate, feature)
+        return
+
     log_event(
         "INFO",
         "session-maintenance.settled",
@@ -408,11 +425,30 @@ async def _perform_settle(job: _SettleJob) -> None:
 
 async def _perform_assign(job: _AssignJob) -> None:
     """补上那一次分配。**只下一次**，不重试——它是否真成了，下一帧看得出来。"""
-    result = await sessions_service.send_command_and_wait(
-        job.device_id,
-        actions.SESSION_ASSIGN,
-        {"door_no": job.door_no, "cert_no": job.cert_no, "password": job.password},
-    )
+    key = (job.device_id, job.door_no)
+    try:
+        result = await sessions_routes.perform_assign(
+            job.device_id, AssignRequest(door_no=job.door_no, cert_no=job.cert_no, password=job.password)
+        )
+    except ApiProblemError as error:
+        if error.problem.code in _WAIT_PROBLEMS:
+            # 门还没空、或他名下还有未结束的会话：命令**根本没下发**，所以留着待办等下一帧
+            # 不是"重试"——重试指的是把同一条命令再发一遍。
+            log_event(
+                "INFO",
+                "session-maintenance.assign-waiting",
+                "还轮不到分配，等下一帧",
+                device_id=job.device_id,
+                door_no=job.door_no,
+                cert_no=job.cert_no,
+                problem=error.problem.code,
+            )
+            return
+        _pending_assigns.pop(key, None)
+        _report_problem(error, job.device_id, job.door_no, job.cert_no, "_assign")
+        return
+
+    _pending_assigns.pop(key, None)
     ok = result.get("status") == outcomes.OK.value
     log_event(
         "INFO" if ok else "WARNING",
@@ -426,28 +462,45 @@ async def _perform_assign(job: _AssignJob) -> None:
     )
 
 
-def _settled_ok(result: CommandOutcome, candidate: Candidate, feature: str) -> bool:
-    """结算算不算成。只认命令结果（见模块注释）。
+def _report_problem(error: ApiProblemError, device_id: str, door_no: int, cert_no: str, feature: str) -> None:
+    """领域层的前置检查拒了。分清"现在还不该做"与"真出问题了"。
 
-    有一类**不算失败**：服务端已经找不到"该学号占用中的喷头"——那正是"他已经走了、或者
-    他自己已经结过账了"，是正常收尾，不该刷告警。
+    前者（门还被占着、他还有会话、他已经走了）是正常情形，记 INFO 就够了；后者要人看见
+    ——它意味着这次维护没做成，而喷头会一直占着，直到浴室端自己释放。
     """
-    if result.get("status") == outcomes.OK.value:
-        return True
-    reason = str(result.get("reason_code") or "")
-    expected = reason == NO_OCCUPIED_DOOR
+    code = error.problem.code
+    expected = code in _WAIT_PROBLEMS or code in _DONE_PROBLEMS
     log_event(
         "INFO" if expected else "WARNING",
-        "session-maintenance.already-gone" if expected else "session-maintenance.settle-failed",
-        "他已不在占用中，无需结算" if expected else "结算失败，请人工确认",
+        "session-maintenance.not-applicable" if expected else "session-maintenance.rejected",
+        "现在还不该做，跳过" if expected else "领域层拒绝了这次维护，请人工确认",
+        device_id=device_id,
+        door_no=door_no,
+        cert_no=cert_no,
+        feature=feature,
+        problem=code,
+        detail=error.detail,
+    )
+
+
+def _report_outcome(result: CommandOutcome, candidate: Candidate, feature: str) -> None:
+    """命令发出去了但没成。
+
+    只认命令结果（见模块注释）——命令报 ok 也可能被浴室端拒了，而那种"没帮上忙"我们不
+    追究。真失败的（设备半路卡住、超时）要人看见。
+    """
+    log_event(
+        "WARNING",
+        "session-maintenance.settle-failed",
+        "结算失败，请人工确认",
         device_id=candidate.device_id,
         door_no=candidate.door_no,
         cert_no=candidate.cert_no,
         feature=feature,
         status=str(result.get("status")),
-        reason_code=reason or "-",
+        reason_code=str(result.get("reason_code") or "-"),
+        terminal_message=str(result.get("terminal_message") or ""),
     )
-    return False
 
 
 def _flush_pending_assign(device_id: str) -> None:
@@ -474,12 +527,17 @@ def _flush_pending_assign(device_id: str) -> None:
         row = live.get(waiting.door_no)
         if row is None:
             continue
-        if str(row["state"]) not in (DoorState.FREE.value, DoorState.SELECTED.value):
+        try:
+            state = DoorState(str(row["state"]))
+        except ValueError:
+            continue  # 设备报了个本端不认识的状态：不分配，也不去猜（同 `_require_assignable_door`）
+        if state not in ASSIGNABLE_STATES:
             continue  # 门还占着（或刚被别人占了）：等下一帧
         if doors_repository.get_active_by_cert(device_id, waiting.cert_no) is not None:
-            continue  # 服务端还没把那一场会话收尾，分配会被拒：等下一帧
+            continue  # 他名下还有未结束的会话（`_reject_duplicate_session` 那条）：等下一帧
 
-        _pending_assigns.pop(key, None)
+        # **这里不摘待办**：万一真下发时前置又变了，留着待办等下一帧。摘除只在真下发了
+        # 命令、或明确放弃时做（见 `_perform_assign` 与上面那条过期分支）。
         _enqueue_assign(
             _AssignJob(
                 device_id=device_id,
