@@ -33,7 +33,12 @@ async def stream(ws: WebSocket, device_id: str | None = None) -> None:
     """实时推送：door.update（喷头变化）与 device.update（设备在场变化）。
 
     带 `device_id` 时只推该设备的事件：过滤在服务端做，客户端不复制规则。
-    """
+
+    该连接是**单向的**：客户端不得发送任何帧——服务端把"收到客户端帧"当作主动
+    断开的信号（见循环体），链路保活由传输层 ping/pong 承担，应用层无事可做。
+
+    断线恢复的职责在客户端：重连后重拉一次 `GET /doors`（断线窗口内错过的事件
+    不含状态），此后推送即权威。"""
     await ws.accept()
     sid, queue = events.subscribe()
     client_frame = asyncio.create_task(ws.receive_text())  # 仅用于探测断连

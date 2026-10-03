@@ -23,12 +23,22 @@ class DeviceSummary(TypedDict):
     """设备的精简视图：可辨识与在场状态，用户面与实时推送共用。
 
     版本、来源 IP 等运维诊断字段不在此列，只出现在完整档案（DeviceRecord）与
-    管理面接口里。
+    管理面接口里。device.update 的载荷即本形状加 `at` 一项（见 devices.service）。
     """
 
     device_id: str
     name: str
     online: bool
+
+
+class DeviceListItem(DeviceSummary):
+    """`GET /devices` 的一行：精简视图 + 该调用方可执行的用户动作。
+
+    actions 由 access.user_actions 按调用方能力位与设备作用域算出（服务端唯一
+    判定，客户端不复制规则）；匿名调用恒为空数组——字段仍然存在，客户端不必判键。
+    """
+
+    actions: list[str]
 
 
 class DeviceRecord(TypedDict):

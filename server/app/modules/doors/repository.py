@@ -1,19 +1,26 @@
-"""doors 四表 SQL 集中管理。
+"""doors 五表 SQL 集中管理。
 
-分两层：`door_snapshot` 是原始层——设备说了什么就记什么，不做任何解释；其余三张是
-派生层——`door_live` 现态、`door_state_event` 状态转换流水、`usage_session` 洗浴会话。
+分两层：`door_snapshot` 是原始层——设备说了什么就记什么，不做任何解释；其余四张是
+派生层——`door_live` 现态、`door_state_event` 状态转换流水、`usage_session` 洗浴会话、
+`usage_segment` 每一次连续出水。
 
 这条分层是整套设计的骨架：派生层的每条结论都依赖"当时的推导规则"，规则一旦发现缺陷
 或要加新指标，没有原始帧就永久无法重算。旧系统只留了原始快照，那 100 天才能重放回来。
 代价约 170MB/年。
 
+会话与段分开成两张表，是因为两件事粒度不同：会话是"一次占用"（人 + 门 + 起止），段是
+占用里的一段连续出水。合成一张就把"洗一次"与"开了几次水"压成一件事，而"这个人洗了
+多久"和"他中间停了几次"要分别回答。
+
 ## 刻意不存的几样
 
 每一条都能从现有列推导出来。**可推导的不存**——存了就是制造第二个真相：
 
-- **暂停次数**：数 `door_state_event` 的 `bathing→paused` 即可；
 - **结束原因**：数据库层面不存在。主动出门与四种超时释放写的是同一套清零 SQL，
   `bathing→free` 与 `paused→free` 完全同形，硬分就是编造；
+- **出水次数**：数 `usage_segment` 的行数；
+- **暂停次数**：数 `door_state_event` 的 `bathing→paused`。它与出水次数**不相等**——
+  一次出水可能直接以 `bathing→free` 收场（洗完就走），那是出门不是暂停；
 - **跨盲区标记**：`ended_at − last_seen_at > 1200 秒` 就是判据，一条 WHERE 的事；
 - **占用时长、等待时长、暂停时长**：都是几个时刻的差。
 
@@ -53,6 +60,12 @@ def init_tables() -> None:
             -- 本帧的**权威时刻**：会话的起点、终点与出水时长全部以它为准。设备刚起来
             -- 还没握上手时为空，此时退回用 received_at。
             captured_at TEXT,
+            -- 采集那一刻**设备墙钟**的读数，与 captured_at 取自同一瞬间。两者相减就是
+            -- 设备钟偏差，open_time / in_time / close_time 靠那个偏差平移到服务端时间轴。
+            --
+            -- 它必须落在原始层：偏差是**随时间变**的量，事后要从历史重算任何一条换算，
+            -- 都得先有"当时那口钟读数是多少"。它推不出来，只能在采集那一刻记下。
+            device_clock TEXT,
             received_at TEXT    NOT NULL,
             doors       TEXT    NOT NULL
         );
@@ -68,18 +81,15 @@ def init_tables() -> None:
             card_no     INTEGER NOT NULL DEFAULT 0,
             cert_no     TEXT    NOT NULL DEFAULT '',
             acc_no      TEXT    NOT NULL DEFAULT '',
+            -- 三个时间字段都是**服务端轴**上的值（设备那口钟的读数只留在原始帧里）。
+            -- 它们对应的会话与段由 usage_session / usage_segment 回答，这里只是为了
+            -- 让"这个门现在什么状况"一次查询就能渲染出来。
             open_time   TEXT    NOT NULL DEFAULT '',
             in_time     TEXT    NOT NULL DEFAULT '',
             close_time  TEXT    NOT NULL DEFAULT '',
             bath_time_s INTEGER NOT NULL DEFAULT 0,
             status_raw  INTEGER NOT NULL DEFAULT 0,
             reported_at TEXT    NOT NULL,
-            -- 当前这段连续出水的**观测**起点；不在出水时为空。
-            --
-            -- 它必须持久化，不能只放内存：出水时长的合成要分清"本段已经在设备那边结算
-            -- 过"与"还没结算"，而这个区分只有靠"这一帧到段起点过了多久"才能做（见
-            -- service 的 _flow_after）。进程重启后内存没了，而下一帧还要接着算。
-            segment_started_at TEXT NOT NULL DEFAULT '',
             PRIMARY KEY (device_id, door_no)
         );
 
@@ -99,6 +109,32 @@ def init_tables() -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_door_state_event_door
             ON door_state_event(device_id, door_no, occurred_at);
+
+        -- 段层：一次连续出水。两端时刻都在服务端轴上，设备轴的两份原文另存。
+        CREATE TABLE IF NOT EXISTS usage_segment (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id  INTEGER NOT NULL,
+            -- 门号与设备号能从会话取到，这里冗余一份是为了按门筛段时免联表。与 door_live
+            -- 保留协议字段名同类：刻意的、写明白的例外，不是疏漏。
+            device_id   TEXT    NOT NULL,
+            door_no     INTEGER NOT NULL,
+            opened_at   TEXT    NOT NULL,
+            -- 空 = 尚未关阀。它为空只有两种情形：数据到此为止，或设备卡住不再写库。
+            closed_at   TEXT,
+            flow_s      INTEGER NOT NULL DEFAULT 0,
+            -- 设备写下的那两个读数原文（yyyyMMddHHmmss）。段长取"同一口钟两个读数之差"，
+            -- 没有原文就无法复核，也无法在事后重算。
+            opened_raw  TEXT    NOT NULL DEFAULT '',
+            closed_raw  TEXT    NOT NULL DEFAULT '',
+            -- measured：设备轴差与观测差一致（取前者）；observed：只信观测差；
+            -- capped：观测差越过一次占用的物理上限、被截断；derived：从设备痕迹推回；
+            -- unclosed：数据到此为止仍在出水，长度不可知。五种来源强度不同，统计必须
+            -- 分得清——capped 与"它真的就洗了那么久"绝不能混成一件事。
+            source      TEXT    NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_usage_segment_session ON usage_segment(session_id);
+        CREATE INDEX IF NOT EXISTS idx_usage_segment_door
+            ON usage_segment(device_id, door_no, opened_at);
 
         CREATE TABLE IF NOT EXISTS usage_session (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,10 +157,18 @@ def init_tables() -> None:
             -- 统计时必须分得清：`inferred` 的跨度（ended_at − assigned_at）可以用，
             -- `observed` 的不能，它天然偏小。
             assigned_source TEXT NOT NULL DEFAULT 'observed',
-            -- 开阀时刻。三条来源按可信度取（见 service 的 _opened_at）：正在出水时是本段的
-            -- 观测起点，它优先由设备报的 in_time 平移而来；已经暂停时由"关阀时刻减累计出水
-            -- 秒数"推回。两者都不成立则留空——没出过水的会话就是空的。
-            opened_at    TEXT,
+            -- 观测连续性：`continuous` 我们一路看着；`gap` 中间有超过一次占用上限的空档。
+            --
+            -- 它只描述**我们看没看见**，不描述发生过什么。缺口前的那一场在我们最后看见
+            -- 它的时刻收尾、缺口后另起一场，两场各自完整——而中间那段是空的，这里如实
+            -- 标出来，不让统计把"我们没看见"当成"什么都没发生"。
+            observed_span TEXT NOT NULL DEFAULT 'continuous',
+            -- 设备累计的出水秒数（bath_time_s 的最大值）。它是**设备说的话**，用来与我们
+            -- 的段之和对照：两者不等，就说明中间有一段没进段表（丢帧、离线、设备卡住）。
+            device_flow_s INTEGER NOT NULL DEFAULT 0,
+            -- 段之和与设备累计值是否一致。**有 derived 段时恒为假**——那段的长度就是从
+            -- 设备那个值推出来的，等式必然成立，拿它当"完整"的证据是循环论证。
+            segments_complete INTEGER NOT NULL DEFAULT 0,
             -- 离开占用态那一帧。**跨盲区时它不是真实结束时刻**，只是"下次见到它的时刻"。
             ended_at     TEXT,
             -- 最后一次**确认它还占着**的那一帧。它才是可信的结束下界：`ended_at` 与它的
@@ -132,11 +176,14 @@ def init_tables() -> None:
             -- 统计因此分两层：占用/等待/暂停类指标走"盲区 ≤ SESSION_MAX_S"的那些会话，
             -- 出水类指标（flow_s）不受影响——它只累加有证据的段。
             last_seen_at TEXT    NOT NULL,
+            -- 段之和。它能从 usage_segment 推出来，在这里存一份是为了让统计有个不联表的
+            -- 入口——"这个人总共洗了多久"是最常问的一句，不该每次去求和。
             flow_s       INTEGER NOT NULL DEFAULT 0
         );
-        -- 一个喷头的使用历史（含 latest_usage_by_door 那句"上次使用"）。
+        -- 一个喷头的使用历史。按**会话起点**排而不是开阀时刻：后者已不在本表（它在段表
+        -- 里），而且拿可空的列筛时间会漏行。
         CREATE INDEX IF NOT EXISTS idx_usage_session_door
-            ON usage_session(device_id, door_no, opened_at);
+            ON usage_session(device_id, door_no, assigned_at);
         -- "这个门现在开着会话吗"（get_open_session）：一帧里每个门问一次，实时路径上
         -- 帧密度是每秒数帧，所以它必须走索引而不是扫全表。把 ended_at 也放进键里，
         -- 三列全命中；只到 door_no 的话还要在一堆历史会话里筛 ended_at IS NULL。
@@ -145,8 +192,8 @@ def init_tables() -> None:
         -- 按学号统计（"这个人洗了多久"）走这条；cert_no 才是人，card_no 是卡，
         -- 无卡模式下 card_no 恒为 0，拿它当人查是错的。
         CREATE INDEX IF NOT EXISTS idx_usage_session_cert
-            ON usage_session(cert_no, opened_at);
-        -- 按时间范围统计（"这个月洗了几次"）走这条。按**会话起点**而不是 opened_at：
+            ON usage_session(cert_no, assigned_at);
+        -- 按时间范围统计（"这个月洗了几次"）走这条。按**会话起点**而不是开阀时刻：
         -- 后者可空（从没出过水的会话没有它），拿可空列筛时间会漏掉那些行。
         CREATE INDEX IF NOT EXISTS idx_usage_session_time
             ON usage_session(assigned_at);
@@ -178,21 +225,23 @@ def upsert_door_live(
     state: str,
     door: JsonObject,
     reported_at: str,
-    segment_started_at: str = "",
 ) -> None:
-    """写下这个门的现态。`segment_started_at` 是当前出水段的观测起点（不在出水时为空）。"""
+    """写下这个门的现态。
+
+    三个时间字段存的是**服务端轴**的值（调用方负责换算）：设备那口钟的读数只在原始帧
+    里保真，对外一律不出现——同一个字段名在两处放两条轴的值，读的人分不出来。
+    """
     write(
         """
         INSERT INTO door_live (device_id, door_no, state, card_no, cert_no, acc_no,
                                open_time, in_time, close_time, bath_time_s, status_raw,
-                               reported_at, segment_started_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                               reported_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(device_id, door_no) DO UPDATE SET
             state=excluded.state, card_no=excluded.card_no, cert_no=excluded.cert_no,
             acc_no=excluded.acc_no, open_time=excluded.open_time, in_time=excluded.in_time,
             close_time=excluded.close_time, bath_time_s=excluded.bath_time_s,
-            status_raw=excluded.status_raw, reported_at=excluded.reported_at,
-            segment_started_at=excluded.segment_started_at
+            status_raw=excluded.status_raw, reported_at=excluded.reported_at
         """,
         (
             device_id,
@@ -207,7 +256,6 @@ def upsert_door_live(
             int(door.get("bath_time_s") or 0),
             int(door.get("status_raw") or 0),
             reported_at,
-            segment_started_at,
         ),
     )
 
@@ -218,6 +266,7 @@ def insert_snapshot(
     seq: int | None,
     source: str,
     captured_at: str,
+    device_clock: str,
     received_at: str,
     doors: list[JsonObject],
 ) -> None:
@@ -228,9 +277,18 @@ def insert_snapshot(
     """
     write(
         "INSERT OR IGNORE INTO door_snapshot"
-        " (device_id, snapshot_id, seq, source, captured_at, received_at, doors)"
-        " VALUES (?,?,?,?,?,?,?)",
-        (device_id, snapshot_id, seq, source, captured_at, received_at, json.dumps(doors, ensure_ascii=False)),
+        " (device_id, snapshot_id, seq, source, captured_at, device_clock, received_at, doors)"
+        " VALUES (?,?,?,?,?,?,?,?)",
+        (
+            device_id,
+            snapshot_id,
+            seq,
+            source,
+            captured_at,
+            device_clock,
+            received_at,
+            json.dumps(doors, ensure_ascii=False),
+        ),
     )
 
 
@@ -291,63 +349,142 @@ def open_session(
     return int(cursor.lastrowid or 0)
 
 
-def touch_session(session_id: int, opened_at: str, seen: bool, at: str, flow_s: int) -> None:
+def touch_session(session_id: int, seen: bool, at: str, flow_s: int, device_flow_s: int, gap: bool) -> None:
     """推进会话的里程碑。几个字段都只增不减，重复调用无副作用。
-
-    `opened_at` 是这一帧能给出的**开阀时刻**，由调用方推导（见 service 的 `_opened_at`）；
-    空串表示这一帧没有开阀证据。本会话已有开阀时刻时不再改动——首次开阀只发生一次。
-    它落的是服务端时间轴上的值，绝不直接取设备报的 `inTime`：那是设备钟，实测偏差可达
-    24 小时，而且它会在暂停时清空、恢复时重写，跟着它走会让起点漂到最后一次恢复那一刻。
 
     `seen` 表示"这一帧确认了它仍然被占着"。结束那一帧要传假——它恰恰证明门已经不占
     了，而 `last_seen_at` 记的是最后一次确认占着的那一刻，两者的差就是盲区大小。
 
     `flow_s` 只取更大的值：调用方给的是"截至此刻的出水秒数"，而设备的 `bathTime`
-    只在暂停那一刻累加、释放时整体归零，本身并不单调。
+    只在暂停那一刻累加、释放时整体归零，本身并不单调。`device_flow_s` 同理。
+
+    `gap` 表示这一帧发现有断层（见 service 的 `_has_gap`）。它是**单向**的：断开过
+    一次之后，后面接上的连续观测补不回失去的那一段。
     """
     write(
         "UPDATE usage_session SET"
-        " opened_at = CASE WHEN opened_at IS NULL AND ? <> '' THEN ? ELSE opened_at END,"
         " last_seen_at = CASE WHEN ? THEN ? ELSE last_seen_at END,"
-        " flow_s = MAX(flow_s, ?)"
+        " flow_s = MAX(flow_s, ?),"
+        " device_flow_s = MAX(device_flow_s, ?),"
+        " observed_span = CASE WHEN ? THEN 'gap' ELSE observed_span END"
         " WHERE id = ?",
-        (opened_at, opened_at, seen, at, flow_s, session_id),
+        (seen, at, flow_s, device_flow_s, gap, session_id),
     )
 
 
-def close_session(session_id: int, ended_at: str) -> None:
-    """标记会话结束。
+def close_session(session_id: int, ended_at: str, segments_complete: bool) -> None:
+    """标记会话结束，并把完整性定稿。
 
-    只写 `ended_at`——`flow_s` 与 `opened_at` 的推进是 `touch_session` 的职责，结束这
+    `segments_complete` 在这里定稿而不是随手更新：它要回答的是"这一场我们记全了吗"，
+    而只有结束时段表才不再增长。
+
+    只写这两样——`flow_s` 与 `last_seen_at` 的推进是 `touch_session` 的职责，结束这
     一帧同样先经过它，不在这里重复。
 
     **不记结束原因**：浴室 App 在"用户主动出门"和三种超时释放下写的是同一套清零语句，
     数据库层面完全同形，服务端没有依据区分。硬分就是编造。真要看"怎么结束的"，
     `door_state_event` 里每次转换都在（`bathing→free` 与 `paused→free` 含义不同）。
     """
-    write("UPDATE usage_session SET ended_at = ? WHERE id = ?", (ended_at, session_id))
+    write(
+        "UPDATE usage_session SET ended_at = ?, segments_complete = ? WHERE id = ?",
+        (ended_at, int(segments_complete), session_id),
+    )
+
+
+def get_open_segment(device_id: str, door_no: int) -> Row | None:
+    """这个门当前未关阀的那一段。"""
+    return read_one(
+        "SELECT * FROM usage_segment"
+        " WHERE device_id = ? AND door_no = ? AND closed_at IS NULL"
+        " ORDER BY id DESC LIMIT 1",
+        (device_id, door_no),
+    )
+
+
+def open_segment(session_id: int, device_id: str, door_no: int, opened_at: str, opened_raw: str) -> int:
+    """开一段出水，返回段 id。
+
+    `opened_raw` 是设备报的 `in_time` 原文：段长取"同一口钟两个读数之差"，没有它就
+    无法在事后复核这一次换算。
+    """
+    cursor = write(
+        "INSERT INTO usage_segment (session_id, device_id, door_no, opened_at, opened_raw) VALUES (?,?,?,?,?)",
+        (session_id, device_id, door_no, opened_at, opened_raw),
+    )
+    return int(cursor.lastrowid or 0)
+
+
+def close_segment(segment_id: int, closed_at: str, flow_s: int, source: str, closed_raw: str) -> None:
+    """关掉一段出水。`source` 说明这个长度是怎么得来的（见建表处的五种来源）。"""
+    write(
+        "UPDATE usage_segment SET closed_at = ?, flow_s = ?, source = ?, closed_raw = ? WHERE id = ?",
+        (closed_at, flow_s, source, closed_raw, segment_id),
+    )
+
+
+def add_derived_segment(
+    session_id: int,
+    device_id: str,
+    door_no: int,
+    opened_at: str,
+    closed_at: str,
+    flow_s: int,
+    closed_raw: str,
+) -> int:
+    """记一段**推出来的**出水。
+
+    冷启动接手用：我们上线时人已经洗到一半、正停在暂停态，`in_time` 早被清空，只有
+    "关阀时刻"与"累计出水秒数"两道痕迹——从前者往前数那么多秒，就是那一段的开阀时刻。
+
+    它与观测得的段同住一张表，靠 `source` 区分：长度取自设备的累计值，不是我们看出来
+    的。同一会话只推一次，理由见 service 的 `_derive_segment`。
+    """
+    cursor = write(
+        "INSERT INTO usage_segment (session_id, device_id, door_no, opened_at, closed_at, flow_s, closed_raw, source)"
+        " VALUES (?,?,?,?,?,?,?,'derived')",
+        (session_id, device_id, door_no, opened_at, closed_at, flow_s, closed_raw),
+    )
+    return int(cursor.lastrowid or 0)
+
+
+def mark_segment_unclosed(segment_id: int) -> None:
+    """把仍在出水的段标成"长度不可知"。
+
+    数据到此为止（重放到历史截止）时它还没关阀——那一段水有多长，没有任何一帧能证明，
+    所以长度留 0、来源标 `unclosed`，不让"到现在为止"冒充它。
+    """
+    write("UPDATE usage_segment SET source = 'unclosed' WHERE id = ?", (segment_id,))
+
+
+def segments_of_session(session_id: int) -> list[Row]:
+    """一个会话的全部段，按开阀先后。"""
+    return (
+        get_conn()
+        .execute("SELECT * FROM usage_segment WHERE session_id = ? ORDER BY opened_at, id", (session_id,))
+        .fetchall()
+    )
 
 
 def latest_usage_by_door() -> dict[tuple[str, int], Row]:
-    """全部设备每个喷头最后一次真正使用的会话，键是 `(device_id, door_no)`。
+    """全部设备每个喷头**最后一次真正使用**的那一段，键是 `(device_id, door_no)`。
 
-    判据是 `opened_at IS NOT NULL`——"分配后直接结算"那种从没出过水的会话因此
-    自动排除；而"开了阀立刻关"（`flow_s` 为 0）会被保留，因为确实出过水。
+    判据从"会话有没有开阀"换成"有没有段"：段表里每一行就是一次出水，"分配后直接结算"
+    那种从没出过水的会话一行都不会有；而"开了阀立刻关"（`flow_s` 为 0）会被保留，
+    因为确实出过水。
 
-    按 `opened_at` 排序而非 `assigned_at`：排在前面的是"真正开始洗"更晚的那次。
-    同一个喷头若两条记录 `opened_at` 相同，取 id 更大的那条，避免结果不定。
+    段表不存 `cert_no`（一次出水里不可能换人），所以取"谁用的"要联会话表——这一句的
+    文件头注释解释了那个冗余是刻意的、为什么只冗余了门号与设备号。
 
-    一次查全部而不是按设备查：行数按年计也就几万，有 `(device_id, door_no,
-    opened_at)` 索引在，全查比让调用方循环更省。
+    一次查全部而不是按设备查：行数按年计也就几万，有 `(device_id, door_no, opened_at)`
+    索引在，全查比让调用方循环更省。
     """
     rows = (
         get_conn()
         .execute(
-            "SELECT device_id, door_no, opened_at, cert_no, flow_s FROM usage_session u"
-            " WHERE opened_at IS NOT NULL"
-            "   AND u.id = (SELECT id FROM usage_session"
-            "               WHERE device_id = u.device_id AND door_no = u.door_no"
-            "                 AND opened_at IS NOT NULL"
+            "SELECT g.device_id, g.door_no, g.opened_at, g.flow_s, s.cert_no"
+            " FROM usage_segment g JOIN usage_session s ON s.id = g.session_id"
+            " WHERE g.id = (SELECT id FROM usage_segment"
+            "               WHERE device_id = g.device_id AND door_no = g.door_no"
             "               ORDER BY opened_at DESC, id DESC LIMIT 1)"
         )
         .fetchall()
@@ -357,17 +494,17 @@ def latest_usage_by_door() -> dict[tuple[str, int], Row]:
 
 _DOOR_LIST_SQL = """
     SELECT d.device_id, d.door_no, d.state, d.card_no, d.cert_no, d.acc_no,
-           d.open_time, d.in_time, d.close_time, d.bath_time_s, d.status_raw, d.reported_at,
-           dev.name AS device_name
-    FROM door_live d LEFT JOIN device dev ON dev.device_id = d.device_id
+           d.open_time, d.in_time, d.close_time, d.bath_time_s, d.status_raw, d.reported_at
+    FROM door_live d
 """
 
 
 def list_doors(device_id: str | None = None) -> list[DoorView]:
-    """喷头现态列表，联所属设备与上次使用；不指定设备时返回所有设备。
+    """喷头现态列表，带上次使用；不指定设备时返回所有设备。
 
     任何返回喷头数据的接口都走这一个查询：权限管的是能不能调接口，不是返回
-    什么内容（见 `schemas` 的模块注释）。
+    什么内容（见 `schemas` 的模块注释）。不联 device 表：设备域的事实
+    （名称、在线）由设备资源回答，门行不携带（见 `schemas` 的 DoorView）。
     """
     if device_id:
         rows = get_conn().execute(_DOOR_LIST_SQL + " WHERE d.device_id = ? ORDER BY d.door_no", (device_id,)).fetchall()
@@ -379,11 +516,7 @@ def list_doors(device_id: str | None = None) -> list[DoorView]:
 
 
 def _as_door_view(row: Row, last_usage: Row | None) -> DoorView:
-    """把行转成 DoorView 形状。
-
-    SQLite 用 0/1 存布尔，直接透出会让字段的实际类型与声明不符。LEFT JOIN 无匹配时
-    为 NULL，保持 NULL 而不是折成 False——"设备记录不存在"与"设备离线"不是一回事。
-    """
+    """把行转成 DoorView 形状。"""
     view: DoorView = {
         "device_id": row["device_id"],
         "door_no": row["door_no"],
@@ -397,8 +530,6 @@ def _as_door_view(row: Row, last_usage: Row | None) -> DoorView:
         "bath_time_s": row["bath_time_s"],
         "status_raw": row["status_raw"],
         "reported_at": row["reported_at"],
-        "device_online": False,  # 占位：由 service 用内存连接表覆盖（唯一来源，见 devices/service）
-        "device_name": row["device_name"],
         "last_used_at": "" if last_usage is None else str(last_usage["opened_at"]),
         "last_used_s": 0 if last_usage is None else int(last_usage["flow_s"]),
         "last_used_cert": "" if last_usage is None else str(last_usage["cert_no"]),

@@ -26,12 +26,40 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response, StreamingResponse
+from typing_extensions import TypedDict
 
 from . import db
 from .clock import now_rfc3339
 from .config import settings
 from .logging import log_event, request_id_var, trace_id_var
-from .protocol import JsonObject
+
+
+class ApiCallRecord(TypedDict):
+    """一行调用审计（`GET /audit/calls` 的行）。
+
+    列即 api_call 表的列；可空字段对应"本行没有该事实"（如网关生命周期行没有
+    method/path 语义、匿名调用没有 actor）。`request_body`/`response_body` 是
+    JSON 体原文，数据重型响应为占位说明（见 store_body）。
+    """
+
+    kind: str
+    requested_at: str
+    request_id: str
+    trace_id: str
+    actor_kind: str
+    actor: str
+    client_ip: str | None
+    user_agent: str | None
+    method: str
+    path: str
+    query: str | None
+    request_body: str | None
+    status_code: int
+    duration_ms: int
+    device_id: str | None
+    problem_type: str | None
+    detail: str | None
+    response_body: str | None
 
 
 def exc_info_text() -> str:
@@ -208,7 +236,7 @@ def list_calls(
     actor_kind: str | None = None,
     kind: str | None = None,
     limit: int = 100,
-) -> list[JsonObject]:
+) -> list[ApiCallRecord]:
     """按时间倒序取审计记录（/ops/audit）。"""
     sql = (
         "SELECT kind, requested_at, request_id, trace_id, actor_kind, actor, client_ip,"

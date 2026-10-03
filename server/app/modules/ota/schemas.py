@@ -58,7 +58,11 @@ class ReleaseRearmed(TypedDict):
 
 
 class ReleaseRemoved(TypedDict):
-    """下架结果（紧急止损，如终止 OTA 循环）。"""
+    """下架结果（紧急止损，如终止 OTA 循环）。
+
+    与身份撤销的 204 不同——下架要回报注册行与 APK 文件是否真的删了，
+    `deleted` 是那次调用实际发生的事实。
+    """
 
     version: str
     deleted: bool

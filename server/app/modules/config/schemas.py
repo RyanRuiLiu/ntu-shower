@@ -35,6 +35,32 @@ class ConfigSpecView(TypedDict):
     """界面分组（配置页按它分卡片），取值见 spec.GROUPS。"""
 
 
+class ConfigSectionOption(TypedDict):
+    """配置页的一个大区（基础能力 / 运行基础）。"""
+
+    key: str
+    title: str
+
+
+class ConfigGroupOption(TypedDict):
+    """配置页的一个分组卡片；`section` 是它归属的大区键。"""
+
+    key: str
+    title: str
+    section: str
+
+
+class ConfigSpecCatalog(TypedDict):
+    """`GET /config/spec` 的读模型：分区、分组与登记表明细，配置页一次装载。
+
+    客户端据此渲染整页控件，不在前端另抄一份键表。
+    """
+
+    sections: list[ConfigSectionOption]
+    groups: list[ConfigGroupOption]
+    specs: list[ConfigSpecView]
+
+
 class ConfigPushNotice(TypedDict, total=False):
     """一次配置推送在单个设备上的结果。
 

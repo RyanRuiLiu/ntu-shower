@@ -9,6 +9,10 @@
 |---|---|---|
 | `nginx/ntu-shower.conf` | `/etc/nginx/sites-available/ntu-shower.conf`（软链到 sites-enabled） | `nginx -t && systemctl reload nginx` |
 | `systemd/ntu-shower.service` | `/etc/systemd/system/ntu-shower.service` | `systemctl daemon-reload && systemctl restart ntu-shower` |
+| `backup/ntu-shower-backup.sh` | `/opt/ntu-shower-backup/ntu-shower-backup.sh` | 由单元调用 |
+| `backup/ntu-shower-backup.{service,timer}` | `/etc/systemd/system/` | `systemctl daemon-reload && systemctl enable --now ntu-shower-backup.timer` |
+
+**发布流程、备份、表结构变更的顺序见 `docs/RUNBOOK.md`**——这里只放配置资产本身。
 
 ## 同步命令
 
@@ -18,6 +22,10 @@ ssh deploy@<deploy-host> "nginx -t && systemctl reload nginx"
 
 scp deploy/systemd/ntu-shower.service deploy@<deploy-host>:/etc/systemd/system/ntu-shower.service
 ssh deploy@<deploy-host> "systemctl daemon-reload && systemctl restart ntu-shower"
+
+scp deploy/backup/ntu-shower-backup.sh deploy@<deploy-host>:/opt/ntu-shower-backup/ntu-shower-backup.sh
+scp deploy/backup/ntu-shower-backup.service deploy/backup/ntu-shower-backup.timer deploy@<deploy-host>:/etc/systemd/system/
+ssh deploy@<deploy-host> "chmod +x /opt/ntu-shower-backup/ntu-shower-backup.sh && systemctl daemon-reload && systemctl enable --now ntu-shower-backup.timer"
 ```
 
 ## 要点（改配置前先读）

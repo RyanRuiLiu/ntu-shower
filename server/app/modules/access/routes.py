@@ -24,13 +24,13 @@ from . import service
 from .capabilities import ALL_CAPABILITIES, Capability, cap_label
 from .dependencies import require_admin
 from .identity import IdentityKind
-from .schemas import IdentityRecord, IdentityRequest
+from .schemas import IdentityCatalog, IdentityRecord, IdentityRequest
 
 admin_router = APIRouter(prefix="/api/v1/identities", dependencies=[Depends(require_admin)], tags=["identities"])
 
 
 @admin_router.get("")
-def list_identities() -> dict[str, object]:
+def list_identities() -> IdentityCatalog:
     """身份域读模型：能力位枚举 + 名单，身份页一次装载。"""
     return {
         "capabilities": [{"key": cap.value, "label": cap_label(cap)} for cap in Capability],
@@ -70,7 +70,12 @@ def update_identity(identity: str, req: IdentityRequest) -> IdentityRecord:
 
 @admin_router.delete("/{identity}", status_code=204)
 def delete_identity(identity: str) -> Response:
-    """撤销授权；该标识立即失去所有能力。"""
+    """撤销授权；该标识立即失去所有能力。
+
+    成功即 204、无响应体：撤销没有可供回报的领域状态。与发布下架（DELETE
+    /ota/releases/{version}，返回 ReleaseRemoved）不同——那边要回报注册行与
+    APK 文件是否真的删了。
+    """
     service.revoke_identity(identity)
     return Response(status_code=204)
 

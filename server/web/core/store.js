@@ -99,10 +99,15 @@ export function selectDevice(deviceId) {
   emit('device', deviceId)
 }
 
-/** 收到全量喷头数据。在线状态由数据中的 device_online 推断（WS 只推变化）。 */
+/**
+ * 收到全量喷头数据。行只含门域事实；在线标志取自设备清单（`currentDevice`），
+ * 由 `refreshDevices`（加载/重连先于 doors 拉取）与 `upsertDevice`
+ * （device.update）维护——同一事实只有一个来源。
+ */
 export function setDoors(doors) {
   store.doors = doors
-  if (doors.length > 0) setOnline(Boolean(doors[0].device_online))
+  const device = currentDevice()
+  if (device) setOnline(Boolean(device.online))
   emit('doors', doors)
 }
 
