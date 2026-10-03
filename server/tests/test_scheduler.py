@@ -12,6 +12,7 @@ from dataclasses import replace
 import pytest
 
 from app.core import outcomes
+from app.core.clock import now_rfc3339, shift_rfc3339
 from app.core.db import get_conn
 from app.core.protocol import JsonObject
 from app.modules.doors import service as doors_service
@@ -40,7 +41,7 @@ WAITING = Candidate(
     cert_no="2530110052",
     state=DoorState.WAITING,
     assigned_at="2026-10-05T11:00:00.000Z",  # 早已过点：必然排上
-    close_time="",
+    paused_at="",
     renew_count=0,
 )
 
@@ -118,7 +119,7 @@ def test_each_door_gets_exactly_one_timer(monkeypatch: pytest.MonkeyPatch) -> No
             cert_no="2530110052",
             state=DoorState.PAUSED,
             assigned_at="2026-10-05T11:00:00.000Z",
-            close_time="2026-10-05T11:00:00.000Z",
+            paused_at="2026-10-05T11:00:00.000Z",
             renew_count=0,
         )
         _prepare(monkeypatch, [paused])
@@ -535,3 +536,149 @@ def test_renew_count_starts_over_after_a_real_break(fresh_db: str) -> None:
     )
 
     assert scheduler._snapshots("dev-1")[0].renew_count == 0
+
+
+# ── 接缝：一帧进来，到命令出、再到补上分配 ────────────────────────────────
+
+
+def _ago(seconds: int) -> str:
+    """相对当前时刻往前推。
+
+    "过了多久"是拿**服务端当下时刻**算的，所以写死日期会在机器时钟不同的时候变成
+    "未来"——那时到点还早，等不到命令出去。
+    """
+    past = shift_rfc3339(now_rfc3339(), -seconds)
+    assert past is not None
+    return past
+
+
+async def _let_the_loop_run(ticks: int = 20) -> None:
+    """让循环转几圈，到点回调与 worker 才有机会跑。
+
+    **不能只 `await queue.join()`**：队列空时它立刻返回、一次都不让出控制权，`call_at`
+    排上的回调根本轮不到执行。到点是"过去某一刻"，所以第一圈就该跑起来。
+    """
+    for _ in range(ticks):
+        await asyncio.sleep(0)
+
+
+def test_a_frame_ends_in_a_settle_then_an_assign(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """全链路：帧 → 挂到点 → 到点复查 → 结算 → 门空了的那一帧 → 补分配。
+
+    这是判据与机制之间的接缝：分段测过之后，还要证明它们接起来真的会把命令发出去。
+    取数走真实库（`_snapshots` 的 SQL 也一并验了），只有命令下发换成可控的桩。
+    """
+    calls: list[tuple[str, JsonObject]] = []
+
+    async def fake_send(_device_id: str, action: str, params: JsonObject, **_kw: object) -> object:
+        calls.append((action, params))
+        return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
+
+    monkeypatch.setattr(scheduler.config_store, "effective", lambda _device_id: CONFIG)
+    monkeypatch.setattr(scheduler.sessions_service, "send_command_and_wait", fake_send)
+
+    # 一小时前分配、一直没开阀：预约续期的 270 秒早已过点
+    doors_service.process_snapshot("dev-1", _frame(captured_at=_ago(3600), card_no=1001, open_time=_ago(3600)))
+
+    async def body() -> None:
+        session_id = scheduler._snapshots("dev-1")[0].session_id
+        scheduler.start()
+        scheduler.on_frame("dev-1")  # 网关的挂钩点
+        await _let_the_loop_run()
+
+        # 结算发出去了，并且挂上了"等门空闲再补分配"
+        assert [action for action, _params in calls] == ["session.settle"]
+        assert calls[0][1] == {"cert_no": "2530110052", "password": "000000"}
+        assert ("dev-1", 3) in scheduler._pending_assigns
+        assert (session_id, FEATURE_RENEW_WAIT) in scheduler._attempted
+
+        # 门被释放的那一帧：会话收尾，待分配接上
+        doors_service.process_snapshot("dev-1", _frame(captured_at=_ago(3000)))
+        scheduler.on_frame("dev-1")
+        await _let_the_loop_run()
+
+        assert [action for action, _params in calls] == ["session.settle", "session.assign"]
+        assert calls[1][1] == {"door_no": 3, "cert_no": "2530110052", "password": "000000"}
+        assert scheduler._pending_assigns == {}
+
+    asyncio.run(body())
+
+
+def test_the_same_session_is_settled_only_once(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """单次执行：帧再来几次也不会为同一个会话再下一单。"""
+    calls: list[tuple[str, JsonObject]] = []
+
+    async def fake_send(_device_id: str, action: str, params: JsonObject, **_kw: object) -> object:
+        calls.append((action, params))
+        return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
+
+    monkeypatch.setattr(scheduler.config_store, "effective", lambda _device_id: CONFIG)
+    monkeypatch.setattr(scheduler.sessions_service, "send_command_and_wait", fake_send)
+    doors_service.process_snapshot("dev-1", _frame(captured_at=_ago(3600), card_no=1001, open_time=_ago(3600)))
+
+    async def body() -> None:
+        scheduler.start()
+        for _ in range(3):
+            scheduler.on_frame("dev-1")
+            await _let_the_loop_run()
+
+        assert [action for action, _params in calls] == ["session.settle"]
+
+    asyncio.run(body())
+
+
+def test_auto_settle_only_settles_and_never_reassigns(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """自动结算只做前半步：结完就完了，不补分配。
+
+    两帧：先淋浴、再关阀——**暂停时刻取自那次状态转换**，所以首帧不能直接给"已暂停"
+    （首帧没有"从哪来"，不记事件）。这里会话才走了 5 分钟（会话续期还早），而关阀已经
+    2 分钟（超过 60 秒的阈值）——所以动手的是自动结算。
+    """
+    calls: list[tuple[str, JsonObject]] = []
+
+    async def fake_send(_device_id: str, action: str, params: JsonObject, **_kw: object) -> object:
+        calls.append((action, params))
+        return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
+
+    monkeypatch.setattr(scheduler.config_store, "effective", lambda _device_id: CONFIG)
+    monkeypatch.setattr(scheduler.sessions_service, "send_command_and_wait", fake_send)
+    doors_service.process_snapshot(
+        "dev-1", _frame(captured_at=_ago(300), card_no=1001, open_time=_ago(300), in_time=_ago(240))
+    )
+    doors_service.process_snapshot(
+        "dev-1", _frame(captured_at=_ago(120), card_no=1001, open_time=_ago(300), close_time=_ago(120), bath_time_s=120)
+    )
+
+    async def body() -> None:
+        scheduler.start()
+        scheduler.on_frame("dev-1")
+        await _let_the_loop_run()
+
+        assert [action for action, _params in calls] == ["session.settle"]
+        assert scheduler._pending_assigns == {}
+
+    asyncio.run(body())
+
+
+def test_a_student_outside_the_roster_is_never_touched(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """名单是"允许对谁动手"的唯一出处：不在名单里，一帧下来什么都不发生。"""
+    calls: list[tuple[str, JsonObject]] = []
+
+    async def fake_send(_device_id: str, action: str, params: JsonObject, **_kw: object) -> object:
+        calls.append((action, params))
+        return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
+
+    monkeypatch.setattr(scheduler.config_store, "effective", lambda _device_id: CONFIG)
+    monkeypatch.setattr(scheduler.sessions_service, "send_command_and_wait", fake_send)
+    doors_service.process_snapshot(
+        "dev-1", _frame(captured_at=_ago(3600), card_no=1001, cert_no="2530999999", open_time=_ago(3600))
+    )
+
+    async def body() -> None:
+        scheduler.start()
+        scheduler.on_frame("dev-1")
+
+        assert calls == []
+        assert scheduler._workers["dev-1"].timers == {}
+
+    asyncio.run(body())

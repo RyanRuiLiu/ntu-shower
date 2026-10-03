@@ -49,8 +49,11 @@ class Candidate:
     assigned_at: str
     """分配时刻：会话从什么时候开始。预约续期与会话续期都从它起算——**不是从开阀起算**，
     因为浴室 App 那条上限管的是整场会话。"""
-    close_time: str
-    """当前这一段的关阀时刻；只有已暂停时有值。它就是"暂停从什么时候开始"。"""
+    paused_at: str
+    """最近一次变成「已暂停」的时刻；只有已暂停时有值。自动结算从它起算。
+
+    取自 `door_state_event`，**不是 `door_live.close_time`**——后者要经钟偏差换算，
+    设备还没锚点时是空的，用它会让自动结算静默失效（理由见 repository.paused_since）。"""
     renew_count: int
     """这一串里我们已经续过的几次。第一场是学生自己的分配，不算续。"""
 
@@ -127,9 +130,9 @@ def _started_at(candidate: Candidate, feature: str, config: JsonObject) -> str |
             return None
         return candidate.assigned_at
     # 自动结算：他关了阀且一直没再开，替他结账。从关阀那一刻起算。
-    if candidate.state is not DoorState.PAUSED or not candidate.close_time:
+    if candidate.state is not DoorState.PAUSED or not candidate.paused_at:
         return None
-    return candidate.close_time
+    return candidate.paused_at
 
 
 def recheck(fresh: Candidate | None, expected: Candidate, trigger: Trigger, config: JsonObject) -> str | None:
