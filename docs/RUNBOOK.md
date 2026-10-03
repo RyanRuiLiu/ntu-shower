@@ -199,7 +199,7 @@ curl -X DELETE -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1
 ```
 
 **预防**：`mark_installed_upto` 已在设备 hello 时调用（且早于 `latest_for`），
-并有回归测试 `test_force_release_not_repushed_when_device_already_on_that_version` 锁定。
+并有回归测试 `test_force_release_not_repushed_after_install_confirmation` 锁定。
 
 ### 服务起不来
 
@@ -245,8 +245,9 @@ curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/device
 curl -X POST -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/devices/<id>/bridge/close
 ```
 
-两个上限都可配（`bridge_idle_timeout_s` 默认 300 秒、`bridge_max_lifetime_s` 默认 3600 秒）。
-**空闲超时管不到"一直有流量"的情况**，所以要寿命上限兜着——调试通道不该无限期开着。
+两个上限都可配（`bridge_pair_timeout_s` 默认 30 秒——点开桥后建隧道的最长时间；
+`bridge_max_lifetime_s` 默认 3600 秒）。**隧道本身没有空闲超时**，只靠寿命上限兜着——
+调试通道不该无限期开着。
 
 ## 6. 日常任务
 
