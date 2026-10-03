@@ -51,13 +51,6 @@
 - **OkHttp 套件陷阱（真机 E2E 实测发现）**：OkHttp 默认白名单中 ECDHE-ECDSA 仅含 GCM 系列，而本设备只有 CBC——对 ECDSA 证书握手必然失败（对 RSA 证书反而能通，这是旧系统侥幸可用的原因）。解法：显式 ConnectionSpec 放行 ECDHE-ECDSA/RSA-CBC + GCM，见 `transport/GatewayClient.kt`
 - 服务端单张 ECDSA 通配符证书；旧系统为迁就 4.4 而维护的 RSA 证书在新系统中不存在
 
-## 设计原则（用户定死）
-
-1. 禁止兜底、禁止降级、禁止兼容垫层、禁止硬编码环境值
-2. 能新则新（构建工具链：Gradle 9.8 + AGP 9.4 + 内置 Kotlin）；设备运行时冻结在 4.4
-3. 能简则简：一个域名、一个端口、一张证书、一个服务进程
-4. 换服务器 = 只改 DNS 记录，零现场
-
 ## 服务端平面
 
 **版本化的单一资源树**：对外 HTTP 面统一挂 `/api/v1` 前缀（路径版本化，破坏性
@@ -237,12 +230,7 @@ bathTime             各段累加，每次关阀时 += |inTime − now|
 ## 签名
 
 `config/keystore/ntu-shower.keystore`（RSA 2048，别名/密码 `ntu-shower`，有效期至 2056）。
-自更新要求新旧 APK 签名一致——此文件是全系统唯一长期绑定物件，必须异地备份。
+**为什么必须一步到位用正式证书、以及它丢了会怎样，见 `docs/DECISIONS.md`「OTA 与版本」。**
 
 证书指纹（SHA-256，OTA 时设备端校验用）：`72ac1447302225b16a621be9461c6202c4796f787acc780b376b75c2572b7fb5`
 
-## 构建验证记录
-
-- 2026-09-29：Gradle 9.8.0 + AGP 9.4.1 + 内置 Kotlin + JDK 25 + compileSdk 37 + minSdk/targetSdk 19
-- debug / release 均构建成功；release 由 ntu-shower 证书 V2 签名
-- lint 仅豁免 `ExpiredTargetSdkVersion`（设备冻结 4.4、不进 Google Play，有意决策）
