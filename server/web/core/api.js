@@ -91,8 +91,8 @@ export const api = {
   // ── 设备动作 ──（admin）
   exec: (id, command) => send(devicePath(id, '/exec'), post({ command })),
   capture: (id) => send(devicePath(id, '/capture'), post()),
-  restart: (id) => send(devicePath(id, '/restart'), post()),
-  uninstall: (id) => send(devicePath(id, '/uninstall'), post()),
+  appRestart: (id) => send(devicePath(id, '/app/restart'), post()),
+  reboot: (id) => send(devicePath(id, '/reboot'), post()),
   bathRestart: (id) => send(devicePath(id, '/bath/restart'), post()),
   clockSet: (id, datetime) => send(devicePath(id, '/clock/set'), post({ datetime })),
   dumpTree: (id) => send(devicePath(id, '/dump'), post()),

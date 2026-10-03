@@ -173,7 +173,7 @@ class AgentService : Service() {
                 // 是同步 shell 调用，closeAdbBridge 的关闭回调里还藏着一条——两条都会把
                 // 主线程压住，连带排队心跳与无障碍事件。它们与 device.exec 共用执行器。
                 //
-                // 与 device.restart/uninstall 不再互斥（那两个走 terminatingExecutor）：
+                // 与 app.restart/device.reboot 不再互斥（那两个走 terminatingExecutor）：
                 // 重启会打断正在进行的调试桥字节流，而重启的用途本就是"设备已经不通了"，
                 // 那时打断一条调试桥不是代价。
                 MessageTypes.BRIDGE_OPEN -> maintenanceExecutor.execute {

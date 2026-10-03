@@ -107,8 +107,8 @@ class CommandFactoryTest {
     fun `device maintenance actions are not queued commands`() {
         // 它们即时执行，见 DeviceMaintenance；工厂如实返回 null
         assertNull(create(SupportedActions.DEVICE_EXEC))
-        assertNull(create(SupportedActions.DEVICE_RESTART))
-        assertNull(create(SupportedActions.DEVICE_UNINSTALL))
+        assertNull(create(SupportedActions.DEVICE_REBOOT))
+        assertNull(create(SupportedActions.APP_RESTART))
         assertNull(create(SupportedActions.BRIDGE_OPEN))
         assertNull(create(SupportedActions.BRIDGE_CLOSE))
     }
@@ -123,8 +123,8 @@ class CommandFactoryTest {
         // 反查：设备声明支持但工厂不认识的 action 会让命令永远无法执行
         val queued = SupportedActions.ALL - setOf(
             SupportedActions.DEVICE_EXEC,
-            SupportedActions.DEVICE_RESTART,
-            SupportedActions.DEVICE_UNINSTALL,
+            SupportedActions.DEVICE_REBOOT,
+            SupportedActions.APP_RESTART,
             SupportedActions.BATH_RESTART,
             SupportedActions.CLOCK_SET,
             SupportedActions.BRIDGE_OPEN,
@@ -142,8 +142,8 @@ class CommandFactoryTest {
         // 那说明能力集合（设备对服务端的自我声明）已经和实现脱节了。
         val maintenance = setOf(
             SupportedActions.DEVICE_EXEC,
-            SupportedActions.DEVICE_RESTART,
-            SupportedActions.DEVICE_UNINSTALL,
+            SupportedActions.DEVICE_REBOOT,
+            SupportedActions.APP_RESTART,
             SupportedActions.BATH_RESTART,
             SupportedActions.CLOCK_SET,
         )
@@ -153,7 +153,7 @@ class CommandFactoryTest {
 
         // 终结类走独立执行器：它们的动作就是终止本进程，排在别的维护命令后面等于没有执行。
         // 真机上如此丢过一次恢复机会——一串超时的 device.exec 挡在前面，重启一次都没跑。
-        val terminating = setOf(SupportedActions.DEVICE_RESTART, SupportedActions.DEVICE_UNINSTALL)
+        val terminating = setOf(SupportedActions.APP_RESTART, SupportedActions.DEVICE_REBOOT)
         maintenance.forEach { action ->
             assertEquals("$action 的终结类判定不对", action in terminating, DeviceMaintenance.isTerminating(action))
         }

@@ -274,5 +274,7 @@ curl -X POST -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/d
 | 备份列表 | `ls -lh /opt/ntu-shower-backup/` |
 | 抓设备画面 | `POST /api/v1/devices/<id>/capture`（返回 `data.image_base64`） |
 | 远程执行 shell | `POST /api/v1/devices/<id>/exec`，body `{"command": "..."}` |
-| 重启设备端程序 | `POST /api/v1/devices/<id>/restart` |
-| 卸载设备端程序 | `POST /api/v1/devices/<id>/uninstall` |
+| 修改设备端时间 | `POST /api/v1/devices/<id>/clock/set`，body `{"datetime": "YYYY-MM-DD HH:MM:SS"}`（设备本地墙钟） |
+| 重启本程序 | `POST /api/v1/devices/<id>/app/restart`（不重启整机，也不动浴室 APP） |
+| 重启浴室 App | `POST /api/v1/devices/<id>/bath/restart`（先强停再冷启动，会中断进行中的会话） |
+| 重启整机 | `POST /api/v1/devices/<id>/reboot` |
