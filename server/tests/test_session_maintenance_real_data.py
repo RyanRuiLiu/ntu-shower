@@ -12,6 +12,8 @@ import asyncio
 from datetime import datetime
 
 import pytest
+from fastapi.testclient import TestClient
+from tests import helpers
 
 from app.core import device_clock, outcomes
 from app.core.clock import seconds_between
@@ -19,6 +21,7 @@ from app.core.db import get_conn, write
 from app.modules.doors import service as doors_service
 from app.modules.doors.schemas import DoorState
 from app.modules.sessions import scheduler
+from app.modules.sessions import service as sessions_service
 from app.modules.sessions.decision import (
     FEATURE_AUTO_SETTLE,
     FEATURE_RENEW_SESSION,
@@ -401,8 +404,14 @@ def test_snapshots_walks_real_rows_and_the_live_view(real_rows: None) -> None:
     assert found[0].renew_count == 0
 
 
-def test_a_real_shape_ends_in_a_settle(real_rows: None, monkeypatch: pytest.MonkeyPatch) -> None:
-    """拿真实形状跑全链路：一帧进来，到命令出去。"""
+def test_a_real_shape_ends_in_a_settle(
+    real_rows: None, client: TestClient, admin_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """拿真实形状跑全链路：一帧进来，到命令出去。
+
+    领域层的两个入口在这里**真跑**（前置检查、守卫都在），只把命令下发换成可控的桩。
+    所以设备必须已信任且在线——那是领域层的第一句守卫。
+    """
     calls: list[tuple[str, object]] = []
 
     async def fake_send(_device_id: str, action: str, params: object, **_kw: object) -> object:
@@ -410,7 +419,7 @@ def test_a_real_shape_ends_in_a_settle(real_rows: None, monkeypatch: pytest.Monk
         return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
 
     monkeypatch.setattr(scheduler.config_store, "effective", lambda _device_id: CONFIG)
-    monkeypatch.setattr(scheduler.sessions_service, "send_command_and_wait", fake_send)
+    monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
     doors_service.process_snapshot(
         "dev-1",
         _frame(
@@ -429,4 +438,5 @@ def test_a_real_shape_ends_in_a_settle(real_rows: None, monkeypatch: pytest.Monk
 
         assert [action for action, _params in calls] == ["session.settle"]
 
-    asyncio.run(body())
+    with helpers.trusted_online(client, "dev-1", admin_headers):
+        asyncio.run(body())

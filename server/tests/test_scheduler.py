@@ -10,15 +10,20 @@ from collections.abc import Iterator
 from dataclasses import replace
 
 import pytest
+from fastapi.testclient import TestClient
+from tests import helpers
 
-from app.core import device_clock, outcomes
+from app.core import device_clock, outcomes, problems
 from app.core.clock import now_rfc3339, shift_rfc3339
 from app.core.db import get_conn
+from app.core.problems import ApiProblemError, Problem
 from app.core.protocol import JsonObject
 from app.modules.doors import service as doors_service
 from app.modules.doors.schemas import DoorState
 from app.modules.sessions import scheduler
+from app.modules.sessions import service as sessions_service
 from app.modules.sessions.decision import FEATURE_AUTO_SETTLE, FEATURE_RENEW_WAIT, Candidate
+from app.modules.sessions.schemas import AssignRequest, CommandOutcome, SettleRequest
 
 CONFIG: dict[str, object] = {
     "renew_wait_enabled": True,
@@ -74,7 +79,13 @@ def _prepare(
     active_by_cert: object = None,
     sent: list[tuple[str, str, dict[str, object]]] | None = None,
 ) -> list[tuple[str, str, dict[str, object]]]:
-    """把取数与下发换成可控的桩，返回记录下来的命令。"""
+    """把取数与**领域层的两个入口**换成可控的桩，返回记录下来的命令。
+
+    这一层要验的是编排：定时器、队列、到点复查、单次执行。领域入口自身的真实性（前置
+    检查、命令往返）不归这里管——那由 `test_session_maintenance_real_data.py`（真库 +
+    真前置）与项目原有的 `test_sessions.py` 覆盖。所以这里连入口一起换掉，每条测试只
+    验一层。
+    """
     monkeypatch.setattr(scheduler.config_store, "effective", lambda _device_id: CONFIG)
     monkeypatch.setattr(scheduler, "_snapshots", lambda _device_id: candidates)
     monkeypatch.setattr(
@@ -85,11 +96,22 @@ def _prepare(
     monkeypatch.setattr(scheduler.doors_repository, "get_active_by_cert", lambda _device_id, _cert: active_by_cert)
     calls = sent if sent is not None else []
 
-    async def fake_send(device_id: str, action: str, params: dict[str, object], **_kw: object) -> object:
-        calls.append((device_id, action, params))
-        return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
+    async def fake_settle(device_id: str, req: SettleRequest) -> CommandOutcome:
+        calls.append((device_id, "session.settle", {"cert_no": req.cert_no, "password": req.password}))
+        return CommandOutcome(status=outcomes.OK.value, reason_code="", terminal_message="", data=None)
 
-    monkeypatch.setattr(scheduler.sessions_service, "send_command_and_wait", fake_send)
+    async def fake_assign(device_id: str, req: AssignRequest) -> CommandOutcome:
+        calls.append(
+            (
+                device_id,
+                "session.assign",
+                {"door_no": req.door_no, "cert_no": req.cert_no, "password": req.password},
+            )
+        )
+        return CommandOutcome(status=outcomes.OK.value, reason_code="", terminal_message="", data=None)
+
+    monkeypatch.setattr(scheduler.sessions_routes, "perform_settle", fake_settle)
+    monkeypatch.setattr(scheduler.sessions_routes, "perform_assign", fake_assign)
     return calls
 
 
@@ -165,7 +187,7 @@ def test_attempted_session_is_not_scheduled_again(monkeypatch: pytest.MonkeyPatc
     async def body() -> None:
         scheduler.start()
         _prepare(monkeypatch, [WAITING])
-        scheduler._attempted.add((WAITING.session_id, FEATURE_RENEW_WAIT))
+        scheduler._attempted.add((WAITING.device_id, WAITING.session_id, FEATURE_RENEW_WAIT))
         scheduler.reschedule("dev-1")
 
         assert scheduler._workers["dev-1"].timers == {}
@@ -173,14 +195,20 @@ def test_attempted_session_is_not_scheduled_again(monkeypatch: pytest.MonkeyPatc
     asyncio.run(body())
 
 
-def test_closed_sessions_are_forgotten(monkeypatch: pytest.MonkeyPatch) -> None:
-    """会话结束时清掉它的记录，否则集合一直长。"""
+def test_closed_sessions_are_forgotten_without_touching_other_devices(monkeypatch: pytest.MonkeyPatch) -> None:
+    """会话结束时清掉它的记录，否则集合一直长。
+
+    而会话 id 是全库自增的，所以**只清本设备的**——否则 B 设备的帧会把 A 设备的记录一起
+    清掉，那一场就会被重复动手。
+    """
     monkeypatch.setattr(scheduler.doors_repository, "list_open_sessions_of", lambda _device_id: [])
-    scheduler._attempted.add((7, FEATURE_RENEW_WAIT))
+    scheduler._attempted.add(("dev-1", 7, FEATURE_RENEW_WAIT))
+    scheduler._attempted.add(("dev-2", 8, FEATURE_RENEW_WAIT))
 
     scheduler._forget_closed_sessions("dev-1")
 
-    assert scheduler._attempted == set()
+    assert ("dev-1", 7, FEATURE_RENEW_WAIT) not in scheduler._attempted
+    assert ("dev-2", 8, FEATURE_RENEW_WAIT) in scheduler._attempted
 
 
 # ── 到点 ──
@@ -261,7 +289,7 @@ def test_settle_records_the_attempt_before_sending(monkeypatch: pytest.MonkeyPat
         _prepare(monkeypatch, [WAITING])
         await scheduler._perform_settle(scheduler._SettleJob(candidate=WAITING, feature=FEATURE_RENEW_WAIT))
 
-        assert (WAITING.session_id, FEATURE_RENEW_WAIT) in scheduler._attempted
+        assert (WAITING.device_id, WAITING.session_id, FEATURE_RENEW_WAIT) in scheduler._attempted
 
     asyncio.run(body())
 
@@ -281,15 +309,30 @@ def test_settle_stops_when_the_roster_changed_underneath(monkeypatch: pytest.Mon
     asyncio.run(body())
 
 
-def test_already_gone_is_not_a_failure() -> None:
-    """服务端找不到占用中的喷头，正是"他已经走了/已经结过了"——正常收尾，不告警。"""
-    ok: JsonObject = {"status": outcomes.OK.value}
-    gone: JsonObject = {"status": outcomes.FAILED.value, "reason_code": scheduler.NO_OCCUPIED_DOOR}
-    other: JsonObject = {"status": outcomes.FAILED.value, "reason_code": "something_else"}
+def test_domain_rejections_are_split_into_normal_and_noteworthy() -> None:
+    """领域层拒了要分清两类：门还被占着/他还有会话/他已经走了是正常，"设备离线"之类不是。
 
-    assert scheduler._settled_ok(ok, WAITING, FEATURE_AUTO_SETTLE) is True
-    assert scheduler._settled_ok(gone, WAITING, FEATURE_AUTO_SETTLE) is False
-    assert scheduler._settled_ok(other, WAITING, FEATURE_AUTO_SETTLE) is False
+    分错的两个方向都坏：把正常当失败会刷满告警，把失败当正常就没人知道这次的维护没做成。
+    """
+
+    def problem(code: str) -> ApiProblemError:
+        return ApiProblemError(Problem(code, 409, "x"), "细节")
+
+    wait = problem(problems.DOOR_NOT_FREE.code)
+    duplicate = problem(problems.DUPLICATE_SESSION.code)
+    gone = problem(problems.NO_OCCUPIED_DOOR.code)
+    offline = problem(problems.DEVICE_OFFLINE.code)
+
+    assert (wait.problem.code, duplicate.problem.code) == (
+        problems.DOOR_NOT_FREE.code,
+        problems.DUPLICATE_SESSION.code,
+    )
+    assert gone.problem.code == problems.NO_OCCUPIED_DOOR.code
+    assert offline.problem.code not in scheduler._WAIT_PROBLEMS | scheduler._DONE_PROBLEMS
+    # 前三个走 INFO 分支、最后一个走 WARNING——判据就是那两个集合
+    for expected in (wait, duplicate, gone):
+        assert expected.problem.code in scheduler._WAIT_PROBLEMS | scheduler._DONE_PROBLEMS
+    assert offline.problem.code not in scheduler._WAIT_PROBLEMS | scheduler._DONE_PROBLEMS
 
 
 def test_assign_is_sent_exactly_once(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -356,12 +399,18 @@ def test_pending_assign_waits_while_the_session_is_open(monkeypatch: pytest.Monk
 
 
 def test_pending_assign_fires_once_the_door_is_free(monkeypatch: pytest.MonkeyPatch) -> None:
+    """够条件就把分配排进队列。
+
+    **待办这时还不摘**：摘除只在命令真下发（或明确放弃）时做——万一真下发时前置又变了，
+    留着待办还能等下一帧。
+    """
+
     async def body() -> None:
         _arm(monkeypatch)
         scheduler._flush_pending_assign("dev-1")
 
-        assert ("dev-1", 3) not in scheduler._pending_assigns
         assert scheduler._workers["dev-1"].queue.qsize() == 1
+        assert ("dev-1", 3) in scheduler._pending_assigns
 
     asyncio.run(body())
 
@@ -573,11 +622,16 @@ async def _let_the_loop_run(ticks: int = 20) -> None:
         await asyncio.sleep(0)
 
 
-def test_a_frame_ends_in_a_settle_then_an_assign(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_frame_ends_in_a_settle_then_an_assign(
+    fresh_db: str, client: TestClient, admin_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     """全链路：帧 → 挂到点 → 到点复查 → 结算 → 门空了的那一帧 → 补分配。
 
     这是判据与机制之间的接缝：分段测过之后，还要证明它们接起来真的会把命令发出去。
-    取数走真实库（`_snapshots` 的 SQL 也一并验了），只有命令下发换成可控的桩。
+    取数与前置检查都走真实库（领域层的两个入口也真跑），只有命令下发换成可控的桩。
+
+    设备必须**已信任且在线**：领域层第一句就是那个守卫，缺了它这一场会以"设备没被信任"
+    结束，而断言看到的却是"什么都没发生"——那等于把测试测假了。
     """
     calls: list[tuple[str, JsonObject]] = []
 
@@ -586,7 +640,7 @@ def test_a_frame_ends_in_a_settle_then_an_assign(fresh_db: str, monkeypatch: pyt
         return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
 
     monkeypatch.setattr(scheduler.config_store, "effective", lambda _device_id: CONFIG)
-    monkeypatch.setattr(scheduler.sessions_service, "send_command_and_wait", fake_send)
+    monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
 
     # 一小时前分配、一直没开阀：预约续期的 270 秒早已过点
     doors_service.process_snapshot("dev-1", _frame(captured_at=_ago(3600), card_no=1001, open_time=_ago(3600)))
@@ -601,7 +655,7 @@ def test_a_frame_ends_in_a_settle_then_an_assign(fresh_db: str, monkeypatch: pyt
         assert [action for action, _params in calls] == ["session.settle"]
         assert calls[0][1] == {"cert_no": "99990052", "password": "000000"}
         assert ("dev-1", 3) in scheduler._pending_assigns
-        assert (session_id, FEATURE_RENEW_WAIT) in scheduler._attempted
+        assert ("dev-1", session_id, FEATURE_RENEW_WAIT) in scheduler._attempted
 
         # 门被释放的那一帧：会话收尾，待分配接上
         doors_service.process_snapshot("dev-1", _frame(captured_at=_ago(3000)))
@@ -612,10 +666,13 @@ def test_a_frame_ends_in_a_settle_then_an_assign(fresh_db: str, monkeypatch: pyt
         assert calls[1][1] == {"door_no": 3, "cert_no": "99990052", "password": "000000"}
         assert scheduler._pending_assigns == {}
 
-    asyncio.run(body())
+    with helpers.trusted_online(client, "dev-1", admin_headers):
+        asyncio.run(body())
 
 
-def test_the_same_session_is_settled_only_once(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_same_session_is_settled_only_once(
+    fresh_db: str, client: TestClient, admin_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     """单次执行：帧再来几次也不会为同一个会话再下一单。"""
     calls: list[tuple[str, JsonObject]] = []
 
@@ -624,7 +681,7 @@ def test_the_same_session_is_settled_only_once(fresh_db: str, monkeypatch: pytes
         return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
 
     monkeypatch.setattr(scheduler.config_store, "effective", lambda _device_id: CONFIG)
-    monkeypatch.setattr(scheduler.sessions_service, "send_command_and_wait", fake_send)
+    monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
     doors_service.process_snapshot("dev-1", _frame(captured_at=_ago(3600), card_no=1001, open_time=_ago(3600)))
 
     async def body() -> None:
@@ -635,11 +692,12 @@ def test_the_same_session_is_settled_only_once(fresh_db: str, monkeypatch: pytes
 
         assert [action for action, _params in calls] == ["session.settle"]
 
-    asyncio.run(body())
+    with helpers.trusted_online(client, "dev-1", admin_headers):
+        asyncio.run(body())
 
 
 def test_auto_settle_only_settles_and_never_reassigns(
-    fresh_db: str, anchored: None, monkeypatch: pytest.MonkeyPatch
+    fresh_db: str, anchored: None, client: TestClient, admin_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """自动结算只做前半步：结完就完了，不补分配。
 
@@ -653,7 +711,7 @@ def test_auto_settle_only_settles_and_never_reassigns(
         return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
 
     monkeypatch.setattr(scheduler.config_store, "effective", lambda _device_id: CONFIG)
-    monkeypatch.setattr(scheduler.sessions_service, "send_command_and_wait", fake_send)
+    monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
     doors_service.process_snapshot(
         "dev-1", _frame(captured_at=_ago(120), card_no=1001, open_time=_ago(300), close_time=_ago(120), bath_time_s=120)
     )
@@ -666,11 +724,18 @@ def test_auto_settle_only_settles_and_never_reassigns(
         assert [action for action, _params in calls] == ["session.settle"]
         assert scheduler._pending_assigns == {}
 
-    asyncio.run(body())
+    with helpers.trusted_online(client, "dev-1", admin_headers):
+        asyncio.run(body())
 
 
-def test_a_student_outside_the_roster_is_never_touched(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """名单是"允许对谁动手"的唯一出处：不在名单里，一帧下来什么都不发生。"""
+def test_a_student_outside_the_roster_is_never_touched(
+    fresh_db: str, client: TestClient, admin_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """名单是"允许对谁动手"的唯一出处：不在名单里，一帧下来什么都不发生。
+
+    设备在这里也要**已信任且在线**——否则"什么都没发生"可能只是因为设备没被信任，
+    那这条测试就测了个空。
+    """
     calls: list[tuple[str, JsonObject]] = []
 
     async def fake_send(_device_id: str, action: str, params: JsonObject, **_kw: object) -> object:
@@ -678,7 +743,7 @@ def test_a_student_outside_the_roster_is_never_touched(fresh_db: str, monkeypatc
         return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
 
     monkeypatch.setattr(scheduler.config_store, "effective", lambda _device_id: CONFIG)
-    monkeypatch.setattr(scheduler.sessions_service, "send_command_and_wait", fake_send)
+    monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
     doors_service.process_snapshot(
         "dev-1", _frame(captured_at=_ago(3600), card_no=1001, cert_no="2530999999", open_time=_ago(3600))
     )
@@ -690,4 +755,5 @@ def test_a_student_outside_the_roster_is_never_touched(fresh_db: str, monkeypatc
         assert calls == []
         assert scheduler._workers["dev-1"].timers == {}
 
-    asyncio.run(body())
+    with helpers.trusted_online(client, "dev-1", admin_headers):
+        asyncio.run(body())
