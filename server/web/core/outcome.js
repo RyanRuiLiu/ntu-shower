@@ -12,15 +12,8 @@
  * 唯一的例外是审计页——那是开发者页面，读它的人正需要拿着 code 去日志里搜。
  */
 
+import { OUTCOME_LABELS } from './contract.js'
 import { $ } from './dom.js'
-
-/** 状态 → 中文。取值与设备端的回报一致。 */
-export const OUTCOME_STATUS = {
-  ok: '成功',
-  failed: '失败',
-  rejected: '被拒',
-  timeout: '超时',
-}
 
 /** 状态 → 徽标样式。未知状态按失败显示：看着像成功比看着像失败危险得多。 */
 export const OUTCOME_BADGE = {
@@ -32,7 +25,7 @@ export const OUTCOME_BADGE = {
 
 /** 状态的中文名；没见过的取值原样回显，让人看得见是哪一个。 */
 export function statusLabel(status) {
-  return OUTCOME_STATUS[status] || status || '未完成'
+  return OUTCOME_LABELS[status] || status || '未完成'
 }
 
 /** 状态的徽标样式。 */
@@ -40,7 +33,7 @@ export function statusBadgeClass(status) {
   return OUTCOME_BADGE[status] || 'badge-red'
 }
 
-/** 状态 → 显示前缀。与 [OUTCOME_STATUS] 分开：那个是状态名（用在表里），
+/** 状态 → 显示前缀。与 [OUTCOME_LABELS] 分开：那个是状态名（用在表里），
  * 这个是已经发生的事（用在一句话的开头）。"被拒"当句子前缀不通顺。 */
 const OUTCOME_PREFIX = {
   ok: '已完成',
