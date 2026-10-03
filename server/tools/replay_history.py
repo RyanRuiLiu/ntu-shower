@@ -13,13 +13,20 @@
 （列名 snake_case、时刻 RFC 3339、无值不出现键），而这里是设备与旧系统的原话。将来若
 需换一种解析方式重来，或核对某条结论，原始库比转换后的帧可靠。
 
+文件名一律是 `<来源>-<用途>-<覆盖截止日>`，日期取该份数据覆盖到的那一天，看名字就知道
+是什么时候的、干什么用的。
+
 | 文件 | 内容 | 覆盖期间 |
 |---|---|---|
-| `shower.db` | 旧系统的库。其中 `door_snapshots` 是本工具的唯一输入 | 至 2026-07-08 |
-| `bath-backup-20260708.db` | 设备端浴室库 | 2020-12-28 → 2026-07-08 |
-| `bath-backup-20260708.db.gz` | 同一份的压缩版（设备侧压缩后传输的形态） | 同上 |
-| `bath-live-20261002.db` | 设备端活跃库的快照，每日变化 | 2026-07-08 → 10-02 |
+| `remote-shower-20260930.db` | 旧系统（`ntu-remote-shower`）的库；`door_snapshots` 是本工具唯一输入 | 至 2026-09-30 |
+| `bath-app-backup-20260708.db` | 设备端浴室库 | 2020-12-28 → 2026-07-08 |
+| `bath-app-backup-20260708.db.gz` | 同一份的压缩版（设备侧压缩后传输的形态） | 同上 |
+| `bath-app-live-20261002.db` | 设备端活跃库的快照，每日变化 | 2026-07-08 → 10-02 |
 | `ntu-shower-prod-20261002.db.gz` | 本项目上一版的生产备份，无原始层，仅含其算出的会话与事件 | 2026-09-30 → 10-02 |
+| `ntu-shower-prod-20261004.db.gz` | 本项目当前版的生产备份，结构同上 | 至 2026-10-03 |
+| `ntu-shower-replayed-20260930.db` | `remote-shower-*` 经本工具重放后的产物，便于离线核对 | 2026-06-22 → 2026-09-30 |
+| `ntu-shower-replayed-20260930.db.gz` | 同一份的压缩版 | 同上 |
+| `device-sdcard-20261002.tar.gz` | 设备 SD 卡的现场数据（旧应用的库、日志与配置），不是本项目数据库 | 现场快照 |
 
 设备端那两份里有两张表可作**抽样验算**（不是对账基准）：
 
@@ -31,7 +38,7 @@
 
 ## 输入从哪来
 
-`shower.db` 只有一张有内容的表：
+`remote-shower-20260930.db` 只有一张有内容的表：
 
 - `door_snapshots.received_at` —— 服务端收到那一刻，**epoch 秒整数**（换算见 [_load_frames]）；
 - `door_snapshots.doors_json` —— 设备那一行的原文（`camelCase`）。
@@ -69,7 +76,7 @@
 用法：
 
     cd server
-    python -m tools.replay_history --source ../archive/shower.db --target data/replayed.db
+    python -m tools.replay_history --source ../archive/remote-shower-20260930.db --target data/replayed.db
 """
 
 from __future__ import annotations
