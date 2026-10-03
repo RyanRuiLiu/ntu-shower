@@ -195,9 +195,11 @@
 
 ## OTA 与版本
 
-- **版本号单一来源是 `server/app/core/version.py` 的 `APP_VERSION`**，与 `server/pyproject.toml`
-  的 `version`、`android/app/build.gradle.kts` 的 `versionName` 三处必须一致，由
-  `tests/test_version_consistency.py` 强制校验。OTA 覆盖安装要求版本可比，人工同步必然出错。
+- **版本号在三处，由测试强制一致**：`server/app/core/version.py` 的 `APP_VERSION`、
+  `server/pyproject.toml` 的 `version`、`android/app/build.gradle.kts` 的 `versionName`，
+  由 `tests/test_version_consistency.py` 校验。**这三处合并不了**——前两个是 Python 侧（一个
+  供运行时、一个是包元数据），第三个在 Kotlin 构建脚本里，跨语言没有共享一处的办法，测试是
+  唯一手段。OTA 覆盖安装要求新旧版本可比，人工同步必然出错。
 - **APK 用正式 RSA 2048 证书一步到位签名**（别名与密码 `ntu-shower`，有效期至 2056），
   不用调试签名过渡。自更新要求新旧 APK 签名一致，调试签名一旦上机就切不回来。
   `config/keystore/` 是全系统唯一长期绑定物件，丢失意味着所有在网设备都要物理接触重装，
