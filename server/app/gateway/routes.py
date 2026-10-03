@@ -23,6 +23,7 @@ from ..modules.devices import service as devices_service
 from ..modules.devices.schemas import LINK_OFFLINE, LINK_ONLINE
 from ..modules.doors import service as doors_service
 from ..modules.ota import repository as ota_repository
+from ..modules.sessions import scheduler as sessions_scheduler
 from ..modules.sessions import service as sessions_service
 
 router = APIRouter()
@@ -217,6 +218,9 @@ async def _handle_frame(
                 device_id=device_id,
                 error=str(exc),
             )
+        # 帧是会话维护的心跳：门刚被占用、刚被释放，都只能从帧看出来。调度器据此重算这台
+        # 设备每个喷头的"下一个到点"，并把待补的那次分配接上——**不轮询**。
+        sessions_scheduler.on_frame(device_id)
         await ws.send_text(
             protocol.envelope(
                 "door.snapshot_ack",
