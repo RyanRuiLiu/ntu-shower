@@ -51,14 +51,12 @@
 
 ## 门禁
 
-```bash
-cd server
-ruff format . && ruff check . --fix && mypy app --strict
-pytest -q --cov=app --cov-report=term-missing
+**命令只有一处：`README.md` 的「质量门」小节，它与 `.github/workflows/ci.yml` 逐条对应。**
+本文档不复述。复述的代价这里已经付过一次——本文档、`RUNBOOK.md`、`DECISIONS.md` 曾各写
+一套**互不相同**的命令：一处 `ruff format .`（会改写文件）而 CI 用 `--check`，一处把范围
+写成 `.` 而非 `app tests`、`pytest` 还漏了 `--cov-report`，而没有任何机制能发现它们不一致。
 
-cd ../android
-./gradlew detekt :app:lintDebug :app:testDebugUnitTest :app:jacocoUnitTestCoverageVerification
-```
+改门禁就是改那两处；其余地方只写"见 README「质量门」"。
 
 覆盖率与测试数由 CI 实时产出，**不写进任何文档**——写死的数字必然过期。
 
