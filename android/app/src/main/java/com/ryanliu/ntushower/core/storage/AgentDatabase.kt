@@ -8,7 +8,7 @@ import com.ryanliu.ntushower.core.config.AppConfig
  * 应用私有库的唯一入口。
  *
  * 装的是本应用自己的持久状态，两张表：
- * - `door_outbox`——待确认的喷头快照；
+ * - `door_outbox`——待确认的喷头帧；
  * - `config_effective`——服务端最后下发的配置，供下次启动直接使用。
  *
  * 位置与命名见 [com.ryanliu.ntushower.core.config.AppConfig] 的库常量。
@@ -36,7 +36,7 @@ object AgentDatabase {
         context.openOrCreateDatabase(AppConfig.AGENT_DB_FILE, Context.MODE_PRIVATE, null).also { db ->
             // 列命名与服务端一致：主键叫 `id` 不叫 `seq`，时间字段带 `_at` 后缀。
             //
-            // `created_at` 不是可有可无的：排查"快照积压了多久"只能靠它，而积压时长决定了
+            // `created_at` 不是可有可无的：排查"帧积压了多久"只能靠它，而积压时长决定了
             // 是网络问题还是服务端没回 ack。
             db.execSQL(
                 "CREATE TABLE IF NOT EXISTS ${AppConfig.OUTBOX_TABLE} (" +

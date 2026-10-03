@@ -179,7 +179,7 @@ function renderDeviceInfo() {
       ]
     : [['设备', '未选择']]
 
-  // 「已运行」与「设备时间」要每秒重算，标出来给 tickDeviceInfo 更新；其余几行是快照
+  // 「已运行」与「设备时间」要每秒重算，标出来给 tickDeviceInfo 更新；其余几行是渲染那一刻的定值
   const html = rows
     .map(([key, value]) => {
       const live = key === '已运行' && diag ? ' data-uptime' : ''
@@ -365,7 +365,7 @@ function connect() {
     clearTimeout(reconnectTimer)
     setStreaming(true)
     // 断线期间错过的通知无法补发（通知不含状态）：按"通知+重拉"模型的标准
-    // 行为，重连成功的第一个动作是重拉权威快照；首次连接由 main() 负责，不重复
+    // 行为，重连成功的第一个动作是重拉权威数据；首次连接由 main() 负责，不重复
     if (everConnected) {
       refreshDevicesSafely()
       refreshDoors()

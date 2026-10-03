@@ -2,7 +2,7 @@
 
 库里只存与默认值不同的差异项，effective 每次现算"默认 ← 全局覆盖 ← 设备覆盖"：
 改默认值即刻对所有设备生效，调用方提交整个表单也不会把未改动的键固化成覆盖。
-存完整快照的做法会固化当时的默认值，新增键永远下不下去。
+存完整配置的做法会固化当时的默认值，新增键永远下不下去。
 
 入参按 spec.CONFIG_SPECS 校验类型与范围；越界值会让设备进入异常状态（如心跳
 间隔为 0 会导致心跳风暴），在此拒绝而非下发。
@@ -43,7 +43,7 @@ def init_tables() -> None:
         );
         """
     )
-    # config 存的是与默认值的差异，空对象即全部沿用默认，无需预置快照
+    # config 存的是与默认值的差异，空对象即全部沿用默认，无需预置
     row = get_conn().execute("SELECT revision FROM global_config WHERE id = 1").fetchone()
     if row is None:
         write("INSERT INTO global_config (id, revision, config) VALUES (1, 1, '{}')")

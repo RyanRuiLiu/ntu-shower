@@ -53,8 +53,8 @@ object AutomationFlow {
         // 开关关闭时 trace 为 null，各标记点退化成空操作——两条路径跑的是同一套代码
         val trace = AutomationTrace.begin(action.traceLabel)
         // 让状态尽快重算一次，但**不等它**。重算跑在自己的线程上，真机上量过，等一次要 165ms，
-        // 而它换来的只是"起点处的快照更新一点"。真正决定要不要走导航的是 bathAppInForeground
-        // （由窗口状态事件维护，本身即时）；快照旧顶多让导航多走一圈，结果不变。
+        // 而它换来的只是"起点处的帧更新一点"。真正决定要不要走导航的是 bathAppInForeground
+        // （由窗口状态事件维护，本身即时）；帧旧顶多让导航多走一圈，结果不变。
         BathAppPage.refresh()
         trace?.mark("refresh-page")
         // 1 回首页
