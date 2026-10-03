@@ -33,7 +33,7 @@
 /* 数字与占比条共用卡片上的 `--tone`，一处声明两处生效 */
 .kpi-num {
   color: var(--tone, var(--text));
-  font: 700 26px var(--font-mono);
+  font: 700 var(--fs-kpi) var(--font-mono);
   line-height: 1;
 }
 
