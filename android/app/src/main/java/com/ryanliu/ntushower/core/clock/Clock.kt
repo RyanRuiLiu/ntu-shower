@@ -14,6 +14,10 @@ import java.util.TimeZone
  * 与本机墙钟比一次偏差；[ServerClock] 拿它立锚点。**墙钟本身仍不得用于"判断某个时刻
  * 过了没有"**——那类判定依赖两台机器的时钟一致，而这台设备没有 NTP；命令的有效期因此
  * 仍是相对时长（见 `protocol/schema/session.command.json` 的 `timeout_ms`）。
+ *
+ * **命名带 `wallClock` 是刻意的**：这里和 [ServerClock] 都能给"现在"，但一个是设备那口
+ * 会被拨的钟、一个是锚在服务端轴上的权威时刻，差一个 3590 秒的偏差。名字里不写出轴，
+ * 调用方只看函数名分不出拿的是哪条——而分错是静默的。
  */
 object Clock {
 
@@ -25,7 +29,8 @@ object Clock {
             }
     }
 
-    fun nowRfc3339(): String = formatRfc3339(Date())
+    /** 设备墙钟此刻（**不是服务端轴**；要权威时刻用 [ServerClock.nowRfc3339]）。 */
+    fun wallClockRfc3339(): String = formatRfc3339(Date())
 
     /**
      * 把给定的时刻格式化为协议时间。格式串因此只在本文件出现一份：浴室 App 的本地
