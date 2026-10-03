@@ -17,6 +17,7 @@
           "required": [
             "snapshot_id",
             "source",
+            "device_clock",
             "doors"
           ],
           "properties": {
@@ -32,6 +33,10 @@
             },
             "captured_at": {
               "description": "采集时刻，由设备锚在服务端时间上（core/clock/ServerClock）。它是本帧的权威时刻：会话起点、终点与出水时长都以它为准。设备尚无锚点（刚起来还没握上手）时缺省，此时服务端退回用自身接收时刻。",
+              "$ref": "#/$defs/null_or_time"
+            },
+            "device_clock": {
+              "description": "采集那一刻**设备墙钟**的读数，与 captured_at 取自同一瞬间。两个数各司其职：captured_at 给权威时刻，它给偏差——服务端拿两者相减得到设备钟偏差，再用那个偏差把 open_time / in_time / close_time 平移到服务端时间轴。它就是那口不可信的钟（漂移、被拨、被校时），而偏差正是从它的读数里量出来的。",
               "$ref": "#/$defs/null_or_time"
             },
             "seq": {

@@ -63,6 +63,8 @@ SAMPLES: dict[str, dict[str, Any]] = {
         "payload": {
             "snapshot_id": "11111111-1111-4111-8111-111111111111",
             "source": "db_watch",
+            "captured_at": "2026-09-30T12:00:00.000Z",
+            "device_clock": "2026-09-30T12:00:00.000Z",
             "doors": [{"door_no": 1, "card_no": 0, "bath_time_s": 0, "status_raw": 0}],
         }
     },

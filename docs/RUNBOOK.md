@@ -57,6 +57,11 @@ tar czf server_deploy.tar.gz -C server \
     --exclude=.ruff_cache --exclude=.coverage --exclude='*.pyc' .
 scp server_deploy.tar.gz iseekdream.com:/tmp/
 
+# ②b 协议 schema 单独同步：它在 server/ 之外（服务器上是 /opt/ntu-shower/protocol），
+#     而服务端与设备端都以它为唯一事实源。漏同步会让两端对字段的理解分叉——服务端
+#     按新 schema 收、设备按旧 schema 发，而两边都不会报错。
+scp protocol/schema/*.json iseekdream.com:/opt/ntu-shower/protocol/schema/
+
 # ③ 服务器：备份现状（回滚点）
 #
 # 含 `.env`：它是 systemd 的 EnvironmentFile，装着数据库路径等生产配置，而它不在仓库里
@@ -102,6 +107,20 @@ ssh iseekdream.com 'systemctl stop ntu-shower \
 - 改 `requirements.txt` 后需在服务器执行 `.venv/bin/pip install -r requirements.txt`；
   仅改业务代码则不需要。
 - `deploy/` 是配置唯一事实来源，不要在服务器上直接改 nginx/systemd 配置。
+
+### 表结构变过的那一次：把历史数据带进新结构
+
+**只做一次**，且**已在生产备份副本上演练过**（2026-10-04：36168 帧 → 会话 5625 / 段 9676，
+越界检查全 0，**帧数一帧不少**）。做完之后只走上面的常规流程，历史数据不再动。
+
+顺序见 `deploy/README.md` 的「一次性」一节。三条要点：
+
+- **原始层只加列**：`ALTER TABLE door_snapshot ADD COLUMN device_clock TEXT`——老帧就该留空，
+  它们确实没有这一列，那不是"缺数据"；
+- **派生层连表结构一起重建**：`tools.rebuild_derived` 会 `DROP` 那四张表再建、再由原始层
+  重算。只 `ALTER` 原始层**不够**——`CREATE TABLE IF NOT EXISTS` 不会去改一张已存在的表，
+  旧结构会让重算在第一帧就撞上"没有这一列"；
+- **核对**：`tools.audit_timeline --db data/ntu-shower.db`，**帧数必须与合并前一致**。
 
 ## 4. 备份与恢复
 

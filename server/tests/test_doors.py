@@ -121,18 +121,24 @@ def test_snapshot_updates_live_state_and_records_events(fresh_db: str) -> None:
     session = sessions[0]
     assert session["card_no"] == 2001
     assert session["ended_at"] is not None
-    assert session["opened_at"] is not None
     assert session["flow_s"] == 60  # t1 到 t2 那一段：上一帧还在出水，计入
     assert session["assigned_at"] == t0  # 这台设备没回过 pong、无偏差可平移，起点落在本帧
-    assert session["opened_at"] == t1  # 同理，开阀时刻退回首次观测到出水的那一帧
+    # 设备从没报过 bath_time_s，我们却观测到 60 秒出水——两边对不上，完整性为假。
+    # 它表达的正是这件事：我们的段之和与设备的累计值不一致。
+    assert session["segments_complete"] == 0
+
+    segments = conn.execute("SELECT * FROM usage_segment WHERE session_id=?", (session["id"],)).fetchall()
+    assert len(segments) == 1
+    assert segments[0]["opened_at"] == t1  # 无偏差可平移，开阀时刻退回首次观测到出水的那一帧
+    assert segments[0]["flow_s"] == session["flow_s"]  # 会话时长就是段之和
 
 
-def test_snapshot_keeps_device_time_fields_untouched(fresh_db: str) -> None:
-    """设备时间字段逐字透出，不做任何校正。
+def test_live_time_fields_are_on_the_server_axis(fresh_db: str) -> None:
+    """现态的三个时间字段是**服务端轴**上的值，不是设备报的原话。
 
-    那三个字段保留原样才能溯源——它们的**值**在推导时经钟偏差平移到服务端时间轴
-    （见 core/device_clock 与 service 的 _opened_at），但落库的原始帧永远保持设备
-    当时的原话。
+    设备那口钟的读数只保留在原始帧里。同一个字段名在两处放两条轴的值，读的人分不出来
+    ——那正是"网页把入门时刻渲染成 00:55"那次事故的成因。这台设备还没有偏差记录
+    （帧比首次 pong 先到），所以换算不出来，字段是空的：给空值比给设备轴的原值安全。
     """
     device_id = "dev-rawtime-01"
     opened = "2026-09-30T12:00:00.000Z"
@@ -140,7 +146,10 @@ def test_snapshot_keeps_device_time_fields_untouched(fresh_db: str) -> None:
     service.process_snapshot(device_id, _snapshot([_door(1, card_no=1, cert_no="C", in_time=opened)]))
 
     live = repository.get_all_live(device_id)
-    assert live[1]["in_time"] == opened
+    assert live[1]["in_time"] == ""
+    # 原话仍然完整地留在原始层里：现态是解释过的视图，原始帧才是设备说过什么。
+    raw = db.get_conn().execute("SELECT doors FROM door_snapshot WHERE device_id = ?", (device_id,)).fetchone()
+    assert opened in raw["doors"]
 
 
 def test_session_owner_change_closes_old_and_opens_new(fresh_db: str) -> None:
@@ -253,7 +262,7 @@ def test_doors_api_exposes_last_used(fresh_db: str) -> None:
 
 
 def test_doors_api_is_public_empty_and_filtered(client: TestClient, fresh_db: str) -> None:
-    """GET /doors 公开可查，支持按设备过滤；DoorView 带设备在场与名称。"""
+    """GET /doors 公开可查，支持按设备过滤；行只含门域字段（设备事实在设备资源）。"""
     assert client.get("/api/v1/doors").json() == []
 
     device_id = "dev-doors-1"
@@ -265,29 +274,13 @@ def test_doors_api_is_public_empty_and_filtered(client: TestClient, fresh_db: st
     view = doors[0]
     assert view["door_no"] == 2
     assert view["state"] == "free"
-    assert view["device_online"] is False
-    assert view["device_name"] == ""
     assert {"device_id", "door_no", "state", "card_no", "cert_no", "reported_at"} <= set(view)
     assert {"last_used_at", "last_used_s", "last_used_cert"} <= set(view)
+    # 设备域事实不进门行：设备在不在线、叫什么由 /devices 与 device.update 回答
+    assert "device_online" not in view
+    assert "device_name" not in view
 
     assert client.get("/api/v1/doors").json()[0]["device_id"] == device_id  # 不带参数列全部设备
-
-
-def test_doors_api_device_online_follows_connections(
-    client: TestClient,
-    fresh_db: str,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """device_online 来自内存连接表，与档案是否存在无关。"""
-    device_id = "dev-doors-online"
-    service.process_snapshot(device_id, _snapshot([_door(1)]))
-
-    assert client.get("/api/v1/doors").json()[0]["device_online"] is False
-
-    from app.core.connections import manager
-
-    monkeypatch.setattr(manager, "_connections", {device_id: object()})
-    assert client.get("/api/v1/doors").json()[0]["device_online"] is True
 
 
 def test_stream_door_update_carries_full_state_matching_rest(client: TestClient, fresh_db: str) -> None:
@@ -382,14 +375,20 @@ def test_startup_snapshot_keeps_events_out_but_still_runs_the_session(fresh_db: 
     session = repository.get_open_session(device_id, 1)
     assert session is not None, "会话照常开出来"
     assert session["assigned_at"] == "2026-09-30T12:01:00.000Z"  # 起点由 open_time 平移
-    assert session["opened_at"] == "2026-09-30T12:04:00.000Z"  # 开阀时刻由 in_time 平移
+    segment = db.get_conn().execute("SELECT * FROM usage_segment WHERE session_id = ?", (session["id"],)).fetchone()
+    assert segment is not None, "全貌帧同样要开段——它挡住的只是事件流水"
+    assert segment["opened_at"] == "2026-09-30T12:04:00.000Z"  # 开阀时刻由 in_time 平移
 
 
 def test_startup_snapshot_closes_the_session_it_finds_abandoned(fresh_db: str) -> None:
     """全貌帧发现门已经空了，就把开着的那场结掉。
 
     设备离线期间人走了，重连时看到的是收尾后的样子。不结的话那场会话永远挂在"进行中"，
-    每一个"当前占用"的统计都多算一条；等下一个 db_watch 帧才结，结束时刻还会再晚一截。
+    每一个"当前占用"的统计都多算一条。
+
+    **结束时刻落在我们最后看见它的那一帧**，不是重连这一刻：两帧隔了 30 分钟，超过一次
+    占用的物理上限，中间必然发生过一次我们没看见的释放。按重连时刻结尾会晚整整半小时，
+    而且那种偏晚是系统性的——离线越久偏得越多。
     """
     device_id = "dev-startup-2"
     service.process_snapshot(device_id, _snapshot([_door(1, card_no=1, cert_no="A")], "2026-09-30T12:00:00.000Z"))
@@ -401,7 +400,8 @@ def test_startup_snapshot_closes_the_session_it_finds_abandoned(fresh_db: str) -
 
     assert repository.get_open_session(device_id, 1) is None
     row = db.get_conn().execute("SELECT * FROM usage_session WHERE device_id = ?", (device_id,)).fetchone()
-    assert row["ended_at"] == "2026-09-30T12:30:00.000Z"
+    assert row["ended_at"] == "2026-09-30T12:00:00.000Z"
+    assert row["observed_span"] == "gap"  # 中间那半小时我们没看见
 
 
 def test_last_seen_stops_at_the_last_occupied_frame(fresh_db: str) -> None:

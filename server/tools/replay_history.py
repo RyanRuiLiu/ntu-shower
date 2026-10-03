@@ -201,7 +201,9 @@ def replay(source: Path, target: Path) -> dict[str, int]:
             # 帧间隔正是依据该列计算——中间插入一帧重复的，间隔即被压小，`flow_s` 中
             # "上一帧到本帧"那一段随之缩短（实测 100 天里合计少 21891 秒）。
             duplicates += 1
-            repository.insert_snapshot(DEVICE_ID, snapshot_id, None, service.SOURCE_IMPORT, at, at, adapted)
+            # import 帧没有设备钟读数：旧系统那份记录里根本没有这一列。给空串而不补一个值
+            # ——重建时据此按"无偏差"处理，与当年重放时的结论逐字一致。
+            repository.insert_snapshot(DEVICE_ID, snapshot_id, None, service.SOURCE_IMPORT, at, "", at, adapted)
             continue
         last_doors = blob
         service.process_snapshot(

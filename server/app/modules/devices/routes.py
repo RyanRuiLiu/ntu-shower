@@ -36,6 +36,7 @@ from .dependencies import require_trusted_online_device
 from .schemas import (
     DeviceClockSetRequest,
     DeviceExecRequest,
+    DeviceListItem,
     DevicePatchRequest,
     DeviceRecord,
     DeviceUiKeyRequest,
@@ -74,20 +75,22 @@ async def _device_action(device_id: str, action: str, params: JsonObject, timeou
 
 
 @router.get("/devices")
-def list_devices(caller: IdentityRecord | None = Depends(optional_identity)) -> list[dict[str, object]]:
+def list_devices(caller: IdentityRecord | None = Depends(optional_identity)) -> list[DeviceListItem]:
     """精简设备清单：id、名称、在线，以及该调用方对每台可执行的用户动作。
 
     匿名调用 actions 恒为空；判定经 access 的唯一实现，客户端不复制作用域规则。
     """
-    items: list[dict[str, object]] = []
+    items: list[DeviceListItem] = []
     for record in service.list_devices():
-        summary: dict[str, object] = dict(service.to_summary(record))
-        summary["actions"] = (
-            user_actions(caller["capabilities"])
-            if caller is not None and ("*" in caller["device_scope"] or record["device_id"] in caller["device_scope"])
-            else []
+        in_scope = caller is not None and (
+            "*" in caller["device_scope"] or record["device_id"] in caller["device_scope"]
         )
-        items.append(summary)
+        items.append(
+            {
+                **service.to_summary(record),
+                "actions": user_actions(caller["capabilities"]) if in_scope else [],
+            }
+        )
     return items
 
 
