@@ -66,7 +66,7 @@ class DoorSnapshotSender(context: Context) {
         // 时刻取在读库之前：采到的内容是那条 SELECT 建立读视图那一刻的数据库，读完
         // 再取会把读的耗时算进去（真机实测几百毫秒），而这是个恒定偏晚的系统偏差。
         val capturedAt = ServerClock.nowRfc3339()
-        val deviceClock = Clock.nowRfc3339()
+        val deviceClock = Clock.wallClockRfc3339()
         val doors = DoorSnapshotReader.readAll()
         val hash = doors.map { it.fingerprint() }.hashCode()
         if (hash == lastHash) return
@@ -86,7 +86,7 @@ class DoorSnapshotSender(context: Context) {
             ContentValues().apply {
                 put("snapshot_id", snapshotId)
                 put("payload", payload.toString())
-                put("created_at", Clock.nowRfc3339())
+                put("created_at", Clock.wallClockRfc3339())
             },
             SQLiteDatabase.CONFLICT_REPLACE,
         )

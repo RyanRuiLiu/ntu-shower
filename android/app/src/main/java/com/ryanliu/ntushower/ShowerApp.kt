@@ -34,7 +34,7 @@ class ShowerApp : Application() {
             val dir = File(AppConfig.WORK_DIR).apply { mkdirs() }
             CappedLogFile.append(
                 File(dir, CRASH_LOG_NAME),
-                "\n==== ${Clock.nowRfc3339()} ====\n" + Log.getStackTraceString(throwable) + "\n",
+                "\n==== ${Clock.wallClockRfc3339()} ====\n" + Log.getStackTraceString(throwable) + "\n",
                 CappedLogFile.DEFAULT_MAX_BYTES,
             )
             try {

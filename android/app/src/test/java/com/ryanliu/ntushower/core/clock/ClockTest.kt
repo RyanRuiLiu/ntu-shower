@@ -11,7 +11,7 @@ class ClockTest {
 
     @Test
     fun `format is utc rfc3339 with millisecond precision`() {
-        val timestamp = Clock.nowRfc3339()
+        val timestamp = Clock.wallClockRfc3339()
         assertTrue("missing Z suffix: $timestamp", timestamp.endsWith("Z"))
 
         // 可被反向解析且时区语义为 UTC（用独立的解析器验证，不依赖被测类提供解析）
@@ -31,7 +31,7 @@ class ClockTest {
         repeat(threads) {
             Thread {
                 repeat(iterations) {
-                    val ts = Clock.nowRfc3339()
+                    val ts = Clock.wallClockRfc3339()
                     if (ts.length != 24 || !ts.endsWith("Z")) {
                         errors.incrementAndGet()
                     }
@@ -46,7 +46,7 @@ class ClockTest {
     @Test
     fun `parse round-trips the formatted output`() {
         // 解析只有一个消费者（开机校时比对 server_time），输入就是本类的输出
-        val now = Clock.nowRfc3339()
+        val now = Clock.wallClockRfc3339()
         val parsed = Clock.parseRfc3339(now)
 
         assertTrue(parsed != null)

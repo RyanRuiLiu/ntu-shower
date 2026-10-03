@@ -22,7 +22,7 @@ object MessageCodec {
             .put("v", 1)
             .put("type", type)
             .put("id", UUID.randomUUID().toString())
-            .put("ts", Clock.nowRfc3339())
+            .put("ts", Clock.wallClockRfc3339())
             .put("payload", payload)
         if (replyTo != null) {
             env.put("reply_to", replyTo)
