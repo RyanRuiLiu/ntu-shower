@@ -72,10 +72,6 @@
   --tone: var(--purple);
 }
 
-.kpi-card.tone-red {
-  --tone: var(--red);
-}
-
 .kpi-card.tone-gray {
   --tone: var(--dim);
 }
