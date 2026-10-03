@@ -108,3 +108,12 @@ def _openapi_served(client: TestClient) -> None:
     response = client.get("/openapi.json")
     assert response.status_code == 200
     assert response.json()["paths"], "OpenAPI 文档为空"
+
+
+@pytest.mark.usefixtures("_openapi_served")
+def test_openapi_is_served_by_the_app() -> None:
+    """文档能生成（本模块顶部的 `app.openapi()`）不等于它经应用可取。
+
+    少了这一条，静态挂载抢走 `/openapi.json` 这类事故不会被任何用例发现——而它是
+    客户端生成类型的来源。断言在 fixture 里，这里只负责把它挂进测试收集。
+    """
