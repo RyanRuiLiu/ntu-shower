@@ -86,7 +86,7 @@ class DeviceLog(dir: File, private val maxBytes: Long = CappedLogFile.DEFAULT_MA
     }
 
     private fun write(entry: JSONObject) {
-        entry.put("ts", Clock.nowRfc3339())
+        entry.put("ts", Clock.wallClockRfc3339())
         entry.put("uptime_ms", Uptime.nowMs())
         CappedLogFile.append(file, entry.toString() + "\n", maxBytes)
     }

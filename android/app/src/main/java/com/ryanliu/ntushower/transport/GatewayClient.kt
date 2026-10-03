@@ -165,7 +165,7 @@ class GatewayClient(context: Context, private val callback: Callback) {
                     // 绝对值不可信。这里报的是**墙上时钟**（[Clock]），不是锚点：锚点本身
                     // 就是从服务端时刻推出来的，拿它去算偏差等于自己减自己。
                     ServerClock.anchor(env.payload.optString("sender_time"))
-                    val deviceTime = JSONObject().put("device_time", Clock.nowRfc3339())
+                    val deviceTime = JSONObject().put("device_time", Clock.wallClockRfc3339())
                     send(MessageTypes.LINK_PONG, deviceTime, replyTo = env.id)
                 }
 
@@ -227,7 +227,7 @@ class GatewayClient(context: Context, private val callback: Callback) {
     private fun scheduleHeartbeat() {
         val runnable = Runnable {
             if (authenticated) {
-                send(MessageTypes.LINK_PING, JSONObject().put("sender_time", Clock.nowRfc3339()))
+                send(MessageTypes.LINK_PING, JSONObject().put("sender_time", Clock.wallClockRfc3339()))
                 scheduleHeartbeat()
             }
         }
