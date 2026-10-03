@@ -544,11 +544,6 @@ def get_active_by_cert(device_id: str, cert_no: str) -> Row | None:
     )
 
 
-def list_open_sessions() -> list[Row]:
-    """全部设备的活跃会话（自动结算扫描用）。"""
-    return get_conn().execute("SELECT * FROM usage_session WHERE ended_at IS NULL").fetchall()
-
-
 def list_open_sessions_of(device_id: str) -> list[Row]:
     """这台设备上未结束的会话。会话维护的判定入口——按设备取，每帧问一遍。"""
     return (

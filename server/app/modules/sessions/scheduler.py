@@ -24,10 +24,20 @@ settle 同属 automation 通道，所以**单条命令**不会并发。这里再
 一个 worker**，是为了让"结算 → 分配"这个**两步序列**原子化：不串行的话两场续期会交错
 成 settle(A) settle(B) … assign(A) assign(B)，而每一步都要读服务端现态。
 
+## 走领域层，不另写一份判据
+
+结算与分配都经 `sessions.routes` 的 `perform_settle` / `perform_assign`——那是"所有调用
+方共用"的入口，前置检查（可分配状态、重复会话、设备守卫）都在里面。**直接调
+`send_command_and_wait` 会把那些前置整条绕过去**，等于同一个判据有两个出处。
+
+领域层拒了要分两类：门还被占着、他还有会话、他已经走了，都只是"现在还不该做"，留待办等
+下一帧（命令根本没下发，所以不是重试）；设备离线、通道积压那类才是真出问题，要人看见。
+
 ## 单次执行
 
 每个会话每个功能**只动手一次**，失败不重试。这不只是取向问题：失败后重算出的到点还是
-同一刻，不记一笔就会自旋。记在 `_attempted` 里，会话结束时清掉。
+同一刻，不记一笔就会自旋。记在 `_attempted` 里（键含设备——会话 id 是全库自增的），
+会话结束时清掉。
 
 ## 判据只认命令结果
 
@@ -49,7 +59,8 @@ from app.core.problems import ApiProblemError
 from app.core.protocol import as_int
 from app.modules.config import store as config_store
 from app.modules.doors import repository as doors_repository
-from app.modules.doors.schemas import ASSIGNABLE_STATES, DoorState
+from app.modules.doors.schemas import DoorState
+from app.modules.doors.service import NO_WATER_RELEASE_S
 
 from . import routes as sessions_routes
 from .decision import (
@@ -62,14 +73,6 @@ from .decision import (
     still_allowed,
 )
 from .schemas import AssignRequest, CommandOutcome, SettleRequest
-
-#: 浴室 App 的"连续无水就释放"门槛（秒）：未开阀是 `maxinspacetime`、关阀后是
-#: `maxbathspacetime`，两者都是 300。它在这里的作用是**划断"同一串会话"**：喷头空着超过
-#: 这么久，说明那个人的占用真的结束了（浴室端早释放了他、之后没人接手），于是预约续期的
-#: 次数重新从 0 数。
-#: 与 `doors.service.SESSION_MAX_S` 同源——那两个值都由浴室 App 同一个参数家族决定，
-#: 分开写两份数字迟早漂移。
-NO_WATER_RELEASE_S = 300
 
 #: 结算成功之后等"门变空闲"的那一帧，最多等这么久。没有它的话，设备离线几小时再上线，
 #: 第一帧会去执行一条陈旧的待分配——**给一个早已走掉的学生开一场会话**。
@@ -226,6 +229,7 @@ def on_frame(device_id: str) -> None:
         return
     _forget_closed_sessions(device_id)
     reschedule(device_id)
+    _flush_pending_assign(device_id)
 
 
 def reload() -> None:
@@ -237,7 +241,11 @@ def reload() -> None:
 
 
 def reschedule(device_id: str) -> None:
-    """重算该设备的定时器。帧到达、配置保存、一次执行跑完之后都调它。"""
+    """重算该设备的定时器。帧到达、配置保存、一次执行跑完之后都调它。
+
+    **只管定时器**：待补的分配由 [on_frame] 单独推——若放在这里，一次"前置还不满足"的
+    分配会在 worker 收尾时再触发一次刷新、再排一次，转成自触发的死循环。
+    """
     if not _running:
         return
     worker = _worker(device_id)
@@ -254,8 +262,6 @@ def reschedule(device_id: str) -> None:
         if existing is not None:
             existing.cancel()
         worker.timers[door_no] = loop.call_at(at, _fire, device_id, candidate, trigger)
-
-    _flush_pending_assign(device_id)
 
 
 def _forget_closed_sessions(device_id: str) -> None:
@@ -504,10 +510,17 @@ def _report_outcome(result: CommandOutcome, candidate: Candidate, feature: str) 
 
 
 def _flush_pending_assign(device_id: str) -> None:
-    """帧到了：该设备上那些待补的分配，够条件就补上。"""
+    """帧到了：该设备上那些待补的分配，够条件就补上。
+
+    **这里不判"门空没空"**：那是 `perform_assign` 自己的前置（`_require_assignable_door`
+    与 `_reject_duplicate_session`），在别处再写一遍就是同一个判据有两个出处。所以这里
+    只管排进队列，前置满不满足由领域层说了算——它拒了就留着待办等下一帧（见
+    `_perform_assign`），那时**命令根本没下发**，不算重试。
+
+    待办也不在这里摘：摘除只在命令真下发、或明确放弃（下面那条过期分支）时做。
+    """
     if not _running:
         return
-    live = doors_repository.get_all_live(device_id)
     now = _now_s()
 
     for key in [k for k in _pending_assigns if k[0] == device_id]:
@@ -524,20 +537,6 @@ def _flush_pending_assign(device_id: str) -> None:
             )
             continue
 
-        row = live.get(waiting.door_no)
-        if row is None:
-            continue
-        try:
-            state = DoorState(str(row["state"]))
-        except ValueError:
-            continue  # 设备报了个本端不认识的状态：不分配，也不去猜（同 `_require_assignable_door`）
-        if state not in ASSIGNABLE_STATES:
-            continue  # 门还占着（或刚被别人占了）：等下一帧
-        if doors_repository.get_active_by_cert(device_id, waiting.cert_no) is not None:
-            continue  # 他名下还有未结束的会话（`_reject_duplicate_session` 那条）：等下一帧
-
-        # **这里不摘待办**：万一真下发时前置又变了，留着待办等下一帧。摘除只在真下发了
-        # 命令、或明确放弃时做（见 `_perform_assign` 与上面那条过期分支）。
         _enqueue_assign(
             _AssignJob(
                 device_id=device_id,
