@@ -91,9 +91,14 @@ def _drop_derived(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def _stored_skew(conn: sqlite3.Connection) -> float:
-    """库里存着的设备钟偏差。"""
-    row = conn.execute("SELECT clock_skew_s FROM device LIMIT 1").fetchone()
+def _stored_skew(conn: sqlite3.Connection, device_id: str) -> float:
+    """库里存着的**这台设备**的钟偏差。
+
+    必须按设备取：偏差随设备而异（每台设备的钟各拨各的），拿任意一条去给所有设备
+    当现值，会让第二台设备的第一帧用一个错偏差平移——而那一帧正是会话起点与
+    "从痕迹推回开阀时刻"的输入。
+    """
+    row = conn.execute("SELECT clock_skew_s FROM device WHERE device_id = ?", (device_id,)).fetchone()
     return float(row[0]) if row is not None else 0.0
 
 
@@ -130,7 +135,6 @@ def rebuild(db_path: Path) -> dict[str, int]:
     init_schema()
     conn = core_db.get_conn()  # init_schema 可能换过连接，重取一次
     frames = _load_frames(conn)
-    skew = _stored_skew(conn)
 
     turbo_writes(conn)
 
@@ -166,7 +170,8 @@ def rebuild(db_path: Path) -> dict[str, int]:
                 continue
             last_import_doors = doors
         elif in_import:
-            device_clock.load(device_id, skew)
+            # 按设备取，不用循环外算好的那一份——偏差随设备而异。这里每台设备只走一次。
+            device_clock.load(device_id, _stored_skew(conn, device_id))
             in_import = False
 
         # 实时帧自己带着采集那一刻的设备钟读数（与 captured_at 同刻），偏差由它算出来，
