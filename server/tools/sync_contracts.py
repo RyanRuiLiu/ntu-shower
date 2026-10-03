@@ -161,7 +161,12 @@ def _constant_of_key(key: str) -> str:
 
 
 def _kotlin_literal(spec: ConfigSpec, kotlin_type: dict[ConfigKind, str]) -> str:
-    kind_name = kotlin_type[spec.kind]
+    # 查表失败要说清"是哪个键、缺哪种类型"：裸 KeyError 不指向该补什么，而设备域出现
+    # 新 kind（如 TEXT_MAP）时，正是要在这里补映射——下一条断言到不了这一步。
+    kind_name = kotlin_type.get(spec.kind)
+    if kind_name is None:
+        message = f"配置键 {spec.key} 的类型 {spec.kind} 还没有对应的 Kotlin 类型"
+        raise AssertionError(message)
     if spec.kind is BOOL:
         return "true" if spec.default else "false"
     if spec.kind is INT:
