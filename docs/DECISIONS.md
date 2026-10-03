@@ -262,8 +262,8 @@
 
 ## 测试与质量
 
-- **门禁是机器强制，不靠自觉**：服务端 `ruff format` + `ruff check` + `mypy --strict` + `pytest`；
-  设备端 `detekt` + JUnit 单测 + JaCoCo 覆盖率门。本地跑绿即 CI 跑绿，两侧命令完全一致。
+- **门禁是机器强制，不靠自觉**，且本地与 CI 跑同一组命令——命令清单见 `README.md`「质量门」
+  与 `.github/workflows/ci.yml`（两者逐条对应），此处不复述。
 - **两端都设覆盖率门，并配赦免清单**：能抽成纯逻辑覆盖的必须覆盖，只有真正无法在 JVM 上覆盖
   的类才排除。设备端豁免登记在 `android/app/build.gradle.kts` 的 `frameworkBoundClasses`，
   逐条带理由；门槛只升不降，加豁免要解释为什么抽不出纯逻辑。
@@ -275,8 +275,9 @@
 
 - **443 统一入口，nginx 按路径分流**，服务器只暴露 80/443/22。证书一张、防火墙规则最少；
   代价是 nginx 进入关键路径。
-- **域名 `<public-domain>`，单张 ECDSA 通配符证书**。4.4 设备实测支持 ECDHE-ECDSA，
-  旧系统为迁就 4.4 维护的 RSA 证书不再需要；续期依赖 Let's Encrypt。
+- **域名 `<public-domain>`，单张通配符证书**。设备实测支持 ECDHE-ECDSA（见
+  `docs/ARCHITECTURE.md`「已定稿的传输层事实」），所以旧系统为迁就 4.4 而维护的 RSA 证书
+  不再需要；续期依赖 Let's Encrypt。
 - **网页端是零构建静态文件**（`server/web/`），由服务端本身托管在根路径，合并了旧系统的调试
   面板与画面查看器。改完刷新即可，无编译步骤、无框架版本约束、与 API 同源无跨域。
   曾试过 Taro + React 的跨端方案，两个页面的规模撑不起它的接入成本，工程已删除；
