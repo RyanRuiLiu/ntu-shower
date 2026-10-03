@@ -45,7 +45,7 @@ def _frame(doors: list[dict[str, Any]], at: str) -> dict[str, Any]:
 #: 设备就是这么写的，它自己算的累计与两个读数的差必然一致。写成不一致的数（比如两个
 #: 时刻差 50 秒却报 60），验的就不是实现而是那个错数。
 SEQUENCE = [
-    # R2 进门 → R4 开阀 → R4 暂停 → R4 恢复
+    # R2 分配 → R4 开阀 → R4 暂停 → R4 恢复
     (_frame([_door(1)], "2026-09-30T12:00:00.000Z"), None),
     (_frame([_occupied(1, "甲")], "2026-09-30T12:00:10.000Z"), None),
     (_frame([_occupied(1, "甲", in_time="2026-09-30T12:00:20.000Z")], "2026-09-30T12:00:20.000Z"), None),
@@ -98,7 +98,7 @@ def test_invariants_over_a_frame_sequence(fresh_db: str) -> None:
     ).fetchall()
     assert segments, "这一串帧应当产出段"
     for seg in segments:
-        assert seg["assigned_at"] <= seg["opened_at"], f"开阀早于进门：{dict(seg)}"
+        assert seg["assigned_at"] <= seg["opened_at"], f"开阀早于分配：{dict(seg)}"
         if seg["ended_at"] is not None:
             assert seg["opened_at"] <= seg["ended_at"], f"开阀晚于出门：{dict(seg)}"
 
@@ -135,7 +135,7 @@ def test_invariants_over_a_frame_sequence(fresh_db: str) -> None:
     first_frame_occupied = 1  # 门2 在它第一次出现的那一帧就已经被占着
     handovers = 1  # 甲 → 乙
     assert len(sessions) == entered + first_frame_occupied + handovers, (
-        f"会话数对不上：进门 {entered} + 首帧即占用 {first_frame_occupied} + 换人 {handovers}"
+        f"会话数对不上：分配 {entered} + 首帧即占用 {first_frame_occupied} + 换人 {handovers}"
     )
 
 
@@ -153,7 +153,7 @@ def test_cross_gap_does_not_join_two_baths(fresh_db: str) -> None:
     service.process_snapshot(device_id, _frame([_occupied(2, "丙", in_time=t0)], far))
 
     rows = db.get_conn().execute("SELECT * FROM usage_session WHERE device_id = ? ORDER BY id", (device_id,)).fetchall()
-    # 缺口 3600 秒远超一次占用的物理上限，中间必然发生过我们没看见的释放，所以是**两场账**：
+    # 盲区 3600 秒远超一次占用的物理上限，中间必然发生过我们没看见的释放，所以是**两次会话**：
     # 前一场在我们最后看见它的时刻收尾，本帧另起一场。并成一场的话它永远不结束、起点还
     # 落在几小时前，而"跨盲区那一段"本来就没有任何证据。
     assert len(rows) == 2
@@ -199,5 +199,5 @@ def test_flow_s_counts_only_observed_segments(fresh_db: str) -> None:
     )
     by_cert = {row["cert_no"]: row["flow_s"] for row in rows}
     assert by_cert["甲"] == 110, "甲那次：第一段 50 秒（12:00:20→12:01:10）+ 第二段 60 秒（12:02:00→12:03:00）"
-    assert by_cert["乙"] == 30, "乙那一次：从进门到出门"
+    assert by_cert["乙"] == 30, "乙那一次：从分配到释放"
     assert by_cert["丙"] == 0, "丙那次跨了盲区，没有证据"

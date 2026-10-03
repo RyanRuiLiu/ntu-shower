@@ -125,7 +125,7 @@ def create_app() -> FastAPI:
     # 前端资源要求浏览器每次都回来验一遍：no-cache 不是"不缓存"，而是带 ETag
     # 协商，没变 304，变了才重新下载。实时状态 API 则一律 no-store：不带任何缓存
     # 头时客户端（微信 iOS 的 wx.request 尤其激进）会启发式缓存 GET，下拉刷新
-    # 拿到旧快照而 WS 推送才是新的——两份数据源打架，表现就是"刷新了但数据不动"。
+    # 拿到的是旧数据而 WS 推送才是新的——两份数据源打架，表现就是"刷新了但数据不动"。
     @app.middleware("http")
     async def revalidate_web_assets(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         response = await call_next(request)

@@ -4,7 +4,7 @@
 格式化、解析、偏移计算一律经由此处（AGENTS.md）。
 
 RFC 3339 profile：UTC 用 "Z" 后缀（RFC 3339 §5.6），毫秒精度足以
-表达本系统的时序分辨率（设备心跳、命令截止、快照时间）。
+表达本系统的时序分辨率（设备心跳、命令截止、帧时间）。
 """
 
 from datetime import datetime, timedelta, timezone

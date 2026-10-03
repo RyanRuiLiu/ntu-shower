@@ -2,7 +2,7 @@
 
 ## 为什么以 door_state_event 为主轴
 
-它自带三个关键字段：`occurred_at`（**服务端轴**，采集端看见状态变化的那一刻锚定，
+它自带三个关键字段：`occurred_at`（**服务端轴**，NTU Shower 看见状态变化的那一刻锚定，
 不经过设备钟）、`cert_no`（谁）、`bath_time_s`（那一刻设备累计的出水秒数）。
 
 而 `usage_session.assigned_at` 是**设备轴平移来的**，其中 `observed` 那一档是**观测下界**
@@ -75,7 +75,7 @@ print(f"全部「进入出水态」事件：{len(events)}")
 print(f"全部事件（含其它迁移）：{conn.execute('SELECT COUNT(*) FROM door_state_event').fetchone()[0]}")
 
 hits = [(e, t) for e in events if (t := local(e["occurred_at"])) and outside(t)]
-# 「场次」只数 waiting -> bathing：那是这一场第一次出水。paused -> bathing 是同一场里
+# 「会话」只数 waiting -> bathing：那是这一场第一次出水。paused -> bathing 是同一场里
 # 暂停后恢复，bath_time_s 接着涨，不是新的一场。
 starts = [(e, t) for e, t in hits if e["from_state"] == "waiting"]
 print(

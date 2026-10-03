@@ -27,7 +27,7 @@ BASE = datetime(2026, 10, 3, 0, 0, 0, tzinfo=timezone.utc)
 #: 段时长 A/B 交叉校验的容许差。帧间隔上限（防抖窗口 + 采集耗时）加余量。
 AB_TOLERANCE_S = 3
 
-#: 单段出水的物理上界，等于设备的 maxbathtime。设备从进门起算到 1200 秒必然强制
+#: 单段出水的物理上界，等于设备的 maxbathtime。设备从分配起算到 1200 秒必然强制
 #: 释放，所以任何一段出水都不可能超过它。跨越采集盲区的观测值会被这一条截断——
 #: 不截断就等于把两次独立的使用合成了一段。
 MAX_SEGMENT_S = 1200
@@ -255,7 +255,7 @@ class BathApp:
         r.bath_time = 0
 
     def check_in(self, door_no: int, cardno: int, certno: str, accno: str = "") -> None:
-        """入门（刷卡或无卡）。"""
+        """分配：喷头被分配给这个人。"""
         r = self.row(door_no)
         r.cardno = cardno
         r.certno = certno
@@ -319,7 +319,7 @@ class BathApp:
     def poll(self) -> list[int]:
         """DoorStatusConfirmThread 的一轮扫描：四个条件命中任一即释放喷头。
 
-        真实顺序是「进门空闲 → 到达关机时间 → 洗浴超时 → 关阀空闲」——四个分支的
+        真实顺序是「等待开阀超时 → 到达关机时间 → 淋浴超时 → 暂停超时」——四个分支的
         日志文本与判定代码见 BathMainActivity$DoorStatusConfirmThread，命中一个即
         closeDoor 并写那条清零 SQL，然后跳出该门的处理。四种原因写的是同一条清零
         SQL，在库里同形——所以结束原因永远不由我们编造。
@@ -341,7 +341,7 @@ class BathApp:
             usetime = int(abs(now - opened)) if opened is not None else 0
             closed = parse(r.close_time) if r.close_time else None
 
-            # 条件一：进门后既没开阀也没累计过出水，且已经等够 maxinspacetime
+            # 条件一：分配后既没开阀也没出水过，且已经等够 maxinspacetime
             if not r.in_time and r.bath_time == 0 and usetime >= self.params.maxinspacetime:
                 self.release(door_no)
                 released.append(door_no)
@@ -351,7 +351,7 @@ class BathApp:
                 self.release(door_no)
                 released.append(door_no)
                 continue
-            # 条件三：进门累计时长越过 maxbathtime（拨钟会让它提前命中）
+            # 条件三：从分配时刻起算的时长越过 maxbathtime（拨钟会让它提前命中）
             if usetime >= self.params.maxbathtime:
                 self.release(door_no)
                 released.append(door_no)
@@ -382,8 +382,8 @@ class BathApp:
     def valve_sync(self, door_no: int, hardware_open: bool) -> None:
         """水控板与库不一致时 DoorStatusConfirmThread 的自愈写库。
 
-        库侧的"阀门开着"是由 `open_time` 是否为空推出来的（见 queryAllUsingDoorInfors：
-        `opendoorTime.equals("") → bit5=0`），而水控板那一侧是真实阀门状态。两者不同
+        库侧的"在出水"是由 `open_time` 是否为空推出来的（见 queryAllUsingDoorInfors：
+        `opendoorTime.equals("") → bit5=0`），而水控板那一侧是真实的开阀状态。两者不同
         时以硬件为准回写。
 
         硬件开着、库以为关：写 `in_time`——**注意此时 `open_time` 可能是空的**，
@@ -413,14 +413,14 @@ class BathApp:
         return [self.rows[n].copy() for n in sorted(self.rows) if n not in self.hidden]
 
     def hide(self, door_no: int) -> None:
-        """让这一门从后续快照里消失（它的行没被读到）。
+        """让这一个喷头从后续帧里消失（它的行没被读到）。
 
         帧里没有的门，服务端**保留原状态**、不判成空闲——漏报一个门不等于那个门空了。
         """
         self.hidden.add(door_no)
 
     def hide_all(self, door_no: int = 0) -> None:
-        """让所有门都不出现在后续快照里，模拟一次读到空结果的采集。
+        """让所有喷头都不出现在后续帧里，模拟一次读到空结果的采集。
 
         空帧不是错误：设备读库失败时会照送一条空的，那本身就是一条事实。它留痕，
         但不改任何门的现态——空帧不等于所有门都空了。
@@ -428,7 +428,7 @@ class BathApp:
         self.hidden.update(self.rows)
 
     def show_all(self, door_no: int = 0) -> None:
-        """取消隐藏：读库恢复正常，快照里重新有全部门。"""
+        """取消隐藏：读库恢复正常，帧里重新有全部喷头。"""
         self.hidden.clear()
 
 
@@ -437,7 +437,7 @@ class BathApp:
 
 @dataclass
 class Frame:
-    """一帧快照。captured_at 是真实时刻，等价于服务端轴。"""
+    """一帧。captured_at 是真实时刻，等价于服务端轴。"""
 
     captured_at: float
     rows: list[Row]
@@ -453,7 +453,7 @@ class Monitor:
 
     `online` 与 `network` 是两种不相干的失效，行为完全不同：
 
-    - `online=False`：**采集端整体不工作**（进程没了、读库失败），期间一帧都没有；
+    - `online=False`：**NTU Shower 整体不工作**（进程没了、读库失败），期间一帧都没有；
       恢复后推一遍全貌，与设备端重启后的行为一致。
     - `network=False`：**网络不通，采集照常**。帧照采、照进发件箱，只是送不出去；
       恢复后按序补发。关键在 `captured_at` 在采集那一刻就已定稿（设备端
@@ -612,14 +612,14 @@ class Deriver:
             if prev is not None and prev_state != state and frame.source != "startup":
                 self.event_log.append((at, door_no, prev_state, state))
 
-            # 观测缺口过大：上一帧到现在隔得比一次占用的物理上限还久，缺口前后的状态
+            # 盲区过大：上一帧到现在隔得比一次占用的物理上限还久，盲区前后的状态
             # **不能当成连续**。前一场在我们最后看见它的时刻收尾，本帧重新起算——
-            # 否则库里的陈旧占用（浴室 App 停了、人早走了）会被当成"他还在洗"，
+            # 否则库里的陈旧占用（浴室 App 停了、人早走了）会被当成"它还被占着"，
             # 那场会话永不结束、起点还落在几小时前。
             prev_at = self.prev_at.get(door_no)
             if prev is not None and prev_at is not None and at - prev_at > MAX_SEGMENT_S:
                 if session is not None:
-                    self._close_session(session, prev, prev_at, reason="观测缺口")
+                    self._close_session(session, prev, prev_at, reason="盲区")
                     session = None
 
             if state in OCCUPIED:
@@ -669,10 +669,10 @@ class Deriver:
         return session
 
     def _has_gap(self, door_no: int, start: float, end: float) -> bool:
-        """这场会话的观测里有没有断层。
+        """这场会话的观测里有没有盲区。
 
-        两种断层：显式声明的链路断开（`link_gaps`），以及**相邻两帧隔得太久**——
-        超过一次占用的物理上限（`MAX_SEGMENT_S`）时，缺口前后不能当成连续：中间必然
+        两种盲区：显式声明的链路断开（`link_gaps`），以及**相邻两帧隔得太久**——
+        超过一次占用的物理上限（`MAX_SEGMENT_S`）时，盲区前后不能当成连续：中间必然
         发生过我们没看见的事（可能是一次释放，也可能又是一次使用）。
         """
         prev_at = self.prev_at.get(door_no)
@@ -683,7 +683,7 @@ class Deriver:
     def _start_agrees(self, start: float, r: Row, at: float) -> bool:
         """起点平移值的三条自洽检验，与生产代码 service._start_readings_agree 同源。
 
-        1. 起点不晚于本帧——刷卡不可能发生在我们看见它之后；
+        1. 起点不晚于本帧——分配不可能发生在我们看见它之后；
         2. 起点不早于上次看见这个门的时刻——更早的会话已经见过了；
         3. 与同帧 `in_time` 的平移值相差不超过一个 maxbathtime——两个读数出自同一口
            钟，而同一次平移里偏差相互抵消，所以这条等价于纯设备轴比较，不受拨钟影响。
@@ -706,7 +706,7 @@ class Deriver:
         session.elapsed_s = at - session.assigned_seconds
         # bath_time 只在暂停那一刻累加、释放时归零，因此取历史最大值才是"设备已结算的段之和"
         session.device_flow_s = max(session.device_flow_s, r.bath_time)
-        # 观测缺口可能在会话推进期间才发生，不能只在开会话时判一次
+        # 盲区可能在会话推进期间才发生，不能只在开会话时判一次
         if self._has_gap(session.door_no, session.assigned_seconds, at):
             session.observed_span = "gap"
         seg = self.open_segment.get(r.door_no)
@@ -846,7 +846,7 @@ class Deriver:
         `usage_segment`；`prev` 与 `prev_at` 在 `door_live` 的现态；`open_segment`
         的段起点在 `door_live.segment_started_at`；偏差在 `device.clock_skew_s`。
 
-        这份状态丢了就出大事：下一帧会把**已经在用**的门当成"刚进门"，凭空开出
+        这份状态丢了就出大事：下一帧会把**已经在用**的喷头当成"刚分配"，凭空开出
         一条新会话，前一段的长度也永久丢掉。所以它们全部要落库，不能只放内存。
         """
         return {
@@ -893,8 +893,8 @@ class SkewTracker:
     """服务端对某台设备偏差的**认知**。
 
     偏差并不是在任意时刻都已知的：它由校时信息**离散更新**，两次之间用的还是上一次
-    的值。设备钟刚被改过、而下一次校时还没到，这段空窗里做的平移就会偏掉整个钟差
-    ——生产代码的注释里记着 2026-10-02 的真实事故（断链期间有人刷卡，重连前设备钟被
+    的值。设备钟刚被改过、而下一次校时还没到，这段空窗里做的平移就会偏掉整个偏差
+    ——生产代码的注释里记着 2026-10-02 的真实事故（断连期间有人分配，重连前设备钟被
     拨快一小时，算出来的起点比开阀还早一小时）。
 
     两个校时源的空窗差一个量级：
@@ -923,8 +923,8 @@ class SkewTracker:
 class Step:
     """场景的一步：推进到某个真实时刻，执行一个动作。
 
-    `online` 不为 None 时切换采集端的在线状态；从离线恢复会立刻产生一帧
-    startup 快照，与设备端重启后的行为一致。
+    `online` 不为 None 时切换 NTU Shower 的在线状态；从离线恢复会立刻产生一帧
+    startup 帧，与设备端重启后的行为一致。
 
     `network` 不为 None 时切换网络：断开只让帧堆在发件箱里，采集照常。
 
@@ -1009,7 +1009,7 @@ def run_scenario(steps: list[Step], debounce: float = 1.0, drift: float = 0.0,
     def drain(until: float) -> None:
         """把 until 之前所有到期的防抖窗口消化掉。
 
-        窗口到期那一刻读库——这是采集端的真实时序：睡够防抖时长就立刻读，
+        窗口到期那一刻读库——这是 NTU Shower 的真实时序：睡够防抖时长就立刻读，
         读到的必然不是更晚的状态。
         """
         while monitor.window_end is not None and until >= monitor.window_end:
@@ -1053,7 +1053,7 @@ def run_scenario(steps: list[Step], debounce: float = 1.0, drift: float = 0.0,
     monitor.network = True
     deliver()
     # 收尾：数据到此为止，仍在出水的段标成"未关闭"。既不丢弃（它代表此刻真的在
-    # 出水，前端要说得出"正在洗"），也不强行结算（设备还没把这一段累加进
+    # 出水，前端要说得出"正在淋浴"），也不强行结算（设备还没把这一段累加进
     # bath_time_s，硬给一个数就是编造）。
     final = holder["deriver"]
     for door_no, seg in list(final.open_segment.items()):

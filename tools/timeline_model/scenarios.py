@@ -73,7 +73,7 @@ class Case:
 #: （心跳空窗 vs 帧带读数），用它量化"那一层校时"到底值多少。
 _SKEW_LAG_STEPS = [
     Step(40, "noop", 1, (), 3600.0),       # 设备钟被拨快一小时
-    Step(50, "check_in", 1, (1002, "B")),  # 刷卡；服务端手上的偏差可能还是旧的
+    Step(50, "check_in", 1, (1002, "B")),  # 分配；服务端手上的偏差可能还是旧的
     Step(60, "valve_open", 1),
     Step(70, "valve_close", 1),
     Step(80, "release", 1),
@@ -104,7 +104,7 @@ _MULTI_JUMP_STEPS = [
     Step(80, "release", 1),
 ]
 
-#: S40 与 S41 共用：前人**正在出水**时被后人刷卡覆盖。一个喷头同一时刻只能一个人用，
+#: S40 与 S41 共用：前人**正在出水**时被后人分配覆盖。一个喷头同一时刻只能一个人用，
 #: 所以那一刻前人的资格就结束了；两个视角分别检查前人与后人的账。
 _HANDOVER_MID_STEPS = [
     Step(0, "check_in", 1, (1001, "A")),
@@ -127,7 +127,7 @@ _SWITCH_DOOR_STEPS = [
     Step(90, "release", 2),
 ]
 
-#: S44 与 S45 共用：前一个人出门与前一个人进门落在**同一个防抖窗口**（间隔 0.3 秒），
+#: S44 与 S45 共用：前一个人的释放与后一个人的分配落在**同一个防抖窗口**（间隔 0.3 秒），
 #: 合并成一帧后只看得见终态。两个视角检查两人的账有没有混。
 _SAME_WINDOW_STEPS = [
     Step(0, "check_in", 1, (1001, "A")),
@@ -140,7 +140,7 @@ _SAME_WINDOW_STEPS = [
 
 CASES: list[Case] = [
     Case(
-        name="S1 标准一次：点选→刷卡→开→关→开→关→出门",
+        name="S1 标准一次：点选→分配→开阀→关阀→开阀→关阀→释放",
         steps=[
             Step(0, "select", 1),
             Step(10, "check_in", 1, (1001, "A")),
@@ -210,7 +210,7 @@ CASES: list[Case] = [
         ),
     ),
     Case(
-        name="S6 换人：暂停中被后一人刷卡覆盖",
+        name="S6 换人：暂停中被后一人分配覆盖",
         steps=[
             Step(0, "check_in", 1, (1001, "A")),
             Step(10, "valve_open", 1),
@@ -238,7 +238,7 @@ CASES: list[Case] = [
         ),
     ),
     Case(
-        name="S8 采集端离线 10 分钟，期间学生洗完走了",
+        name="S8 NTU Shower 离线 10 分钟，期间学生洗完走了",
         steps=[
             Step(0, "check_in", 1, (1001, "A")),
             Step(10, "valve_open", 1),
@@ -249,12 +249,12 @@ CASES: list[Case] = [
         expect=Expect(
             sessions=1, segments=1, flows=[610], sources=["observed"], complete=False,
             span="gap",
-            note="唯一不可恢复的缺口：没有旁观者，设备也已把痕迹清零",
+            note="唯一不可恢复的盲区：没有旁观者，设备也已把痕迹清零",
         ),
         link_gaps=(11.0,),
     ),
     Case(
-        name="S9 点选后不刷卡就走",
+        name="S9 点选后不分配就走",
         steps=[
             Step(0, "select", 1),
             Step(300, "dummy_noop", 1),
@@ -302,7 +302,7 @@ CASES: list[Case] = [
         ),
     ),
     Case(
-        name="S13 入门等待期间拨钟：段在拨钟之后才开",
+        name="S13 等待开阀期间拨钟：段在拨钟之后才开",
         steps=[
             Step(0, "check_in", 1, (1001, "A")),
             Step(5, "noop", 1, (), 5.0),
@@ -341,7 +341,7 @@ CASES: list[Case] = [
         ),
     ),
     Case(
-        name="S16 进门空闲自动释放：刷了卡始终没开阀",
+        name="S16 等待开阀超时自动释放：分配了始终没开阀",
         steps=[
             Step(0, "check_in", 1, (1001, "A")),
             Step(310, "noop", 1),
@@ -460,7 +460,7 @@ CASES: list[Case] = [
             sessions=1, segments=1, flows=[10], sources=["measured"],
             complete=True, assigned_source="inferred",
             note="帧自带设备钟读数，偏差在采集那一刻就对齐，不经过心跳空窗，"
-            "起点算成真实刷卡时刻",
+            "起点算成真实分配时刻",
         ),
     ),
     Case(
@@ -518,7 +518,7 @@ CASES: list[Case] = [
         ),
     ),
     Case(
-        name="S28 断网期间采集端重启：发件箱留着，恢复后先补旧帧再推全貌",
+        name="S28 断网期间 NTU Shower 重启：发件箱留着，恢复后先补旧帧再推全貌",
         steps=[
             Step(0, "check_in", 1, (1001, "A")),
             Step(10, "valve_open", 1),
@@ -532,7 +532,7 @@ CASES: list[Case] = [
         expect=Expect(
             sessions=1, segments=1, flows=[20], sources=["measured"],
             complete=True, assigned_source="inferred",
-            note="两种失效叠加：断网让帧堆在发件箱，采集端重启期间一帧都没有。恢复后"
+            note="两种失效叠加：断网让帧堆在发件箱，NTU Shower 重启期间一帧都没有。恢复后"
             "先按序补旧帧、再推一遍全貌，旧帧一条不少，段的两个读数都还在",
         ),
     ),
@@ -589,7 +589,7 @@ CASES: list[Case] = [
         ],
         expect=Expect(
             sessions=1, segments=0, complete=True,
-            note="硬件说阀门关着、库以为开着，本该按 |inTime−now| 结算；但这一行"
+            note="硬件说已关阀、库以为开着，本该按 |inTime−now| 结算；但这一行"
             "inTime 是空的（刷了卡没开阀），真实代码在这里抛 NPE 被外层吞掉——"
             "等价于什么都不做。我们照搬，不替它补一个结算",
         ),
@@ -603,12 +603,12 @@ CASES: list[Case] = [
         ],
         expect=Expect(
             sessions=1, segments=1, flows=[0], sources=["unclosed"], complete=True,
-            note="数据窗口在这里结束、学生还在洗：会话不收尾，在途段以未关闭的形态"
+            note="数据窗口在这里结束、学生还在淋浴：会话不收尾，在途段以未关闭的形态"
             "保留（closed_at 为空、不计时长），既不丢弃也不强行结算",
         ),
     ),
     Case(
-        name="S35 门从快照里消失：保留原状态，不判成空闲",
+        name="S35 喷头从帧里消失：保留原状态，不判成空闲",
         steps=[
             Step(0, "check_in", 1, (1001, "A")),
             Step(10, "valve_open", 1),
@@ -681,7 +681,7 @@ CASES: list[Case] = [
         expect=Expect(
             session_index=0, sessions=2, segments=1, flows=[20], sources=["observed"],
             complete=False,
-            note="一个喷头同一时刻只能一个人用：新人刷卡覆盖的那一刻，前人的资格就结束了，"
+            note="一个喷头同一时刻只能一个人用：新人分配覆盖的那一刻，前人的资格就结束了，"
             "他名下那段水随之收尾。硬件当时没关阀，但那段水不再是他的账",
         ),
     ),
@@ -710,21 +710,21 @@ CASES: list[Case] = [
         expect=Expect(
             door_no=2, sessions=1, segments=1, flows=[20], sources=["measured"],
             complete=True,
-            note="换过去的那个喷头，会话从他的刷卡时刻起算，与 1 号那场无关",
+            note="换过去的那个喷头，会话从他的分配时刻起算，与 1 号那场无关",
         ),
     ),
     Case(
-        name="S44 出门与进门落在同一窗口（查前人）：他的账在合并帧前已结",
+        name="S44 释放与分配落在同一窗口（查前人）：他的账在合并帧前已结",
         steps=_SAME_WINDOW_STEPS,
         expect=Expect(
             session_index=0, sessions=2, segments=1, flows=[20], sources=["measured"],
             complete=True,
-            note="前一个人出门与后一个人进门只隔 0.3 秒，合并成一帧后只看得见终态；"
+            note="前一个人的释放与后一个人的分配只隔 0.3 秒，合并成一帧后只看得见终态；"
             "但前人的账在关阀那一帧就已经结清了，合并不会让他少记",
         ),
     ),
     Case(
-        name="S45 出门与进门落在同一窗口（查后人）：他的账从合并帧起",
+        name="S45 释放与分配落在同一窗口（查后人）：他的账从合并帧起",
         steps=_SAME_WINDOW_STEPS,
         expect=Expect(
             session_index=1, sessions=2, segments=0, complete=True,
@@ -754,7 +754,7 @@ CASES: list[Case] = [
         ),
     ),
     Case(
-        name="S47 采集端与服务端同时重启，而网络也断着",
+        name="S47 NTU Shower 与服务端同时重启，而网络也断着",
         steps=[
             Step(0, "check_in", 1, (1001, "A")),
             Step(10, "valve_open", 1),
@@ -769,7 +769,7 @@ CASES: list[Case] = [
         expect=Expect(
             sessions=1, segments=1, flows=[20], sources=["measured"], complete=True,
             assigned_source="inferred",
-            note="三种失效叠在一起：网络断、采集端 40-50 不工作、服务端 45 重启。"
+            note="三种失效叠在一起：网络断、NTU Shower 40-50 不工作、服务端 45 重启。"
             "恢复后帧仍按序送达、段起点仍在、账仍精确",
         ),
     ),
@@ -824,7 +824,7 @@ CASES: list[Case] = [
         expect=Expect(
             session_index=2, sessions=3, segments=1, flows=[20], sources=["measured"],
             complete=True, assigned_source="inferred",
-            note="同一扇门一天里被三个人轮流用：三场会话各自独立，起点分别是三次刷卡的"
+            note="同一个喷头一天里被三个人轮流用：三次会话各自独立，起点分别是三次分配的"
             "时刻，谁都不占谁的便宜",
         ),
     ),
@@ -893,7 +893,7 @@ CASES: list[Case] = [
             sessions=1, segments=1, flows=[20], sources=["measured"], complete=True,
             assigned_source="inferred",
             note="我们离线的那段时间里有人进场、开阀。恢复时推的全貌帧只答「现在什么样」，"
-            "所以不记那条进门迁移——记了会摆到重连这一刻。但会话照常从 open_time 平移出"
+            "所以不记那条分配迁移——记了会摆到重连这一刻。但会话照常从 open_time 平移出"
             "真实起点，段的开阀时刻也从 in_time 平移出来，所以时长仍然精确",
         ),
     ),
@@ -953,13 +953,13 @@ CASES: list[Case] = [
             session_index=1, sessions=2, segments=1, flows=[0], sources=["unclosed"],
             complete=True, assigned_source="observed", span="gap",
             note="浴室 App 停了、我们的软件也不在，库停在一小时前那一行上。上线时看到的"
-            "是**陈旧的占用**：缺口 4980 秒远超一次占用的物理上限，所以前一场在我们最后"
+            "是**陈旧的占用**：盲区 4980 秒远超一次占用的物理上限，所以前一场在我们最后"
             "看见它的时刻收尾，本帧另起一场——起点只能是观测时刻（陈旧行的 open_time 被"
             "判据挡在外面），跨度标成 gap。真实的人早就走了，我们如实说不出来他什么时候走的",
         ),
     ),
     Case(
-        name="S58 刚刷卡就卡住不释放：会话一直开着，但库里那一行始终是同一行",
+        name="S58 刚分配就卡住不释放：会话一直开着，但库里那一行始终是同一行",
         steps=[
             Step(0, "check_in", 1, (1001, "A")),
             Step(3000, "noop", 1),
@@ -969,7 +969,7 @@ CASES: list[Case] = [
             session_index=1, sessions=2, segments=0, complete=True,
             assigned_source="observed", span="gap",
             note="学生刷了卡，浴室 App 就此卡住、永不释放。库里的行一动不动，我们只能看到"
-            "两帧——中间三小时**没有任何证据**。缺口超过一次占用的上限，所以切开：前一场"
+            "两帧——中间三小时**没有任何证据**。盲区超过一次占用的上限，所以切开：前一场"
             "在我们最后看见它的时刻收尾，新的那场只取观测时刻当起点",
         ),
     ),
@@ -985,7 +985,7 @@ CASES: list[Case] = [
         expect=Expect(
             session_index=1, sessions=2, segments=1, flows=[0], sources=["unclosed"],
             complete=True, assigned_source="observed", span="gap",
-            note="阀门卡在开的位置：in_time 一直是那个值、close_time 永远不来。这一段水的"
+            note="开阀状态卡住：in_time 一直是那个值、close_time 永远不来。这一段水的"
             "长度**我们拿不到**——没有任何一帧能证明它什么时候停过。所以给 0、标 gap，"
             "不去拿『到现在为止』当长度（那会随重连次数一直涨）",
         ),
@@ -1038,7 +1038,7 @@ CASES: list[Case] = [
         expect=Expect(
             sessions=1, segments=1, flows=[25], sources=["measured"], complete=False,
             assigned_source="inferred",
-            note="升级完成时他正在洗第二段。全貌帧带着完整的设备读数：起点从 open_time 平移、"
+            note="升级完成时他正在淋浴第二段。全貌帧带着完整的设备读数：起点从 open_time 平移、"
             "这一段的开阀时刻从 in_time 平移，所以这 25 秒是精确的；升级期间那第一段的 10 秒"
             "只在设备的累计值里（35 秒），段表里没有——完整性地标假，如实说出缺了哪一块",
         ),
@@ -1078,7 +1078,7 @@ CASES: list[Case] = [
         ),
     ),
     Case(
-        name="S66 观测缺口恰好 1200 秒：判据用「大于」，恰好不算断层",
+        name="S66 盲区恰好 1200 秒：判据用「大于」，恰好不算盲区",
         steps=[
             Step(0, "check_in", 1, (1001, "A")),
             Step(10, "valve_open", 1),
@@ -1087,13 +1087,13 @@ CASES: list[Case] = [
         ],
         expect=Expect(
             sessions=1, segments=1, flows=[1200], sources=["observed"], complete=False,
-            note="缺口恰好 1200 秒：设备本该在满 1200 那一刻释放它，而那一刻我们不在，"
-            "所以只看到一个跨缺口的观测差——恰好压在上界的边界上被截断。缺口的判据是"
-            "「大于」而不是「不小于」：恰好 1200 不算断层，会话没被切开",
+            note="盲区恰好 1200 秒：设备本该在满 1200 那一刻释放它，而那一刻我们不在，"
+            "所以只看到一个跨盲区的观测差——恰好压在上界的边界上被截断。盲区的判据是"
+            "「大于」而不是「不小于」：恰好 1200 不算盲区，会话没被切开",
         ),
     ),
     Case(
-        name="S68 门停在孤立占用上，之后有人正常刷卡",
+        name="S68 喷头停在孤立占用上，之后有人正常分配",
         steps=[
             Step(10, "valve_sync_open", 1),
             Step(20, "check_in", 1, (1001, "A")),
@@ -1104,7 +1104,7 @@ CASES: list[Case] = [
         expect=Expect(
             sessions=1, segments=1, flows=[20], sources=["measured"], complete=True,
             note="前一段是水控自愈留下的孤立占用（有 in_time、无 open_time、无人认领），"
-            "它不进占用判据、没有会话。真正的用户刷卡时设备清空了 in_time，所以那段"
+            "它不进占用判据、没有会话。真正的用户分配时设备清空了 in_time，所以那段"
             "无人认领的水一秒都不会算到新人头上",
         ),
     ),
@@ -1127,7 +1127,7 @@ CASES: list[Case] = [
         ),
     ),
     Case(
-        name="S71 两个人先后刷卡、都没开阀就走：两笔空账",
+        name="S71 两个人先后分配、都没开阀就走：两笔空账",
         steps=[
             Step(0, "check_in", 1, (1001, "A")),
             Step(100, "check_in", 1, (1002, "B")),
@@ -1151,7 +1151,7 @@ CASES: list[Case] = [
         expect=Expect(
             sessions=1, segments=1, flows=[10], sources=["observed"], complete=False,
             note="管控停用只写 status=3，占用字段一个字不动——库里那一行仍然带着 in_time 与"
-                 "证书号，看起来还在洗。但派生状态优先看 status：它变成 disabled 即离开占用态，"
+                 "证书号，看起来还被占着。但派生状态优先看 status：它变成 disabled 即离开占用态，"
                  "会话随之收尾；段没有 close_time，只能按观测差取",
         ),
     ),
@@ -1169,7 +1169,7 @@ CASES: list[Case] = [
             sessions=1, segments=1, flows=[1200], sources=["capped"], complete=False,
             note="那一段水的观测跨度是 1290 秒，越过一次占用的物理上限，被截到 1200。"
                  "**截断过的必须与真实的 1200 秒分开**——否则统计会把『我们不知道有多长』"
-                 "与『它就洗了 1200 秒』当成同一回事。中间那一帧（读到空）把缺口压在 700 秒，"
+                 "与『它就洗了 1200 秒』当成同一回事。中间那一帧（读到空）把盲区压在 700 秒，"
                  "所以会话没被切开，段才走到这一步",
         ),
     ),
@@ -1213,13 +1213,13 @@ CASES: list[Case] = [
         ),
     ),
     Case(
-        name="S76 断链期间钟被改、重连才校时：已经在洗的那一场，起点被新偏差推早一整个钟差",
+        name="S76 断连期间钟被改、重连才校时：已经在淋浴的那一场，起点被新偏差推早一整个偏差值",
         steps=[
             Step(0, "check_in", 1, (1001, "A")),
             Step(5, "valve_open", 1),
-            Step(10, "noop", 1, online=False),  # 断链：之后的动作我们看不见
+            Step(10, "noop", 1, online=False),  # 断连：之后的动作我们看不见
             Step(20, "valve_close", 1),  # 关阀，但人没走——痕迹留在设备库里
-            Step(40, "noop", 1, (), 3600.0),  # 断链期间设备钟被拨快一小时
+            Step(40, "noop", 1, (), 3600.0),  # 断连期间设备钟被拨快一小时
             Step(50, "noop", 1, online=True),  # 重连：全貌帧带着 inTime 与 closeTime
             Step(90, "release", 1),
         ],
@@ -1227,12 +1227,12 @@ CASES: list[Case] = [
         expect=Expect(
             sessions=1, segments=1, flows=[44], sources=["observed"], complete=False,
             assigned_source="inferred",
-            note="断链期间的关阀我们没看见，重连时设备已把它归到「不在出水中」，所以这一段"
-                 "只剩观测差可用——44 秒是「最后一次看见出水」到重连的距离，不是真实出水时长。"
+            note="断连期间的关阀我们没看见，重连时设备已把它归到「不在出水中」，所以这一段"
+                 "只剩观测差可用——44 秒是「最后一次看见出水」到重连的距离，不是真实淋浴时长。"
                  "**这个场景复现的是「痕迹不可用」那条路径**，与 model.SkewTracker 说明里"
                  "2026-10 的真实事故不是同一条：那次段是 measured（两个读数出自同一钟状态，"
-                 "差值精确）、而**起点**被钟被改之后测出的偏差推早了一整个钟差。"
-                 "两者共同的缺口是同一个：偏差在两次校时之间被沿用，而设备钟可能在那期间"
+                 "差值精确）、而**起点**被钟被改之后测出的偏差推早了一整个偏差值。"
+                 "两者共同的盲区是同一个：偏差在两次校时之间被沿用，而设备钟可能在那期间"
                  "被改。要复现「measured + 起点偏一小时」还需要「关阀后门仍占用、痕迹留在"
                  "设备库里」的步骤，那条路径本模型尚未覆盖。",
         ),

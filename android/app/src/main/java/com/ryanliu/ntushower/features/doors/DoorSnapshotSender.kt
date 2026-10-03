@@ -17,7 +17,7 @@ import org.json.JSONObject
 import java.util.UUID
 
 /**
- * 快照发件箱：本地 SQLite 按序保存未确认快照，收到 door.snapshot_ack 才删除；
+ * 帧发件箱：本地 SQLite 按序保存未确认帧，收到 door.snapshot_ack 才删除；
  * 未确认的按序重发（断网不丢数据，恢复后续传）。
  *
  * 去重：逐扇喷头取 [DoorRaw.fingerprint] 再比对，内容未变化不上报。
@@ -28,7 +28,7 @@ import java.util.UUID
  */
 class DoorSnapshotSender(context: Context) {
 
-    /** 发件箱里最旧的一条待确认快照。 */
+    /** 发件箱里最旧的一条待确认帧。 */
     private data class OutboxRow(val id: Long, val snapshotId: String, val payload: String)
 
     private val db: SQLiteDatabase = AgentDatabase.get(context)
@@ -49,7 +49,7 @@ class DoorSnapshotSender(context: Context) {
      * - `startup`——重连或开机后推的一遍全貌，与状态是否变化无关（见 [forgetLastState]）。
      *
      * 注意：喷头状态无变化时本方法直接返回（去重），因此**不能**把它当作重传入口——
-     * 断网期间积压的快照与喷头状态是否变化无关，重连时必须直接调 [flush]。
+     * 断网期间积压的帧与喷头状态是否变化无关，重连时必须直接调 [flush]。
      *
      * 读库返回空也照常入队：设备端的职责是如实送达"库现在是什么"，而"读到空"本身
      * 就是一条事实（这台设备的 t_doorlist 恒有它的全部喷头行），由服务端判断它意味着
@@ -111,10 +111,10 @@ class DoorSnapshotSender(context: Context) {
      *
      * 断网期间每有一次喷头状态变化就多一行，而只有收到 ack 才会删。上限是**配置项**（默认值与
      * 服务端登记表同源，那边刻意给得远超真实所需），因此正常情况下它一次也不会触发——留着
-     * 它是给极端积压一个终点，而不是当作日常淘汰策略。调小它是主动放弃历史：快照丢了设备
+     * 它是给极端积压一个终点，而不是当作日常淘汰策略。调小它是主动放弃历史：帧丢了设备
      * 不会重发，服务端的时长与状态迁移就永久缺一块。
      *
-     * 丢最旧的而不是拒绝新的：越新的快照越接近当前实情，而服务端的现态本来就由最后一条决定。
+     * 丢最旧的而不是拒绝新的：越新的帧越接近当前实情，而服务端的现态本来就由最后一条决定。
      */
     private fun trimOutbox() {
         val limit = RuntimeConfig.outboxMaxRows
@@ -145,10 +145,10 @@ class DoorSnapshotSender(context: Context) {
     }
 
     /**
-     * 按序发送最旧的一条未确认快照（等待 ack 后再发下一条）。幂等，可随时调用。
+     * 按序发送最旧的一条未确认帧（等待 ack 后再发下一条）。幂等，可随时调用。
      *
      * 遇到解析不出 JSON 的坏行**当场删掉再取下一条**，而不是把异常抛出去。坏行永远排在
-     * 最前面（按 id 升序取最旧），每次 flush 都在同一行上失败，后面所有快照全被它堵住
+     * 最前面（按 id 升序取最旧），每次 flush 都在同一行上失败，后面所有帧全被它堵住
      * ——这台设备的喷头状态上报就此彻底停止，而日志里只有一串 JSON 异常，读不出"上报停了"。
      *
      * 存储损坏才会产生坏行（单条 INSERT 是原子的），概率低，但一旦出现不会自愈。
@@ -169,7 +169,7 @@ class DoorSnapshotSender(context: Context) {
         }
     }
 
-    /** 收到 ack：删除对应快照，继续发下一条。 */
+    /** 收到 ack：删除对应帧，继续发下一条。 */
     fun onAcked(snapshotId: String, gateway: GatewayClient) {
         db.delete(AppConfig.OUTBOX_TABLE, "snapshot_id = ?", arrayOf(snapshotId))
         Log.i(TAG, "snapshot acked: $snapshotId")

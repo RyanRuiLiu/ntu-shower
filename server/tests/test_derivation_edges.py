@@ -108,12 +108,12 @@ def test_state_derivation(fresh_db: str, door: dict[str, Any], expected: str) ->
 
 
 # ════════════════════════════════════════════════════════════════════════
-# 二、会话：四个时刻与出水时长
+# 二、会话：四个时刻与淋浴时长
 # ════════════════════════════════════════════════════════════════════════
 
 
 def test_full_session_four_moments(fresh_db: str) -> None:
-    """一次完整使用：刷卡 → 开阀 → 暂停 → 出门。
+    """一次完整使用：分配 → 开阀 → 暂停 → 释放。
 
     起点与终点在会话表上，开阀时刻与那一段的长度在段表上——两者粒度不同，所以不再挤在
     同一行。
@@ -166,7 +166,7 @@ def test_leaving_while_bathing_keeps_last_segment(fresh_db: str) -> None:
 
 
 def test_assign_then_settle_without_water(fresh_db: str) -> None:
-    """入门后没开水就结算：会话存在，但从未观测到出水——一段都没有。"""
+    """分配后没开阀就结算：会话存在，但从未观测到出水——一段都没有。"""
     device_id = "dev-no-water"
     service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C")], T0))
     service.process_snapshot(device_id, _frame([_door()], "2026-09-30T12:00:20.000Z"))
@@ -178,7 +178,7 @@ def test_assign_then_settle_without_water(fresh_db: str) -> None:
 
 
 def test_repair_interrupts_session(fresh_db: str) -> None:
-    """使用中被打上报修：占用态结束，会话收尾。"""
+    """淋浴中被打上维修：占用态结束，会话收尾。"""
     device_id = "dev-repair"
     service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], T0))
     service.process_snapshot(device_id, _frame([_door(status_raw=1)], "2026-09-30T12:00:40.000Z"))
@@ -202,7 +202,7 @@ def test_two_sessions_are_separate(fresh_db: str) -> None:
 
 
 def test_handover_leaves_the_previous_accumulation_unowned(fresh_db: str) -> None:
-    """前一个人停在暂停态、后人刷卡覆盖（实测 10 次换人都是这一形态）。
+    """前一个人停在暂停态、后人分配覆盖（实测 10 次换人都是这一形态）。
 
     前人那一场我们只看见**一帧**（暂停态、没有 `in_time`），凭它推不出段——设备累计的
     200 秒没有起止。所以那 200 秒**没有归属**：它只体现在 `device_flow_s` 里。硬把它塞进
@@ -268,7 +268,7 @@ def test_gap_one_second_over_the_limit_breaks_the_segment(fresh_db: str) -> None
 def test_offline_gap_does_not_inflate_flow(fresh_db: str) -> None:
     """离线 8 小时后仍在出水：那 8 小时不可知，一秒都不计。
 
-    缺口远超一次占用的物理上限，所以前后是**两场账**：前一场在我们最后看见它的时刻收尾，
+    盲区远超一次占用的物理上限，所以前后是**两次会话**：前一场在我们最后看见它的时刻收尾，
     本帧另起一场。并成一场的话它永远不结束、`flow_s` 还会把 8 小时算进去——旧实现用
     "当前时刻减 in_time"，实测出现过 24 小时的脏值，而且只增不减。
     """
@@ -288,7 +288,7 @@ def test_offline_gap_does_not_inflate_flow(fresh_db: str) -> None:
 def test_session_crossing_gap_keeps_last_seen_as_the_bound(fresh_db: str) -> None:
     """跨夜：次日上午才再看见这个门，中间十几个小时是空的。
 
-    `last_seen_at` 是可信用作结束下界的那一个，`ended_at` 只是"下次见到它的时刻"——缺口
+    `last_seen_at` 是可信用作结束下界的那一个，`ended_at` 只是"下次见到它的时刻"——盲区
     超过一次占用的上限时，两者不再是同一件事。
     """
     device_id = "dev-cross-night"
@@ -297,7 +297,7 @@ def test_session_crossing_gap_keeps_last_seen_as_the_bound(fresh_db: str) -> Non
     service.process_snapshot(device_id, _frame([_door()], _plus(T0, 12 * 3600)))
 
     rows = _sessions(device_id)
-    assert len(rows) == 2, "缺口 11 小时，前后是两场账"
+    assert len(rows) == 2, "盲区 11 小时，前后是两次会话"
     assert rows[0]["last_seen_at"] == T0
     assert rows[0]["ended_at"] == T0, "两帧隔了一小时，第一场在最初那一帧就收尾了"
     assert rows[0]["observed_span"] == "gap"
@@ -367,12 +367,12 @@ def test_missing_door_in_a_later_frame_keeps_its_state(fresh_db: str) -> None:
 
 
 # ════════════════════════════════════════════════════════════════════════
-# 五、接手时那边已经在洗
+# 五、接手时那边还被占着
 # ════════════════════════════════════════════════════════════════════════
 
 
 def test_first_frame_already_occupied_marks_the_observation_bound(fresh_db: str) -> None:
-    """接手时那边已经在洗：起点只能记本帧，它是**观测下界**不是事实起点。
+    """接手时那边还被占着：起点只能记本帧，它是**观测下界**不是事实起点。
 
     服务端重启、agent 重装、设备断网重连之后，本端拿到的第一帧就可能落在用户洗浴过程中。
 
@@ -402,9 +402,9 @@ def test_first_frame_already_occupied_marks_the_observation_bound(fresh_db: str)
 
 
 def test_takeover_with_open_time_infers_the_real_start(fresh_db: str) -> None:
-    """设备带着 `open_time` 时，起点由它平移而来——那是**真实的刷卡时刻**，不是下界。
+    """设备带着 `open_time` 时，起点由它平移而来——那是**真实的分配时刻**，不是下界。
 
-    `open_time` 是刷卡那一刻设备写下的，而它在整场会话里不变：暂停与恢复都不改它，
+    `open_time` 是分配那一刻设备写下的，而它在整场会话里不变：暂停与恢复都不改它，
     只有释放才整体清零。所以无论中间暂停过几次，平移回来都还是那个起点。
 
     平移的依据是设备回的 pong 算出的钟偏差（见 core/device_clock）。
@@ -420,7 +420,7 @@ def test_takeover_with_open_time_infers_the_real_start(fresh_db: str) -> None:
                     acc_no="A",
                     cert_no="C",
                     bath_time_s=600,
-                    open_time="2026-09-30T11:57:30.000Z",  # 用户刷卡时刻（设备钟）
+                    open_time="2026-09-30T11:57:30.000Z",  # 用户分配时刻（设备钟）
                     in_time="2026-09-30T11:58:00.000Z",  # 本段开始出水（设备钟）
                 )
             ],
@@ -456,7 +456,7 @@ def test_inferred_start_makes_the_span_cover_the_duration(fresh_db: str) -> None
                     acc_no="A",
                     cert_no="C",
                     bath_time_s=300,  # 之前几段已结算的出水
-                    open_time="2026-09-30T11:45:00.000Z",  # 刷卡（设备钟）
+                    open_time="2026-09-30T11:45:00.000Z",  # 分配（设备钟）
                     in_time="2026-09-30T11:50:00.000Z",  # 本段开始出水（设备钟）
                 )
             ],
@@ -466,7 +466,7 @@ def test_inferred_start_makes_the_span_cover_the_duration(fresh_db: str) -> None
     service.process_snapshot(device_id, _frame([_door()], "2026-09-30T12:05:00.000Z"))
 
     row = _sessions(device_id)[0]
-    assert row["assigned_at"] == "2026-09-30T11:45:30.000Z", "刷卡平移"
+    assert row["assigned_at"] == "2026-09-30T11:45:30.000Z", "分配平移"
     assert row["flow_s"] == 870, "本段：设备说的 11:50:30 到关阀那一刻"
     span = 1170  # 11:45:30 → 12:05:00
     assert row["flow_s"] <= span, "时长落在跨度之内——起点是事实，不再是下界"
@@ -519,7 +519,7 @@ def test_takeover_while_paused_recovers_the_open_time(fresh_db: str) -> None:
                     acc_no="A",
                     cert_no="C",
                     bath_time_s=120,
-                    open_time="2026-09-30T11:58:00.000Z",  # 刷卡（设备钟）
+                    open_time="2026-09-30T11:58:00.000Z",  # 分配（设备钟）
                     close_time="2026-09-30T12:01:00.000Z",  # 关阀（设备钟）
                 )
             ],
@@ -528,7 +528,7 @@ def test_takeover_while_paused_recovers_the_open_time(fresh_db: str) -> None:
     )
 
     row = _sessions(device_id)[0]
-    assert row["assigned_at"] == "2026-09-30T11:59:00.000Z", "刷卡平移"
+    assert row["assigned_at"] == "2026-09-30T11:59:00.000Z", "分配平移"
     assert row["flow_s"] == 120
 
     segments = _segments_of(row["id"])
@@ -540,7 +540,7 @@ def test_takeover_while_paused_recovers_the_open_time(fresh_db: str) -> None:
 def test_opened_at_comes_from_the_shifted_in_time(fresh_db: str) -> None:
     """正在出水时，开阀时刻取 `in_time` 的平移值，不是我们看见它的那一帧。
 
-    两者差着"设备检测加上报"的那一段。它同时就是出水时长的段起点——同一份证据喂给两个
+    两者差着"设备检测加上报"的那一段。它同时就是这一段的起点——同一份证据喂给两个
     字段，不再各算各的。
     """
     device_id = "dev-open-shift"
@@ -571,7 +571,7 @@ def test_opened_at_comes_from_the_shifted_in_time(fresh_db: str) -> None:
 def test_out_of_range_open_time_is_not_adopted(fresh_db: str) -> None:
     """算出来的开阀时刻落在会话起点之前就不采用——多段之和会把它推得过早。
 
-    判据是 `[assigned_at, 本帧]`：开阀不可能早于进门，也不可能晚于此刻。拿不准就留空，
+    判据是 `[assigned_at, 本帧]`：开阀不可能早于分配，也不可能晚于此刻。拿不准就留空，
     宁可没有。
     """
     device_id = "dev-open-out-of-range"
@@ -595,7 +595,7 @@ def test_out_of_range_open_time_is_not_adopted(fresh_db: str) -> None:
 
     row = _sessions(device_id)[0]
     assert row["assigned_at"] == "2026-09-30T11:59:00.000Z"
-    assert _segments_of(row["id"]) == [], "12:02 往前数 3600 秒得到 11:02，早于进门，丢掉"
+    assert _segments_of(row["id"]) == [], "12:02 往前数 3600 秒得到 11:02，早于分配，丢掉"
     assert row["flow_s"] == 0
     assert row["device_flow_s"] == 3600, "设备的话留着，但它凑不出一段"
 
@@ -603,7 +603,7 @@ def test_out_of_range_open_time_is_not_adopted(fresh_db: str) -> None:
 def test_takeover_does_not_inherit_the_previous_open_time(fresh_db: str) -> None:
     """换人时，新会话的段起点不得沿用前人的。
 
-    新人此刻才进门，他名下的最早值只能是这一刻。前人那一段水在换人那一刻就收尾了——
+    新人此刻才分配，他名下的最早值只能是这一刻。前人那一段水在换人那一刻就收尾了——
     它归旧账，不归新账。
     """
     device_id = "dev-takeover-opened"
@@ -624,11 +624,11 @@ def test_takeover_does_not_inherit_the_previous_open_time(fresh_db: str) -> None
     assert first["ended_at"] == "2026-09-30T12:02:00.000Z", "旧账在换人那一刻结清，结束时刻是准的"
 
     segments = _segments_of(second["id"])
-    assert segments[0]["opened_at"] == "2026-09-30T12:02:00.000Z", "新人名下的段起点不得早于他进门"
+    assert segments[0]["opened_at"] == "2026-09-30T12:02:00.000Z", "新人名下的段起点不得早于他分配"
 
 
 def test_start_later_than_the_frame_is_not_adopted(fresh_db: str) -> None:
-    """`open_time` 平移后晚于本帧就不采用——刷卡不可能发生在我们看见它之后。
+    """`open_time` 平移后晚于本帧就不采用——分配不可能发生在我们看见它之后。
 
     设备钟被往回拨、而偏差还没跟上时会读到这种值。
     """
@@ -648,8 +648,8 @@ def test_start_later_than_the_frame_is_not_adopted(fresh_db: str) -> None:
 def test_start_before_the_last_sighting_is_not_adopted(fresh_db: str) -> None:
     """起点早于**上次看见这个门**的时刻就不采用——更早的会话我们已经见过了。
 
-    上一次看见它还是空闲，刷卡只可能发生在那之后。2026-10-02 的断链场景就落在这一条上：
-    刷卡写在设备钟被改之前，重连时偏差已经换代。
+    上一次看见它还是空闲，分配只可能发生在那之后。2026-10-02 的断连场景就落在这一条上：
+    分配写在设备钟被改之前，重连时偏差已经换代。
     """
     device_id = "dev-assign-early"
     device_clock.load(device_id, 0.0)
@@ -672,7 +672,7 @@ def test_start_far_from_in_time_is_not_adopted(fresh_db: str) -> None:
     差得更多只有一个解释：其中一个是用**另一口钟**写的——设备钟被改过而我们没跟上。
 
     这是"拨钟时我们离线"**唯一**能识破的一条：那时没有上一帧可参照（判据 2 无从谈起）。
-    下例还原 2026-10-02 实测的那一次：断链期间刷卡（旧钟，12:01）→ 拨快一小时 →
+    下例还原 2026-10-02 实测的那一次：断连期间分配（旧钟，12:01）→ 拨快一小时 →
     重连后开阀（新钟，13:05）。`open_time` 平移出来是 11:01，比开阀早了 64 分钟。
     """
     device_id = "dev-assign-skew"

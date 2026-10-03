@@ -37,7 +37,7 @@ import com.ryanliu.ntushower.core.shell.RootShell
  *
  * `input text` 按字节处理，**非 ASCII 会被写坏**——中文必须走无障碍的剪贴板粘贴
  * （[A11yUiChannel]）。但粘贴在字段的**第二次**插入时会带出一个空格（本 ROM 的
- * widget 行为，两次发送之间必现；单次粘贴的自动化登录不受影响），而按键注入没有
+ * widget 行为，两次发送之间必现；单次粘贴的自动化分配不受影响），而按键注入没有
  * 这个问题。因此文本输入在 [typeText]（仅 ASCII）与无障碍粘贴两条通道并存，由
  * 调用方按内容与需要选择，见 `executeUiAction`。
  */

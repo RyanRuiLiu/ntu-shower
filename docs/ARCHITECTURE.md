@@ -158,7 +158,7 @@ closed_at   = close_time + skew@关这一段那一刻
 ```
 
 `open_time` 在整场会话里不变——设备只在释放喷头时清零，暂停与恢复都不改它——所以它平移
-出来的是**真实的刷卡时刻**，不是下界。`in_time` 与 `close_time` 各自平移，得到那一段的真
+出来的是**真实的分配时刻**，不是下界。`in_time` 与 `close_time` 各自平移，得到那一段的真
 实起止。
 
 **逐个平移之所以安全，是因为窗口内偏差是常量**：一次占用压在 20 分钟以内（设备满
@@ -178,9 +178,9 @@ closed_at   = close_time + skew@关这一段那一刻
 设备侧的判断都是"某个已存储的时刻与此刻之差"，而"此刻"取自设备钟：
 
 ```
-|openTime  − now|    入门空闲
+|openTime  − now|    等待开阀
 |closeTime − now|    关阀空闲
-|inTime    − now|    本段已出水时长
+|inTime    − now|    本段已淋浴时长
 bathTime             各段累加，每次关阀时 += |inTime − now|
 ```
 
@@ -201,10 +201,10 @@ bathTime             各段累加，每次关阀时 += |inTime − now|
 
 | 离线时学生在 | 库里的残留 | 命中的条件 | 该次的时长口径 |
 |---|---|---|---|
-| 入门未开阀 | `openTime` 有 | `\|openTime − now\| ≥ maxinspacetime` | 不计时长 |
+| 已分配未开阀 | `openTime` 有 | `\|openTime − now\| ≥ maxinspacetime` | 不计时长 |
 | 正在出水 | `openTime` + `inTime` 有 | `\|openTime − now\| ≥ maxbathtime` | `min(\|inTime − now\| + bathTime, maxbathtime)` |
 | 暂停中 | `openTime` + `closeTime` 有 | `\|closeTime − now\| ≥ maxbathspacetime` | `bathTime` |
-| 已选中未刷卡 | `status = 2` | `\|openTime − now\| ≥ maxinspacetime` | 不计时长 |
+| 已选中未分配 | `status = 2` | `\|openTime − now\| ≥ maxinspacetime` | 不计时长 |
 
 **"正在出水"与"暂停中"的差别只在 `inTime` 是否为空**，但两者的时长口径相差悬殊：前者把整个
 离线时长计入并截断到上限，后者完全不计入。
@@ -216,7 +216,7 @@ bathTime             各段累加，每次关阀时 += |inTime − now|
 
 | 字段 | 轴 | 含义 |
 |---|---|---|
-| `open_time` | 服务端 | 入门时刻，由设备轴换算 |
+| `open_time` | 服务端 | 分配时刻，由设备轴换算 |
 | `in_time` | 服务端 | 本次开阀时刻；已关阀时为空 |
 | `close_time` | 服务端 | 本次关阀时刻；正在出水时为空 |
 | `bath_time_s` | — | 各段出水秒数之和，是时长不是时刻，不受设备钟影响 |
@@ -224,7 +224,7 @@ bathTime             各段累加，每次关阀时 += |inTime − now|
 | `last_used_at` | 服务端 | 上次开阀时刻；取自该喷头最近一个**已关阀**的段，会话表只用来说明是谁用的 |
 
 **对外不出现设备轴的值。** 设备轴没有时区标记，任何消费者按本地时间解析都会得到错误结果
-（实际发生过：设备钟快一小时，网页把入门时刻渲染成 `00:55`，并把 `|时刻 − 本地时间|` 当成
+（实际发生过：设备钟快一小时，网页把分配时刻渲染成 `00:55`，并把 `|时刻 − 本地时间|` 当成
 已洗时长在计）。
 
 ## 签名
