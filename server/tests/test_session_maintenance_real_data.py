@@ -35,16 +35,15 @@ from test_scheduler import _frame, _let_the_loop_run
 #: 一概不碰，所以这里必须与下面的真实 `cert_no` 对上。
 CONFIG: dict[str, object] = {
     "renew_wait_enabled": True,
-    "renew_wait_students": "99990052,99990057",
+    "renew_wait_students": {"99990052": "000000", "99990057": "111111"},
     "renew_wait_threshold_s": 270,
     "renew_wait_max_count": 3,
     "renew_session_enabled": True,
-    "renew_session_students": "99990052,99990057",
+    "renew_session_students": {"99990052": "000000", "99990057": "111111"},
     "renew_session_threshold_s": 1140,
     "auto_settle_enabled": True,
-    "auto_settle_students": "99990052,99990057",
+    "auto_settle_students": {"99990052": "000000", "99990057": "111111"},
     "auto_settle_pause_threshold_s": 60,
-    "student_passwords": {"99990052": "000000", "99990057": "111111"},
 }
 
 #: 生产库 `usage_session` 的真实行（列序与 [_seed] 的 INSERT 一致）：

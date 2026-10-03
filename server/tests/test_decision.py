@@ -16,8 +16,8 @@ from app.modules.sessions.decision import (
     decide,
     password_of,
     recheck,
+    roster,
     still_allowed,
-    students,
 )
 
 #: 基准时刻：判据的全部时刻都是服务端轴的 RFC 3339。
@@ -25,16 +25,15 @@ NOW = "2026-10-05T12:00:00.000Z"
 
 BASE_CONFIG: dict[str, object] = {
     "renew_wait_enabled": True,
-    "renew_wait_students": "99990052, 99990053",
+    "renew_wait_students": {"99990052": "000000", "99990053": "111111"},
     "renew_wait_threshold_s": 270,
     "renew_wait_max_count": 3,
     "renew_session_enabled": True,
-    "renew_session_students": "99990052",
+    "renew_session_students": {"99990052": "000000"},
     "renew_session_threshold_s": 1140,
     "auto_settle_enabled": True,
-    "auto_settle_students": "99990052",
+    "auto_settle_students": {"99990052": "000000"},
     "auto_settle_pause_threshold_s": 60,
-    "student_passwords": {"99990052": "000000"},
 }
 
 
@@ -56,24 +55,34 @@ def candidate(**overrides: object) -> Candidate:
 # ── 名单与凭证 ──
 
 
-def test_students_accepts_commas_newlines_and_spaces() -> None:
-    assert students({"k": "1001,1002"}, "k") == ["1001", "1002"]
-    assert students({"k": "1001\n1002"}, "k") == ["1001", "1002"]
-    assert students({"k": " 1001 , 1002 \n"}, "k") == ["1001", "1002"]
-    assert students({"k": ""}, "k") == []
-    assert students({}, "k") == []
+def test_roster_reads_the_map_and_trims_the_id_only() -> None:
+    """学号两端去空格（粘贴常带），**密码不动**——它是凭证，静默改它比留着空格更糟。
+
+    配置页那侧两个都 trim 过了，所以这里只兜住"直接调接口"的情形。
+    """
+    assert roster({"k": {"1001": "pw"}}, "k") == {"1001": "pw"}
+    assert roster({"k": {" 1001 ": "pw"}}, "k") == {"1001": "pw"}
+    assert roster({"k": {}}, "k") == {}
+    assert roster({}, "k") == {}
 
 
-def test_students_tolerates_a_wrong_shape() -> None:
+def test_roster_tolerates_a_wrong_shape() -> None:
     """名单是配置值，人手改错了不该让整个功能抛异常。"""
-    assert students({"k": 42}, "k") == []
-    assert students({"k": ["1001"]}, "k") == []
+    assert roster({"k": "1001,pw"}, "k") == {}
+    assert roster({"k": ["1001"]}, "k") == {}
 
 
-def test_password_of_reads_the_shared_map() -> None:
-    assert password_of(BASE_CONFIG, "99990052") == "000000"
-    assert password_of(BASE_CONFIG, "9999") == ""
-    assert password_of({"student_passwords": "oops"}, "99990052") == ""
+def test_password_of_comes_from_that_features_own_roster() -> None:
+    """凭证跟着名单走：同一份名单里"在不在"与"有没有密码"是同一件事。
+
+    所以不存在"名单里有他、却没有他的密码"那种静默不执行——代价是同一个学号开两个功能
+    要在两份名单里各写一遍。
+    """
+    assert password_of(BASE_CONFIG, FEATURE_RENEW_WAIT, "99990052") == "000000"
+    assert password_of(BASE_CONFIG, FEATURE_RENEW_WAIT, "99990053") == "111111"
+    # 99990053 只开了预约续期，所以会话续期那份名单里没有他
+    assert password_of(BASE_CONFIG, FEATURE_RENEW_SESSION, "99990053") == ""
+    assert password_of(BASE_CONFIG, FEATURE_AUTO_SETTLE, "9999") == ""
 
 
 # ── 预约续期 ──
@@ -212,7 +221,7 @@ def test_recheck_reports_every_kind_of_change() -> None:
         "状态已变（waiting → bathing）"
     )
     assert recheck(expected, expected, trigger, {**BASE_CONFIG, "renew_wait_enabled": False}) == "功能已关"
-    assert recheck(expected, expected, trigger, {**BASE_CONFIG, "renew_wait_students": ""}) == "不在名单里"
+    assert recheck(expected, expected, trigger, {**BASE_CONFIG, "renew_wait_students": {}}) == "不在名单里"
 
 
 def test_still_allowed_is_the_same_question_asked_before_sending() -> None:

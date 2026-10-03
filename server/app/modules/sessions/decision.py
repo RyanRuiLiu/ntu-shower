@@ -69,25 +69,26 @@ class Trigger:
     delay_s: float
 
 
-def students(config: JsonObject, key: str) -> list[str]:
-    """取一份名单。
+def roster(config: JsonObject, key: str) -> dict[str, str]:
+    """取一份名单：`学号 → 密码`。
 
-    存的是逗号或换行分隔的学号（`ConfigKind.TEXT`）。**逐字比对**：门上报的 `cert_no`
-    与名单里的字符串必须完全一致，前导零、空格、全角数字对不上就是静默不执行。
-    要去 `door_state_event.cert_no` 里抄原样，别凭记忆敲。
+    **凭证跟着名单走**——三份名单各自完整，所以"在名单里"与"有凭证"是同一件事：不可能
+    出现"名单里有他、却没有他的密码"那种静默不执行。代价是同一个学号开两个功能要在两份
+    名单里各写一遍，那是刻意的：**配一份就读得懂一份**，不必再去别处对照。
+
+    学号必须**逐字**对上门上报的 `cert_no`——前导零、空格对不上就是不在名单里（我们会
+    静默不动手）。去 `door_state_event.cert_no` 里抄原样最稳。
     """
     value = config.get(key)
-    if not isinstance(value, str):
-        return []
-    return [item.strip() for item in value.replace("\n", ",").split(",") if item.strip()]
+    if not isinstance(value, dict):
+        return {}
+    return {str(item).strip(): str(password) for item, password in value.items()}
 
 
-def password_of(config: JsonObject, cert_no: str) -> str:
-    """该学号在浴室系统里的凭证。`student_passwords` 是唯一出处。"""
-    passwords = config.get("student_passwords")
-    if not isinstance(passwords, dict):
-        return ""
-    return str(passwords.get(cert_no, ""))
+def password_of(config: JsonObject, feature: str, cert_no: str) -> str:
+    """这个功能那份名单里，这个学号的凭证；不在名单里就是空的，动作不会下发。"""
+    roster_key = FEATURES[feature][1]
+    return roster(config, roster_key).get(cert_no, "")
 
 
 def decide(candidate: Candidate, config: JsonObject, now: str) -> Trigger | None:
@@ -101,7 +102,7 @@ def decide(candidate: Candidate, config: JsonObject, now: str) -> Trigger | None
     for feature, (enabled_key, students_key, threshold_key) in FEATURES.items():
         if not config.get(enabled_key):
             continue
-        if candidate.cert_no not in students(config, students_key):
+        if candidate.cert_no not in roster(config, students_key):
             continue
         threshold = as_int(config[threshold_key])
         started = _started_at(candidate, feature, config)
@@ -164,6 +165,6 @@ def still_allowed(cert_no: str, feature: str, config: JsonObject) -> str | None:
     enabled_key, students_key, _threshold_key = FEATURES[feature]
     if not config.get(enabled_key):
         return "功能已关"
-    if cert_no not in students(config, students_key):
+    if cert_no not in roster(config, students_key):
         return "不在名单里"
     return None
