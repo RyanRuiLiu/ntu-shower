@@ -309,30 +309,27 @@ def test_settle_stops_when_the_roster_changed_underneath(monkeypatch: pytest.Mon
     asyncio.run(body())
 
 
-def test_domain_rejections_are_split_into_normal_and_noteworthy() -> None:
+def test_domain_rejections_are_split_into_normal_and_noteworthy(caplog: pytest.LogCaptureFixture) -> None:
     """领域层拒了要分清两类：门还被占着/他还有会话/他已经走了是正常，"设备离线"之类不是。
 
     分错的两个方向都坏：把正常当失败会刷满告警，把失败当正常就没人知道这次的维护没做成。
+    所以这条**验日志级别**，而不是重述那两个集合——后者会因为错误的原因通过。
     """
 
     def problem(code: str) -> ApiProblemError:
         return ApiProblemError(Problem(code, 409, "x"), "细节")
 
-    wait = problem(problems.DOOR_NOT_FREE.code)
-    duplicate = problem(problems.DUPLICATE_SESSION.code)
-    gone = problem(problems.NO_OCCUPIED_DOOR.code)
-    offline = problem(problems.DEVICE_OFFLINE.code)
+    normal = (problems.DOOR_NOT_FREE.code, problems.DUPLICATE_SESSION.code, problems.NO_OCCUPIED_DOOR.code)
+    for code in normal:
+        caplog.clear()
+        with caplog.at_level("INFO"):
+            scheduler._report_problem(problem(code), "dev-1", 3, "2530110052", FEATURE_AUTO_SETTLE)
+        assert [record.levelname for record in caplog.records] == ["INFO"], code
 
-    assert (wait.problem.code, duplicate.problem.code) == (
-        problems.DOOR_NOT_FREE.code,
-        problems.DUPLICATE_SESSION.code,
-    )
-    assert gone.problem.code == problems.NO_OCCUPIED_DOOR.code
-    assert offline.problem.code not in scheduler._WAIT_PROBLEMS | scheduler._DONE_PROBLEMS
-    # 前三个走 INFO 分支、最后一个走 WARNING——判据就是那两个集合
-    for expected in (wait, duplicate, gone):
-        assert expected.problem.code in scheduler._WAIT_PROBLEMS | scheduler._DONE_PROBLEMS
-    assert offline.problem.code not in scheduler._WAIT_PROBLEMS | scheduler._DONE_PROBLEMS
+    caplog.clear()
+    with caplog.at_level("INFO"):
+        scheduler._report_problem(problem(problems.DEVICE_OFFLINE.code), "dev-1", 3, "2530110052", FEATURE_AUTO_SETTLE)
+    assert [record.levelname for record in caplog.records] == ["WARNING"]
 
 
 def test_assign_is_sent_exactly_once(monkeypatch: pytest.MonkeyPatch) -> None:
