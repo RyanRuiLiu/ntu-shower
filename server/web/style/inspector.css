@@ -774,12 +774,6 @@
   font: 10px var(--font-mono);
 }
 
-.ctx-menu .divider {
-  height: 1px;
-  margin: 4px 0;
-  background: var(--border);
-}
-
 /* ── 滚动条：旧版这里比别处细 ───────────────────────────── */
 
 .tree-content::-webkit-scrollbar,
