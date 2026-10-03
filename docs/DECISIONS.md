@@ -202,12 +202,12 @@
   自然补齐；`target` 支持逗号分隔的定向列表。调试期 `force` 发布无视版本号，只更新指定设备。
 - **安装状态在服务端跟踪**：设备 `link.hello` 里的 `version_code` 即安装确认，
   `ota_release_install` 表记录到该版本为止；已确认的 `force` 发布不再推，重推同一版本需先调
-  `POST /ops/releases/{version}/rearm/{device_id}`，`DELETE /ops/releases/{version}` 用于
+  `POST /api/v1/ota/releases/{version}/rearm/{device_id}`，`DELETE /api/v1/ota/releases/{version}` 用于
   紧急下架。缺少这层跟踪会让 force 发布与设备重启构成无限重装循环——真机发生过一次。
 - **发布按个数保留（`ota_release_keep`，默认 5）**：新版登记时裁最旧的，注册行与 APK
   文件一起删。留的是回滚点而不是历史档案——盘上的旧 APK 只有体积没有意义；N=1 会让
   "新版有问题退回上一版"无处可退。
-- **删除接口连文件一起删**：`DELETE /ops/releases` 只删注册行会让 APK 变成无人认领的
+- **删除接口连文件一起删**：`DELETE /api/v1/ota/releases` 只删注册行会让 APK 变成无人认领的
   孤儿文件，"下架"的语义必须覆盖到盘上那份。
 
 ## 可观测性
@@ -289,7 +289,7 @@
   回来验，未变即 304。没有它时只有 `Last-Modified`，浏览器会走启发式缓存，改完样式刷新看到的
   还是旧的那一份。
 - **真实 ADB 经 443 网关透传，零新端口、零新进程**：管理面
-  `POST /ops/devices/{id}/bridge/open` 下发含一次性 nonce 的 `bridge.open`，设备以 root 打开
+  `POST /api/v1/devices/{device_id}/bridge/open` 下发含一次性 nonce 的 `bridge.open`，设备以 root 打开
   adbd 并另开一条二进制 WSS 与本地 adbd 互泵字节流；服务端 nonce 配对后绑 `127.0.0.1:<port>`
   （15655 起，避开旧系统的 15555），开发者经 SSH 转发后 `adb connect`。保留真实 adb 的完整
   能力（shell/install/dumpsys），不用轻量替代。
