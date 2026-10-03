@@ -179,7 +179,7 @@ keystore 的可用性验证：从备份副本执行 `gradlew assembleRelease` �
 
 ### OTA 反复下载同一个版本（已发生过一次）
 
-**症状**：日志每数秒一轮 `WebSocket accepted → GET /ota/manifest → GET /ota/download/<版本>`，
+**症状**：日志每数秒一轮 `WebSocket accepted → GET /ota/manifest → GET /api/v1/ota/releases/<版本>/download`，
 设备被反复重装。
 
 **根因**：`force` 发布 + `ota_release_install` 表无该设备的安装确认 →

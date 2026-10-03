@@ -73,7 +73,7 @@ def delete_identity(identity: str) -> Response:
     """撤销授权；该标识立即失去所有能力。
 
     成功即 204、无响应体：撤销没有可供回报的领域状态。与发布下架（DELETE
-    /ota/releases/{version}，返回 ReleaseRemoved）不同——那边要回报注册行与
+    /api/v1/ota/releases/{version}，返回 ReleaseRemoved）不同——那边要回报注册行与
     APK 文件是否真的删了。
     """
     service.revoke_identity(identity)
