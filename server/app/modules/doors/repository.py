@@ -448,15 +448,6 @@ def add_derived_segment(
     return int(cursor.lastrowid or 0)
 
 
-def mark_segment_unclosed(segment_id: int) -> None:
-    """把仍在出水的段标成"长度不可知"。
-
-    数据到此为止（重放到历史截止）时它还没关阀——那一段水有多长，没有任何一帧能证明，
-    所以长度留 0、来源标 `unclosed`，不让"到现在为止"冒充它。
-    """
-    write("UPDATE usage_segment SET source = 'unclosed' WHERE id = ?", (segment_id,))
-
-
 def segments_of_session(session_id: int) -> list[Row]:
     """一个会话的全部段，按开阀先后。"""
     return (
