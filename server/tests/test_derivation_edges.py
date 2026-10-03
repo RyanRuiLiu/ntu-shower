@@ -27,7 +27,9 @@ T3 = "2026-09-30T12:03:00.000Z"
 T4 = "2026-09-30T12:04:00.000Z"
 T5 = "2026-09-30T12:05:00.000Z"
 IN = "2026-09-30T12:00:00.000Z"  # 任意合法时刻，只用来表达"正在出水"
-CLOSE = "2026-09-30T12:30:00.000Z"
+#: 关阀时刻。与 [IN] 相距 100 秒——设备结算本段时写下的 `bath_time_s` 就是这两个读数之差
+#: （`bathTime += |inTime − now|`），所以用它造数据时段长才自洽。
+CLOSE = "2026-09-30T12:01:40.000Z"
 
 
 def _door(door_no: int = 1, **overrides: object) -> dict[str, Any]:
@@ -57,6 +59,15 @@ def _plus(rfc3339: str, seconds: int) -> str:
     shifted = shift_rfc3339(rfc3339, seconds)
     assert shifted is not None
     return shifted
+
+
+def _segments_of(session_id: int) -> list[Any]:
+    """某个会话的全部段，按开阀先后。"""
+    return (
+        db.get_conn()
+        .execute("SELECT * FROM usage_segment WHERE session_id = ? ORDER BY opened_at, id", (session_id,))
+        .fetchall()
+    )
 
 
 def _sessions(device_id: str) -> list[Any]:
@@ -102,7 +113,11 @@ def test_state_derivation(fresh_db: str, door: dict[str, Any], expected: str) ->
 
 
 def test_full_session_four_moments(fresh_db: str) -> None:
-    """一次完整使用：刷卡 → 开阀 → 暂停 → 出门，四个时刻各落在正确的帧上。"""
+    """一次完整使用：刷卡 → 开阀 → 暂停 → 出门。
+
+    起点与终点在会话表上，开阀时刻与那一段的长度在段表上——两者粒度不同，所以不再挤在
+    同一行。
+    """
     device_id = "dev-full-session"
     service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C")], "2026-09-30T12:00:00.000Z"))
     service.process_snapshot(
@@ -111,7 +126,7 @@ def test_full_session_four_moments(fresh_db: str) -> None:
     service.process_snapshot(
         device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], "2026-09-30T12:01:30.000Z")
     )
-    # 设备在暂停那一刻结算本段：30 → 130 正好 100 秒
+    # 设备在暂停那一刻结算本段：12:00:30 → 12:01:30 正好 100 秒
     service.process_snapshot(
         device_id,
         _frame([_door(acc_no="A", cert_no="C", bath_time_s=100, close_time=CLOSE)], "2026-09-30T12:02:10.000Z"),
@@ -122,11 +137,16 @@ def test_full_session_four_moments(fresh_db: str) -> None:
     assert len(sessions) == 1
     row = sessions[0]
     assert row["assigned_at"] == "2026-09-30T12:00:00.000Z"
-    assert row["opened_at"] == "2026-09-30T12:00:30.000Z"
     assert row["last_seen_at"] == "2026-09-30T12:02:10.000Z", "停在最后一次确认占用，不是结束帧"
     assert row["ended_at"] == "2026-09-30T12:02:30.000Z"
-    assert row["flow_s"] == 100
     assert row["cert_no"] == "C"
+    assert row["flow_s"] == 100
+
+    segments = _segments_of(row["id"])
+    assert len(segments) == 1
+    assert segments[0]["opened_at"] == "2026-09-30T12:00:30.000Z"
+    assert segments[0]["flow_s"] == 100
+    assert segments[0]["source"] == "measured"
 
 
 def test_leaving_while_bathing_keeps_last_segment(fresh_db: str) -> None:
@@ -140,30 +160,19 @@ def test_leaving_while_bathing_keeps_last_segment(fresh_db: str) -> None:
 
     row = _sessions(device_id)[0]
     assert row["flow_s"] == 200
-    assert row["opened_at"] == T0
-
-
-def test_device_reported_bath_time_wins_when_larger(fresh_db: str) -> None:
-    """设备累计值更大且跨度容得下时以它为准——我们的观测可能漏帧。"""
-    device_id = "dev-device-wins"
-    service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], T0))
-    service.process_snapshot(
-        device_id,
-        _frame([_door(acc_no="A", cert_no="C", bath_time_s=500, close_time=CLOSE)], "2026-09-30T12:10:00.000Z"),
-    )
-
-    row = _sessions(device_id)[0]
-    assert row["flow_s"] == 500
+    segments = _segments_of(row["id"])
+    assert segments[0]["opened_at"] == T0
+    assert segments[0]["source"] == "observed", "没有 close_time，只能用观测差"
 
 
 def test_assign_then_settle_without_water(fresh_db: str) -> None:
-    """入门后没开水就结算：会话存在，但从未观测到出水。"""
+    """入门后没开水就结算：会话存在，但从未观测到出水——一段都没有。"""
     device_id = "dev-no-water"
     service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C")], T0))
     service.process_snapshot(device_id, _frame([_door()], "2026-09-30T12:00:20.000Z"))
 
     row = _sessions(device_id)[0]
-    assert row["opened_at"] is None
+    assert _segments_of(row["id"]) == []
     assert row["flow_s"] == 0
     assert row["ended_at"] == "2026-09-30T12:00:20.000Z"
 
@@ -192,21 +201,25 @@ def test_two_sessions_are_separate(fresh_db: str) -> None:
     assert [row["flow_s"] for row in rows] == [60, 60]
 
 
-def test_handover_from_paused_keeps_the_accumulated_water(fresh_db: str) -> None:
-    """前一个人暂停中、后一个人刷卡直接覆盖了他的字段（实测 10 次是这一形态）。
+def test_handover_leaves_the_previous_accumulation_unowned(fresh_db: str) -> None:
+    """前一个人停在暂停态、后人刷卡覆盖（实测 10 次换人都是这一形态）。
 
-    设备累计的出水归**前一个人**——那是他用的水。
+    前人那一场我们只看见**一帧**（暂停态、没有 `in_time`），凭它推不出段——设备累计的
+    200 秒没有起止。所以那 200 秒**没有归属**：它只体现在 `device_flow_s` 里。硬把它塞进
+    某一段，等于替前人编出那一段的起止。
     """
     device_id = "dev-handover-paused"
     service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C", bath_time_s=200, close_time=CLOSE)], T0))
-    service.process_snapshot(device_id, _frame([_door(acc_no="B", cert_no="D")], T1))
+    # 设备不清零累计值：它是"这台设备出过的水"，换人不重置（后人的帧里仍是 200）
+    service.process_snapshot(device_id, _frame([_door(acc_no="B", cert_no="D", bath_time_s=200)], T1))
 
-    rows = _sessions(device_id)
-    assert len(rows) == 2
-    assert rows[0]["cert_no"] == "C"
-    assert rows[0]["flow_s"] == 200, "前一个人的累计没有丢"
-    assert rows[1]["cert_no"] == "D"
-    assert rows[1]["flow_s"] == 0, "新账从零起算"
+    first, second = _sessions(device_id)
+    assert first["cert_no"] == "C"
+    assert first["flow_s"] == 0, "只看见一帧暂停态，造不出段"
+    assert second["cert_no"] == "D"
+    assert second["flow_s"] == 0, "后人还没出过水"
+    assert second["device_flow_s"] == 200, "设备累计里留着前人那一场，但它没有归属"
+    assert second["segments_complete"] == 0, "两边对不上——这正是它要表达的事"
 
 
 def test_same_occupant_repeated_frames_do_not_split(fresh_db: str) -> None:
@@ -255,32 +268,40 @@ def test_gap_one_second_over_the_limit_breaks_the_segment(fresh_db: str) -> None
 def test_offline_gap_does_not_inflate_flow(fresh_db: str) -> None:
     """离线 8 小时后仍在出水：那 8 小时不可知，一秒都不计。
 
-    旧实现用"当前时刻减 in_time"，实测出现过 24 小时的脏值，而且只增不减，一旦落库
-    就永久污染。
+    缺口远超一次占用的物理上限，所以前后是**两场账**：前一场在我们最后看见它的时刻收尾，
+    本帧另起一场。并成一场的话它永远不结束、`flow_s` 还会把 8 小时算进去——旧实现用
+    "当前时刻减 in_time"，实测出现过 24 小时的脏值，而且只增不减。
     """
     device_id = "dev-offline-gap"
     service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], T0))
     service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], _plus(T0, 100)))
     service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], _plus(T0, 8 * 3600)))
 
-    row = _sessions(device_id)[0]
-    assert row["flow_s"] == 100, "盲区那段不计"
-    assert row["last_seen_at"] == _plus(T0, 8 * 3600), "但这一帧确实证明它还占着"
+    rows = _sessions(device_id)
+    assert len(rows) == 2
+    assert rows[0]["flow_s"] == 100, "盲区那段不计，只剩我们看见的那 100 秒"
+    assert rows[0]["ended_at"] == _plus(T0, 100), "在我们最后看见它的时刻收尾"
+    assert rows[0]["observed_span"] == "gap"
+    assert rows[1]["assigned_at"] == _plus(T0, 8 * 3600), "新的一场只能从我们看见它的那一刻起算"
 
 
 def test_session_crossing_gap_keeps_last_seen_as_the_bound(fresh_db: str) -> None:
-    """跨夜会话：设备关机前自动结算，我们次日才看到 free。
+    """跨夜：次日上午才再看见这个门，中间十几个小时是空的。
 
-    `last_seen_at` 是可信用作结束下界的那一个，`ended_at` 只是"下次见到它的时刻"。
+    `last_seen_at` 是可信用作结束下界的那一个，`ended_at` 只是"下次见到它的时刻"——缺口
+    超过一次占用的上限时，两者不再是同一件事。
     """
     device_id = "dev-cross-night"
     service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C")], T0))
     service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C")], _plus(T0, 3600)))
     service.process_snapshot(device_id, _frame([_door()], _plus(T0, 12 * 3600)))
 
-    row = _sessions(device_id)[0]
-    assert row["last_seen_at"] == _plus(T0, 3600)
-    assert row["ended_at"] == _plus(T0, 12 * 3600)
+    rows = _sessions(device_id)
+    assert len(rows) == 2, "缺口 11 小时，前后是两场账"
+    assert rows[0]["last_seen_at"] == T0
+    assert rows[0]["ended_at"] == T0, "两帧隔了一小时，第一场在最初那一帧就收尾了"
+    assert rows[0]["observed_span"] == "gap"
+    assert rows[1]["assigned_at"] == _plus(T0, 3600)
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -371,8 +392,13 @@ def test_first_frame_already_occupied_marks_the_observation_bound(fresh_db: str)
     row = _sessions(device_id)[0]
     assert row["assigned_at"] == T0, "观测下界：我们确知它此刻占着，仅此而已"
     assert row["assigned_source"] == service.SESSION_ASSIGNED_OBSERVED, "这一帧没带 open_time，平移不了"
-    assert row["opened_at"] == T0, "无偏差可平移，开阀时刻退回首次观测到出水的那一帧"
-    assert row["flow_s"] == 180, "但已经出的水一秒不少"
+    assert row["flow_s"] == 0, "刚开阀，本段还没有长度"
+    assert row["device_flow_s"] == 180, "设备说它出过 180 秒水，但那 180 秒我们看不见起止"
+
+    segments = _segments_of(row["id"])
+    assert segments[0]["opened_at"] == T0, "无偏差可平移，段起点退回首次观测到出水的那一帧"
+    assert segments[0]["closed_at"] is None, "还没关阀，长度等它关阀那一刻才定"
+    assert segments[0]["source"] == "", "在途段的来源还没有定论"
 
 
 def test_takeover_with_open_time_infers_the_real_start(fresh_db: str) -> None:
@@ -405,7 +431,11 @@ def test_takeover_with_open_time_infers_the_real_start(fresh_db: str) -> None:
     row = _sessions(device_id)[0]
     assert row["assigned_source"] == service.SESSION_ASSIGNED_INFERRED
     assert row["assigned_at"] == "2026-09-30T11:58:00.000Z", "设备说的 11:57:30，加 30 秒"
-    assert row["flow_s"] == 690, "设备累计 600，加上本段从 11:58:30 到 12:00:00 那 90 秒"
+    assert row["flow_s"] == 90, "本段：设备说的 11:58:30 到我们看见它的 12:00:00"
+    assert row["device_flow_s"] == 600, "设备那 600 秒是之前几段结算的，我们不知道它们的起止"
+
+    segments = _segments_of(row["id"])
+    assert segments[0]["opened_at"] == "2026-09-30T11:58:30.000Z", "开阀时刻由 in_time 平移而来"
 
 
 def test_inferred_start_makes_the_span_cover_the_duration(fresh_db: str) -> None:
@@ -436,25 +466,20 @@ def test_inferred_start_makes_the_span_cover_the_duration(fresh_db: str) -> None
     service.process_snapshot(device_id, _frame([_door()], "2026-09-30T12:05:00.000Z"))
 
     row = _sessions(device_id)[0]
-    assert row["assigned_at"] == "2026-09-30T11:45:30.000Z"
-    assert row["flow_s"] == 1170, "设备累计 300 + 本段 570 + 最后那 300"
+    assert row["assigned_at"] == "2026-09-30T11:45:30.000Z", "刷卡平移"
+    assert row["flow_s"] == 870, "本段：设备说的 11:50:30 到关阀那一刻"
     span = 1170  # 11:45:30 → 12:05:00
     assert row["flow_s"] <= span, "时长落在跨度之内——起点是事实，不再是下界"
 
 
-def test_takeover_session_has_duration_greater_than_span(fresh_db: str) -> None:
-    """接手那次的时长会**大于**跨度，而且这是对的。
+def test_takeover_session_duration_stays_within_its_span(fresh_db: str) -> None:
+    """接手那一次（这一帧没带 `open_time`）时长仍落在跨度之内。
 
-    起点只能落到本帧（这一帧没带 `open_time`，无从平移），而 `flow_s` 里含着我们接手
-    之前那段已结算的出水——两者于是不再满足 `flow_s ≤ ended_at − assigned_at`。实测
-    100 天里有 5 条如此，其中 3 条正是"数据起点即占用"。
+    起点只能落到本帧，它是**观测下界**；而时长只累加我们看见的那一段——两边都从"我们看见
+    它的那一刻"起算，所以 `flow_s ≤ ended_at − assigned_at` 恒成立。
 
-    **不该去"修"它**：拿设备那口钟的差值硬凑会把真实的出水抹掉。要做的只是认出来——
-    判据就是这条不等式，据此把这几条单列：时长类指标用它们的 `flow_s`（那个是对的），
-    跨度类指标则不能。
-
-    设备带 `open_time` 时起点能平移（见 `_assigned_at`），那时起点就是事实而非下界，
-    这类情形自然消失——本用例走的是不带 `open_time` 的那条退路。
+    设备累计的那 600 秒不在里面：我们不知道它的起止，只在 `device_flow_s` 里留痕。旧实现
+    把那 600 秒并进 `flow_s`，于是时长大于跨度；现在两者各归各位。
     """
     device_id = "dev-takeover-span"
     service.process_snapshot(
@@ -465,8 +490,10 @@ def test_takeover_session_has_duration_greater_than_span(fresh_db: str) -> None:
 
     row = _sessions(device_id)[0]
     span = 300  # 12:00:00 → 12:05:00，我们只看了这五分钟
-    assert row["flow_s"] == 900, "设备累计的 600，加上上一帧到现在那 300 秒"
-    assert row["flow_s"] > span, "所以时长大于跨度——起点只是下界"
+    assert row["flow_s"] == 300, "我们看见它出水的这五分钟"
+    assert row["flow_s"] <= span
+    assert row["device_flow_s"] == 600, "设备说 600，多出来的那 300 秒没有起止"
+    assert row["segments_complete"] == 0
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -478,7 +505,7 @@ def test_takeover_while_paused_recovers_the_open_time(fresh_db: str) -> None:
     """接手时人已经洗到一半（暂停态）：从关阀时刻与累计秒数里把开阀时刻拿回来。
 
     这是冷启动时唯一还能拿回它的途径——出水那一帧我们没看见，而 `in_time` 已经被设备
-    清空（见 service 的 [_opened_at]）。两个量都来自同一口钟，绝对值不可信，但"关阀
+    清空（见 service 的 [_derive_segment]）。两个量都来自同一口钟，绝对值不可信，但"关阀
     时刻"经偏差平移到服务端轴之后，"累计秒数"是纯时长，两者相减就是本段起点。
     """
     device_id = "dev-takeover-paused"
@@ -502,8 +529,12 @@ def test_takeover_while_paused_recovers_the_open_time(fresh_db: str) -> None:
 
     row = _sessions(device_id)[0]
     assert row["assigned_at"] == "2026-09-30T11:59:00.000Z", "刷卡平移"
-    assert row["opened_at"] == "2026-09-30T12:00:00.000Z", "关阀 12:02 减 120 秒"
     assert row["flow_s"] == 120
+
+    segments = _segments_of(row["id"])
+    assert segments[0]["opened_at"] == "2026-09-30T12:00:00.000Z", "关阀 12:02 往前数 120 秒"
+    assert segments[0]["source"] == "derived", "这一段是我们从设备痕迹里推回来的"
+    assert row["segments_complete"] == 0, "推出来的长度就是设备那个值，等式必然成立"
 
 
 def test_opened_at_comes_from_the_shifted_in_time(fresh_db: str) -> None:
@@ -531,9 +562,10 @@ def test_opened_at_comes_from_the_shifted_in_time(fresh_db: str) -> None:
     )
 
     row = _sessions(device_id)[0]
-    assert row["opened_at"] == "2026-09-30T12:01:00.000Z", "设备 12:00 平移到服务端 12:01"
-    assert row["opened_at"] != "2026-09-30T12:10:00.000Z", "不是我们看见它的那一帧"
     assert row["flow_s"] == 540
+    segments = _segments_of(row["id"])
+    assert segments[0]["opened_at"] == "2026-09-30T12:01:00.000Z", "设备 12:00 平移到服务端 12:01"
+    assert segments[0]["opened_at"] != "2026-09-30T12:10:00.000Z", "不是我们看见它的那一帧"
 
 
 def test_out_of_range_open_time_is_not_adopted(fresh_db: str) -> None:
@@ -563,15 +595,16 @@ def test_out_of_range_open_time_is_not_adopted(fresh_db: str) -> None:
 
     row = _sessions(device_id)[0]
     assert row["assigned_at"] == "2026-09-30T11:59:00.000Z"
-    assert row["opened_at"] is None, "12:02 减 3600 秒得到 11:02，早于进门"
-    assert row["flow_s"] == 3600
+    assert _segments_of(row["id"]) == [], "12:02 往前数 3600 秒得到 11:02，早于进门，丢掉"
+    assert row["flow_s"] == 0
+    assert row["device_flow_s"] == 3600, "设备的话留着，但它凑不出一段"
 
 
 def test_takeover_does_not_inherit_the_previous_open_time(fresh_db: str) -> None:
-    """换人时，新会话的开阀时刻不得沿用前人的段起点。
+    """换人时，新会话的段起点不得沿用前人的。
 
-    段起点仍要延续给 `flow_s`（那段水从上一帧就开始了），但开阀时刻是"这个人"的：
-    新人此刻才进门，他名下的最早值只能是这一刻。两者在这一处必须分开。
+    新人此刻才进门，他名下的最早值只能是这一刻。前人那一段水在换人那一刻就收尾了——
+    它归旧账，不归新账。
     """
     device_id = "dev-takeover-opened"
     service.process_snapshot(
@@ -587,9 +620,11 @@ def test_takeover_does_not_inherit_the_previous_open_time(fresh_db: str) -> None
     assert first["cert_no"] == "甲"
     assert second["cert_no"] == "乙"
     assert second["assigned_at"] == "2026-09-30T12:02:00.000Z"
-    assert second["opened_at"] == "2026-09-30T12:02:00.000Z", "新人名下的开阀时刻不得早于他进门"
     assert first["assigned_source"] == service.SESSION_ASSIGNED_OBSERVED, "这一帧没带偏差，起点是观测下界"
     assert first["ended_at"] == "2026-09-30T12:02:00.000Z", "旧账在换人那一刻结清，结束时刻是准的"
+
+    segments = _segments_of(second["id"])
+    assert segments[0]["opened_at"] == "2026-09-30T12:02:00.000Z", "新人名下的段起点不得早于他进门"
 
 
 def test_start_later_than_the_frame_is_not_adopted(fresh_db: str) -> None:
@@ -661,4 +696,6 @@ def test_start_far_from_in_time_is_not_adopted(fresh_db: str) -> None:
     row = _sessions(device_id)[0]
     assert row["assigned_at"] == "2026-09-30T12:05:00.000Z", "退回本帧，而不是算出 11:01"
     assert row["assigned_source"] == service.SESSION_ASSIGNED_OBSERVED
-    assert row["opened_at"] == "2026-09-30T12:05:00.000Z", "in_time 是新钟写的，平移回来是对的"
+
+    segments = _segments_of(row["id"])
+    assert segments[0]["opened_at"] == "2026-09-30T12:05:00.000Z", "in_time 是新钟写的，平移回来是对的"

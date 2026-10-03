@@ -14,7 +14,7 @@ NTU 浴室系统二代：寄生代理设备端（Android 4.4.4 老中控）+ 单
 | `android/` | 设备端 APK（Kotlin，minSdk/targetSdk 19）：`core/` 基础设施 · `transport/` 网关客户端与协议编解码 · `features/` doors 采集 / automation 自动化 / remote 远程调试 / selfmanage 自更新 · `service/` 常驻服务 |
 | `server/` | FastAPI 模块化单体：`gateway/` 设备 WS 网关 · `modules/` access/sessions/doors/devices/config/ota/bridge/audit 各领域 · `core/` 协议/时钟/审计/错误/事件总线 · `web/` 网页端（零构建静态文件） |
 | `protocol/` | 协议单一事实源：全部消息类型的 JSON Schema（draft 2020-12），CI 样例校验 |
-| `docs/` | `ARCHITECTURE` 架构 · `DECISIONS` 决策索引 · `RUNBOOK` 运维 · `ROADMAP` 方向 |
+| `docs/` | `ARCHITECTURE` 架构 · `DECISIONS` 决策 · `RUNBOOK` 运维 |
 | `deploy/` | 部署资产唯一事实来源：nginx 站点配置 + systemd 单元 + 备份脚本 |
 | `config/keystore/` | APK 签名密钥（gitignored，**全系统唯一长期绑定物件**，须异地备份） |
 

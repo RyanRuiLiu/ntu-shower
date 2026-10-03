@@ -49,14 +49,17 @@ ASSIGNABLE_STATES = frozenset({DoorState.FREE, DoorState.SELECTED})
 
 
 class DoorView(TypedDict):
-    """一个喷头的现态：door_live 全列 + 所属设备 + 上次使用。
+    """一个喷头的现态：door_live 全列 + 上次使用。
 
-    device_name 可空：LEFT JOIN 无匹配时为 NULL，保持 NULL 而不是折成 False，
-    "设备记录不存在"与"设备离线"不是一回事。device_online 恒有值：来自内存
-    连接表，由 doors.service.list_doors 填入。
+    只回答**门域**的问题（这扇门什么状态、上次谁用的）；设备域的事实（在不在线、
+    叫什么、能对它做什么）由设备资源回答：GET /devices 与 device.update 推送。
+    同一事实只出现在一个接口里，客户端不用调和两份数据源。
 
-    last_used_* 只在喷头没有进行中的会话时才有展示意义；判据是开过阀
-    （opened_at 非空），分配后直接结算那种从没出过水的不算。
+    last_used_* 只在喷头没有进行中的会话时才有展示意义；判据是**有没有过段**——"分配后
+    直接结算"那种从没出过水的会话说不出任何一段。
+
+    **三个时间字段都在服务端轴上**。设备报的原话只留在原始帧里：同一个字段名在两处放两条
+    轴的值，读的人分不出来，而"形状相同、含义差一个偏差"比"没有值"危险得多。
     """
 
     device_id: str
@@ -65,14 +68,21 @@ class DoorView(TypedDict):
     card_no: int
     cert_no: str
     acc_no: str
+
     open_time: str
+    """分配时刻（服务端轴）。空闲时为空串。"""
+
     in_time: str
+    """当前这一段的开阀时刻（服务端轴）。只有正在出水时有值。"""
+
     close_time: str
+    """当前这一段的关阀时刻（服务端轴）。只有暂停时有值。"""
+
     bath_time_s: int
+    """设备累计的出水秒数。它是**时长不是时刻**，不在任何一条时间轴上。"""
+
     status_raw: int
     reported_at: str
-    device_online: bool
-    device_name: str | None
 
     last_used_at: str
     """上次开阀时刻（RFC 3339）。从未被真正使用过时为空串。"""

@@ -57,9 +57,16 @@ class DoorSnapshotSender(context: Context) {
      * 不出发生过这件事。
      */
     fun captureAndEnqueue(gateway: GatewayClient, source: String) {
+        // 两个读数在同一瞬间取，它们分工不同：
+        // - capturedAt 是这一帧的**权威时刻**，由单调钟加服务端锚点算出，拨钟影响不到它；
+        // - deviceClock 是设备墙钟**此刻的读数**，服务端拿它与 capturedAt 相减得到偏差，
+        //   再用那个偏差把库里的设备轴时刻平移过来。
+        // 差一个调用栈的延迟就会让偏差估计带上那个延迟，而这里的精度单位是毫秒。
+        //
         // 时刻取在读库之前：采到的内容是那条 SELECT 建立读视图那一刻的数据库，读完
         // 再取会把读的耗时算进去（真机实测几百毫秒），而这是个恒定偏晚的系统偏差。
         val capturedAt = ServerClock.nowRfc3339()
+        val deviceClock = Clock.nowRfc3339()
         val doors = DoorSnapshotReader.readAll()
         val hash = doors.map { it.fingerprint() }.hashCode()
         if (hash == lastHash) return
@@ -72,6 +79,7 @@ class DoorSnapshotSender(context: Context) {
         if (capturedAt != null) {
             payload.put("captured_at", capturedAt)
         }
+        payload.put("device_clock", deviceClock)
         val rowId = db.insertWithOnConflict(
             AppConfig.OUTBOX_TABLE,
             null,

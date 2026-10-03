@@ -13,7 +13,6 @@ from pydantic import BaseModel, Field
 from app.core.connections import manager
 from app.core.logging import log_event
 from app.core.problems import INVALID_CONFIG, ApiProblemError
-from app.core.protocol import JsonObject
 from app.modules.access.dependencies import require_admin
 from app.modules.devices.dependencies import require_trusted_online_device
 from app.modules.sessions import service as sessions_service
@@ -21,6 +20,7 @@ from app.modules.sessions import service as sessions_service
 from . import store
 from .schemas import (
     ConfigPushNotice,
+    ConfigSpecCatalog,
     ConfigValues,
     DeviceConfigRemovalReport,
     DeviceConfigUpdateReport,
@@ -47,7 +47,7 @@ def _validated(values: ConfigValues) -> ConfigValues:
 
 
 @admin_router.get("/config/spec")
-def get_config_spec() -> JsonObject:
+def get_config_spec() -> ConfigSpecCatalog:
     """配置登记表：每个键的类型、范围、默认值、归属、分组与说明。
 
     客户端据此渲染控件（布尔用开关、整数输入框带上下限），不硬编码第二份键表。
