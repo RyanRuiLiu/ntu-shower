@@ -172,7 +172,7 @@ def device_effective(device_id: str) -> ConfigValues:
 
 
 def describe() -> list[ConfigSpecView]:
-    """配置登记表的外部描述，供 GET /ops/config/spec（客户端据此渲染控件）。"""
+    """配置登记表的外部描述，供 GET /api/v1/config/spec（客户端据此渲染控件）。"""
     return [
         {
             "key": spec.key,

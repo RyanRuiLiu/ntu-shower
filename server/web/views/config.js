@@ -20,7 +20,7 @@
  * bool → 勾选框；int → 数字输入（带上下限与单位）；text → 文本框；
  * text_map（如自动结算名单）→ "键=值" 行编辑器。
  *
- * 表单由服务端登记表生成（`GET /ops/config/spec`），键名/类型/范围/分组不在
+ * 表单由服务端登记表生成（`GET /api/v1/config/spec`），键名/类型/范围/分组不在
  * 前端另抄一份。
  */
 import { api } from '../core/api.js'
