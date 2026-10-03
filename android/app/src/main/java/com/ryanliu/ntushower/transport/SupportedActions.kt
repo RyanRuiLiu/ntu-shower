@@ -28,8 +28,10 @@ object SupportedActions {
 
     // ── 设备自身 ──
     const val DEVICE_EXEC = "device.exec"
-    const val DEVICE_RESTART = "device.restart"
-    const val DEVICE_UNINSTALL = "device.uninstall"
+    const val DEVICE_REBOOT = "device.reboot"
+
+    // ── app ──
+    const val APP_RESTART = "app.restart"
 
     // ── bath ──
     const val BATH_RESTART = "bath.restart"
@@ -55,8 +57,8 @@ object SupportedActions {
         CAMERA_CAPTURE,
         SCREEN_CAPTURE,
         DEVICE_EXEC,
-        DEVICE_RESTART,
-        DEVICE_UNINSTALL,
+        DEVICE_REBOOT,
+        APP_RESTART,
         BATH_RESTART,
         CLOCK_SET,
         BRIDGE_OPEN,

@@ -14,8 +14,9 @@
  * `mount` 在切入时调用，`unmount` 负责停掉自己起的轮询与监听。
  */
 import { api, getIdentity, hasIdentity, setIdentity } from './core/api.js'
-import { fmtDateTime, fmtDuration, fmtServerTimeNow, fmtUptime } from './core/clock.js'
+import { deviceNowMs, fmtDateTime, fmtDuration, fmtServerTimeNow, fmtSkew, fmtUptime } from './core/clock.js'
 import { EVENT_TYPES } from './core/contract.js'
+import { promptClockSet, restartBathApp } from './core/device-actions.js'
 import { $, esc, listen, PLACEHOLDER } from './core/dom.js'
 import { problemText } from './core/outcome.js'
 import { toast } from './core/toast.js'
@@ -148,6 +149,10 @@ function renderDevicePicker() {
  * 顺序即重要程度：先认身份（名称、ID），再看它能不能收命令（在线、信任、跑了多久），
  * 最后是排障要拿去搜日志的那几项（版本、系统、能力、最后上报、来源 IP）。
  *
+ * 「设备时间」紧挨着「已运行」：那两行是面板里唯一会自己走的两个值，也都是**设备那口钟**
+ * 的事。设备时间带上它与服务端的偏差——派生的时刻全靠那个偏差从设备轴平移到服务端轴，
+ * 偏差偏了，网页上所有时刻就都偏了。
+ *
  * 面板里的每一行都会渲染，缺值给占位符——不按有没有值增减行数，行数忽多忽少会让人
  * 分不清"这一项没有了"与"这一项没值"。
  */
@@ -168,24 +173,47 @@ function renderDeviceInfo() {
         // 空数组是"设备未声明能力集"（升级前的旧版本设备），不是"没有能力"，措辞要分开
         ['能力位', caps ? (caps.length > 0 ? `${caps.length} 项` : '未声明') : PLACEHOLDER],
         ['已运行', diag ? fmtUptime(diag.booted_at) : PLACEHOLDER],
+        ['设备时间', diag ? deviceTimeText(diag) : PLACEHOLDER],
         ['最后上报', diag ? fmtDateTime(diag.last_seen_at) : PLACEHOLDER],
         ['来源 IP', diag ? diag.last_ip || PLACEHOLDER : PLACEHOLDER],
       ]
     : [['设备', '未选择']]
 
-  $('deviceInfo').innerHTML = rows
+  // 「已运行」与「设备时间」要每秒重算，标出来给 tickDeviceInfo 更新；其余几行是快照
+  const html = rows
     .map(([key, value]) => {
-      // "已运行"要每秒重算，标出来给 tickDeviceInfo 更新；其余几行是快照，渲染一次就够
       const live = key === '已运行' && diag ? ' data-uptime' : ''
+      const ticking = key === '设备时间' && diag ? ' data-device-time' : ''
       // 只报数量不够排障："命令被 device.unsupported_action 拒绝"时要对着设备声明逐项核对。
       // 动作名照原样显示，与审计页同一原则——翻译成中文反而搜不到
       const capsHtml =
         key === '能力位' && caps && caps.length > 0
           ? `<div class="info-caps">${caps.map((cap) => `<span class="badge">${esc(cap)}</span>`).join('')}</div>`
           : ''
-      return `<div class="kv"><span class="k">${esc(key)}</span><span class="v"${live}>${esc(value)}</span></div>${capsHtml}`
+      return `<div class="kv"><span class="k">${esc(key)}</span><span class="v"${live}${ticking}>${esc(value)}</span></div>${capsHtml}`
     })
     .join('')
+
+  // 功能行：与设备页同一套动作、同一份实现（core/device-actions.js）。这里只放两个「轻」的
+  // ——改时间与重启浴室 APP 不会掐断本页与服务端的连接；重启本程序/整机会，那类确认留在设备页。
+  const actions = summary
+    ? `<div class="btn-row info-actions">
+         <button type="button" class="btn btn-ghost btn-sm" data-act="clock-set">修改设备端时间</button>
+         <button type="button" class="btn btn-ghost btn-sm" data-act="bath-restart">重启浴室 App</button>
+       </div>`
+    : ''
+
+  $('deviceInfo').innerHTML = html + actions
+}
+
+/**
+ * 设备端墙钟此刻该显示什么：读数 + 括号里的偏差。
+ *
+ * 读数由**服务端此刻减去偏差**算得（见 [deviceNowMs]），而偏差取自 `/devices/runtime`
+ * 的 `clock_skew_s`——那是设备回 pong 时带上的墙钟算出来的真值，不是猜的。
+ */
+function deviceTimeText(diag) {
+  return `${fmtDateTime(deviceNowMs(diag.clock_skew_s))}（${fmtSkew(diag.clock_skew_s)}）`
 }
 
 /**
@@ -197,9 +225,29 @@ function renderDeviceInfo() {
 function tickDeviceInfo() {
   const panel = $('deviceInfo')
   if (panel.hidden) return
-  const cell = panel.querySelector('[data-uptime]')
   const diag = currentRuntime()
-  if (cell && diag) cell.textContent = fmtUptime(diag.booted_at)
+  const up = panel.querySelector('[data-uptime]')
+  if (up && diag) up.textContent = fmtUptime(diag.booted_at)
+  const clock = panel.querySelector('[data-device-time]')
+  if (clock && diag) clock.textContent = deviceTimeText(diag)
+}
+
+/**
+ * 面板功能行的点击分派。
+ *
+ * 用委托而不是给按钮逐个挂监听：面板每开一次就整体重渲染一次 innerHTML，逐个挂会留在
+ * 已经不在文档里的旧节点上，监听越积越多。
+ */
+function onDeviceInfoAction(event) {
+  const btn = event.target.closest('button[data-act]')
+  if (!btn || !store.deviceId) return
+  // 面板是浮层，没有放结果区的位置，结果报成 toast；'info' 那一档（"正在…"）不报，
+  // 否则每次操作都先弹一条再弹结果
+  const say = (text, kind) => {
+    if (kind !== 'info') toast(text)
+  }
+  if (btn.dataset.act === 'clock-set') promptClockSet(store.deviceId, say)
+  if (btn.dataset.act === 'bath-restart') restartBathApp(store.deviceId, say)
 }
 
 /** 开合设备信息面板。按钮的 `aria-expanded` 跟着走，读屏才知道它是收起的还是展开的。 */
@@ -249,6 +297,7 @@ function bindTopbar() {
   })
 
   listen($('deviceInfo'), 'click', (event) => event.stopPropagation())
+listen($('deviceInfo'), 'click', onDeviceInfoAction)
   listen(document, 'click', () => toggleDeviceInfo(false))
   listen(document, 'keydown', (event) => {
     if (event.key === 'Escape') toggleDeviceInfo(false)

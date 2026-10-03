@@ -36,11 +36,18 @@ SCREEN_CAPTURE = "screen.capture"
 DEVICE_EXEC = "device.exec"
 """执行：在设备上运行一条 root shell 命令，结果在 data.output 与 data.exit_code。"""
 
-DEVICE_RESTART = "device.restart"
-"""重启 agent 进程（不重启整机）。先回报结果再动作：命令会杀死本进程。"""
+DEVICE_REBOOT = "device.reboot"
+"""重启整机。设备重启后 agent 随之重来，会话与喷头现态由重连后的全貌帧重建。
 
-DEVICE_UNINSTALL = "device.uninstall"
-"""卸载设备上的 agent（退役或排障用）。同样先回报再动作。"""
+先回报再动作：与 [APP_RESTART] 同理，命令本身会掐断回报通路。
+"""
+
+# ── 本程序 ──
+# [APP_RESTART] 重启的是**我们这个程序**（agent 进程），不是设备也不是浴室 APP，
+# 所以对象是 app 而不是 device——`device.reboot` 才是整机重启，两者不能混用一个对象。
+
+APP_RESTART = "app.restart"
+"""重启 NTU Shower 进程（不重启整机，也不动浴室 APP）。先回报结果再动作：命令会杀死本进程。"""
 
 # ── 浴室 App ──
 # 强停与冷启动由 root shell 完成，即时执行。过程会中断进行中的会话，网页端有确认。
@@ -113,8 +120,8 @@ ALL_ACTIONS: tuple[str, ...] = (
     CAMERA_CAPTURE,
     SCREEN_CAPTURE,
     DEVICE_EXEC,
-    DEVICE_RESTART,
-    DEVICE_UNINSTALL,
+    DEVICE_REBOOT,
+    APP_RESTART,
     BATH_RESTART,
     CLOCK_SET,
     BRIDGE_OPEN,
@@ -138,7 +145,7 @@ CHANNEL_CAPTURE = "capture"
 """采集：拍照与截屏。与自动化并行，一条慢截图不会堵住操作序列。"""
 
 CHANNEL_MAINTENANCE = "maintenance"
-"""设备自身维护：执行命令、重启、卸载、开关调试桥。设备端即时执行，不进队列。"""
+"""设备自身维护：执行命令、重启本程序、重启整机、开关调试桥。设备端即时执行，不进队列。"""
 
 #: 动作 → 执行通道。每个动作恰好属于一个通道。
 ACTION_CHANNELS: dict[str, str] = {
@@ -152,8 +159,8 @@ ACTION_CHANNELS: dict[str, str] = {
     CAMERA_CAPTURE: CHANNEL_CAPTURE,
     SCREEN_CAPTURE: CHANNEL_CAPTURE,
     DEVICE_EXEC: CHANNEL_MAINTENANCE,
-    DEVICE_RESTART: CHANNEL_MAINTENANCE,
-    DEVICE_UNINSTALL: CHANNEL_MAINTENANCE,
+    DEVICE_REBOOT: CHANNEL_MAINTENANCE,
+    APP_RESTART: CHANNEL_MAINTENANCE,
     BATH_RESTART: CHANNEL_MAINTENANCE,
     CLOCK_SET: CHANNEL_MAINTENANCE,
     BRIDGE_OPEN: CHANNEL_MAINTENANCE,

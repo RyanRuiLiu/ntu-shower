@@ -109,6 +109,38 @@ export function fmtUptime(bootedAt) {
 }
 
 /**
+ * 设备端墙钟的当前读数（毫秒）。
+ *
+ * 偏差的符号约定是「服务端时刻 − 设备时刻」（见服务端 `core/device_clock.py`），
+ * 所以设备此刻 = 服务端此刻 − 偏差。用服务端此刻而不是设备报来的原值：原值只在那一帧
+ * 到达时有效，而面板是随时点开的，读到的是它此刻该显示什么。
+ */
+export function deviceNowMs(skewSeconds) {
+  return serverNowMs() - (Number(skewSeconds) || 0) * 1000
+}
+
+/**
+ * 偏差的人读说法：`准` / `慢 6 秒` / `快 1 分 30 秒`。
+ *
+ * 正值表示设备慢——它落在服务端时刻之前。小于 1 秒就当对准了：这台设备的钟自然漂移是
+ * 8.5 秒/天，这个量级以下显示小数没有意义，反而让人以为每次刷新都在变。
+ */
+export function fmtSkew(skewSeconds) {
+  const skew = Number(skewSeconds) || 0
+  const total = Math.round(Math.abs(skew))
+  if (total < 1) return '准'
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const seconds = total % 60
+  const parts = []
+  if (hours > 0) parts.push(`${hours} 小时`)
+  if (minutes > 0) parts.push(`${minutes} 分`)
+  // 小时级偏差下秒没有意义，省掉它免得行太长
+  if (seconds > 0 && hours === 0) parts.push(`${seconds} 秒`)
+  return `${skew > 0 ? '慢' : '快'} ${parts.join(' ')}`
+}
+
+/**
  * 秒 → `2m30s` / `45s`，与小程序 `formatDuration` 一致。
  *
  * 零值给 `0s` 而不是占位符：这个函数只在需要显示时长时被调用，一个刚分配的喷头

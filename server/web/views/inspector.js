@@ -314,6 +314,20 @@ async function act(label, run, options = {}) {
   }
 }
 
+/**
+ * 重启整机。
+ *
+ * 放在这个工具条上，是因为"界面卡住不动了"最先被打开的就是这一页——从这里能直接重启，
+ * 不必切回设备页。
+ *
+ * `refresh: false`：设备马上要重启，紧接着去重取画面与界面树只会白等一轮超时，而那一轮
+ * 的失败还会把状态栏染红，看上去像是重启失败了。
+ */
+async function rebootDevice() {
+  if (!window.confirm('重启设备？整机会重启，期间设备离线，进行中的会话会中断。')) return
+  await act('重启设备', (deviceId) => api.reboot(deviceId), { refresh: false })
+}
+
 /** 截图在飞标记：screenrecord 占住设备端采集通道，重复触发只会有害。 */
 let capturing = false
 /** 刷新单飞与尾随合并：连续操作只补一轮，不把采集通道排成串。 */
@@ -614,6 +628,10 @@ export const inspectorView = {
           <button type="button" data-key="enter">回车</button>
           <button type="button" data-key="del">删除</button>
         </span>
+        <span class="sep"></span>
+        <span class="grp">
+          <button type="button" class="danger" data-act="reboot" title="重启整机；设备会离线一段时间，进行中的会话会中断">重启设备</button>
+        </span>
         <div class="tb-right">
           <label class="tb-toggle" title="操作后自动重截画面">
             <input type="checkbox" id="autoCaptureToggle"> 自动截图
@@ -718,6 +736,7 @@ export const inspectorView = {
 
     root.querySelector('[data-act="capture"]').addEventListener('click', capture)
     root.querySelector('[data-act="tree"]').addEventListener('click', refreshTree)
+    root.querySelector('[data-act="reboot"]').addEventListener('click', rebootDevice)
     root.querySelector('[data-act="collapse"]').addEventListener('click', () => {
       // 折叠选中节点而不是全部：全部折叠会把用户刚展开的那条路径也收掉，
       // 而这里通常只想起把当前这棵子树收起来

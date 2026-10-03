@@ -140,16 +140,10 @@ async def capture_screen(device_id: str) -> CommandOutcome:
     return await _device_action(device_id, actions.SCREEN_CAPTURE, {}, DEVICE_ACTION_TIMEOUT_S)
 
 
-@admin_router.post("/{device_id}/restart")
-async def restart_agent(device_id: str) -> CommandOutcome:
-    """重启设备上的 agent 进程（不重启整机）。"""
-    return await _device_action(device_id, actions.DEVICE_RESTART, {}, DEVICE_ACTION_TIMEOUT_S)
-
-
-@admin_router.post("/{device_id}/uninstall")
-async def uninstall_agent(device_id: str) -> CommandOutcome:
-    """卸载设备上的 agent（退役或排障用）。"""
-    return await _device_action(device_id, actions.DEVICE_UNINSTALL, {}, DEVICE_ACTION_TIMEOUT_S)
+@admin_router.post("/{device_id}/app/restart")
+async def restart_app(device_id: str) -> CommandOutcome:
+    """重启 NTU Shower 进程（不重启整机，也不动浴室 APP）。"""
+    return await _device_action(device_id, actions.APP_RESTART, {}, DEVICE_ACTION_TIMEOUT_S)
 
 
 @admin_router.post("/{device_id}/clock/set")
@@ -162,6 +156,12 @@ async def set_clock(device_id: str, req: DeviceClockSetRequest) -> CommandOutcom
 async def restart_bath_app(device_id: str) -> CommandOutcome:
     """重启浴室 App：先强停再冷启动，让它重读每日定时开关机计划。"""
     return await _device_action(device_id, actions.BATH_RESTART, {}, DEVICE_ACTION_TIMEOUT_S)
+
+
+@admin_router.post("/{device_id}/reboot")
+async def reboot_device(device_id: str) -> CommandOutcome:
+    """重启整机。设备重启后 agent 随之重来，会话与喷头现态由重连后的全貌帧重建。"""
+    return await _device_action(device_id, actions.DEVICE_REBOOT, {}, DEVICE_ACTION_TIMEOUT_S)
 
 
 # ── 设备界面 ──
