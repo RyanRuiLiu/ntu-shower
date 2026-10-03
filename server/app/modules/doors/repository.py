@@ -21,7 +21,8 @@
 - **出水次数**：数 `usage_segment` 的行数；
 - **暂停次数**：数 `door_state_event` 的 `bathing→paused`。它与出水次数**不相等**——
   一次出水可能直接以 `bathing→free` 收场（洗完就走），那是出门不是暂停；
-- **跨盲区标记**：`ended_at − last_seen_at > 1200 秒` 就是判据，一条 WHERE 的事；
+- **跨盲区标记**：`ended_at − last_seen_at` 超过 `service.SESSION_MAX_S` 就是判据，
+  一条 WHERE 的事；
 - **占用时长、等待时长、暂停时长**：都是几个时刻的差。
 
 `door_state_event` 同理不加 `acc_no`（实测与 `cert_no` 严格一对一，255 个映射无例外）
