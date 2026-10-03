@@ -47,7 +47,7 @@ def candidate(**overrides: object) -> Candidate:
         cert_no="99990052",
         state=DoorState.WAITING,
         assigned_at="2026-10-05T11:55:00.000Z",
-        close_time="",
+        paused_at="",
         renew_count=0,
     )
     return replace(base, **overrides)  # type: ignore[arg-type]
@@ -134,7 +134,7 @@ def test_renew_session_has_no_count_cap() -> None:
 
 def test_auto_settle_counts_from_valve_close_not_from_assignment() -> None:
     """暂停从关阀那一刻起算：分配时刻早在几十分钟前，拿它算等于立刻结算。"""
-    trigger = decide(candidate(state=DoorState.PAUSED, close_time="2026-10-05T11:59:30.000Z"), BASE_CONFIG, NOW)
+    trigger = decide(candidate(state=DoorState.PAUSED, paused_at="2026-10-05T11:59:30.000Z"), BASE_CONFIG, NOW)
 
     assert trigger == Trigger(feature=FEATURE_AUTO_SETTLE, delay_s=30.0)
 
@@ -143,7 +143,7 @@ def test_auto_settle_needs_a_close_time() -> None:
     """已暂停却没有关阀时刻：那一刻不知道，算不出到点，不判。"""
     only_settle = {**BASE_CONFIG, "renew_session_enabled": False, "renew_wait_enabled": False}
 
-    assert decide(candidate(state=DoorState.PAUSED, close_time=""), only_settle, NOW) is None
+    assert decide(candidate(state=DoorState.PAUSED, paused_at=""), only_settle, NOW) is None
 
 
 # ── 名单、开关与择早 ──
@@ -175,7 +175,7 @@ def test_paused_is_claimed_by_two_features_and_renewal_wins() -> None:
     自动结算先动手。反过来的那一半（会话快满 20 分钟才关阀、续期先动手）由
     [test_renewal_beats_settle_when_the_session_is_nearly_full] 钉住。
     """
-    trigger = decide(candidate(state=DoorState.PAUSED, close_time="2026-10-05T11:59:00.000Z"), BASE_CONFIG, NOW)
+    trigger = decide(candidate(state=DoorState.PAUSED, paused_at="2026-10-05T11:59:00.000Z"), BASE_CONFIG, NOW)
 
     assert trigger == Trigger(feature=FEATURE_AUTO_SETTLE, delay_s=0.0)
 
@@ -185,7 +185,7 @@ def test_renewal_beats_settle_when_the_session_is_nearly_full() -> None:
     nearly_full = candidate(
         state=DoorState.PAUSED,
         assigned_at="2026-10-05T11:41:00.000Z",  # 1140 秒在 12:00:00 到点
-        close_time="2026-10-05T11:59:50.000Z",  # 结算还要 50 秒
+        paused_at="2026-10-05T11:59:50.000Z",  # 结算还要 50 秒
     )
 
     trigger = decide(nearly_full, BASE_CONFIG, NOW)
