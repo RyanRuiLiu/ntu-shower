@@ -406,9 +406,8 @@ def _apply_snapshot(device_id: str, payload: JsonObject) -> JsonObject:
         # 会话跟着一起跳过就会丢掉重连时正在进行的那一场。
         _maintain_session(device_id, door_no, state, door, occurred_at, old)
 
-        # 现态对外的三个时间字段是**服务端轴**的：设备那口钟的读数只保留在原始帧里。
-        # 同一个字段名在两处放两条轴的值，读的人分不出来——那正是"网页把入门时刻渲染成
-        # 00:55、还把 |时刻−本地时间| 当已洗时长在计"那次事故的成因。
+        # 现态对外的三个时间字段是**服务端轴**的：设备那口钟的读数只保留在原始帧里
+        # （为什么对外不能出现设备轴，见 DECISIONS 的「两条时间轴」）。
         view = dict(door)
         for key in ("open_time", "in_time", "close_time"):
             view[key] = _to_server_or_empty(door.get(key), device_id)
@@ -425,9 +424,8 @@ def _apply_snapshot(device_id: str, payload: JsonObject) -> JsonObject:
 def _to_server_or_empty(value: object, device_id: str) -> str:
     """设备轴时刻 → 服务端轴；没有值或换算不出来时给空串。
 
-    换算不出来的情形只有一种：这台设备还没有偏差记录（刚上线，帧比首次 pong 先到）。
-    那时给空串而**不是原值**——原值在设备轴上，混进服务端轴的字段里读的人分不出来，
-    而"形状相同、含义不同"比"没有值"危险得多。
+    换算不出来的情形只有一种：这台设备还没有任何偏差记录（刚上线，帧比首次 pong 先到）。
+    那时给空串而**不是原值**——原值在设备轴上，对外不能出现设备轴。
     """
     return device_clock.to_server(value, device_id) or ""
 
