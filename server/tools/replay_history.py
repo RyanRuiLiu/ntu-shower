@@ -163,7 +163,12 @@ def replay(source: Path, target: Path) -> dict[str, int]:
     from app.core.config import settings
 
     settings.db_path = str(target)
-    device_clock.clear()
+    # 旧系统这份记录由它自己的服务端在同机上写，那些时刻**已经是服务端轴**，偏差恒为 0。
+    # 必须显式载入 0 而不是 `clear()`：`clear()` 让这台设备在偏差表里没有条目，于是
+    # `to_server` 返回 None、调用方退回"本帧观测时刻"——而采到 `in_time` 的那一帧可能
+    # 比 `in_time` 晚一小时（关阀后 `bathTime` 还在，说明门一直占着）。36,000 帧里有 36 次，
+    # 落在本地时已越过午夜，看起来像"凌晨有人在洗澡"。
+    device_clock.load(DEVICE_ID, 0.0)
 
     from app.main import init_schema
     from app.modules.doors import repository, service
@@ -183,9 +188,15 @@ def replay(source: Path, target: Path) -> dict[str, int]:
 
     # 关掉事件发布。每帧都要刷新一遍"每个门的最新会话"来组装载荷，而重放时根本没有
     # 订阅者——这一项单独占到全部耗时的四成。
+    #
+    # **把 `publish` 换成 no-op 并不能省掉那份载荷**：`list_doors(device_id)` 是它的实参，
+    # Python 先求值再调用，所以那次全表扫描照样发生。而它随库增长（`latest_usage_by_door`
+    # 扫 `usage_segment` 全表），35,861 帧跑下来是 O(n²)——实测 5 分钟，而其中核心派生
+    # 只要 35 秒。只有把 `list_doors` 本身换掉才省得下来。
     from app.core import events as events_module
 
     setattr(events_module, "publish", lambda *_args, **_kwargs: None)  # noqa: B010 - 同上
+    setattr(service, "list_doors", lambda *_args, **_kwargs: [])  # noqa: B010 - 同上
 
     frames = _load_frames(source)
     last_doors: str | None = None
@@ -201,8 +212,8 @@ def replay(source: Path, target: Path) -> dict[str, int]:
             # 帧间隔正是依据该列计算——中间插入一帧重复的，间隔即被压小，`flow_s` 中
             # "上一帧到本帧"那一段随之缩短（实测 100 天里合计少 21891 秒）。
             duplicates += 1
-            # import 帧没有设备钟读数：旧系统那份记录里根本没有这一列。给空串而不补一个值
-            # ——重建时据此按"无偏差"处理，与当年重放时的结论逐字一致。
+            # import 帧没有设备钟读数：旧系统那份记录里根本没有这一列。给空串，让重建时
+            # 按"偏差为零"处理（见上面 `device_clock.load`）——旧系统的时刻已是服务端轴。
             repository.insert_snapshot(DEVICE_ID, snapshot_id, None, service.SOURCE_IMPORT, at, "", at, adapted)
             continue
         last_doors = blob
