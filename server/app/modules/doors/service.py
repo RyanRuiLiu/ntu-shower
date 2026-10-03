@@ -469,6 +469,12 @@ def _close_segment(segment: Row, door: JsonObject, device_id: str, at: str) -> N
     # 还标成 measured。这是本文件里最贵的一类错误：不报错，只是数字变成 0。
     close_raw = close_value if isinstance(close_value, str) else ""
     a = seconds_between(in_raw, close_raw) if in_raw and close_raw else None
+    # `seconds_between` 把负值归零，所以这里的 0 有两种来历：两个读数真的是同一秒，或者
+    # 关阀**早于**开阀（段内设备钟被往回拨过）。后者正是上面注释警告的那类错误——不报错，
+    # 数字变成 0，而它会被标成最强的一档 `measured`，统计随后把它当真相。两个**不同**的
+    # 读数不可能差 0 秒，据此把归零值当"没有 A"退回 B。
+    if a == 0 and in_raw != close_raw:
+        a = None
     shifted_in = device_clock.to_server(in_raw, device_id) if in_raw else None
     if a is not None and (shifted_in is None or shifted_in != str(segment["opened_at"])):
         repository.close_segment(int(segment["id"]), at, a, "measured", close_raw)

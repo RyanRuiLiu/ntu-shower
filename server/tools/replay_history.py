@@ -226,24 +226,35 @@ def replay(source: Path, target: Path) -> dict[str, int]:
 
 
 def _trim(target: Path) -> None:
-    """清空历史部分。重放是幂等的：重跑一遍得到的是同一份结果，不是叠加。"""
+    """清空历史部分。重放是幂等的：重跑一遍得到的是同一份结果，不是叠加。
+
+    **每张由重放追加的表都要清**。漏一张的后果不是"多留了点数据"，而是孤儿：段表
+    漏清时它留着上一次的段，而那些段指向的会话已经删了，联表查询会静默少算。
+    `door_live` 不必清——它是现态、由 upsert 覆盖，不是追加。
+    """
     conn = sqlite3.connect(target)
-    for table in ("door_snapshot", "usage_session", "door_state_event"):
+    for table in ("door_snapshot", "usage_session", "usage_segment", "door_state_event"):
         conn.execute(f"DELETE FROM {table}")
     conn.commit()
     conn.close()
 
 
 def _settle_open_sessions(target: Path) -> int:
-    """收尾：重放结束时仍开着的会话，按"最后见到"那一刻结束。
+    """收尾：重放结束时仍开着的东西，按"最后见到"那一刻结束。
 
     数据总在某一刻截断，而截断时恰好有人在洗是常态。不收尾的话它们会永远挂在
     "进行中"，让每一个"当前占用"的统计都多算一条。
+
+    **在途段一并标 `unclosed`**——它表达的正是"数据到此为止仍在出水"。这与
+    `rebuild_derived` 的取向相反，那里的帧还会继续来，"正在进行"就是真实的正在进行；
+    这里之后没有帧了，不收就等于谎称它永远开着。
     """
     conn = sqlite3.connect(target)
     rows = conn.execute("SELECT id, last_seen_at FROM usage_session WHERE ended_at IS NULL").fetchall()
     for session_id, last_seen in rows:
         conn.execute("UPDATE usage_session SET ended_at = ? WHERE id = ?", (last_seen, session_id))
+    # 在途段的 flow_s 保持 0：`unclosed` 说的是"我们不知道有多长"，不是"就那么长"。
+    conn.execute("UPDATE usage_segment SET source = 'unclosed' WHERE closed_at IS NULL")
     conn.commit()
     conn.close()
     return len(rows)

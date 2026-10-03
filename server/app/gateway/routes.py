@@ -198,9 +198,25 @@ async def _handle_frame(
                 captured_at,
             )
         # 回执与派生结果解耦：原始帧是 process_snapshot 落的第一样东西，那之后无论派生
-        # 出什么岔子，"这一帧已经收下"都成立。回错误会让设备端不删发件箱里那一行，把
-        # 整个队列堵死，而它对派生失败无能为力——设备端只管送达，判断是服务端的事。
-        await run_in_threadpool(doors_service.process_snapshot, device_id, payload)
+        # 出什么岔子，"这一帧已经收下"都成立。
+        #
+        # 所以派生异常**在这里止住**，不能让它冒泡到会话层的 `raise`——那会把一个数据问题
+        # 升级成连接问题：WS 一断，设备立刻重发同一帧，而派生是确定性的，它在同一处再失败、
+        # 再断，循环下去。断连的代价还不止这一帧：`finally` 会记 offline、推 device.update
+        # （网页上看到设备闪断），其他门正在推进的会话也被打断。
+        #
+        # 数据不会因此丢：派生失败可以事后 `tools/rebuild_derived` 从原始层重算，回执让
+        # 设备删掉发件箱里那一行才是对的。
+        try:
+            await run_in_threadpool(doors_service.process_snapshot, device_id, payload)
+        except Exception as exc:  # noqa: BLE001 - 派生可能以任何方式失败，而这一帧已经收下了
+            log_event(
+                "ERROR",
+                "doors.snapshot-derive-failed",
+                "派生失败，原始帧已落库",
+                device_id=device_id,
+                error=str(exc),
+            )
         await ws.send_text(
             protocol.envelope(
                 "door.snapshot_ack",
