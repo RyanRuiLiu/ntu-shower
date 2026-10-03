@@ -148,9 +148,14 @@ def rebuild(db_path: Path) -> dict[str, int]:
     setattr(repository, "insert_snapshot", lambda *_args, **_kwargs: None)  # noqa: B010 - 同上
 
     # 关掉事件发布：重放时没有订阅者，而每帧都要组装一次完整现态，代价不菲。
+    #
+    # **换掉 `publish` 还不够**：`list_doors(device_id)` 是它的实参，会先被求值。而
+    # `latest_usage_by_door` 要扫 `usage_segment` 全表，于是每帧一次全表扫描——帧数乘
+    # 段数是 O(n²)。把 `list_doors` 也换掉才真的省下来。
     from app.core import events as events_module
 
     setattr(events_module, "publish", lambda *_args, **_kwargs: None)  # noqa: B010 - 同上
+    setattr(service, "list_doors", lambda *_args, **_kwargs: [])  # noqa: B010 - 同上
 
     device_clock.clear()
     in_import = True
@@ -160,9 +165,13 @@ def rebuild(db_path: Path) -> dict[str, int]:
 
     for device_id, at, source, device_clock_text, doors, snapshot_id in frames:
         if source == service.SOURCE_IMPORT:
-            if not in_import:
-                device_clock.clear()
-                in_import = True
+            in_import = True
+            # 旧系统的库在同机上由它自己的服务端写，那些时刻**已经是服务端轴**，偏差恒为 0。
+            # 这里必须 `load(0.0)` 而不是 `clear()`：`clear()` 让这台设备在偏差表里没有条目，
+            # `to_server` 于是返回 None，调用方退回"本帧观测时刻"——而采到 `in_time` 的那一帧
+            # 可能比 `in_time` 晚一小时（`bathTime` 还在累加，说明中间关过阀）。36 万帧里有
+            # 36 次，落在本地时已越过午夜，看起来像"凌晨有人在洗澡"。
+            device_clock.load(device_id, 0.0)
             # 与紧邻的前一帧相同：当年重放时就不进推导（理由见 replay_history），
             # 重建要复现同一份结论，这一步不能省。
             if doors == last_import_doors:
