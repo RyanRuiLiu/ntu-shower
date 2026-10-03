@@ -11,6 +11,7 @@
  */
 import { api } from '../core/api.js'
 import { hasIdentity } from '../core/api.js'
+import { fmtFullDateTime, serverNowMs } from '../core/clock.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
 import { outcomeText, problemText, report } from '../core/outcome.js'
 import { refreshDevices, refreshRuntime, store, subscribe } from '../core/store.js'
@@ -163,15 +164,12 @@ async function doBathRestart() {
 /**
  * 校正设备系统时间：网页端给定任意时刻，设备端写墙钟。
  *
- * 默认值取本机当前时间（设备与操作者同城，偏差应在校正后的秒级内）；格式校验
- * 在客户端先拦一次，服务端边界仍有同一条正则。
+ * 默认值取**服务端校准过的当前时间**（`serverNowMs`）而不是本机时间：操作者的本机时钟可能
+ * 偏，而设备时间正是要往这个基准上对——给一个准的起点，人只需确认。格式校验在客户端先拦
+ * 一次，服务端边界仍有同一条正则。
  */
 function promptClockSet() {
-  const pad = (n) => String(n).padStart(2, '0')
-  const now = new Date()
-  const defaultVal =
-    `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ` +
-    `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
+  const defaultVal = fmtFullDateTime(serverNowMs())
   const input = window.prompt('设置设备系统时间（格式：YYYY-MM-DD HH:MM:SS）', defaultVal)
   if (!input) return
   if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(input.trim())) {
