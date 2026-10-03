@@ -81,6 +81,8 @@ def list_devices(caller: IdentityRecord | None = Depends(optional_identity)) -> 
     匿名调用 actions 恒为空；判定经 access 的唯一实现，客户端不复制作用域规则。
     """
     items: list[DeviceListItem] = []
+    # 能力位在循环外取一次：匿名调用没有身份，取不到就是空表，actions 随后由作用域否决
+    capabilities = caller["capabilities"] if caller is not None else []
     for record in service.list_devices():
         in_scope = caller is not None and (
             "*" in caller["device_scope"] or record["device_id"] in caller["device_scope"]
@@ -88,7 +90,7 @@ def list_devices(caller: IdentityRecord | None = Depends(optional_identity)) -> 
         items.append(
             {
                 **service.to_summary(record),
-                "actions": user_actions(caller["capabilities"]) if in_scope else [],
+                "actions": user_actions(capabilities) if in_scope else [],
             }
         )
     return items
