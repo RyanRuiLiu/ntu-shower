@@ -563,22 +563,6 @@ def list_open_sessions_of(device_id: str) -> list[Row]:
 _RUN_WALK_LIMIT = 50
 
 
-def paused_since(device_id: str, door_no: int) -> str:
-    """这个喷头最近一次变成「已暂停」的时刻（服务端轴）；没有则空串。
-
-    **不取 `door_live.close_time`**：那三个时刻是经钟偏差换算过去的，设备还没有锚点
-    时算不出来、留空——用它会让"暂停了多久"永远算不出，于是自动结算静默不触发，
-    不报错也不做任何事。状态事件里的 `occurred_at` 直接来自帧的采集时刻，不依赖锚点。
-    """
-    row = read_one(
-        "SELECT occurred_at FROM door_state_event"
-        " WHERE device_id = ? AND door_no = ? AND to_state = ?"
-        " ORDER BY id DESC LIMIT 1",
-        (device_id, door_no, "paused"),
-    )
-    return str(row["occurred_at"]) if row else ""
-
-
 def count_renewals_in_run(device_id: str, door_no: int, cert_no: str, gap_s: int) -> int:
     """这一串里我们已经续过几次。
 
