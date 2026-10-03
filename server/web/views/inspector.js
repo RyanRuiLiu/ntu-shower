@@ -14,6 +14,7 @@
  * 画面与结构都不轮询：定时拉取会让设备持续编码，也挤占采集通道。
  */
 import { api } from '../core/api.js'
+import { INPUT_CHANNELS, UI_KEYS } from '../core/contract.js'
 import { problemText, statusLabel } from '../core/outcome.js'
 import { $, disposer, esc, listen } from '../core/dom.js'
 import { store, subscribe } from '../core/store.js'
@@ -46,9 +47,11 @@ let autoTree = localStorage.getItem(AUTO_TREE_KEY) !== '0'
  * 文本注入通道：`clipboard` 粘贴（支持中文；同一字段第二次插入会多一个空格——ROM
  * 行为）与 `keys` 按键注入（无空格问题，仅英文/数字/符号）。两条并列、由使用者
  * 按内容选择，选择记在 localStorage。
+ *
+ * 取值不在这里列——取自 `contract.js` 的 `INPUT_CHANNELS`（服务端
+ * `DeviceUiTextRequest.channel` 生成，有 `test_contract_sync.py` 守着）。
  */
 const INPUT_CHANNEL_KEY = 'ntu-shower.inspector.input-channel'
-const INPUT_CHANNELS = ['clipboard', 'keys']
 let inputChannel = localStorage.getItem(INPUT_CHANNEL_KEY)
 if (!INPUT_CHANNELS.includes(inputChannel)) inputChannel = 'clipboard'
 /** 父索引 → 子索引数组；根节点的父记作 -1。 */
@@ -558,6 +561,30 @@ function copy(text, what) {
 
 let dispose = disposer()
 
+/**
+ * 模板里的按键与文本通道必须与契约逐字一致。
+ *
+ * 这两样东西的性质不同，分开是对的：**布局**（按钮怎么排、中文叫什么）由模板定，
+ * **取值**（`home` / `clipboard` 这些字符串）是契约，由 `contract.js` 从服务端的请求
+ * 模型生成、`test_contract_sync.py` 逐字节守着。
+ *
+ * 但取值不能在这里另抄一份：服务端增删一个按键时，手抄的那份会静默少一个按钮——
+ * 使用者按下去没反应，而没有任何东西报错。所以模板照写，这里对齐。
+ */
+function assertTemplateMatchesContract(root) {
+  for (const selector of ['[data-key]', '[data-channel]']) {
+    const attribute = selector.slice(1, -1)
+    const values = [...root.querySelectorAll(selector)].map((el) => el.getAttribute(attribute))
+    const rendered = new Set(values)
+    const expected = selector === '[data-key]' ? UI_KEYS : INPUT_CHANNELS
+    const missing = expected.filter((value) => !rendered.has(value))
+    const extra = [...rendered].filter((value) => !expected.includes(value))
+    if (missing.length > 0 || extra.length > 0) {
+      throw new Error(`${attribute} 与契约不一致：缺 [${missing}]；多 [${extra}]`)
+    }
+  }
+}
+
 export const inspectorView = {
   id: 'inspector',
   title: '界面检视',
@@ -687,6 +714,8 @@ export const inspectorView = {
     dragStart = null
 
     // ── 工具条 ──
+    assertTemplateMatchesContract(root)
+
     root.querySelector('[data-act="capture"]').addEventListener('click', capture)
     root.querySelector('[data-act="tree"]').addEventListener('click', refreshTree)
     root.querySelector('[data-act="collapse"]').addEventListener('click', () => {
