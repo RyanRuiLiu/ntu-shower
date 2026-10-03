@@ -170,6 +170,8 @@ def _snapshots(device_id: str) -> list[Candidate]:
             continue  # 会话还在、门的现态却没了：不判，等下一帧
         cert_no = str(session["cert_no"] or "")
         raw_state = str(row["state"])
+        # 暂停时刻只对已暂停的喷头有意义，所以只在那时才查
+        paused_at = doors_repository.paused_since(device_id, door_no) if raw_state == DoorState.PAUSED.value else ""
         found.append(
             Candidate(
                 session_id=as_int(session["id"]),
@@ -178,7 +180,7 @@ def _snapshots(device_id: str) -> list[Candidate]:
                 cert_no=cert_no,
                 state=DoorState(raw_state) if raw_state in _STATES else DoorState.FREE,
                 assigned_at=str(session["assigned_at"] or ""),
-                close_time=str(row["close_time"] or ""),
+                paused_at=paused_at,
                 renew_count=doors_repository.count_renewals_in_run(device_id, door_no, cert_no, NO_WATER_RELEASE_S),
             )
         )
