@@ -643,7 +643,7 @@ export const inspectorView = {
         </div>
 
         <div class="tree-panel" id="treePanel">
-          <div class="panel-header" id="panelHeader">
+          <div class="panel-header">
             <span class="panel-title-btn" id="panelCollapse" title="收起右侧面板，画面占满整行">界面树</span>
             <span class="count" id="treeCount"></span>
             <span class="actions">
