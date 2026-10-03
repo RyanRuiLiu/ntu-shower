@@ -50,7 +50,7 @@ object ConfigCache {
             val values = ContentValues().apply {
                 put("id", 1)
                 put("payload", config.toString())
-                put("updated_at", Clock.nowRfc3339())
+                put("updated_at", Clock.wallClockRfc3339())
             }
             AgentDatabase.get(context).insertWithOnConflict(
                 AppConfig.CONFIG_TABLE,
