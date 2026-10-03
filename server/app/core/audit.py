@@ -237,7 +237,7 @@ def list_calls(
     kind: str | None = None,
     limit: int = 100,
 ) -> list[ApiCallRecord]:
-    """按时间倒序取审计记录（/ops/audit）。"""
+    """按时间倒序取审计记录（/api/v1/audit/calls）。"""
     sql = (
         "SELECT kind, requested_at, request_id, trace_id, actor_kind, actor, client_ip,"
         " user_agent, method, path, query, request_body, status_code, duration_ms, device_id,"
