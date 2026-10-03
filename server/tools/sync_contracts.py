@@ -292,6 +292,19 @@ def _javascript() -> str:
     网页端的状态文案表以这些值为键，键写错就静默显示成原始英文，不报错。
     """
     states = [state.value for state in DoorState]
+    # 设备输入能力的三组闭集，直接取服务端 Literal 的取值——网页端的按钮清单此前是手抄的：
+    # 服务端删一个取值，按钮还在，点了得到 422 而页面看不出为什么。
+    from typing import get_args
+
+    from app.modules.devices.schemas import (
+        DeviceUiKeyRequest,
+        DeviceUiScrollRequest,
+        DeviceUiTextRequest,
+    )
+
+    key_names = get_args(DeviceUiKeyRequest.model_fields["key"].annotation)
+    scroll_directions = get_args(DeviceUiScrollRequest.model_fields["direction"].annotation)
+    input_channels = get_args(DeviceUiTextRequest.model_fields["channel"].annotation)
     lines = [
         "/**",
         f" * 跨端契约常量。**本文件{GENERATED_MARK}，不要手改**。",
@@ -323,6 +336,21 @@ def _javascript() -> str:
     lines.append(f"  DEVICE_UPDATE: '{DEVICE_UPDATE}',")
     lines.append(f"  DOOR_UPDATE: '{DOOR_UPDATE}',")
     lines.append("})")
+    lines.append("")
+    lines.append("/** 系统按键（与服务端 `DeviceUiKeyRequest.key` 一致）。 */")
+    lines.append("export const UI_KEYS = Object.freeze([")
+    lines.extend(f"  '{key}'," for key in key_names)
+    lines.append("])")
+    lines.append("")
+    lines.append("/** 文本注入的两条通路（clipboard 支持中文；keys 仅 ASCII）。 */")
+    lines.append("export const INPUT_CHANNELS = Object.freeze([")
+    lines.extend(f"  '{channel}'," for channel in input_channels)
+    lines.append("])")
+    lines.append("")
+    lines.append("/** 滚动方向。 */")
+    lines.append("export const SCROLL_DIRECTIONS = Object.freeze([")
+    lines.extend(f"  '{direction}'," for direction in scroll_directions)
+    lines.append("])")
     lines.append("")
     return "\n".join(lines)
 
