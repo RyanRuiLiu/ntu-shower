@@ -160,6 +160,9 @@ def _snapshots(device_id: str) -> list[Candidate]:
 
     只取派生层：`usage_session` 给会话，`door_live` 给现态。原始帧一概不读——判定不需要
     它，而读了就等于把两套真相都摆上台面。
+
+    `door_live` 的三个时间字段要经钟偏差换算，所以**设备还没有偏差记录时它们是空的**
+    （测试里要显式建立，否则测的不是线上的样子；线上连上后一个往返内就有，且跨重启持久化）。
     """
     live = doors_repository.get_all_live(device_id)
     found: list[Candidate] = []
@@ -170,8 +173,6 @@ def _snapshots(device_id: str) -> list[Candidate]:
             continue  # 会话还在、门的现态却没了：不判，等下一帧
         cert_no = str(session["cert_no"] or "")
         raw_state = str(row["state"])
-        # 暂停时刻只对已暂停的喷头有意义，所以只在那时才查
-        paused_at = doors_repository.paused_since(device_id, door_no) if raw_state == DoorState.PAUSED.value else ""
         found.append(
             Candidate(
                 session_id=as_int(session["id"]),
@@ -180,7 +181,7 @@ def _snapshots(device_id: str) -> list[Candidate]:
                 cert_no=cert_no,
                 state=DoorState(raw_state) if raw_state in _STATES else DoorState.FREE,
                 assigned_at=str(session["assigned_at"] or ""),
-                paused_at=paused_at,
+                paused_at=str(row["close_time"] or ""),
                 renew_count=doors_repository.count_renewals_in_run(device_id, door_no, cert_no, NO_WATER_RELEASE_S),
             )
         )

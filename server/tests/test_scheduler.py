@@ -11,7 +11,7 @@ from dataclasses import replace
 
 import pytest
 
-from app.core import outcomes
+from app.core import device_clock, outcomes
 from app.core.clock import now_rfc3339, shift_rfc3339
 from app.core.db import get_conn
 from app.core.protocol import JsonObject
@@ -44,6 +44,17 @@ WAITING = Candidate(
     paused_at="",
     renew_count=0,
 )
+
+
+@pytest.fixture
+def anchored() -> None:
+    """给测试设备建立偏差记录。
+
+    `door_live` 的三个时间字段（`open_time` / `in_time` / `close_time`）要经钟偏差换算，
+    **没有记录时是空的**。真实设备连上后一个往返内就有（网关在 `link.hello` 之后立刻
+    主动 ping），而且偏差跨重启持久化——不建立它，测的就不是线上的样子。
+    """
+    device_clock.load("dev-1", 0.0)
 
 
 @pytest.fixture(autouse=True)
@@ -627,12 +638,13 @@ def test_the_same_session_is_settled_only_once(fresh_db: str, monkeypatch: pytes
     asyncio.run(body())
 
 
-def test_auto_settle_only_settles_and_never_reassigns(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_auto_settle_only_settles_and_never_reassigns(
+    fresh_db: str, anchored: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """自动结算只做前半步：结完就完了，不补分配。
 
-    两帧：先淋浴、再关阀——**暂停时刻取自那次状态转换**，所以首帧不能直接给"已暂停"
-    （首帧没有"从哪来"，不记事件）。这里会话才走了 5 分钟（会话续期还早），而关阀已经
-    2 分钟（超过 60 秒的阈值）——所以动手的是自动结算。
+    会话才走了 5 分钟（会话续期还早），而关阀已经 2 分钟（超过 60 秒的阈值）——所以
+    动手的是自动结算。暂停时刻取自 `door_live.close_time`，所以这台设备要有偏差记录。
     """
     calls: list[tuple[str, JsonObject]] = []
 
@@ -642,9 +654,6 @@ def test_auto_settle_only_settles_and_never_reassigns(fresh_db: str, monkeypatch
 
     monkeypatch.setattr(scheduler.config_store, "effective", lambda _device_id: CONFIG)
     monkeypatch.setattr(scheduler.sessions_service, "send_command_and_wait", fake_send)
-    doors_service.process_snapshot(
-        "dev-1", _frame(captured_at=_ago(300), card_no=1001, open_time=_ago(300), in_time=_ago(240))
-    )
     doors_service.process_snapshot(
         "dev-1", _frame(captured_at=_ago(120), card_no=1001, open_time=_ago(300), close_time=_ago(120), bath_time_s=120)
     )
