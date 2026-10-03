@@ -105,7 +105,8 @@ ssh <deploy-host> 'systemctl stop ntu-shower \
 - 打包排除 `.env`：服务器的 `.env` 是唯一副本，被覆盖将导致管理面令牌丢失。
 - 改 `requirements.txt` 后需在服务器执行 `.venv/bin/pip install -r requirements.txt`；
   仅改业务代码则不需要。
-- `deploy/` 是配置唯一事实来源，不要在服务器上直接改 nginx/systemd 配置。
+- 配置（nginx / systemd / backup）的唯一事实来源是 `deploy/`，**不要在服务器上直接改**；
+  改法与同步命令见 `deploy/README.md`。
 
 ### 表结构变过的那一次：把历史数据带进新结构
 
