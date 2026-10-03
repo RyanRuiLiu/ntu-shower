@@ -11,7 +11,7 @@
  */
 import { api } from '../core/api.js'
 import { hasIdentity } from '../core/api.js'
-import { fmtFullDateTime, serverNowMs } from '../core/clock.js'
+import { promptClockSet, restartBathApp } from '../core/device-actions.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
 import { outcomeText, problemText, report } from '../core/outcome.js'
 import { refreshDevices, refreshRuntime, store, subscribe } from '../core/store.js'
@@ -60,7 +60,7 @@ function renderCurrent() {
   const device = store.devices.find((item) => item.device_id === store.deviceId)
   $('currentDevice').textContent = device ? `${device.name || device.device_id}（${device.online ? '在线' : '离线'}）` : '未选择'
   const usable = Boolean(device)
-  for (const id of ['btnExec', 'btnRestart', 'btnUninstall', 'btnBathRestart', 'btnClockSet', 'btnBridgeOpen', 'btnBridgeClose', 'btnBridgeStatus']) {
+  for (const id of ['btnClockSet', 'btnRestart', 'btnBathRestart', 'btnReboot', 'btnExec', 'btnBridgeOpen', 'btnBridgeClose', 'btnBridgeStatus']) {
     $(id).disabled = !usable
   }
   // 换了设备，上一条连接命令与上一份状态都不再属于眼前这台，收起来免得照着旧端口去连
@@ -127,34 +127,23 @@ async function runExec() {
   }
 }
 
-async function doRestart() {
-  if (!window.confirm('重启设备端程序？期间设备会短暂离线。')) return
+async function doAppRestart() {
+  if (!window.confirm('重启 NTU Shower？期间设备会短暂离线。')) return
   report('maintResult', '正在重启…', 'info')
   try {
-    await api.restart(store.deviceId)
+    await api.appRestart(store.deviceId)
     report('maintResult', '已完成 · 重启指令已下发', 'ok')
   } catch (error) {
     report('maintResult', problemText(error), 'err')
   }
 }
 
-async function doUninstall() {
-  if (!window.confirm('卸载设备端程序？卸载后设备将断开连接，需至现场重新安装。')) return
-  report('maintResult', '正在卸载…', 'info')
+/** 重启整机：设备离线一段时间，重连后由全貌帧重建现态。这是四个里最重的一个，排在最后。 */
+async function doReboot() {
+  if (!window.confirm('重启设备？整机会重启，期间设备离线，进行中的会话会中断。')) return
+  report('maintResult', '正在重启设备…', 'info')
   try {
-    await api.uninstall(store.deviceId)
-    report('maintResult', '已完成 · 卸载指令已下发', 'ok')
-  } catch (error) {
-    report('maintResult', problemText(error), 'err')
-  }
-}
-
-/** 重启浴室 App：强停会中断进行中的会话，必须确认。 */
-async function doBathRestart() {
-  if (!window.confirm('重启浴室 App？进行中的会话会被中断。')) return
-  report('maintResult', '正在重启浴室 App…', 'info')
-  try {
-    const result = await api.bathRestart(store.deviceId)
+    const result = await api.reboot(store.deviceId)
     report('maintResult', outcomeText(result), result.status === 'ok' ? 'ok' : 'err')
   } catch (error) {
     report('maintResult', problemText(error), 'err')
@@ -162,26 +151,11 @@ async function doBathRestart() {
 }
 
 /**
- * 校正设备系统时间：网页端给定任意时刻，设备端写墙钟。
- *
- * 默认值取**服务端校准过的当前时间**（`serverNowMs`）而不是本机时间：操作者的本机时钟可能
- * 偏，而设备时间正是要往这个基准上对——给一个准的起点，人只需确认。格式校验在客户端先拦
- * 一次，服务端边界仍有同一条正则。
+ * 「改设备时间」与「重启浴室 App」的实现在 `core/device-actions.js`——顶栏设备信息面板
+ * 的功能行是同一套动作，两处不能各写一份。这里只把结果接到本页的结果区。
  */
-function promptClockSet() {
-  const defaultVal = fmtFullDateTime(serverNowMs())
-  const input = window.prompt('设置设备系统时间（格式：YYYY-MM-DD HH:MM:SS）', defaultVal)
-  if (!input) return
-  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(input.trim())) {
-    report('maintResult', '失败 · 时间格式应为 YYYY-MM-DD HH:MM:SS', 'err')
-    return
-  }
-  report('maintResult', '正在设置设备时间…', 'info')
-  api.clockSet(store.deviceId, input.trim()).then((result) => {
-    report('maintResult', outcomeText(result), result.status === 'ok' ? 'ok' : 'err')
-  }).catch((error) => {
-    report('maintResult', problemText(error), 'err')
-  })
+function sayMaint(text, kind) {
+  report('maintResult', text, kind)
 }
 
 /**
@@ -297,11 +271,13 @@ export const devicesView = {
             <!-- 设备自身的动作放在上面：下面那条命令的输出区会随输出长度撑开，
                  排在它后面的东西每次执行都会往下跳，按钮跑掉就不好点了。 -->
             <div class="panel-split-label">设备自身</div>
+            <!-- 顺序按影响面从小到大：不动进程的 → 重启本程序 → 重启浴室 APP → 重启整机。
+                 破坏性的排最后并用红色，免得误点。 -->
             <div class="btn-row">
-              <button type="button" class="btn btn-ghost btn-sm" id="btnRestart">重启设备端程序</button>
-              <button type="button" class="btn btn-danger btn-sm" id="btnUninstall">卸载设备端程序</button>
-              <button type="button" class="btn btn-ghost btn-sm" id="btnBathRestart">重启浴室App</button>
-              <button type="button" class="btn btn-ghost btn-sm" id="btnClockSet">校正时间</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnClockSet">修改设备端时间</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnRestart">重启 NTU Shower</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnBathRestart">重启浴室 App</button>
+              <button type="button" class="btn btn-danger btn-sm" id="btnReboot">重启设备</button>
             </div>
             <div class="result" id="maintResult"></div>
 
@@ -372,10 +348,10 @@ export const devicesView = {
       }),
     )
     dispose.add(listen($('btnExec'), 'click', runExec))
-    dispose.add(listen($('btnRestart'), 'click', doRestart))
-    dispose.add(listen($('btnUninstall'), 'click', doUninstall))
-    dispose.add(listen($('btnBathRestart'), 'click', doBathRestart))
-    dispose.add(listen($('btnClockSet'), 'click', promptClockSet))
+    dispose.add(listen($('btnClockSet'), 'click', () => promptClockSet(store.deviceId, sayMaint)))
+    dispose.add(listen($('btnRestart'), 'click', doAppRestart))
+    dispose.add(listen($('btnBathRestart'), 'click', () => restartBathApp(store.deviceId, sayMaint)))
+    dispose.add(listen($('btnReboot'), 'click', doReboot))
     dispose.add(listen($('btnBridgeStatus'), 'click', bridgeStatus))
     dispose.add(listen($('btnBridgeOpen'), 'click', bridgeOpen))
     dispose.add(listen($('btnBridgeClose'), 'click', bridgeClose))

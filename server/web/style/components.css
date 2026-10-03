@@ -445,6 +445,13 @@ tr.audit-row.is-selected td {
   gap: 4px;
 }
 
+/* 功能行：上面那些行是"看"的，这一行是"做"的，用一条线分开 */
+.info-actions {
+  margin-top: var(--sp-1);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--border);
+}
+
 /* ── 表格：设备、身份、发布、审计都用它 ─────────────────── */
 
 .table {

@@ -12,13 +12,13 @@ import com.ryanliu.ntushower.transport.SupportedActions
 import org.json.JSONObject
 
 /**
- * 设备自身的维护命令：执行 shell、重启 agent、卸载。
+ * 设备自身的维护命令：执行 shell、重启本程序、重启整机、重启浴室 APP、设置系统时钟。
  *
- * 独立于 [AgentService]：那是传输层的宿主，而这三个命令的共同点是
- * **不经调度队列、即时执行**——重启与卸载会停掉本进程，排队没有意义；
+ * 独立于 [AgentService]：那是传输层的宿主，而这里的命令共同点是
+ * **不经调度队列、即时执行**——重启本程序与重启整机会停掉本进程，排队没有意义；
  * 执行类是同步取回输出的短操作。
  *
- * 重启与卸载**先回报再动作**：它们会杀死本进程，若不先回报，命令方只能等超时。
+ * 重启本程序、重启整机**先回报再动作**：它们会杀死本进程，若不先回报，命令方只能等超时。
  */
 object DeviceMaintenance {
 
@@ -26,9 +26,9 @@ object DeviceMaintenance {
 
     /** 本模块负责的 action。调用方据此判断是否要把它挪到工作线程。 */
     private val HANDLED = setOf(
-        SupportedActions.DEVICE_RESTART,
+        SupportedActions.APP_RESTART,
         SupportedActions.DEVICE_EXEC,
-        SupportedActions.DEVICE_UNINSTALL,
+        SupportedActions.DEVICE_REBOOT,
         SupportedActions.BATH_RESTART,
         SupportedActions.CLOCK_SET,
     )
@@ -37,14 +37,14 @@ object DeviceMaintenance {
      * 终结类动作：执行它们等于终止本进程。
      *
      * 这两个必须**立刻**执行，不与其他维护命令共用一个执行器。动作本身是毫秒级的——
-     * [restartAgent] 与 [uninstallAgent] 都只是起一个脱手进程（[RootShell.execDetached]，
+     * [restartAgent] 与 [rebootMachine] 都只是起一个脱手进程（[RootShell.execDetached]，
      * 不等结果）；而共用执行器会让它们排在前面的命令之后，每条 `device.exec` 可以等满
      * 25 秒（见 [RootShell.command] 的超时上限）。真机上因此丢过一次恢复机会：一串超时
      * 的 `device.exec` 挡在前面，随后发的重启从服务端看也是超时，而设备侧一次都没执行。
      */
     private val TERMINATING = setOf(
-        SupportedActions.DEVICE_RESTART,
-        SupportedActions.DEVICE_UNINSTALL,
+        SupportedActions.APP_RESTART,
+        SupportedActions.DEVICE_REBOOT,
     )
 
     /**
@@ -69,7 +69,7 @@ object DeviceMaintenance {
      * 悬着——服务端只能等到超时，而设备这边连"我失败了"都说不出来。[CommandScheduler]
      * 对自动化命令有同样的保证。
      *
-     * `reported` 这个标记是必要的：`device.restart` 与 `device.uninstall` 必须**先回报
+     * `reported` 这个标记是必要的：`app.restart` 与 `device.reboot` 必须**先回报
      * 再执行**（那两个操作会杀掉本进程），所以它们的收尾动作跑在结果已发出之后。
      * 那之后崩了不影响服务端——它已经拿到答复了，不该再收到第二条。
      */
@@ -78,7 +78,7 @@ object DeviceMaintenance {
         var reported = false
         try {
             when (action) {
-                SupportedActions.DEVICE_RESTART -> {
+                SupportedActions.APP_RESTART -> {
                     onOutcome(CommandOutcome(commandId, OutcomeStatus.OK, "", ""))
                     reported = true
                     restartAgent()
@@ -89,10 +89,10 @@ object DeviceMaintenance {
                     reported = true
                 }
 
-                SupportedActions.DEVICE_UNINSTALL -> {
+                SupportedActions.DEVICE_REBOOT -> {
                     onOutcome(CommandOutcome(commandId, OutcomeStatus.OK, "", ""))
                     reported = true
-                    uninstallAgent()
+                    rebootMachine()
                 }
 
                 SupportedActions.BATH_RESTART -> {
@@ -176,9 +176,18 @@ object DeviceMaintenance {
         )
     }
 
-    /** 卸载本 agent。同样脱手：卸载会杀掉本进程。 */
-    private fun uninstallAgent() {
-        RootShell.execDetached("sleep 2; pm uninstall ${BuildConfig.APPLICATION_ID}")
+    /**
+     * 重启整机。
+     *
+     * 同样脱手：整机一重启本进程就没了，不能挂在一个随它一起消失的常驻 shell 上。
+     *
+     * **"回来"这件事是有依据的**：本设备 ROM 不投递 `BOOT_COMPLETED`（`receiver.BootReceiver`
+     * 那条路在这台机器上不成立），但开机后**系统会主动重绑已启用的无障碍服务**，于是
+     * [A11yService.onServiceConnected] 被调到，它把 [AgentService] 拉起来——那是这台
+     * 机器上唯一可靠的开机拉起锚点，旧系统真机验证过。标准 ROM 则另有 `BOOT_COMPLETED`。
+     */
+    private fun rebootMachine() {
+        RootShell.execDetached("sleep 2; reboot")
     }
 
     /** 重启浴室 App：强停与冷启动都不杀本进程，可以同步等结果再回报。 */
