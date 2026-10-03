@@ -58,16 +58,20 @@
 领域划分，`/devices/*` 由 devices、sessions、bridge、config 各域按资源归属提供
 端点。
 
-| 域 | 路径 | 职责 |
-|---|---|---|
-| gateway | `/gateway/device`（WSS）、`/gateway/bridge`（WSS） | 设备长连接；调试通道隧道。路径为设备硬编码契约，无版本前缀、冻结 |
-| devices | `GET /api/v1/devices`（精简+actions，公开）、`GET /api/v1/devices/runtime`（运维档案）、`PATCH /api/v1/devices/{id}`、远程动作 `/api/v1/devices/{id}/exec` 等 | 设备档案与远程操作 |
-| doors | `GET /api/v1/doors?device_id=`、`WS /api/v1/stream?device_id=` | 喷头现态与实时推送（door.update 数据承载，直接应用） |
-| sessions | `POST /api/v1/devices/{id}/assign`、`…/settle`、`…/photo` | 会话操作，目标设备在路径里 |
-| config | `GET/PUT /api/v1/config`、`GET /api/v1/config/spec`、`/api/v1/devices/{id}/config` | 全局配置、登记表、单台覆盖 |
-| identities | `/api/v1/identities`（名单响应含能力位枚举） | 身份域读模型与签发/编辑/撤销 |
-| ota | `/ota/manifest`（设备硬编码契约，无前缀冻结）、`/api/v1/ota/releases`（读公开、写 admin）、`/api/v1/ota/releases/{v}/download` | 版本清单 / 下载 / 发布管理 |
-| audit | `GET /api/v1/audit/calls`、`GET /api/v1/audit/commands` | 接口调用与命令级审计，以 trace_id 关联 |
+| 域 | 职责（具体路径的权威在代码：各模块的 `APIRouter` 与 `core/protocol.py`） |
+|---|---|
+| gateway | 设备长连接；调试通道隧道。路径为设备硬编码契约，无版本前缀、冻结 |
+| devices | 设备档案与远程操作 |
+| doors | 喷头现态与实时推送（door.update 数据承载，直接应用） |
+| sessions | 会话操作，目标设备在路径里 |
+| config | 全局配置、登记表、单台覆盖 |
+| identities | 身份域读模型与签发/编辑/撤销 |
+| ota | 版本清单 / 下载 / 发布管理 |
+| audit | 接口调用与命令级审计，以 trace_id 关联 |
+
+**这张表列的是分工，不是路径清单**：路径会随功能增删而变，而它们已经写在代码里（各模块的
+`APIRouter` 前缀加上装饰器），前端那一侧由 `tests/test_api_contract.py` 守着。在文档里再抄
+一份只会多一个无人守的副本。
 
 ### 鉴权模型（modules/access）
 
@@ -79,16 +83,12 @@
 | 用户操作 | 分配 / 结算（`session`）、拍照（`photo`），设备须在作用域内 | `X-Identity` + 能力位 × 设备作用域 |
 | 管理 | 运维档案、远程调试、配置、名单、发布写、审计 | `X-Identity` + `admin` 能力位 |
 
-- 管理台不是特权通道：管理台身份持有 `["admin","session","photo"]`，代用户
-  操作时走与用户同一路径，审计 actor 即其身份。
-- **无注册流程**：授权经 `/api/v1/identities` 预置（小程序用户登记 openid，
-  网页用户签发一个标识），撤销即从名单删除；能力位与作用域修改即时生效
-  （每请求实时查库）。
-- `/api/v1/devices` 的 `actions` 字段由服务端按调用方算出（access 唯一判定），
-  客户端不复制作用域规则。
-- 小程序身份：openid 由 status-panel 的登录端点换取（本项目**不含微信交互**），
-  小程序直连本项目、请求带 `X-Identity: <openid>`，本项目直接认该字符串为身份。
-- 浴室账号密码**不落库**：随操作请求直传设备，由浴室系统验证。
+**为什么是统一身份制、能力位为什么是唯一的权限模型、以及"无注册流程"与"密码不落库"的
+理由，见 `docs/DECISIONS.md`「身份与能力」。** 这里只留它长什么样：
+
+- 管理台身份持有 `["admin","session","photo"]`，代用户操作时走与用户**同一条**路径，
+  审计 actor 即其身份——不存在特权通道。
+- `/api/v1/devices` 的 `actions` 由服务端按调用方算出（access 唯一判定），客户端不复制作用域规则。
 
 ### HTTP 错误响应
 
