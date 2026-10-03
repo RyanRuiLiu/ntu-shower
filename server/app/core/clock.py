@@ -22,11 +22,6 @@ def now_rfc3339() -> str:
     return format_rfc3339(datetime.now(timezone.utc))
 
 
-def now_epoch_s() -> int:
-    """当前时刻的 Unix 秒。"""
-    return int(datetime.now(timezone.utc).timestamp())
-
-
 def rfc3339_after(seconds: float) -> str:
     """当前时刻 + seconds 的 RFC 3339 字符串（命令截止时刻等）。"""
     return format_rfc3339(datetime.now(timezone.utc) + timedelta(seconds=seconds))
