@@ -13,7 +13,7 @@ import android.os.SystemClock
  * [com.ryanliu.ntushower.core.clock.Clock] 里已经为协议时间记过一次。
  *
  * 取 [SystemClock.elapsedRealtime] 而不是 `System.nanoTime`：后者不含深度睡眠时间，而
- * "过了多久"该把休眠算进去。设备是常亮终端，两者眼下等价，但语义上要的是前者。
+ * "过了多久"该把休眠算进去。设备是常亮的，两者眼下等价，但语义上要的是前者。
  *
  * ## 与相邻三件事的分工
  *

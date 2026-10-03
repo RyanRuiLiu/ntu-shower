@@ -1,4 +1,4 @@
-"""喷头域：七态派生、快照 diff 与事件、会话开合里程碑、上次使用、GET /doors 与 WS /stream。"""
+"""喷头域：七态派生、帧 diff 与事件、会话开合里程碑、上次使用、GET /doors 与 WS /stream。"""
 
 import json
 import uuid
@@ -79,7 +79,7 @@ def test_derive_state_covers_all_states(raw: dict[str, Any], expected: DoorState
 
 
 def test_snapshot_updates_live_state_and_records_events(fresh_db: str) -> None:
-    """快照链路：状态落库、状态迁移记事件、会话随占用开合。"""
+    """帧链路：状态落库、状态迁移记事件、会话随占用开合。"""
     device_id = "test-device-0002"
     service.process_snapshot(device_id, _snapshot([_door(1), _door(2)]))
     live = repository.get_all_live(device_id)
@@ -197,7 +197,7 @@ def test_last_used_ignores_sessions_that_never_opened(fresh_db: str) -> None:
 
 
 def test_last_used_keeps_zero_length_bath(fresh_db: str) -> None:
-    """开了阀立刻关（出水时长为 0）也要算一次使用：「上次使用」的判据是开阀时刻落过值，
+    """开了阀立刻关（淋浴时长为 0）也要算一次使用：「上次使用」的判据是开阀时刻落过值，
     不是时长。统计层的"算不算用过"另有判据（`flow_s > 0`），两者不要混。"""
     device_id = "dev-last-used-2"
     t0 = "2026-09-30T12:00:00.000Z"
@@ -275,7 +275,7 @@ def test_doors_api_is_public_empty_and_filtered(client: TestClient, fresh_db: st
     assert view["state"] == "free"
     assert {"device_id", "door_no", "state", "card_no", "cert_no", "reported_at"} <= set(view)
     assert {"last_used_at", "last_used_s", "last_used_cert"} <= set(view)
-    # 设备域事实不进门行：设备在不在线、叫什么由 /devices 与 device.update 回答
+    # 设备域事实不进喷头行：设备在不在线、叫什么由 /devices 与 device.update 回答
     assert "device_online" not in view
     assert "device_name" not in view
 
@@ -351,7 +351,7 @@ def test_startup_snapshot_keeps_events_out_but_still_runs_the_session(fresh_db: 
     # 起始是空闲：这一帧走 db_watch，且它不涉及占用
     service.process_snapshot(device_id, _snapshot([_door(1)], "2026-09-30T12:00:00.000Z"))
 
-    # 全貌帧里门显示被占着、正在出水。它是"当前是什么样"，不是"刚刚有人刷卡进来"
+    # 全貌帧里喷头显示被占着、正在出水。它是"当前是什么样"，不是"刚刚有人分配进来"
     service.process_snapshot(
         device_id,
         _snapshot(

@@ -1,4 +1,4 @@
-"""设备 WS 网关：首帧 hello、坏帧、未知类型、未知 command_id、坏快照、信任流程与握手内容。"""
+"""设备 WS 网关：首帧 hello、坏帧、未知类型、未知 command_id、坏载荷、信任流程与握手内容。"""
 
 import asyncio
 import contextlib
@@ -57,7 +57,7 @@ def test_unknown_type_gets_error_but_stays_connected(client: TestClient, fresh_d
 def test_device_pong_updates_clock_skew(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:
     """设备回 pong 时带上自己的墙上时刻，服务端据此算出钟偏差并落库。
 
-    偏差（符号是「服务端时刻 − 设备时刻」）是把快照里的 `open_time` / `in_time` 平移到
+    偏差（符号是「服务端时刻 − 设备时刻」）是把帧里的 `open_time` / `in_time` 平移到
     服务端时间轴的依据——那两个字段是"这次会话从什么时候开始"的唯一线索，而设备钟的
     绝对值不可信（自然漂移 8.5 秒/天、还会被人为回拨一小时）。
 
@@ -118,7 +118,7 @@ def test_unknown_command_id_replies_error(client: TestClient, admin_headers: dic
 def test_unparsable_snapshot_is_acknowledged_and_recorded(
     client: TestClient, admin_headers: dict[str, str], fresh_db: str
 ) -> None:
-    """坏快照照收回执，并如实落进原始层。
+    """坏载荷照收回执，并如实落进原始层。
 
     回错误会让设备端不删发件箱里那一行、把队列堵死，而它对内容能否解析无能为力——
     设备端只管送达，判断是服务端的事。原始层留下"设备报过这么一帧"，派生跳过即可。
@@ -133,7 +133,7 @@ def test_unparsable_snapshot_is_acknowledged_and_recorded(
 
 
 def test_valid_snapshot_gets_ack(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:
-    """已信任设备上报快照 → door.snapshot_ack 带回原 snapshot_id。"""
+    """已信任设备上报一帧 → door.snapshot_ack 带回原 snapshot_id。"""
     snapshot_id = "11111111-1111-4111-8111-111111111111"
     with helpers.trusted_online(client, "dev-snap-ack", admin_headers) as ws:
         ws.send_text(helpers.frame("door.snapshot", {"snapshot_id": snapshot_id, "doors": [{"door_no": 1}]}))

@@ -51,7 +51,7 @@ def test_pick_candidate_requires_listed_student(fresh_db: str) -> None:
 
 
 def test_pick_candidate_requires_threshold_reached(fresh_db: str) -> None:
-    """占用时长不足阈值不产生候选。"""
+    """分配时长不足阈值不产生候选。"""
     _seed_open_session("dev-as-1", 1, "2530110052", 5 * 60)
 
     assert auto_settle.pick_auto_settle_candidate(STUDENT_CONFIG) is None

@@ -17,7 +17,7 @@ object AppConfig {
      * （只读），`settings.db` 是 Android 系统的（只在无障碍开关被拒绝写回时动它）。
      *
      * 落在**应用私有目录**（`openOrCreateDatabase` 的默认位置
-     * `/data/data/<包名>/databases/`）而不是共享存储——发件箱里装着待上报的喷头快照，
+     * `/data/data/<包名>/databases/`）而不是共享存储——发件箱里装着待上报的喷头帧，
      * 含占用者学号，放 `/sdcard` 上任何应用都读得到。
      *
      * 名字取 `agent` 而不是某张表的名字：库里装着两张不相干的表（见下），拿其中一张命名
@@ -25,7 +25,7 @@ object AppConfig {
      */
     const val AGENT_DB_FILE = "agent.db"
 
-    /** 待确认的喷头快照：逐条发送，收到 ack 才删。 */
+    /** 待确认的喷头帧：逐条发送，收到 ack 才删。 */
     const val OUTBOX_TABLE = "door_outbox"
 
     /**

@@ -69,7 +69,7 @@ class DeviceRecord(TypedDict):
     clock_skew_s: float
     """设备钟与服务端的偏差（秒）。由设备回 pong 时带上的墙上时刻算出（见 core/device_clock）。
 
-    它用来把快照里的 `open_time` / `in_time` 平移到服务端时间轴——那两个字段是"这次
+    它用来把帧里的 `open_time` / `in_time` 平移到服务端时间轴——那两个字段是"这次
     会话从什么时候开始"的唯一线索。**绝对值不可信不代表它没用**：一次会话压在 20 分钟
     以内，而 20 分钟里的漂移只有 0.03 秒，窗口内偏差是常量。
     """

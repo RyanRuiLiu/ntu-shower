@@ -16,7 +16,7 @@ ASSIGN_PAYLOAD = {"door_no": 1, "cert_no": "C", "password": "P"}
 
 
 def _seed_door(device_id: str, door_no: int, **fields: object) -> None:
-    """推一份只含一个喷头的快照；缺省字段表示空闲。"""
+    """推一份只含一个喷头的帧；缺省字段表示空闲。"""
     doors: list[dict[str, Any]] = [
         {
             "door_no": door_no,
@@ -96,7 +96,7 @@ def test_photo_rejects_offline_device(client: TestClient, ops_headers: dict[str,
 @pytest.mark.parametrize(
     ("label", "raw"),
     [
-        ("已进门未出水", {"card_no": 1001}),
+        ("等待开阀", {"card_no": 1001}),
         ("出水中", {"card_no": 1001, "in_time": "2026-09-30T12:00:00.000Z"}),
         ("暂停", {"card_no": 1001, "bath_time_s": 60, "close_time": "2026-09-30T12:05:00.000Z"}),
         ("报修", {"status_raw": 1}),

@@ -34,10 +34,10 @@ def init_tables() -> None:
             last_seen_at TEXT NOT NULL DEFAULT '',
             last_ip      TEXT NOT NULL DEFAULT '',
             booted_at    TEXT NOT NULL DEFAULT '',
-            -- 设备钟与服务端的偏差（秒）。用来把快照里的 open_time / in_time 平移到
+            -- 设备钟与服务端的偏差（秒）。用来把帧里的 open_time / in_time 平移到
             -- 服务端时间轴——那两个字段是"这次会话从什么时候开始"的唯一线索。
             -- 持久化是必须的：只留内存的话，服务重启后回到 0 等于这段时间不平移，而
-            -- "我们刚接手、那边已经在洗"恰恰最常发生在设备上线到首次 pong 之间。
+            -- "我们刚接手、那边还被占着"恰恰最常发生在设备上线到首次 pong 之间。
             -- 见 core/device_clock。
             clock_skew_s REAL NOT NULL DEFAULT 0
         );
@@ -120,7 +120,7 @@ def touch_seen(device_id: str) -> None:
     """记下最后一次有该设备消息的时刻；心跳与断开收尾都走这里。
 
     last_seen_at 的含义是"最后见到"，不区分心跳还是断开。不在每一帧都写：喷头
-    快照密集时每秒数帧，心跳粒度足够回答"它还在吗"；"数据还在来吗"看喷头的
+    帧密集时每秒数帧，心跳粒度足够回答"它还在吗"；"数据还在来吗"看喷头的
     reported_at。
     """
     write("UPDATE device SET last_seen_at = ? WHERE device_id = ?", (now_rfc3339(), device_id))

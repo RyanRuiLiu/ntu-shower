@@ -85,7 +85,7 @@ def load_clock_skew(device_id: str) -> None:
     """把持久化的钟偏差载入内存。设备上线时调一次。
 
     不载入的话，从上线到首次 pong 之间偏差读出来是 0，等于这段时间不做平移——而
-    "我们刚接手、那边已经在洗"恰恰最常发生在这个窗口里。
+    "我们刚接手、那边还被占着"恰恰最常发生在这个窗口里。
     """
     device_clock.load(device_id, repository.get_clock_skew(device_id))
 

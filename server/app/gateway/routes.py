@@ -74,7 +74,7 @@ async def device_gateway(ws: WebSocket) -> None:
         await run_in_threadpool(ota_repository.mark_installed_upto, device_id, version_code)
         manager.register(device_id, ws)
         # 载入上次记下的钟偏差。从上线到首次 pong 之间有一小段窗口，不载入的话那段时间
-        # 读到的是 0（等于不平移）——而"我们刚接手、那边已经在洗"恰恰最常落在窗口里。
+        # 读到的是 0（等于不平移）——而"我们刚接手、那边还被占着"恰恰最常落在窗口里。
         await run_in_threadpool(devices_service.load_clock_skew, device_id)
         await run_in_threadpool(devices_service.record_link_event, device_id, LINK_ONLINE)
         await run_in_threadpool(audit.record_gateway, device_id, "connect", ip)
@@ -163,7 +163,7 @@ async def _handle_frame(
         await run_in_threadpool(devices_service.touch_seen, device_id)
         await ws.send_text(protocol.envelope("link.pong", {}, reply_to=frame_id))
     elif mtype == "link.pong":
-        # 两件事：判活，以及用设备带回来的墙上时刻更新钟偏差。那个偏差把快照里的
+        # 两件事：判活，以及用设备带回来的墙上时刻更新钟偏差。那个偏差把帧里的
         # open_time / in_time 平移到服务端时间轴——那两个字段是"这次会话从什么时候
         # 开始"的唯一线索（见 core/device_clock）。
         #
