@@ -77,7 +77,10 @@ SECTIONS: tuple[tuple[str, str], ...] = (
 #: 与时间校正（开不开）；后面的链路、守护、自更新是一次性调好的。
 #: 分组元数据只在这里一份，前端据此分卡片渲染，不在各处硬编码键表。
 GROUPS: tuple[GroupSpec, ...] = (
-    GroupSpec("settle", "自动结算", "business"),
+    GroupSpec("session_ops", "会话维护名单", "business"),
+    GroupSpec("renew_wait", "预约续期", "business"),
+    GroupSpec("renew_session", "会话续期", "business"),
+    GroupSpec("auto_settle", "自动结算", "business"),
     GroupSpec("overlay", "操作遮罩", "infra"),
     GroupSpec("clock", "时间校正", "infra"),
     GroupSpec("doors", "喷头状态采集", "infra"),
@@ -541,38 +544,125 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
     ),
     # ── 自动结算（服务端侧）──
     ConfigSpec(
+        "student_passwords",
+        TEXT_MAP,
+        SERVER,
+        {},  # 可变默认值：defaults() 每次返回新副本，勿在此就地修改
+        "学生凭证",
+        "学号=密码，一行一个。只填被允许做会话维护的那些学号——不在名单里的人本来就不会被"
+        "操作，这里也就不需要他的凭证。密码用于调用浴室系统的分配与结算，明文存在服务端"
+        "数据库里（机器上没有别人，而自动化必须有它）",
+        group="session_ops",
+    ),
+    ConfigSpec(
+        "renew_wait_students",
+        TEXT,
+        SERVER,
+        "",
+        "预约续期名单",
+        "只对这些学号做预约续期（逗号或换行分隔）。留空表示谁都不做",
+        group="session_ops",
+    ),
+    ConfigSpec(
+        "renew_session_students",
+        TEXT,
+        SERVER,
+        "",
+        "会话续期名单",
+        "只对这些学号做会话续期（逗号或换行分隔）。留空表示谁都不做。与预约续期各自独立——同一个人可以只开其中一个",
+        group="session_ops",
+    ),
+    ConfigSpec(
+        "auto_settle_students",
+        TEXT,
+        SERVER,
+        "",
+        "自动结算名单",
+        "只对这些学号做自动结算（逗号或换行分隔）。留空表示谁都不做",
+        group="session_ops",
+    ),
+    ConfigSpec(
+        "renew_wait_enabled",
+        BOOL,
+        SERVER,
+        False,
+        "启用预约续期",
+        "他的喷头已分配、但他一直没开阀时，浴室 App 会在 300 秒后把这场会话放掉。开启后"
+        "服务端在到点前替他结算并重新分配同一个喷头，把这次预约保住",
+        group="renew_wait",
+    ),
+    ConfigSpec(
+        "renew_wait_threshold_s",
+        INT,
+        SERVER,
+        270,
+        "预约续期阈值",
+        "从分配时刻起算，过了这个时长还没开阀就续一次。上界是浴室 App 那条 300 秒的无水"
+        "释放门槛——设到 300 或更大，浴室端会先把它放掉，我们就不是续、而是重新开一场",
+        minimum=60,
+        maximum=300,
+        unit="秒",
+        group="renew_wait",
+    ),
+    ConfigSpec(
+        "renew_wait_max_count",
+        INT,
+        SERVER,
+        3,
+        "预约续期次数上限",
+        "同一串连续会话里最多替他续几次（默认 3 次，即最多 4 场会话）。喷头空着超过 300 秒"
+        "就算这一串结束、次数从头数。续满之后停止续期，让浴室端正常释放——他从没出过水，"
+        "没有账要结",
+        minimum=1,
+        maximum=10,
+        unit="次",
+        group="renew_wait",
+    ),
+    ConfigSpec(
+        "renew_session_enabled",
+        BOOL,
+        SERVER,
+        False,
+        "启用会话续期",
+        "他在淋浴中、会话逼近浴室 App 那条 20 分钟上限时，替他结算并重新分配同一个喷头，让这一场接着洗下去",
+        group="renew_session",
+    ),
+    ConfigSpec(
+        "renew_session_threshold_s",
+        INT,
+        SERVER,
+        1140,
+        "会话续期阈值",
+        "从分配时刻起算，过了这个时长就续一次（默认 1140 秒＝19 分钟）。上界 1200 是浴室 App"
+        "的强制释放点，留出的余量要盖住两条命令的本事（实测 5–10 秒）**再加上排队**——同一"
+        "台设备上的续期是一条接一条跑的，同校同时到点的人越多，最后一个动手越晚",
+        minimum=300,
+        maximum=1200,
+        unit="秒",
+        group="renew_session",
+    ),
+    ConfigSpec(
         "auto_settle_enabled",
         BOOL,
         SERVER,
         False,
         "启用自动结算",
-        "自动结算的总开关（默认关）。开启后，分配时长超过「自动结算阈值」的会话由服务端"
-        "自动代为结算，防止学生忘了结算导致喷头整夜占用。名单（auto_settle_students）"
-        "非空时只对名单内的学号生效",
-        group="settle",
+        "他关了阀却一直没再回来开阀，替他结账，免得忘了结算让喷头整夜占着",
+        group="auto_settle",
     ),
     ConfigSpec(
-        "auto_settle_threshold_s",
+        "auto_settle_pause_threshold_s",
         INT,
         SERVER,
-        1140,
+        60,
         "自动结算阈值",
-        "占用持续超过这个时长（默认 19 分钟）还没结算，服务端就代为结算。"
-        "调小回收更快但可能误伤还在冲洗的人；调大则喷头可能被长时间占用",
-        minimum=60,
-        maximum=7200,
+        "已暂停持续超过这个时长就结算一次。暂停时阀已经关着，所以这一步不会打断正在淋浴的"
+        "人；它结束的是这一场会话——他要是回来开阀，需要重新分配。按实测，暂停后还会回来"
+        "的人里有 15.2% 会在 60 秒之后才回来，调大它可以少打断一些，代价是喷头被占得久些",
+        minimum=15,
+        maximum=300,
         unit="秒",
-        group="settle",
-    ),
-    ConfigSpec(
-        "auto_settle_students",
-        TEXT_MAP,
-        SERVER,
-        {},  # 可变默认值：defaults() 每次返回新副本，勿在此就地修改
-        "自动结算名单",
-        "只对这些学号做自动结算，一行一个（格式：学号=密码）。留空表示所有人；"
-        "密码用于调用浴室系统的结算接口，仅保存在服务端数据库",
-        group="settle",
+        group="auto_settle",
     ),
 )
 
@@ -589,7 +679,7 @@ SERVER_KEYS: frozenset[str] = frozenset(spec.key for spec in CONFIG_SPECS if spe
 def defaults() -> dict[str, int | bool | str | dict[str, str]]:
     """全部键的默认值。
 
-    `auto_settle_students` 的默认值是可变对象，每次调用返回新副本，
+    `student_passwords` 的默认值是可变对象，每次调用返回新副本，
     避免调用方改动它而污染登记表。
     """
     return {spec.key: ({} if spec.kind is TEXT_MAP else spec.default) for spec in CONFIG_SPECS}

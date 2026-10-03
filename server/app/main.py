@@ -51,7 +51,7 @@ from .modules.doors.routes import router as doors_router
 from .modules.ota import repository as ota_repository
 from .modules.ota.routes import device_router as ota_device_router
 from .modules.ota.routes import router as ota_router
-from .modules.sessions import auto_settle
+from .modules.sessions import scheduler as sessions_scheduler
 from .modules.sessions.routes import router as sessions_router
 
 #: 要求浏览器每次回来验证的前端资源后缀。
@@ -90,11 +90,11 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        auto_settle.start()
+        sessions_scheduler.start()
         audit.start_prune()
         yield
         audit.stop_prune()
-        auto_settle.stop()
+        sessions_scheduler.stop()
 
     app = FastAPI(title="NTU Shower", version=APP_VERSION, lifespan=lifespan)
     install_error_handlers(app)

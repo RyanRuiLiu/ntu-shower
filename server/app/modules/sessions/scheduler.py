@@ -1,0 +1,512 @@
+"""会话维护的调度与执行：把判据（`decision.py`）接到真实的时钟、队列与设备上。
+
+## 为什么不是定时扫描
+
+帧是**事件驱动**的（状态变化才上报），而"会话逼近 20 分钟"是个**时间点**、不是事件：
+纯事件驱动永远不触发。而纯定时扫描要为扫描间隔留余量——那等于让学生少洗那段时间。
+所以两样都要，但各只做自己擅长的：
+
+- **到点**由一次性定时器提醒（每喷头一个，指着"下一个该动手的时刻"）
+- **状态变化**由帧驱动重算（帧一来就重算那个喷头该什么时候动手）
+- **续期的第二步**（结算之后的分配）也由帧驱动：门被释放必然导致浴室 App 写库、必然
+  出一帧，所以"等门变空闲"不需要轮询
+
+## 为什么每喷头一个定时器
+
+一个喷头会随会话推进依次落到不同的判据上，而**已暂停**同时落在"会话续期"与"自动结算"
+两条上（见 `decision.py`）。每功能各挂一个定时器会互相打架（取消与重挂交错），所以每
+喷头只留**一个**、指着最早的那个；状态一变就重算，它自己会纠正。
+
+## 串行
+
+`sessions.service.send_command_and_wait` 已经按 (设备, 通道) 加了串行锁，而 assign 与
+settle 同属 automation 通道，所以**单条命令**不会并发。这里再加一层**每设备一个队列 +
+一个 worker**，是为了让"结算 → 分配"这个**两步序列**原子化：不串行的话两场续期会交错
+成 settle(A) settle(B) … assign(A) assign(B)，而每一步都要读服务端现态。
+
+## 单次执行
+
+每个会话每个功能**只动手一次**，失败不重试。这不只是取向问题：失败后重算出的到点还是
+同一刻，不记一笔就会自旋。记在 `_attempted` 里，会话结束时清掉。
+
+## 判据只认命令结果
+
+命令报 ok 只说明设备把那一轮 UI 流程走完了——浴室端拒绝（比如密码错）时它**也报 ok**
+（`AutomationFlow.awaitTerminal` 的提示页分支返回 `reached = true`，见 `CommandScheduler
+.execute` 里 `error == null` 那条出口）。所以"浴室端到底认没认"我们不看，只看命令结果；
+看错的后果是**没帮上忙**（那个学生被浴室端释放、自己重新分配一次），不是帮倒忙。
+"""
+
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass
+
+from app.core import actions, outcomes
+from app.core.clock import now_rfc3339
+from app.core.logging import log_event
+from app.core.protocol import as_int
+from app.modules.config import store as config_store
+from app.modules.doors import repository as doors_repository
+from app.modules.doors.schemas import DoorState
+
+from . import service as sessions_service
+from .decision import (
+    RENEWING_FEATURES,
+    Candidate,
+    Trigger,
+    decide,
+    password_of,
+    recheck,
+    still_allowed,
+)
+from .schemas import CommandOutcome
+
+#: 浴室 App 的"连续无水就释放"门槛（秒）：未开阀是 `maxinspacetime`、关阀后是
+#: `maxbathspacetime`，两者都是 300。它在这里的作用是**划断"同一串会话"**：喷头空着超过
+#: 这么久，说明那个人的占用真的结束了（浴室端早释放了他、之后没人接手），于是预约续期的
+#: 次数重新从 0 数。
+#: 与 `doors.service.SESSION_MAX_S` 同源——那两个值都由浴室 App 同一个参数家族决定，
+#: 分开写两份数字迟早漂移。
+NO_WATER_RELEASE_S = 300
+
+#: 结算成功之后等"门变空闲"的那一帧，最多等这么久。没有它的话，设备离线几小时再上线，
+#: 第一帧会去执行一条陈旧的待分配——**给一个早已走掉的学生开一场会话**。
+#: 它是机制的时限、不是业务旋钮，所以是常量：能调的话，调大只会让那种错更容易发生。
+ASSIGN_PENDING_TIMEOUT_S = 30.0
+
+#: 结算时服务端已经找不到"该学号占用中的喷头"。那正是"他已经走了、或者他自己已经结过账
+#: 了"，是正常收尾，不该刷告警。
+NO_OCCUPIED_DOOR = "no_occupied_door"
+
+#: `door_live.state` 里我们认识的取值。认不出来的当空闲——宁可不动手，也不要对一条没读懂
+#: 的现态下单。
+_STATES = {state.value for state in DoorState}
+
+
+# ── 待办 ──────────────────────────────────────────────────────────────────
+
+
+@dataclass
+class _SettleJob:
+    """一次结算。续期类功能在结算成功之后还要补一次分配。"""
+
+    candidate: Candidate
+    feature: str
+
+
+@dataclass
+class _AssignJob:
+    """补上那一次分配。"""
+
+    device_id: str
+    door_no: int
+    cert_no: str
+    password: str
+
+
+@dataclass
+class _PendingAssign:
+    """结算成功、等门变空闲之后要补的那次分配。它在队列之外，由帧推动。"""
+
+    device_id: str
+    door_no: int
+    cert_no: str
+    password: str
+    expires_at: float
+
+
+class _DeviceWorker:
+    """一台设备的串行执行者。设备只能串行，串行的边界就是设备。"""
+
+    def __init__(self, device_id: str) -> None:
+        self.device_id = device_id
+        self.queue: asyncio.Queue[_SettleJob | _AssignJob] = asyncio.Queue()
+        #: 在途的喷头：同一喷头不排两个待办
+        self.busy: set[int] = set()
+        #: door_no → 该门下一个到点
+        self.timers: dict[int, asyncio.TimerHandle] = {}
+        self.task: asyncio.Task[None] | None = None
+
+
+_workers: dict[str, _DeviceWorker] = {}
+
+#: (设备, 喷头) → 待补的那一次分配。键含喷头，因为门是那个被释放的东西。
+_pending_assigns: dict[tuple[str, int], _PendingAssign] = {}
+
+#: (会话, 功能) → 已动手。每个会话每个功能只一次；会话结束时清掉。
+_attempted: set[tuple[int, str]] = set()
+
+_running = False
+
+
+def _worker(device_id: str) -> _DeviceWorker:
+    worker = _workers.get(device_id)
+    if worker is None:
+        worker = _DeviceWorker(device_id)
+        _workers[device_id] = worker
+    return worker
+
+
+def _now_s() -> float:
+    return asyncio.get_running_loop().time()
+
+
+# ── 取数：只读派生层 ──────────────────────────────────────────────────────
+
+
+def _snapshots(device_id: str) -> list[Candidate]:
+    """这台设备上此刻所有未结束的会话，连同判据要用的现态。
+
+    只取派生层：`usage_session` 给会话，`door_live` 给现态。原始帧一概不读——判定不需要
+    它，而读了就等于把两套真相都摆上台面。
+    """
+    live = doors_repository.get_all_live(device_id)
+    found: list[Candidate] = []
+    for session in doors_repository.list_open_sessions_of(device_id):
+        door_no = as_int(session["door_no"])
+        row = live.get(door_no)
+        if row is None:
+            continue  # 会话还在、门的现态却没了：不判，等下一帧
+        cert_no = str(session["cert_no"] or "")
+        raw_state = str(row["state"])
+        found.append(
+            Candidate(
+                session_id=as_int(session["id"]),
+                device_id=device_id,
+                door_no=door_no,
+                cert_no=cert_no,
+                state=DoorState(raw_state) if raw_state in _STATES else DoorState.FREE,
+                assigned_at=str(session["assigned_at"] or ""),
+                close_time=str(row["close_time"] or ""),
+                renew_count=doors_repository.count_renewals_in_run(device_id, door_no, cert_no, NO_WATER_RELEASE_S),
+            )
+        )
+    return found
+
+
+def _plan(device_id: str) -> dict[int, tuple[float, Candidate, Trigger]]:
+    """该设备每个喷头下一个到点：`door_no → (到点时刻, 候选, 触发)`。"""
+    config = config_store.effective(device_id)
+    now = now_rfc3339()
+    planned: dict[int, tuple[float, Candidate, Trigger]] = {}
+    for candidate in _snapshots(device_id):
+        trigger = decide(candidate, config, now)
+        if trigger is None:
+            continue
+        if (candidate.session_id, trigger.feature) in _attempted:
+            continue  # 这个会话这个功能已经动过手，不再排
+        at = _now_s() + trigger.delay_s
+        current = planned.get(candidate.door_no)
+        if current is None or at < current[0]:
+            planned[candidate.door_no] = (at, candidate, trigger)
+    return planned
+
+
+# ── 挂钩点：帧到达、配置保存 ──────────────────────────────────────────────
+
+
+def on_frame(device_id: str) -> None:
+    """一帧刚派生完。重算该设备每个喷头的"下一个到点"，并把待补的分配接上。
+
+    它在事件循环上调用（网关的 `_handle_frame` 是协程），所以可以直接碰定时器。
+    """
+    if not _running:
+        return
+    _forget_closed_sessions(device_id)
+    reschedule(device_id)
+
+
+def reload() -> None:
+    """配置刚保存。阈值与名单都变了，所以所有定时器都要重算——**保存即生效**。"""
+    if not _running:
+        return
+    for device_id in list(_workers):
+        reschedule(device_id)
+
+
+def reschedule(device_id: str) -> None:
+    """重算该设备的定时器。帧到达、配置保存、一次执行跑完之后都调它。"""
+    if not _running:
+        return
+    worker = _worker(device_id)
+    loop = asyncio.get_running_loop()
+    planned = _plan(device_id)
+
+    for door_no, handle in list(worker.timers.items()):
+        if door_no not in planned:
+            handle.cancel()
+            worker.timers.pop(door_no, None)
+
+    for door_no, (at, candidate, trigger) in planned.items():
+        existing = worker.timers.pop(door_no, None)
+        if existing is not None:
+            existing.cancel()
+        worker.timers[door_no] = loop.call_at(at, _fire, device_id, candidate, trigger)
+
+    _flush_pending_assign(device_id)
+
+
+def _forget_closed_sessions(device_id: str) -> None:
+    """会话结束时把它在 `_attempted` 里的记录清掉。
+
+    留着只会让集合一直长；清掉是安全的——那一场不会再触发（它已经结束），重新开的那一场
+    有自己的 `session_id`。
+    """
+    open_ids = {as_int(session["id"]) for session in doors_repository.list_open_sessions_of(device_id)}
+    for key in [item for item in _attempted if item[0] not in open_ids]:
+        _attempted.discard(key)
+
+
+# ── 到点与入队 ────────────────────────────────────────────────────────────
+
+
+def _fire(device_id: str, candidate: Candidate, trigger: Trigger) -> None:
+    """到点：复查 → 入队。只做这两件事，重活交给 worker，免得占着事件循环。"""
+    _worker(device_id).timers.pop(candidate.door_no, None)
+    config = config_store.effective(device_id)
+    fresh = {item.session_id: item for item in _snapshots(device_id)}.get(candidate.session_id)
+
+    reason = recheck(fresh, expected=candidate, trigger=trigger, config=config)
+    if reason is not None:
+        log_event(
+            "INFO",
+            "session-maintenance.skipped",
+            "到点复查未通过，放弃这一次",
+            device_id=device_id,
+            door_no=candidate.door_no,
+            feature=trigger.feature,
+            reason=reason,
+        )
+        reschedule(device_id)
+        return
+
+    _enqueue_settle(fresh or candidate, trigger.feature)
+
+
+def _enqueue_settle(candidate: Candidate, feature: str) -> None:
+    """把一次结算排进该设备的队列。同一喷头已在途就不再排。"""
+    worker = _worker(candidate.device_id)
+    if candidate.door_no in worker.busy:
+        return
+    worker.busy.add(candidate.door_no)
+    worker.queue.put_nowait(_SettleJob(candidate=candidate, feature=feature))
+    _ensure_worker_task(candidate.device_id)
+
+
+def _enqueue_assign(job: _AssignJob) -> None:
+    worker = _worker(job.device_id)
+    if job.door_no in worker.busy:
+        return
+    worker.busy.add(job.door_no)
+    worker.queue.put_nowait(job)
+    _ensure_worker_task(job.device_id)
+
+
+def _ensure_worker_task(device_id: str) -> None:
+    worker = _worker(device_id)
+    if worker.task is None or worker.task.done():
+        worker.task = asyncio.create_task(_worker_loop(device_id))
+
+
+async def _worker_loop(device_id: str) -> None:
+    """一台设备的串行执行者：取一项跑一项，**之间不睡**。"""
+    worker = _worker(device_id)
+    while True:
+        job = await worker.queue.get()
+        door_no = job.candidate.door_no if isinstance(job, _SettleJob) else job.door_no
+        try:
+            if isinstance(job, _AssignJob):
+                await _perform_assign(job)
+            else:
+                await _perform_settle(job)
+        except Exception as exc:  # noqa: BLE001 - 单次失败不得终止这台设备的处理
+            log_event(
+                "ERROR",
+                "session-maintenance.failed",
+                "会话维护执行异常",
+                device_id=device_id,
+                door_no=door_no,
+                error=str(exc),
+            )
+        finally:
+            worker.busy.discard(door_no)
+            worker.queue.task_done()
+            # 跑完之后现态已经变了，重算这台设备的下一个到点
+            reschedule(device_id)
+
+
+# ── 执行 ──────────────────────────────────────────────────────────────────
+
+
+async def _perform_settle(job: _SettleJob) -> None:
+    """结算一次。失败即停，不重试。"""
+    candidate = job.candidate
+    feature = job.feature
+    _attempted.add((candidate.session_id, feature))
+
+    config = config_store.effective(candidate.device_id)
+    still = still_allowed(candidate.cert_no, feature, config)
+    if still is not None:
+        log_event(
+            "INFO",
+            "session-maintenance.skipped",
+            "下单前复查未通过，放弃这一次",
+            device_id=candidate.device_id,
+            door_no=candidate.door_no,
+            feature=feature,
+            reason=still,
+        )
+        return
+
+    password = password_of(config, candidate.cert_no)
+    if not password:
+        # 名单里有他、却没有他的凭证：动作发不出去。属于配置漏项，要人看见。
+        log_event(
+            "ERROR",
+            "session-maintenance.no-password",
+            "名单里有这个学号，但没有他的凭证",
+            device_id=candidate.device_id,
+            door_no=candidate.door_no,
+            cert_no=candidate.cert_no,
+            feature=feature,
+        )
+        return
+
+    result = await sessions_service.send_command_and_wait(
+        candidate.device_id,
+        actions.SESSION_SETTLE,
+        {"cert_no": candidate.cert_no, "password": password},
+    )
+    if not _settled_ok(result, candidate, feature):
+        return
+    log_event(
+        "INFO",
+        "session-maintenance.settled",
+        "续期已结算，等门空闲后补分配" if feature in RENEWING_FEATURES else "自动结算已下发",
+        device_id=candidate.device_id,
+        door_no=candidate.door_no,
+        cert_no=candidate.cert_no,
+        feature=feature,
+    )
+    if feature not in RENEWING_FEATURES:
+        return
+
+    # 分配的前置是服务端**先看见门空了**——`perform_assign` 自己要去读 door_live。门被释放
+    # 必然出一帧，所以这里挂一条待办、由帧推动接着走，不轮询。
+    _pending_assigns[(candidate.device_id, candidate.door_no)] = _PendingAssign(
+        device_id=candidate.device_id,
+        door_no=candidate.door_no,
+        cert_no=candidate.cert_no,
+        password=password,
+        expires_at=_now_s() + ASSIGN_PENDING_TIMEOUT_S,
+    )
+
+
+async def _perform_assign(job: _AssignJob) -> None:
+    """补上那一次分配。**只下一次**，不重试——它是否真成了，下一帧看得出来。"""
+    result = await sessions_service.send_command_and_wait(
+        job.device_id,
+        actions.SESSION_ASSIGN,
+        {"door_no": job.door_no, "cert_no": job.cert_no, "password": job.password},
+    )
+    ok = result.get("status") == outcomes.OK.value
+    log_event(
+        "INFO" if ok else "WARNING",
+        "session-maintenance.assigned" if ok else "session-maintenance.assign-failed",
+        "续期已补分配" if ok else "续期补分配失败，请人工确认",
+        device_id=job.device_id,
+        door_no=job.door_no,
+        cert_no=job.cert_no,
+        status=str(result.get("status")),
+        reason_code=str(result.get("reason_code") or "-"),
+    )
+
+
+def _settled_ok(result: CommandOutcome, candidate: Candidate, feature: str) -> bool:
+    """结算算不算成。只认命令结果（见模块注释）。
+
+    有一类**不算失败**：服务端已经找不到"该学号占用中的喷头"——那正是"他已经走了、或者
+    他自己已经结过账了"，是正常收尾，不该刷告警。
+    """
+    if result.get("status") == outcomes.OK.value:
+        return True
+    reason = str(result.get("reason_code") or "")
+    expected = reason == NO_OCCUPIED_DOOR
+    log_event(
+        "INFO" if expected else "WARNING",
+        "session-maintenance.already-gone" if expected else "session-maintenance.settle-failed",
+        "他已不在占用中，无需结算" if expected else "结算失败，请人工确认",
+        device_id=candidate.device_id,
+        door_no=candidate.door_no,
+        cert_no=candidate.cert_no,
+        feature=feature,
+        status=str(result.get("status")),
+        reason_code=reason or "-",
+    )
+    return False
+
+
+def _flush_pending_assign(device_id: str) -> None:
+    """帧到了：该设备上那些待补的分配，够条件就补上。"""
+    if not _running:
+        return
+    live = doors_repository.get_all_live(device_id)
+    now = _now_s()
+
+    for key in [k for k in _pending_assigns if k[0] == device_id]:
+        waiting = _pending_assigns[key]
+        if now > waiting.expires_at:
+            _pending_assigns.pop(key, None)
+            log_event(
+                "WARNING",
+                "session-maintenance.assign-expired",
+                "等门空闲超时，放弃这次分配",
+                device_id=device_id,
+                door_no=waiting.door_no,
+                cert_no=waiting.cert_no,
+            )
+            continue
+
+        row = live.get(waiting.door_no)
+        if row is None:
+            continue
+        if str(row["state"]) not in (DoorState.FREE.value, DoorState.SELECTED.value):
+            continue  # 门还占着（或刚被别人占了）：等下一帧
+        if doors_repository.get_active_by_cert(device_id, waiting.cert_no) is not None:
+            continue  # 服务端还没把那一场会话收尾，分配会被拒：等下一帧
+
+        _pending_assigns.pop(key, None)
+        _enqueue_assign(
+            _AssignJob(
+                device_id=device_id,
+                door_no=waiting.door_no,
+                cert_no=waiting.cert_no,
+                password=waiting.password,
+            )
+        )
+
+
+# ── 生命周期 ──────────────────────────────────────────────────────────────
+
+
+def start() -> None:
+    global _running
+    _running = True
+    log_event("INFO", "session-maintenance.started", "会话维护已启动")
+
+
+def stop() -> None:
+    global _running
+    _running = False
+    for worker in _workers.values():
+        for handle in worker.timers.values():
+            handle.cancel()
+        worker.timers.clear()
+        if worker.task is not None:
+            worker.task.cancel()
+            worker.task = None
+    _workers.clear()
+    _pending_assigns.clear()
+    _attempted.clear()
+    log_event("INFO", "session-maintenance.stopped", "会话维护已停止")
