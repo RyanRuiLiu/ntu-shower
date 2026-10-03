@@ -258,7 +258,8 @@ def list_calls(
         sql += " WHERE " + " AND ".join(clauses)
     sql += " ORDER BY id DESC LIMIT ?"
     params.append(limit)
-    return [dict(r) for r in db.get_conn().execute(sql, params).fetchall()]
+    rows = db.get_conn().execute(sql, params).fetchall()
+    return cast("list[ApiCallRecord]", [dict(r) for r in rows])
 
 
 def prune(retention_days: int) -> int:
