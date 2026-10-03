@@ -292,18 +292,16 @@ def _javascript() -> str:
     网页端的状态文案表以这些值为键，键写错就静默显示成原始英文，不报错。
     """
     states = [state.value for state in DoorState]
-    # 设备输入能力的三组闭集，直接取服务端 Literal 的取值——网页端的按钮清单此前是手抄的：
+    # 设备输入能力的两组闭集，直接取服务端 Literal 的取值——网页端的按钮清单此前是手抄的：
     # 服务端删一个取值，按钮还在，点了得到 422 而页面看不出为什么。
+    #
+    # 只生成网页端**真用得上的**：`ui.scroll.direction` 也一样是闭集，但页面上没有滚动入口，
+    # 生成了没人 import 就是白添一个会漂的副本（与 CHANNELS 同一个道理）。
     from typing import get_args
 
-    from app.modules.devices.schemas import (
-        DeviceUiKeyRequest,
-        DeviceUiScrollRequest,
-        DeviceUiTextRequest,
-    )
+    from app.modules.devices.schemas import DeviceUiKeyRequest, DeviceUiTextRequest
 
     key_names = get_args(DeviceUiKeyRequest.model_fields["key"].annotation)
-    scroll_directions = get_args(DeviceUiScrollRequest.model_fields["direction"].annotation)
     input_channels = get_args(DeviceUiTextRequest.model_fields["channel"].annotation)
     lines = [
         "/**",
@@ -339,11 +337,6 @@ def _javascript() -> str:
     lines.append("/** 文本注入的两条通路（clipboard 支持中文；keys 仅 ASCII）。 */")
     lines.append("export const INPUT_CHANNELS = Object.freeze([")
     lines.extend(f"  '{channel}'," for channel in input_channels)
-    lines.append("])")
-    lines.append("")
-    lines.append("/** 滚动方向。 */")
-    lines.append("export const SCROLL_DIRECTIONS = Object.freeze([")
-    lines.extend(f"  '{direction}'," for direction in scroll_directions)
     lines.append("])")
     lines.append("")
     return "\n".join(lines)
