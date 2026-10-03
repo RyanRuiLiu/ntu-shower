@@ -50,9 +50,3 @@ export const INPUT_CHANNELS = Object.freeze([
   'clipboard',
   'keys',
 ])
-
-/** 滚动方向。 */
-export const SCROLL_DIRECTIONS = Object.freeze([
-  'forward',
-  'backward',
-])
