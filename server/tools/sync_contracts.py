@@ -31,7 +31,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from app.core.actions import ACTION_CHANNELS, ALL_ACTIONS
+from app.core.actions import ALL_ACTIONS
 from app.core.events import DEVICE_UPDATE, DOOR_UPDATE
 from app.core.outcomes import ALL as OUTCOME_STATUSES
 from app.core.reason_codes import REGISTRY as REASON_CODES
@@ -318,12 +318,6 @@ def _javascript() -> str:
     ]
     lines.extend(f"  '{state}'," for state in states)
     lines.append("])")
-    lines.append("")
-    lines.append("/** 执行通道：同通道内命令串行，跨通道并行。 */")
-    lines.append("export const CHANNELS = Object.freeze({")
-    for action, channel in ACTION_CHANNELS.items():
-        lines.append(f"  '{action}': '{channel}',")
-    lines.append("})")
     lines.append("")
     lines.append("/** 命令结果状态 → 中文名。取值与中文都取自服务端的 core/outcomes.py。 */")
     lines.append("export const OUTCOME_LABELS = Object.freeze({")
