@@ -380,7 +380,7 @@ async def _perform_settle(job: _SettleJob) -> None:
         )
         return
 
-    password = password_of(config, candidate.cert_no)
+    password = password_of(config, feature, candidate.cert_no)
     if not password:
         # 名单里有他、却没有他的凭证：动作发不出去。属于配置漏项，要人看见。
         log_event(
