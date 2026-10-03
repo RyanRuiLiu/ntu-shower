@@ -72,17 +72,19 @@ SECTIONS: tuple[tuple[str, str], ...] = (
     ("infra", "运行基础"),
 )
 
-#: 界面分组清单：顺序即配置页卡片顺序。分组元数据只在这里一份，
-#: 前端据此分卡片渲染，不在各处硬编码键表。
+#: 界面分组清单：顺序即配置页卡片顺序，**按改动的频繁程度排**——偶尔要动的在前，
+#: 装好就不再碰的在后。排在前面的两类是实测常改的：遮罩（要不要显示、提示写什么）
+#: 与时间校正（开不开）；后面的链路、守护、自更新是一次性调好的。
+#: 分组元数据只在这里一份，前端据此分卡片渲染，不在各处硬编码键表。
 GROUPS: tuple[GroupSpec, ...] = (
     GroupSpec("settle", "自动结算", "business"),
-    GroupSpec("gateway", "链路与心跳", "infra"),
-    GroupSpec("doors", "喷头状态采集", "infra"),
-    GroupSpec("automation", "自动化流程", "infra"),
-    GroupSpec("ui", "界面操作", "infra"),
     GroupSpec("overlay", "操作遮罩", "infra"),
-    GroupSpec("guard", "崩溃守护", "infra"),
     GroupSpec("clock", "时间校正", "infra"),
+    GroupSpec("doors", "喷头状态采集", "infra"),
+    GroupSpec("ui", "界面操作", "infra"),
+    GroupSpec("automation", "自动化流程", "infra"),
+    GroupSpec("gateway", "链路与心跳", "infra"),
+    GroupSpec("guard", "崩溃守护", "infra"),
     GroupSpec("ota", "自更新", "infra"),
     GroupSpec("debug", "调试通道", "infra"),
     GroupSpec("misc", "其他", "infra"),

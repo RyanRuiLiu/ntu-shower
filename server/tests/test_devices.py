@@ -255,8 +255,8 @@ def test_device_action_endpoints_require_admin(client: TestClient) -> None:
     [
         ("exec", actions.DEVICE_EXEC, {"command": "id"}),
         ("capture", actions.SCREEN_CAPTURE, None),
-        ("restart", actions.DEVICE_RESTART, None),
-        ("uninstall", actions.DEVICE_UNINSTALL, None),
+        ("app/restart", actions.APP_RESTART, None),
+        ("reboot", actions.DEVICE_REBOOT, None),
         ("dump", actions.UI_DUMP, None),
         ("bath/restart", actions.BATH_RESTART, None),
         ("clock/set", actions.CLOCK_SET, {"datetime": "2026-10-02 12:00:00"}),
