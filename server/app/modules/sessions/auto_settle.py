@@ -23,7 +23,7 @@ SCAN_INTERVAL_S = 30
 def _duration_s(assigned_at: str) -> int:
     """会话从分配到现在的秒数；时间不可解析时返回 0（不参与自动结算）。
 
-    以分配时刻起算而不是开阀时刻：占用是从刷卡入门那刻开始的。
+    以分配时刻起算而不是开阀时刻：占用是从分配那一刻开始的。
     """
     return seconds_between(assigned_at, now_rfc3339())
 

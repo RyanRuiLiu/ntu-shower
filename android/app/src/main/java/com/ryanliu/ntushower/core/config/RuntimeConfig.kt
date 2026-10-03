@@ -55,7 +55,7 @@ object RuntimeConfig {
      * 发件箱的行数上限，超出即丢弃最旧的行。
      *
      * 默认值来自 [ConfigDefaults]（上游是服务端登记表 `spec.py`），那边刻意给得远超真实
-     * 所需，于是它实际上不触发。**调小它是主动放弃历史**：快照丢了设备不会重发。
+     * 所需，于是它实际上不触发。**调小它是主动放弃历史**：帧丢了设备不会重发。
      */
     @Volatile var outboxMaxRows = ConfigDefaults.OUTBOX_MAX_ROWS
         private set
@@ -67,7 +67,7 @@ object RuntimeConfig {
     @Volatile var overlayMessage = ConfigDefaults.OVERLAY_MESSAGE
         private set
 
-    // 遮罩的文字样式。默认值取自旧项目：目标设备是 1366x768 的横屏终端，字号小了在
+    // 遮罩的文字样式。默认值取自旧项目：目标设备是 1366x768 的横屏，字号小了在
     // 一米外看不清；文字被推到 600dp 处，正好落在提示图右侧的空白区里。
     @Volatile var overlayTextSizeSp = ConfigDefaults.OVERLAY_TEXT_SIZE_SP.toInt()
         private set

@@ -34,7 +34,7 @@ UNTRUSTED_DEVICE = Problem("untrusted-device", 403, "设备尚未被信任")
 DUPLICATE_SESSION = Problem("duplicate-session", 409, "该学号已有进行中的会话")
 
 # ── 访问授权 ──
-UNAUTHENTICATED = Problem("unauthenticated", 401, "需要登录")
+UNAUTHENTICATED = Problem("unauthenticated", 401, "需要身份")
 UNKNOWN_IDENTITY = Problem("unknown-identity", 401, "该身份尚未被授权")
 CAPABILITY_DENIED = Problem("capability-denied", 403, "权限不足")
 UNKNOWN_CAPABILITY = Problem("unknown-capability", 422, "未知的权限名")

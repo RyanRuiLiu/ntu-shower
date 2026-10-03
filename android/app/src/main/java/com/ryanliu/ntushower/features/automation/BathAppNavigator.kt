@@ -34,7 +34,7 @@ object BathAppNavigator {
         // 实测 35~70ms），而 HOME 只可能是浴室 App 自己的页面——它在，就说明它在前台。
         // 每个流程都从"回首页"开始，而绝大多数时候本来就在首页，所以这一下省的是常态开销。
         //
-        // 两个条件都要：快照可能是旧值（重算只在事件到达时发生），而 bathAppInForeground 由
+        // 两个条件都要：页面状态可能是旧值（重算只在事件到达时发生），而 bathAppInForeground 由
         // 窗口状态事件维护，它才是"浴室 App 此刻在前台"的即时依据。
         if (A11yRuntime.bathAppInForeground && BathAppPage.snapshot().state == PageState.HOME) return true
         ensureForeground(a11y)

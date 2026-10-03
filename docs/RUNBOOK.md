@@ -126,7 +126,7 @@ ssh <deploy-host> 'systemctl stop ntu-shower \
 
 ### 自动备份（数据库）
 
-`ntu-shower-backup.timer` 每日 00:00 执行 `VACUUM INTO` 在线快照，
+`ntu-shower-backup.timer` 每日 00:00 执行 `VACUUM INTO` 在线备份，
 滚动保留 30 份，落在 `/opt/ntu-shower-backup/ntu-shower-<时间戳>.db`。
 
 手动触发与查看：
