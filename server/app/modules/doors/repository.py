@@ -472,6 +472,10 @@ def latest_usage_by_door() -> dict[tuple[str, int], Row]:
     那种从没出过水的会话一行都不会有；而"开了阀立刻关"（`flow_s` 为 0）会被保留，
     因为确实出过水。
 
+    **只取已关阀的段**：在途段的 `flow_s` 还是 0（它只在关阀那一刻才写），把它当"上次
+    使用"会让淋浴中的喷头显示"上次用了 0 秒"——而那一格问的是"上一次**完整**使用"。
+    正在进行的这一次由 `in_time` + `bath_time_s` 回答，不需要它兼职。
+
     段表不存 `cert_no`（一次出水里不可能换人），所以取"谁用的"要联会话表——这一句的
     文件头注释解释了那个冗余是刻意的、为什么只冗余了门号与设备号。
 
@@ -483,8 +487,10 @@ def latest_usage_by_door() -> dict[tuple[str, int], Row]:
         .execute(
             "SELECT g.device_id, g.door_no, g.opened_at, g.flow_s, s.cert_no"
             " FROM usage_segment g JOIN usage_session s ON s.id = g.session_id"
-            " WHERE g.id = (SELECT id FROM usage_segment"
+            " WHERE g.closed_at IS NOT NULL"
+            "   AND g.id = (SELECT id FROM usage_segment"
             "               WHERE device_id = g.device_id AND door_no = g.door_no"
+            "                 AND closed_at IS NOT NULL"
             "               ORDER BY opened_at DESC, id DESC LIMIT 1)"
         )
         .fetchall()
