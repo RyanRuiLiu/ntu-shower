@@ -15,7 +15,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from model import MAX_BATH_S, Deriver, Frame, Row, Step, row_from_payload, run_scenario  # noqa: E402
+from model import (  # noqa: E402
+    BASE,
+    MAX_BATH_S,
+    Deriver,
+    Frame,
+    Row,
+    Step,
+    parse,
+    row_from_payload,
+    run_scenario,
+)
 
 #: 段时长的预期容许差（秒）。observed 段按帧间隔估算，误差不该超过防抖窗口加余量。
 SLACK = 2
@@ -32,6 +42,9 @@ class Expect:
     complete: bool | None = None
     assigned_source: str | None = None
     span: str | None = None
+    #: 会话起点的期望值，**相对 BASE 的秒**。只断言数量与时长是不够的：起点整体平移
+    #: 一整段时，数量、时长、`source` 可以全部正确，而那个"什么时候用的"已经错了。
+    assigned_at_s: float | None = None
     door_no: int = 1
     session_index: int = 0
     note: str = ""
@@ -1199,6 +1212,31 @@ CASES: list[Case] = [
                  "结果是这一段整个消失（不报错，只是没段）",
         ),
     ),
+    Case(
+        name="S76 断链期间钟被改、重连才校时：已经在洗的那一场，起点被新偏差推早一整个钟差",
+        steps=[
+            Step(0, "check_in", 1, (1001, "A")),
+            Step(5, "valve_open", 1),
+            Step(10, "noop", 1, online=False),  # 断链：之后的动作我们看不见
+            Step(20, "valve_close", 1),  # 关阀，但人没走——痕迹留在设备库里
+            Step(40, "noop", 1, (), 3600.0),  # 断链期间设备钟被拨快一小时
+            Step(50, "noop", 1, online=True),  # 重连：全貌帧带着 inTime 与 closeTime
+            Step(90, "release", 1),
+        ],
+        calibrate="frame",
+        expect=Expect(
+            sessions=1, segments=1, flows=[44], sources=["observed"], complete=False,
+            assigned_source="inferred",
+            note="断链期间的关阀我们没看见，重连时设备已把它归到「不在出水中」，所以这一段"
+                 "只剩观测差可用——44 秒是「最后一次看见出水」到重连的距离，不是真实出水时长。"
+                 "**这个场景复现的是「痕迹不可用」那条路径**，与 model.SkewTracker 说明里"
+                 "2026-10 的真实事故不是同一条：那次段是 measured（两个读数出自同一钟状态，"
+                 "差值精确）、而**起点**被钟被改之后测出的偏差推早了一整个钟差。"
+                 "两者共同的缺口是同一个：偏差在两次校时之间被沿用，而设备钟可能在那期间"
+                 "被改。要复现「measured + 起点偏一小时」还需要「关阀后门仍占用、痕迹留在"
+                 "设备库里」的步骤，那条路径本模型尚未覆盖。",
+        ),
+    ),
 ]
 
 
@@ -1279,6 +1317,15 @@ def compare(case: Case, deriver) -> list[str]:
     if target is not None and e.span is not None:
         if target.observed_span != e.span:
             problems.append(f"观测连续性 {target.observed_span} != {e.span}")
+
+    if target is not None and e.assigned_at_s is not None:
+        moment = parse(target.assigned_at)
+        if moment is None:
+            problems.append(f"起点时刻为空，期望 {e.assigned_at_s:.0f}s（相对 BASE）")
+        else:
+            got = (moment - BASE).total_seconds()
+            if abs(got - e.assigned_at_s) > SLACK:
+                problems.append(f"起点时刻 {got:.0f}s != {e.assigned_at_s:.0f}s（相对 BASE，容许 ±{SLACK}）")
 
     return problems
 
