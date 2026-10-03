@@ -102,9 +102,9 @@ def test_validate_rejects_invalid_values(fresh_db: str) -> None:
     with pytest.raises(store.InvalidConfigError, match="需要文本"):
         store.validate({"overlay_message": 42})
     with pytest.raises(store.InvalidConfigError, match="需要映射"):
-        store.validate({"student_passwords": ["not", "a", "map"]})
+        store.validate({"renew_wait_students": ["not", "a", "map"]})
     with pytest.raises(store.InvalidConfigError, match="都必须是文本"):
-        store.validate({"student_passwords": {"2021001": 12345}})
+        store.validate({"renew_wait_students": {"2021001": 12345}})
 
 
 def test_validate_passes_normalized_values(fresh_db: str) -> None:
@@ -113,7 +113,7 @@ def test_validate_passes_normalized_values(fresh_db: str) -> None:
             "heartbeat_interval_s": 45,
             "overlay_enabled": False,
             "overlay_message": "处理中",
-            "student_passwords": {"2021001": "pw"},
+            "renew_wait_students": {"2021001": "pw"},
         }
     )
 
@@ -121,16 +121,16 @@ def test_validate_passes_normalized_values(fresh_db: str) -> None:
         "heartbeat_interval_s": 45,
         "overlay_enabled": False,
         "overlay_message": "处理中",
-        "student_passwords": {"2021001": "pw"},
+        "renew_wait_students": {"2021001": "pw"},
     }
 
 
 def test_defaults_returns_independent_maps(fresh_db: str) -> None:
     """TEXT_MAP 默认值是可变对象：返回副本才不会污染登记表。"""
     first = store.defaults()
-    first["student_passwords"]["2021001"] = "pw"
+    first["renew_wait_students"]["2021001"] = "pw"
 
-    assert store.defaults()["student_passwords"] == {}
+    assert store.defaults()["renew_wait_students"] == {}
 
 
 def test_describe_covers_every_spec(fresh_db: str) -> None:

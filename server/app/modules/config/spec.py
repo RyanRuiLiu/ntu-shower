@@ -21,7 +21,7 @@ class ConfigKind(str, Enum):
     BOOL = "bool"
     TEXT = "text"
     TEXT_MAP = "text_map"
-    """字符串到字符串的映射，目前只有 student_passwords 一例。"""
+    """字符串到字符串的映射，目前只有三份会话维护名单一例（学号=密码）。"""
 
 
 class ConfigScope(str, Enum):
@@ -542,43 +542,35 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         unit="秒",
         group="debug",
     ),
-    # ── 自动结算（服务端侧）──
+    # ── 会话维护（服务端侧，名单见 session_ops 组）──
     ConfigSpec(
-        "student_passwords",
+        "renew_wait_students",
         TEXT_MAP,
         SERVER,
         {},  # 可变默认值：defaults() 每次返回新副本，勿在此就地修改
-        "学生凭证",
-        "学号=密码，一行一个。只填被允许做会话维护的那些学号——不在名单里的人本来就不会被"
-        "操作，这里也就不需要他的凭证。密码用于调用浴室系统的分配与结算，明文存在服务端"
-        "数据库里（机器上没有别人，而自动化必须有它）",
-        group="session_ops",
-    ),
-    ConfigSpec(
-        "renew_wait_students",
-        TEXT,
-        SERVER,
-        "",
         "预约续期名单",
-        "只对这些学号做预约续期（逗号或换行分隔）。留空表示谁都不做",
+        "只对这些学号做预约续期，一行一个（格式：学号=密码）。留空表示谁都不做。"
+        "**凭证跟着这份名单走**：同一个学号要开两个功能，就在那两份名单里各写一遍——"
+        "三份名单各自完整、互不依赖，配一份就读得懂一份",
         group="session_ops",
     ),
     ConfigSpec(
         "renew_session_students",
-        TEXT,
+        TEXT_MAP,
         SERVER,
-        "",
+        {},
         "会话续期名单",
-        "只对这些学号做会话续期（逗号或换行分隔）。留空表示谁都不做。与预约续期各自独立——同一个人可以只开其中一个",
+        "只对这些学号做会话续期，一行一个（格式：学号=密码）。留空表示谁都不做。"
+        "与预约续期各自独立——同一个人可以只开其中一个",
         group="session_ops",
     ),
     ConfigSpec(
         "auto_settle_students",
-        TEXT,
+        TEXT_MAP,
         SERVER,
-        "",
+        {},
         "自动结算名单",
-        "只对这些学号做自动结算（逗号或换行分隔）。留空表示谁都不做",
+        "只对这些学号做自动结算，一行一个（格式：学号=密码）。留空表示谁都不做",
         group="session_ops",
     ),
     ConfigSpec(
@@ -679,7 +671,7 @@ SERVER_KEYS: frozenset[str] = frozenset(spec.key for spec in CONFIG_SPECS if spe
 def defaults() -> dict[str, int | bool | str | dict[str, str]]:
     """全部键的默认值。
 
-    `student_passwords` 的默认值是可变对象，每次调用返回新副本，
+    `renew_wait_students` 等三份名单的默认值是可变对象，每次调用返回新副本，
     避免调用方改动它而污染登记表。
     """
     return {spec.key: ({} if spec.kind is TEXT_MAP else spec.default) for spec in CONFIG_SPECS}

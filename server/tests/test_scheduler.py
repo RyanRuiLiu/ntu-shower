@@ -27,16 +27,15 @@ from app.modules.sessions.schemas import AssignRequest, CommandOutcome, SettleRe
 
 CONFIG: dict[str, object] = {
     "renew_wait_enabled": True,
-    "renew_wait_students": "99990052",
+    "renew_wait_students": {"99990052": "000000"},
     "renew_wait_threshold_s": 270,
     "renew_wait_max_count": 3,
     "renew_session_enabled": True,
-    "renew_session_students": "99990052",
+    "renew_session_students": {"99990052": "000000"},
     "renew_session_threshold_s": 1140,
     "auto_settle_enabled": True,
-    "auto_settle_students": "99990052",
+    "auto_settle_students": {"99990052": "000000"},
     "auto_settle_pause_threshold_s": 60,
-    "student_passwords": {"99990052": "000000"},
 }
 
 WAITING = Candidate(
@@ -259,7 +258,9 @@ def test_settle_stops_when_there_is_no_password(monkeypatch: pytest.MonkeyPatch)
 
     async def body() -> None:
         calls = _prepare(monkeypatch, [WAITING], sent=[])
-        monkeypatch.setattr(scheduler.config_store, "effective", lambda _device_id: {**CONFIG, "student_passwords": {}})
+        monkeypatch.setattr(
+            scheduler.config_store, "effective", lambda _device_id: {**CONFIG, "renew_wait_students": {}}
+        )
         await scheduler._perform_settle(scheduler._SettleJob(candidate=WAITING, feature=FEATURE_RENEW_WAIT))
 
         assert calls == []
