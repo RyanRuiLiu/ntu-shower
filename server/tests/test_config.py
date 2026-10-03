@@ -72,7 +72,7 @@ def test_device_effective_excludes_server_only_keys(fresh_db: str) -> None:
     """服务端自己的键不下发给设备。"""
     device_view = store.device_effective("dev-1")
 
-    assert "auto_settle_threshold_s" not in device_view
+    assert "renew_session_threshold_s" not in device_view
     assert "ping_interval_s" not in device_view
     assert "heartbeat_interval_s" in device_view
 
@@ -102,9 +102,9 @@ def test_validate_rejects_invalid_values(fresh_db: str) -> None:
     with pytest.raises(store.InvalidConfigError, match="需要文本"):
         store.validate({"overlay_message": 42})
     with pytest.raises(store.InvalidConfigError, match="需要映射"):
-        store.validate({"auto_settle_students": ["not", "a", "map"]})
+        store.validate({"student_passwords": ["not", "a", "map"]})
     with pytest.raises(store.InvalidConfigError, match="都必须是文本"):
-        store.validate({"auto_settle_students": {"2021001": 12345}})
+        store.validate({"student_passwords": {"2021001": 12345}})
 
 
 def test_validate_passes_normalized_values(fresh_db: str) -> None:
@@ -113,7 +113,7 @@ def test_validate_passes_normalized_values(fresh_db: str) -> None:
             "heartbeat_interval_s": 45,
             "overlay_enabled": False,
             "overlay_message": "处理中",
-            "auto_settle_students": {"2021001": "pw"},
+            "student_passwords": {"2021001": "pw"},
         }
     )
 
@@ -121,16 +121,16 @@ def test_validate_passes_normalized_values(fresh_db: str) -> None:
         "heartbeat_interval_s": 45,
         "overlay_enabled": False,
         "overlay_message": "处理中",
-        "auto_settle_students": {"2021001": "pw"},
+        "student_passwords": {"2021001": "pw"},
     }
 
 
 def test_defaults_returns_independent_maps(fresh_db: str) -> None:
     """TEXT_MAP 默认值是可变对象：返回副本才不会污染登记表。"""
     first = store.defaults()
-    first["auto_settle_students"]["2021001"] = "pw"
+    first["student_passwords"]["2021001"] = "pw"
 
-    assert store.defaults()["auto_settle_students"] == {}
+    assert store.defaults()["student_passwords"] == {}
 
 
 def test_describe_covers_every_spec(fresh_db: str) -> None:
@@ -153,7 +153,7 @@ def test_config_spec_rendering_contract(client: TestClient, admin_headers: dict[
     assert [s["key"] for s in spec["sections"]] == ["business", "infra"]
     groups = {g["key"]: g for g in spec["groups"]}
     assert groups["gateway"]["section"] == "infra"
-    assert groups["settle"]["section"] == "business"
+    assert groups["session_ops"]["section"] == "business"
     heartbeat = next(item for item in spec["specs"] if item["key"] == "heartbeat_interval_s")
     assert heartbeat["kind"] == "int"
     assert heartbeat["scope"] == "device"

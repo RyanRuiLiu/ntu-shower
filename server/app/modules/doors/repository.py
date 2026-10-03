@@ -34,6 +34,7 @@
 import json
 from sqlite3 import Row
 
+from app.core.clock import seconds_between
 from app.core.db import get_conn, read_one, write
 from app.core.protocol import JsonObject
 from app.modules.doors.schemas import DoorView
@@ -546,3 +547,57 @@ def get_active_by_cert(device_id: str, cert_no: str) -> Row | None:
 def list_open_sessions() -> list[Row]:
     """全部设备的活跃会话（自动结算扫描用）。"""
     return get_conn().execute("SELECT * FROM usage_session WHERE ended_at IS NULL").fetchall()
+
+
+def list_open_sessions_of(device_id: str) -> list[Row]:
+    """这台设备上未结束的会话。会话维护的判定入口——按设备取，每帧问一遍。"""
+    return (
+        get_conn()
+        .execute("SELECT * FROM usage_session WHERE device_id = ? AND ended_at IS NULL", (device_id,))
+        .fetchall()
+    )
+
+
+#: 数"连续续期次数"时往前最多走多少场。一次预约续期最多十来次，五十场足够；
+#: 它挡住的是脏数据里那种病态长链。
+_RUN_WALK_LIMIT = 50
+
+
+def count_renewals_in_run(device_id: str, door_no: int, cert_no: str, gap_s: int) -> int:
+    """这一串里我们已经续过几次。
+
+    "同一串"由**喷头的空档**划断：相邻两场之间「前一场的 `ended_at` → 后一场的
+    `assigned_at`」的间隔不超过 `gap_s` 就算同一串。判据取的是浴室 App 那条
+    "连续无水就释放"的门槛（300 秒）：我们自己的续期间隔是秒级，真人走了再回来是
+    分钟级，两者分得开。
+
+    在名单里数的是**场数**而不是"谁开的"——会话不记是谁发起它，也没有必要记：
+    第一场是学生自己的分配，从第二场起就是我们替他续的。
+
+    返回**场数减一**：第一场不算续。
+    """
+    rows = (
+        get_conn()
+        .execute(
+            "SELECT assigned_at, ended_at FROM usage_session"
+            " WHERE device_id = ? AND door_no = ? AND cert_no = ?"
+            " ORDER BY assigned_at DESC LIMIT ?",
+            (device_id, door_no, cert_no, _RUN_WALK_LIMIT),
+        )
+        .fetchall()
+    )
+    run = 0
+    newer_assigned = ""
+    for row in rows:
+        if run == 0:
+            run = 1
+            newer_assigned = str(row["assigned_at"] or "")
+            continue
+        previous_ended = str(row["ended_at"] or "")
+        if not previous_ended:
+            break  # 前一场还开着（数据异常）：到此为止，不硬数下去
+        if seconds_between(previous_ended, newer_assigned) > gap_s:
+            break
+        run += 1
+        newer_assigned = str(row["assigned_at"] or "")
+    return max(0, run - 1)

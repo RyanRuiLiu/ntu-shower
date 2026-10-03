@@ -15,6 +15,7 @@ from app.core.logging import log_event
 from app.core.problems import INVALID_CONFIG, ApiProblemError
 from app.modules.access.dependencies import require_admin
 from app.modules.devices.dependencies import require_trusted_online_device
+from app.modules.sessions import scheduler as sessions_scheduler
 from app.modules.sessions import service as sessions_service
 
 from . import store
@@ -72,6 +73,8 @@ def get_global_config() -> GlobalConfigView:
 async def put_global_config(req: ConfigUpdateRequest) -> GlobalConfigUpdateReport:
     """更新全局覆盖，并把新的有效配置推送给所有在线设备。"""
     revision, overrides = store.put_global_overrides(_validated(req.config))
+    # 会话维护的阈值与名单也在配置里，而定时器是按旧值挂着的——这里立刻重算，保存即生效。
+    sessions_scheduler.reload()
     notified: list[ConfigPushNotice] = []
     for device_id, _ws in manager.online_connections():
         result = await sessions_service.push_config_update(device_id, revision, store.device_effective(device_id))
@@ -111,6 +114,7 @@ async def put_device_config(device_id: str, req: ConfigUpdateRequest) -> DeviceC
     """设置设备级覆盖并推送给该设备。"""
     require_trusted_online_device(device_id)
     revision, overrides = store.put_device_overrides(device_id, _validated(req.config))
+    sessions_scheduler.reload()
     result = await sessions_service.push_config_update(device_id, revision, store.device_effective(device_id))
     log_event(
         "INFO",
@@ -135,5 +139,7 @@ def delete_device_config(device_id: str) -> DeviceConfigRemovalReport:
     """删除设备级覆盖，该设备回落为跟随全局。"""
     removed = store.delete_device_overrides(device_id)
     if removed:
+        # 该设备回落为跟随全局：会话维护的定时器也要按新值重算
+        sessions_scheduler.reload()
         log_event("INFO", "config.device-override-removed", "设备覆盖配置已移除", device_id=device_id)
     return {"device_id": device_id, "override_removed": removed, "config": store.effective(device_id)}
