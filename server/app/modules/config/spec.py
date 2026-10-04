@@ -64,32 +64,39 @@ class GroupSpec:
     section: str
 
 
-#: 分区清单：配置页的两个大区，业务功能在前。业务功能是这个软件存在的目的
-#: （自动结算这类自建业务扩展，需要按需及时调整）；运行基础是支撑它长期跑着的
-#: 地基（链路、采集、自动化、界面、遮罩、守护、自更新），装好后基本不动。
+#: 分区清单：配置页的两个页签，**按"这个键去哪"分**，不按主题分。
+#: 服务端那一边在服务器上运行——不下发设备、也不按设备区分；设备那一边会推到设备、
+#: 支持单台覆盖。两者的边界就是 [ConfigScope]：**一组里的键必须同属一个 scope**，
+#: 由 `tests/test_config_spec.py` 强制，不允许一组混两种。
+#: 服务端在前：会话维护是这个软件存在的目的，设备侧的九块是支撑它长期跑着的地基。
 SECTIONS: tuple[tuple[str, str], ...] = (
-    ("business", "业务功能"),
-    ("infra", "运行基础"),
+    ("server", "服务端业务"),
+    ("device", "设备下发"),
 )
 
-#: 界面分组清单：顺序即配置页卡片顺序，**按改动的频繁程度排**——偶尔要动的在前，
-#: 装好就不再碰的在后。排在前面的两类是实测常改的：遮罩（要不要显示、提示写什么）
-#: 与时间校正（开不开）；后面的链路、守护、自更新是一次性调好的。
+#: 界面分组清单：顺序即配置页卡片顺序（设备侧那几块按改动的频繁程度排——遮罩与时间校正
+#: 实测常改，链路、守护、自更新是一次性调好的）。
+#: **从原来按主题分的组里拆出来的服务端那几块换了组名**（`server_link` / `server_ui` /
+#: `server_bridge`），不与设备侧的同名组混在一起——同一个名字只能指一件事。
 #: 分组元数据只在这里一份，前端据此分卡片渲染，不在各处硬编码键表。
 GROUPS: tuple[GroupSpec, ...] = (
-    GroupSpec("renew_wait", "预约续期", "business"),
-    GroupSpec("renew_session", "会话续期", "business"),
-    GroupSpec("auto_settle", "自动结算", "business"),
-    GroupSpec("overlay", "操作遮罩", "infra"),
-    GroupSpec("clock", "时间校正", "infra"),
-    GroupSpec("doors", "喷头状态采集", "infra"),
-    GroupSpec("ui", "界面操作", "infra"),
-    GroupSpec("automation", "自动化流程", "infra"),
-    GroupSpec("gateway", "链路与心跳", "infra"),
-    GroupSpec("guard", "崩溃守护", "infra"),
-    GroupSpec("ota", "自更新", "infra"),
-    GroupSpec("debug", "调试通道", "infra"),
-    GroupSpec("misc", "其他", "infra"),
+    # ── 服务端业务：在服务器上运行，不下发设备 ──
+    GroupSpec("renew_wait", "预约续期", "server"),
+    GroupSpec("renew_session", "会话续期", "server"),
+    GroupSpec("auto_settle", "自动结算", "server"),
+    GroupSpec("server_link", "链路维持", "server"),
+    GroupSpec("server_ui", "界面操作超时", "server"),
+    GroupSpec("server_bridge", "调试通道", "server"),
+    # ── 设备下发：会推到设备，支持单台覆盖 ──
+    GroupSpec("overlay", "操作遮罩", "device"),
+    GroupSpec("clock", "时间校正", "device"),
+    GroupSpec("doors", "喷头状态采集", "device"),
+    GroupSpec("ui", "界面操作", "device"),
+    GroupSpec("automation", "自动化流程", "device"),
+    GroupSpec("gateway", "链路与心跳", "device"),
+    GroupSpec("guard", "崩溃守护", "device"),
+    GroupSpec("ota", "自更新", "device"),
+    GroupSpec("debug", "调试通道", "device"),
 )
 
 
@@ -130,7 +137,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=10,
         maximum=1800,
         unit="秒",
-        group="gateway",
+        group="server_link",
     ),
     ConfigSpec(
         "clock_jump_threshold_s",
@@ -147,7 +154,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=5,
         maximum=3600,
         unit="秒",
-        group="gateway",
+        group="server_link",
     ),
     ConfigSpec(
         "bridge_ssh_target",
@@ -158,7 +165,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "网页端生成本机连接命令时用的 `用户@主机`。它是现场那台电脑要 ssh 过去的地方，"
         "与网页自己的域名不是一回事——网页挂在 ntu-shower 子域上，而 ssh 连的是主域，"
         "所以推不出来，只能配。见 docs/RUNBOOK.md 的连接指引。",
-        group="debug",
+        group="server_bridge",
     ),
     ConfigSpec(
         "reconnect_base_ms",
@@ -396,7 +403,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=5,
         maximum=300,
         unit="秒",
-        group="ui",
+        group="server_ui",
     ),
     ConfigSpec(
         "ui_swipe_duration_ms",
@@ -526,7 +533,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=300,
         maximum=86400,
         unit="秒",
-        group="debug",
+        group="server_bridge",
     ),
     ConfigSpec(
         "bridge_pair_timeout_s",
@@ -539,7 +546,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=5,
         maximum=300,
         unit="秒",
-        group="debug",
+        group="server_bridge",
     ),
     # ── 会话维护（服务端侧）：一个功能一块，块内按"开关 → 阈值 → 名单"排 ──
     ConfigSpec(
