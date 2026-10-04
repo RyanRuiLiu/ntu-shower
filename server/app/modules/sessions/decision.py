@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from app.core.clock import seconds_between
 from app.core.protocol import JsonObject, as_int
@@ -24,17 +25,67 @@ FEATURE_RENEW_WAIT = "renew_wait"
 FEATURE_RENEW_SESSION = "renew_session"
 FEATURE_AUTO_SETTLE = "auto_settle"
 
-#: 功能 → (开关键, 名单键, 阈值键)。
-#: 名单在配置里、三份各自独立——同一个人可以只开其中一个功能。名单是"允许对谁动手"的
-#: 唯一出处：不在名单里就什么都不做。
-FEATURES: dict[str, tuple[str, str, str]] = {
-    FEATURE_RENEW_WAIT: ("renew_wait_enabled", "renew_wait_students", "renew_wait_threshold_s"),
-    FEATURE_RENEW_SESSION: ("renew_session_enabled", "renew_session_students", "renew_session_threshold_s"),
-    FEATURE_AUTO_SETTLE: ("auto_settle_enabled", "auto_settle_students", "auto_settle_pause_threshold_s"),
-}
 
-#: 需要"结算之后再分配"的功能；自动结算只需要前半步。
-RENEWING_FEATURES = frozenset({FEATURE_RENEW_WAIT, FEATURE_RENEW_SESSION})
+@dataclass(frozen=True)
+class FeatureSpec:
+    """一个后台任务的全部参数。**三个功能的差异只有这些**——判据本身是同一个。
+
+    写成数据而不是在每个功能上各判一次，是因为下一个功能（如果真有）只该是加一条登记，
+    而不是再抄一遍判据：抄第二遍的时候没人会记得同步第一遍改过的东西。
+    """
+
+    key: str
+    enabled_key: str
+    students_key: str
+    """名单在配置里、三份各自独立——同一个人可以只开其中一个功能。名单是"允许对谁动手"的
+    唯一出处：不在名单里就什么都不做；凭证也跟着这份名单走（见 [roster]）。"""
+    threshold_key: str
+    states: tuple[DoorState, ...]
+    """哪些状态下这个任务适用。"""
+    start: Literal["assigned_at", "paused_at"]
+    """从哪一刻起算：整场会话（浴室 App 那两条上限管着它）还是关阀那一刻。"""
+    max_count_key: str | None
+    """次数上限的配置键；None 表示无上限。"""
+    two_step: bool
+    """续期是两步（先结算、等门空的那一帧再分配回同一个喷头）；自动结算只做前半步。"""
+
+
+#: 登记顺序即**同刻撞车时的优先级**：已暂停会同时落进会话续期与自动结算两条判据，那时
+#: 续期在前——保住他这一场会话比结束它更保守。
+FEATURES: tuple[FeatureSpec, ...] = (
+    FeatureSpec(
+        key=FEATURE_RENEW_WAIT,
+        enabled_key="renew_wait_enabled",
+        students_key="renew_wait_students",
+        threshold_key="renew_wait_threshold_s",
+        states=(DoorState.WAITING,),
+        start="assigned_at",
+        max_count_key="renew_wait_max_count",
+        two_step=True,
+    ),
+    FeatureSpec(
+        key=FEATURE_RENEW_SESSION,
+        enabled_key="renew_session_enabled",
+        students_key="renew_session_students",
+        threshold_key="renew_session_threshold_s",
+        states=(DoorState.BATHING, DoorState.PAUSED),
+        start="assigned_at",
+        max_count_key=None,
+        two_step=True,
+    ),
+    FeatureSpec(
+        key=FEATURE_AUTO_SETTLE,
+        enabled_key="auto_settle_enabled",
+        students_key="auto_settle_students",
+        threshold_key="auto_settle_pause_threshold_s",
+        states=(DoorState.PAUSED,),
+        start="paused_at",
+        max_count_key=None,
+        two_step=False,
+    ),
+)
+
+FEATURES_BY_KEY: dict[str, FeatureSpec] = {spec.key: spec for spec in FEATURES}
 
 
 @dataclass(frozen=True)
@@ -63,10 +114,15 @@ class Candidate:
 
 @dataclass(frozen=True)
 class Trigger:
-    """一条该动手的判据：哪个功能、还有多久到点。"""
+    """一条该动手的判据：哪个功能、还有多久到点、当时生效的阈值是多少。
+
+    `threshold_s` 一起带出来，是为了让它能落进审计表——配置没有历史，事后再去查"当时
+    阈值多少"是查不到的，而那一行要能自己说清"为什么是这一刻"。
+    """
 
     feature: str
     delay_s: float
+    threshold_s: int
 
 
 def roster(config: JsonObject, key: str) -> dict[str, str]:
@@ -87,8 +143,7 @@ def roster(config: JsonObject, key: str) -> dict[str, str]:
 
 def password_of(config: JsonObject, feature: str, cert_no: str) -> str:
     """这个功能那份名单里，这个学号的凭证；不在名单里就是空的，动作不会下发。"""
-    roster_key = FEATURES[feature][1]
-    return roster(config, roster_key).get(cert_no, "")
+    return roster(config, FEATURES_BY_KEY[feature].students_key).get(cert_no, "")
 
 
 def decide(candidate: Candidate, config: JsonObject, now: str) -> Trigger | None:
@@ -99,44 +154,34 @@ def decide(candidate: Candidate, config: JsonObject, now: str) -> Trigger | None
     """
     hits: list[Trigger] = []
 
-    for feature, (enabled_key, students_key, threshold_key) in FEATURES.items():
-        if not config.get(enabled_key):
+    for spec in FEATURES:
+        if not config.get(spec.enabled_key):
             continue
-        if candidate.cert_no not in roster(config, students_key):
+        if candidate.cert_no not in roster(config, spec.students_key):
             continue
-        threshold = as_int(config[threshold_key])
-        started = _started_at(candidate, feature, config)
+        started = _started_at(candidate, spec, config)
         if started is None:
             continue
-        hits.append(Trigger(feature=feature, delay_s=threshold - seconds_between(started, now)))
+        threshold = as_int(config[spec.threshold_key])
+        hits.append(Trigger(feature=spec.key, delay_s=threshold - seconds_between(started, now), threshold_s=threshold))
 
     if not hits:
         return None
     return min(hits, key=lambda hit: hit.delay_s)
 
 
-def _started_at(candidate: Candidate, feature: str, config: JsonObject) -> str | None:
+def _started_at(candidate: Candidate, spec: FeatureSpec, config: JsonObject) -> str | None:
     """这条判据从哪一刻起算；状态对不上或次数用尽就返回 None（不适用）。
 
-    自动结算之外的两个都从**分配时刻**起算，因为浴室 App 那两条上限（20 分钟整场、
-    300 秒无水）都是在它上面走的。
+    **三个功能的差异全在 [FeatureSpec] 里**，所以这里一处按功能的分叉都没有：适用状态、
+    起算点、次数上限都是数据。起算点为空（已暂停却拿不到关阀时刻）就是判不了，返回 None。
     """
-    if feature == FEATURE_RENEW_WAIT:
-        # 等待开阀：他还没出水，浴室端会在 300 秒后把这场会话放掉。续它。
-        if candidate.state is not DoorState.WAITING:
-            return None
-        if candidate.renew_count >= as_int(config["renew_wait_max_count"]):
-            return None  # 续满了：停止续期，让浴室端正常释放
-        return candidate.assigned_at
-    if feature == FEATURE_RENEW_SESSION:
-        # 占用中：他在淋浴中。续它，别让浴室端在 20 分钟上把这场掐断；次数无上限。
-        if candidate.state not in (DoorState.BATHING, DoorState.PAUSED):
-            return None
-        return candidate.assigned_at
-    # 自动结算：他关了阀且一直没再开，替他结账。从关阀那一刻起算。
-    if candidate.state is not DoorState.PAUSED or not candidate.paused_at:
+    if candidate.state not in spec.states:
         return None
-    return candidate.paused_at
+    if spec.max_count_key is not None and candidate.renew_count >= as_int(config[spec.max_count_key]):
+        return None  # 续满了：停止续期，让浴室端正常释放
+    started = candidate.assigned_at if spec.start == "assigned_at" else candidate.paused_at
+    return started or None
 
 
 def recheck(fresh: Candidate | None, expected: Candidate, trigger: Trigger, config: JsonObject) -> str | None:
@@ -162,9 +207,9 @@ def still_allowed(cert_no: str, feature: str, config: JsonObject) -> str | None:
 
     下单之前还要再问一次：复查到下单之间隔着一次取数与一次排队，名单可能刚被改。
     """
-    enabled_key, students_key, _threshold_key = FEATURES[feature]
-    if not config.get(enabled_key):
+    spec = FEATURES_BY_KEY[feature]
+    if not config.get(spec.enabled_key):
         return "功能已关"
-    if cert_no not in roster(config, students_key):
+    if cert_no not in roster(config, spec.students_key):
         return "不在名单里"
     return None
