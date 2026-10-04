@@ -96,7 +96,9 @@ async def device_gateway(ws: WebSocket) -> None:
                 {
                     "trusted": trusted,
                     "server_time": now_rfc3339(),
-                    "config": await run_in_threadpool(config_store.effective, device_id),
+                    # 只给设备端消费的键（`effective` 再按 scope 过滤）：服务端自己的键
+                    # 不占设备的解析路径，两条下发的路（这里与 config.update）给的键集要一致。
+                    "config": await run_in_threadpool(config_store.device_effective, device_id),
                     "upgrade": await run_in_threadpool(ota_repository.latest_for, device_id, version_code),
                 },
                 reply_to=text_of(hello, "id"),
