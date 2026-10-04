@@ -14,6 +14,7 @@
 
 import { OUTCOME_LABELS } from './contract.js'
 import { $ } from './dom.js'
+import { toast } from './toast.js'
 
 /** 状态 → 徽标样式。未知状态按失败显示：看着像成功比看着像失败危险得多。 */
 export const OUTCOME_BADGE = {
@@ -68,12 +69,22 @@ export function problemText(error) {
 }
 
 /**
- * 往某个结果区写一句话。
+ * 往结果区写一句话；`ok` / `err` 时另弹一条浮层。
  *
- * `kind` 取 `ok` / `err` / `info`，与样式表的 `.result-*` 对应。
+ * **结果区在页面底部，而按钮在上面**：页面一长就得往下滚，滚下去就看不见按钮、也看不见
+ * 结果。所以终态一律再弹一条浮层——它固定在视口上，滚到哪儿都看得见；结果区留着当可回看
+ * 的记录，两者不重复也不冲突。
+ *
+ * `info` 那一档（"正在…"）不弹，否则每次操作都先弹一条再弹结果。
+ *
+ * `id` 为空时只弹浮层、不写结果区——浮层面板没有结果区的位置。
+ * `kind` 取 `ok` / `err` / `info`，与样式表的 `.result.ok` / `.result.err` 对应。
  */
 export function report(id, text, kind) {
-  const box = $(id)
-  box.className = `result ${kind}`
-  box.textContent = text
+  const box = id ? $(id) : null
+  if (box) {
+    box.className = `result ${kind}`
+    box.textContent = text
+  }
+  if (kind !== 'info') toast(text)
 }
