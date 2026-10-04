@@ -545,7 +545,7 @@ def get_active_by_cert(device_id: str, cert_no: str) -> Row | None:
 
 
 def list_open_sessions_of(device_id: str) -> list[Row]:
-    """这台设备上未结束的会话。会话维护的判定入口——按设备取，每帧问一遍。"""
+    """这台设备上未结束的会话。后台任务的判定入口——按设备取，每帧问一遍。"""
     return (
         get_conn()
         .execute("SELECT * FROM usage_session WHERE device_id = ? AND ended_at IS NULL", (device_id,))

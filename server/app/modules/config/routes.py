@@ -56,7 +56,7 @@ def _validated(values: ConfigValues) -> ConfigValues:
 def _validated_device_overrides(values: ConfigValues) -> ConfigValues:
     """校验单台覆盖的入参，并拒掉只服务于服务端的键。
 
-    服务端的键在服务器上运行（会话维护、链路维持、调试通道那些），它们**不按设备区分**：
+    服务端的键在服务器上运行（后台任务、链路维持、调试通道那些），它们**不按设备区分**：
     收进来之后 `device_effective` 会把它滤掉、永远不下发，而 `effective` 会把它当真——
     于是"同一份阈值、每台设备各不相同"这种既推不出去又说得出口的状态就悄悄存在了。
     与其留这么一个口子，不如在这里拒掉。
@@ -93,7 +93,7 @@ async def put_global_config(req: ConfigUpdateRequest) -> GlobalConfigUpdateRepor
     """更新全局覆盖，并把新的有效配置推送给所有在线设备。"""
     _before_revision, before = store.get_global_overrides()
     revision, overrides = store.put_global_overrides(_validated(req.config))
-    # 会话维护的阈值与名单也在配置里，而定时器是按旧值挂着的——这里立刻重算，保存即生效。
+    # 后台任务的阈值与名单也在配置里，而定时器是按旧值挂着的——这里立刻重算，保存即生效。
     sessions_scheduler.reload()
     notified: list[ConfigPushNotice] = []
     # 服务端的键不下发，所以只有**设备域那部分真的变了**才需要惊动设备：在服务器上运行的
@@ -162,7 +162,7 @@ def delete_device_config(device_id: str) -> DeviceConfigRemovalReport:
     """删除设备级覆盖，该设备回落为跟随全局。"""
     removed = store.delete_device_overrides(device_id)
     if removed:
-        # 该设备回落为跟随全局：会话维护的定时器也要按新值重算
+        # 该设备回落为跟随全局：后台任务的定时器也要按新值重算
         sessions_scheduler.reload()
         log_event("INFO", "config.device-override-removed", "设备覆盖配置已移除", device_id=device_id)
     return {"device_id": device_id, "override_removed": removed, "config": store.effective(device_id)}
