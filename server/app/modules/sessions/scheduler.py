@@ -1,4 +1,4 @@
-"""会话维护的调度与执行：把判据（`decision.py`）接到真实的时钟、队列与设备上。
+"""后台任务的调度与执行：把判据（`decision.py`）接到真实的时钟、队列与设备上。
 
 ## 为什么不是定时扫描
 
@@ -288,7 +288,7 @@ def _fire(device_id: str, candidate: Candidate, trigger: Trigger) -> None:
     if reason is not None:
         log_event(
             "INFO",
-            "session-maintenance.skipped",
+            "background-task.skipped",
             "到点复查未通过，放弃这一次",
             device_id=device_id,
             door_no=candidate.door_no,
@@ -340,8 +340,8 @@ async def _worker_loop(device_id: str) -> None:
         except Exception as exc:  # noqa: BLE001 - 单次失败不得终止这台设备的处理
             log_event(
                 "ERROR",
-                "session-maintenance.failed",
-                "会话维护执行异常",
+                "background-task.failed",
+                "后台任务执行异常",
                 device_id=device_id,
                 door_no=door_no,
                 error=str(exc),
@@ -371,7 +371,7 @@ async def _perform_settle(job: _SettleJob) -> None:
     if still is not None:
         log_event(
             "INFO",
-            "session-maintenance.skipped",
+            "background-task.skipped",
             "下单前复查未通过，放弃这一次",
             device_id=candidate.device_id,
             door_no=candidate.door_no,
@@ -385,7 +385,7 @@ async def _perform_settle(job: _SettleJob) -> None:
         # 名单里有他、却没有他的凭证：动作发不出去。属于配置漏项，要人看见。
         log_event(
             "ERROR",
-            "session-maintenance.no-password",
+            "background-task.no-password",
             "名单里有这个学号，但没有他的凭证",
             device_id=candidate.device_id,
             door_no=candidate.door_no,
@@ -408,7 +408,7 @@ async def _perform_settle(job: _SettleJob) -> None:
 
     log_event(
         "INFO",
-        "session-maintenance.settled",
+        "background-task.settled",
         "续期已结算，等门空闲后补分配" if feature in RENEWING_FEATURES else "自动结算已下发",
         device_id=candidate.device_id,
         door_no=candidate.door_no,
@@ -442,7 +442,7 @@ async def _perform_assign(job: _AssignJob) -> None:
             # 不是"重试"——重试指的是把同一条命令再发一遍。
             log_event(
                 "INFO",
-                "session-maintenance.assign-waiting",
+                "background-task.assign-waiting",
                 "还轮不到分配，等下一帧",
                 device_id=job.device_id,
                 door_no=job.door_no,
@@ -458,7 +458,7 @@ async def _perform_assign(job: _AssignJob) -> None:
     ok = result.get("status") == outcomes.OK.value
     log_event(
         "INFO" if ok else "WARNING",
-        "session-maintenance.assigned" if ok else "session-maintenance.assign-failed",
+        "background-task.assigned" if ok else "background-task.assign-failed",
         "续期已补分配" if ok else "续期补分配失败，请人工确认",
         device_id=job.device_id,
         door_no=job.door_no,
@@ -478,7 +478,7 @@ def _report_problem(error: ApiProblemError, device_id: str, door_no: int, cert_n
     expected = code in _WAIT_PROBLEMS or code in _DONE_PROBLEMS
     log_event(
         "INFO" if expected else "WARNING",
-        "session-maintenance.not-applicable" if expected else "session-maintenance.rejected",
+        "background-task.not-applicable" if expected else "background-task.rejected",
         "现在还不该做，跳过" if expected else "领域层拒绝了这次维护，请人工确认",
         device_id=device_id,
         door_no=door_no,
@@ -497,7 +497,7 @@ def _report_outcome(result: CommandOutcome, candidate: Candidate, feature: str) 
     """
     log_event(
         "WARNING",
-        "session-maintenance.settle-failed",
+        "background-task.settle-failed",
         "结算失败，请人工确认",
         device_id=candidate.device_id,
         door_no=candidate.door_no,
@@ -529,7 +529,7 @@ def _flush_pending_assign(device_id: str) -> None:
             _pending_assigns.pop(key, None)
             log_event(
                 "WARNING",
-                "session-maintenance.assign-expired",
+                "background-task.assign-expired",
                 "等门空闲超时，放弃这次分配",
                 device_id=device_id,
                 door_no=waiting.door_no,
@@ -553,7 +553,7 @@ def _flush_pending_assign(device_id: str) -> None:
 def start() -> None:
     global _running
     _running = True
-    log_event("INFO", "session-maintenance.started", "会话维护已启动")
+    log_event("INFO", "background-task.started", "后台任务已启动")
 
 
 def stop() -> None:
@@ -569,4 +569,4 @@ def stop() -> None:
     _workers.clear()
     _pending_assigns.clear()
     _attempted.clear()
-    log_event("INFO", "session-maintenance.stopped", "会话维护已停止")
+    log_event("INFO", "background-task.stopped", "后台任务已停止")
