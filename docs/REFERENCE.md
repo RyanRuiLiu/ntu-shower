@@ -526,7 +526,13 @@ PUT /api/v1/config  或  PUT /api/v1/devices/{id}/config
 设备回报 config.ack（服务端等 config_ack_timeout_s = 15 秒）
 ```
 
-设备端拿到的生效值是三层合并的结果；`config.update` 只带差异。
+设备端拿到的是**合并后的生效值**（`默认 ← 全局 ← 设备`），而且**只含设备域消费的键**——服务端
+自己的键不下发（`store.device_effective`）。推送只发给**在线**设备；离线的那些不排队，它们重连时
+由 `link.hello_ack` 带回当前值，所以最终一致。设备回 `config.ack`（15 秒超时），前端据此数"已生效"。
+
+> **两条路给的键集不一样**（既有行为）：`config.update` 用 `device_effective`（只含设备域的键），
+> 而 `link.hello_ack` 用的是 `effective`（**全部键，含服务端自己的**）。实际无害——设备端
+> `RuntimeConfig.apply` 对不认识的键直接跳过，但两处本可以一致。
 
 ### 8.4 OTA 发布
 
