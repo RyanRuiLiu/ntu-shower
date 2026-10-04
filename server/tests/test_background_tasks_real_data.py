@@ -18,6 +18,7 @@ from tests import helpers
 from app.core import device_clock, outcomes
 from app.core.clock import seconds_between
 from app.core.db import get_conn, write
+from app.modules.doors import repository as doors_repository
 from app.modules.doors import service as doors_service
 from app.modules.doors.schemas import DoorState
 from app.modules.sessions import scheduler
@@ -33,11 +34,14 @@ from test_scheduler import _frame, _let_the_loop_run
 
 #: 判据要看的两个学号都在名单里——真实行里就是两个人（一台设备、两间浴室间）。名单外的
 #: 一概不碰，所以这里必须与下面的真实 `cert_no` 对上。
+#:
+#: 时长上限放得极大：下面那些真实行的 `assigned_at` 动辄在几小时前，撞上真实默认值
+#: （900 秒）的话判据会先停手，测到的是"没动手"。上限本身由 test_decision.py 盯。
 CONFIG: dict[str, object] = {
     "renew_wait_enabled": True,
     "renew_wait_students": {"2530110052": "000000", "2217110057": "111111"},
     "renew_wait_threshold_s": 270,
-    "renew_wait_max_count": 3,
+    "renew_wait_max_duration_s": 86_400,
     "renew_session_enabled": True,
     "renew_session_students": {"2530110052": "000000", "2217110057": "111111"},
     "renew_session_threshold_s": 1140,
@@ -279,20 +283,20 @@ def test_the_real_incomplete_session_reports_a_mismatch(real_rows: None) -> None
 # ── 判据落在真实形状上 ────────────────────────────────────────────────────
 
 
-def test_renew_count_on_the_real_consecutive_run(real_rows: None) -> None:
-    """真实的那一串：同一喷头同一学号，间隔 92 秒与 12 秒 → 算同一串。
+def test_run_started_at_on_the_real_consecutive_run(real_rows: None) -> None:
+    """真实的那一串：同一喷头同一学号，间隔 92 秒与 12 秒 → 算同一串，起点是最早那场。
 
     这一串是手工连点出来的，但形状与我们的续期一样：都是"先释放、几秒后又分配"。
     差别只在间隔量级——我们自己的续期是秒级，真人走了再回来是分钟级；而这里隔了 92 秒，
     仍落在 300 秒那条线以内。
     """
-    count = scheduler.doors_repository.count_renewals_in_run
+    started = doors_repository.run_started_at
 
-    assert count("dev-1", 3, "2530110052", 300) == 2
-    # 把那条线收到 60 秒：92 秒那一跳被划断，只剩最后两场同一串
-    assert count("dev-1", 3, "2530110052", 60) == 1
-    # 另一个喷头、另一个学号：各自独立
-    assert count("dev-1", 6, "2217110057", 300) == 0
+    assert started("dev-1", 3, "2530110052", 300) == "2026-10-03T18:50:22.210Z"
+    # 把那条线收到 60 秒：92 秒那一跳被划断，起点跟着挪到最后两场里最早的那一场
+    assert started("dev-1", 3, "2530110052", 60) == "2026-10-03T18:52:18.233Z"
+    # 另一个喷头、另一个学号：只有一场，它自己就是起点
+    assert started("dev-1", 6, "2217110057", 300) == "2026-10-03T16:53:57.213Z"
 
 
 def _candidate(door_no: int, cert_no: str, state: DoorState, assigned_at: str, paused_at: str = "") -> Candidate:
@@ -304,7 +308,7 @@ def _candidate(door_no: int, cert_no: str, state: DoorState, assigned_at: str, p
         state=state,
         assigned_at=assigned_at,
         paused_at=paused_at,
-        renew_count=0,
+        run_started_at=assigned_at,
     )
 
 
@@ -400,7 +404,7 @@ def test_snapshots_walks_real_rows_and_the_live_view(real_rows: None) -> None:
     assert found[0].state is DoorState.WAITING  # 分配了、还没开阀
     assert found[0].cert_no == "2530110052"
     assert found[0].paused_at == ""  # 没暂停过
-    assert found[0].renew_count == 0
+    assert found[0].run_started_at == found[0].assigned_at  # 只此一场，起点就是它自己
 
 
 def test_a_real_shape_ends_in_a_settle(

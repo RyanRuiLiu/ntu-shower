@@ -78,6 +78,16 @@ def get(device_id: str) -> float:
     return _skew.get(device_id, 0.0)
 
 
+def has(device_id: str) -> bool:
+    """这台设备有没有偏差记录。
+
+    与 [get] 的差别只在"有没有"这一点：`get` 返回 0.0 时，分不清"从没量到过"与
+    "偏差恰好为零"。要据偏差推算设备钟的调用方必须先问这一句——拿 0 当偏差用，
+    等价于假定设备钟与我们对齐，而那正是这台没有 NTP 的设备靠不住的地方。
+    """
+    return device_id in _skew
+
+
 def to_server(device_time: object, device_id: str) -> str | None:
     """把设备钟上的一个时刻平移到服务端时间轴。
 

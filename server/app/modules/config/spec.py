@@ -7,6 +7,7 @@ scope=DEVICE 的键下发给设备，设备端 RuntimeConfig 是它的消费者�
 由 tests/test_config_spec.py 对账，防止单边漂移。
 """
 
+import re
 from dataclasses import dataclass
 from enum import Enum
 
@@ -23,6 +24,29 @@ class ConfigKind(str, Enum):
     TEXT_MAP = "text_map"
     """字符串到字符串的映射，目前只有三份后台任务名单一例（学号=密码）。"""
 
+    TIME = "time"
+    """一天里的一个时刻，`HH:MM`。时刻不是时长、也没有单位：`23:49` 与 `1429 分钟` 是
+    同一件事，而后者要读的人自己换算。下限与上限用自 0 点起的分钟数表达。"""
+
+
+#: `HH:MM` 形式的一天内时刻，小时 00–23、分钟 00–59。时刻这个类型的全部知识都在下面
+#: 这两个函数里——怎么认它、怎么让它与分钟数互相换算。校验（[spec.py] 的范围）与测试
+#: （默认值在不在范围内）都要用它，写第二份的地方必然与第一份漂移。
+_TIME_PATTERN = re.compile(r"([01]\d|2[0-3]):([0-5]\d)")
+
+
+def parse_time(value: str) -> int | None:
+    """`HH:MM` → 自 0 点起的分钟数；格式不对给 None。"""
+    matched = _TIME_PATTERN.fullmatch(value)
+    if matched is None:
+        return None
+    return int(matched.group(1)) * 60 + int(matched.group(2))
+
+
+def format_time(minutes: int) -> str:
+    """自 0 点起的分钟数 → `HH:MM`，用于把范围错误说得像人话。"""
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
 
 class ConfigScope(str, Enum):
     """归属：键由哪一端消费。"""
@@ -38,7 +62,8 @@ class ConfigScope(str, Enum):
 class ConfigSpec:
     """一个配置键的完整规格。
 
-    `minimum` / `maximum` 只对 `ConfigKind.INT` 有意义，其余类型为 None。
+    `minimum` / `maximum` 只对 `ConfigKind.INT` 与 `ConfigKind.TIME` 有意义——后者用自
+    0 点起的分钟数表达；其余类型为 None。
     `group` 是界面分组（配置页按它分卡片），取值见 [GROUPS]；分组又归属
     `SECTIONS` 之一（基础能力 / 拓展功能）。
     """
@@ -84,6 +109,7 @@ GROUPS: tuple[GroupSpec, ...] = (
     GroupSpec("renew_wait", "预约续期", "server"),
     GroupSpec("renew_session", "会话续期", "server"),
     GroupSpec("auto_settle", "自动结算", "server"),
+    GroupSpec("extend_hours", "延长服务时间", "server"),
     GroupSpec("server_link", "链路维持", "server"),
     GroupSpec("server_ui", "界面操作超时", "server"),
     GroupSpec("server_bridge", "调试通道", "server"),
@@ -106,6 +132,7 @@ INT = ConfigKind.INT
 BOOL = ConfigKind.BOOL
 TEXT = ConfigKind.TEXT
 TEXT_MAP = ConfigKind.TEXT_MAP
+TIME = ConfigKind.TIME
 
 #: 全部配置键的规格。新增配置键时只改这里——服务端校验、客户端渲染、文档
 #: 生成都从它派生。
@@ -155,17 +182,6 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         maximum=3600,
         unit="秒",
         group="server_link",
-    ),
-    ConfigSpec(
-        "bridge_ssh_target",
-        TEXT,
-        SERVER,
-        "root@iseekdream.com",
-        "调试通道的 SSH 目标",
-        "网页端生成本机连接命令时用的 `用户@主机`。它是现场那台电脑要 ssh 过去的地方，"
-        "与网页自己的域名不是一回事——网页挂在 ntu-shower 子域上，而 ssh 连的是主域，"
-        "所以推不出来，只能配。见 docs/RUNBOOK.md 的连接指引。",
-        group="server_bridge",
     ),
     ConfigSpec(
         "reconnect_base_ms",
@@ -343,11 +359,13 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "home_timeout_ms",
         INT,
         DEVICE,
-        10000,
+        15000,
         "回首页预算",
         "自动化流程每一步之间都要先回到浴室 App 首页，这是单次返回的时间预算。"
-        "正常返回在 1 秒内完成；预算给到 10 秒是留给设备卡顿时的余量——超预算会判定"
-        "流程卡死并中止，调小会误杀正在缓慢恢复的界面",
+        "正常返回在 1 秒内完成；预算给到 15 秒是留给两种情形的余量：设备卡顿，以及"
+        "**浴室 App 刚被重启过**——那时它还在冷启动，而流程的第一步就是回首页，"
+        "10 秒会在它露脸之前就判定流程卡死。超预算会中止并判失败，调小会误杀"
+        "正在缓慢恢复的界面",
         minimum=1000,
         maximum=60000,
         unit="毫秒",
@@ -548,6 +566,17 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         unit="秒",
         group="server_bridge",
     ),
+    ConfigSpec(
+        "bridge_ssh_target",
+        TEXT,
+        SERVER,
+        "root@iseekdream.com",
+        "调试通道的 SSH 目标",
+        "网页端生成本机连接命令时用的 `用户@主机`。它是现场那台电脑要 ssh 过去的地方，"
+        "与网页自己的域名不是一回事——网页挂在 ntu-shower 子域上，而 ssh 连的是主域，"
+        "所以推不出来，只能配。见 docs/RUNBOOK.md 的连接指引。",
+        group="server_bridge",
+    ),
     # ── 后台任务（服务端侧）：一个功能一块，块内按"开关 → 阈值 → 名单"排 ──
     ConfigSpec(
         "renew_wait_enabled",
@@ -573,17 +602,16 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         group="renew_wait",
     ),
     ConfigSpec(
-        "renew_wait_max_count",
+        "renew_wait_max_duration_s",
         INT,
         SERVER,
-        3,
-        "预约续期次数上限",
-        "同一串连续会话里最多替他续几次（默认 3 次，即最多 4 场会话）。喷头空着超过 300 秒"
-        "就算这一串结束、次数从头数。续满之后停止续期，让浴室端正常释放——他从没出过水，"
-        "没有账要结",
-        minimum=1,
-        maximum=10,
-        unit="次",
+        1200,
+        "预约续期时长上限",
+        "从这一串的第一场（他自己那一次分配）算起，累计替他续了这么久就停，让他被浴室端"
+        "正常释放——他从没出过水，没有账要结。喷头空着超过 300 秒即算这一串结束、计时从头"
+        "开始。浴室端每 300 秒放一次、我们每 270 秒续一次，所以 1200 秒约合四场",
+        minimum=0,
+        unit="秒",
         group="renew_wait",
     ),
     ConfigSpec(
@@ -661,6 +689,68 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "自动结算名单",
         "只对这些学号做自动结算，一行一个（格式：学号=密码）。留空表示谁都不做",
         group="auto_settle",
+    ),
+    ConfigSpec(
+        "extend_hours_enabled",
+        BOOL,
+        SERVER,
+        False,
+        "启用延长服务时间",
+        "浴室 App 每天到点关机，并在关机前五分钟放掉所有喷头。开启后，只要名单里的人在这台"
+        "设备上还有会话，服务端就把设备钟往后拨一小时、并重启浴室 App 让它重读开关机计划——"
+        "当晚那次关机因此被跳过，他们能接着用。这台设备空了、或者保持时长到了，再把钟调回",
+        group="extend_hours",
+    ),
+    ConfigSpec(
+        "extend_hours_at",
+        TIME,
+        SERVER,
+        "23:49",
+        "触发时刻",
+        "设备表盘上的哪一刻动手。**不能早于 23:00**：拨钟往后拨满一小时，早于这个点就跨不过"
+        "日界，浴室 App 的下一次扫描仍会把所有人放掉。实测它在 23:53 动手放人（关机前五分钟），"
+        "所以这个时刻要留足余量让拨钟与重启跑完（十几秒）",
+        minimum=23 * 60,
+        group="extend_hours",
+    ),
+    ConfigSpec(
+        "extend_hours_hold_s",
+        INT,
+        SERVER,
+        3600,
+        "保持时长",
+        "拨钟成功起算，保持这么久之后把设备钟调回。**到期时还挂着的会话会被浴室端清掉**——"
+        "它判「开阀时刻与此刻之差」用的是绝对值，钟一退这个差值就跳过去了。借来的那一小时要还，"
+        "这是这个功能自身的终点",
+        minimum=60,
+        maximum=14400,
+        unit="秒",
+        group="extend_hours",
+    ),
+    ConfigSpec(
+        "extend_hours_zone_offset_minutes",
+        INT,
+        SERVER,
+        480,
+        "设备时区偏移",
+        "设备墙钟与 UTC 的差，用来把最近一帧的读数换算成「设备表盘上现在几点」。默认 480 即"
+        "UTC+8。**它是设备的事实而不是我们的策略**：浴室 App 判时间用的是设备默认时区，配错会"
+        "让拨钟时机整体错位一小时，而且不报任何错",
+        minimum=-720,
+        maximum=840,
+        unit="分钟",
+        group="extend_hours",
+    ),
+    ConfigSpec(
+        "extend_hours_students",
+        TEXT_MAP,
+        SERVER,
+        {},
+        "延长服务时间名单",
+        "只在这些学号还有会话时才拨钟，一行一个（格式：学号=密码）。留空表示谁都不做。"
+        "**凭证跟着这份名单走**：拨钟之后要替他们重新分配喷头，那一步要用密码——"
+        "四份名单各自完整，配一份就读得懂一份",
+        group="extend_hours",
     ),
 )
 

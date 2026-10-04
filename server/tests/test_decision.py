@@ -27,7 +27,7 @@ BASE_CONFIG: dict[str, object] = {
     "renew_wait_enabled": True,
     "renew_wait_students": {"2530110052": "000000", "2530110053": "111111"},
     "renew_wait_threshold_s": 270,
-    "renew_wait_max_count": 3,
+    "renew_wait_max_duration_s": 1200,
     "renew_session_enabled": True,
     "renew_session_students": {"2530110052": "000000"},
     "renew_session_threshold_s": 1140,
@@ -47,7 +47,7 @@ def candidate(**overrides: object) -> Candidate:
         state=DoorState.WAITING,
         assigned_at="2026-10-05T11:55:00.000Z",
         paused_at="",
-        renew_count=0,
+        run_started_at="2026-10-05T11:55:00.000Z",
     )
     return replace(base, **overrides)  # type: ignore[arg-type]
 
@@ -106,11 +106,15 @@ def test_renew_wait_fires_past_due_with_negative_delay() -> None:
     assert trigger.delay_s < 0
 
 
-def test_renew_wait_stops_at_the_count_cap() -> None:
-    """续满之后停止续期，让浴室端正常释放——他从没出过水，没有账要结。"""
-    assert decide(candidate(renew_count=2), BASE_CONFIG, NOW) is not None
-    assert decide(candidate(renew_count=3), BASE_CONFIG, NOW) is None
-    assert decide(candidate(renew_count=9), BASE_CONFIG, NOW) is None
+def test_renew_wait_stops_at_the_duration_cap() -> None:
+    """续够了就停，让浴室端正常释放——他从没出过水，没有账要结。
+
+    上限比的是「这一串第一场到此刻」，不是「续了几次」：NOW 是 12:00，1200 秒的线落在
+    11:40。11:47 起步还差七分钟，11:40 与更早就到点了。
+    """
+    assert decide(candidate(run_started_at="2026-10-05T11:47:00.000Z"), BASE_CONFIG, NOW) is not None
+    assert decide(candidate(run_started_at="2026-10-05T11:40:00.000Z"), BASE_CONFIG, NOW) is None
+    assert decide(candidate(run_started_at="2026-10-05T11:00:00.000Z"), BASE_CONFIG, NOW) is None
 
 
 def test_renew_wait_only_applies_while_waiting() -> None:
@@ -130,9 +134,11 @@ def test_renew_session_applies_to_both_occupied_states() -> None:
         assert trigger == Trigger(FEATURE_RENEW_SESSION, delay_s=30.0, threshold_s=1140)
 
 
-def test_renew_session_has_no_count_cap() -> None:
-    """长期洗的人不该被次数挡住——续期就是为他存在的。"""
-    trigger = decide(candidate(state=DoorState.BATHING, renew_count=99), BASE_CONFIG, NOW)
+def test_renew_session_has_no_duration_cap() -> None:
+    """长期洗的人不该被时长挡住——续期就是为他存在的。"""
+    long_run = candidate(state=DoorState.BATHING, run_started_at="2026-10-05T08:00:00.000Z")
+
+    trigger = decide(long_run, BASE_CONFIG, NOW)
 
     assert trigger is not None
     assert trigger.feature == FEATURE_RENEW_SESSION

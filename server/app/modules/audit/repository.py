@@ -15,6 +15,12 @@
 `no-password` / `not-applicable` / `assign-waiting` / `assign-expired` 那几种根本没有
 命令。要对照两边，按 `occurred_at` 与 `command_audit.created_at` 排着看。
 
+**延长服务时间不在这三条里。** 它的每一次动手都是一个命令（`clock.set` /
+`bath.restart` / `session.assign`），不存在"动手了却没有命令"的终局；而这张表的
+`door_no` 与 `cert_no` 都是非空的，判定粒度却是**整台设备**——它装不下。它的"为什么
+动手"由结构化日志说（事件名 `extend-hours.*`），动作本身由 command_audit 覆盖，
+两边按设备与时间排着看。
+
 **只记终局**：每帧、每个候选都要判一次"到点没有"，那个过程不落库（否则量级等于帧数）。
 
 **永久保留**：它是运营历史（谁被自动续期过），效果本身留在 usage_session 里，但

@@ -48,6 +48,8 @@ from .modules.devices.routes import admin_router as devices_admin_router
 from .modules.devices.routes import router as devices_router
 from .modules.doors import repository as doors_repository
 from .modules.doors.routes import router as doors_router
+from .modules.extend_hours import repository as extend_hours_repository
+from .modules.extend_hours import service as extend_hours_service
 from .modules.ota import repository as ota_repository
 from .modules.ota.routes import device_router as ota_device_router
 from .modules.ota.routes import router as ota_router
@@ -80,6 +82,7 @@ def init_schema() -> None:
     config_store.init_tables()
     audit.init_tables()
     command_audit_repository.init_tables()
+    extend_hours_repository.init_tables()
 
 
 def create_app() -> FastAPI:
@@ -91,9 +94,11 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         sessions_scheduler.start()
+        extend_hours_service.start()
         audit.start_prune()
         yield
         audit.stop_prune()
+        extend_hours_service.stop()
         sessions_scheduler.stop()
 
     app = FastAPI(title="NTU Shower", version=APP_VERSION, lifespan=lifespan)
