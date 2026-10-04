@@ -21,7 +21,7 @@ class ConfigKind(str, Enum):
     BOOL = "bool"
     TEXT = "text"
     TEXT_MAP = "text_map"
-    """字符串到字符串的映射，目前只有三份会话维护名单一例（学号=密码）。"""
+    """字符串到字符串的映射，目前只有三份后台任务名单一例（学号=密码）。"""
 
 
 class ConfigScope(str, Enum):
@@ -68,7 +68,7 @@ class GroupSpec:
 #: 服务端那一边在服务器上运行——不下发设备、也不按设备区分；设备那一边会推到设备、
 #: 支持单台覆盖。两者的边界就是 [ConfigScope]：**一组里的键必须同属一个 scope**，
 #: 由 `tests/test_config_spec.py` 强制，不允许一组混两种。
-#: 服务端在前：会话维护是这个软件存在的目的，设备侧的九块是支撑它长期跑着的地基。
+#: 服务端在前：后台任务是这个软件存在的目的，设备侧的九块是支撑它长期跑着的地基。
 SECTIONS: tuple[tuple[str, str], ...] = (
     ("server", "服务端业务"),
     ("device", "设备下发"),
@@ -548,7 +548,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         unit="秒",
         group="server_bridge",
     ),
-    # ── 会话维护（服务端侧）：一个功能一块，块内按"开关 → 阈值 → 名单"排 ──
+    # ── 后台任务（服务端侧）：一个功能一块，块内按"开关 → 阈值 → 名单"排 ──
     ConfigSpec(
         "renew_wait_enabled",
         BOOL,

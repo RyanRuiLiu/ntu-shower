@@ -37,7 +37,7 @@ class DoorState(str, Enum):
     """禁用：设备标记为停用。"""
 
 
-#: 占用中的状态（有人），用于会话维护与自动结算判断。
+#: 占用中的状态（有人），用于后台任务与自动结算判断。
 OCCUPIED_STATES = frozenset({DoorState.WAITING, DoorState.BATHING, DoorState.PAUSED})
 
 #: 可以被分配的状态。

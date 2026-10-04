@@ -220,7 +220,7 @@ async def _handle_frame(
                 device_id=device_id,
                 error=str(exc),
             )
-        # 帧是会话维护的心跳：门刚被占用、刚被释放，都只能从帧看出来。调度器据此重算这台
+        # 帧是后台任务的心跳：门刚被占用、刚被释放，都只能从帧看出来。调度器据此重算这台
         # 设备每个喷头的"下一个到点"，并把待补的那次分配接上——**不轮询**。
         sessions_scheduler.on_frame(device_id)
         await ws.send_text(

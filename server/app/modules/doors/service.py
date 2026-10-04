@@ -1,4 +1,4 @@
-"""喷头状态派生与洗浴会话维护：`t_doorlist` 解析规则的单一来源。
+"""喷头状态派生与洗浴后台任务：`t_doorlist` 解析规则的单一来源。
 
 ## 时刻只有一个来源
 
@@ -128,7 +128,7 @@ MAX_SEGMENT_S = SESSION_MAX_S
 
 #: 浴室 App"连续无水就释放"的门槛，秒：未开阀是 `maxinspacetime`、关阀后是
 #: `maxbathspacetime`，两者都是 300。它与 [SESSION_MAX_S] 同源（浴室 App 同一个参数家族），
-#: 所以住在一起而不各写一份。会话维护用它划断"同一串会话"：喷头空着超过这么久，说明那个
+#: 所以住在一起而不各写一份。后台任务用它划断"同一串会话"：喷头空着超过这么久，说明那个
 #: 人的占用真的结束了（浴室端早释放了他、之后没人接手），预约续期的次数从头数。
 NO_WATER_RELEASE_S = 300
 
@@ -413,7 +413,7 @@ def _apply_snapshot(device_id: str, payload: JsonObject) -> JsonObject:
                 as_int(door.get("bath_time_s")),
             )
 
-        # 先派生、再落现态：会话维护要读**上一帧**的状态与时刻，而 `upsert_door_live`
+        # 先派生、再落现态：后台任务要读**上一帧**的状态与时刻，而 `upsert_door_live`
         # 会把它们覆盖掉。全貌帧同样要派生——它挡住的只是事件流水（见 SOURCE_STARTUP），
         # 会话跟着一起跳过就会丢掉重连时正在进行的那一场。
         _maintain_session(device_id, door_no, state, door, occurred_at, old)
