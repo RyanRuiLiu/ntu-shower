@@ -61,47 +61,48 @@ scp server_deploy.tar.gz <deploy-host>:/tmp/
 #     按新 schema 收、设备按旧 schema 发，而两边都不会报错。
 scp protocol/schema/*.json <deploy-host>:/opt/ntu-shower/protocol/schema/
 
-# ③ 服务器：备份现状（回滚点）
+# ③ 本地：把部署脚本送到服务器
 #
-# 含 `.env`：它是 systemd 的 EnvironmentFile，装着数据库路径等生产配置，而它不在仓库里
-# （gitignore），丢了就只能靠记忆重建。备份落在服务器本地 /tmp，不往外传。
-ssh <deploy-host> 'cd /opt/ntu-shower/server && tar czf /tmp/ntu-shower-backup-$(date +%s).tar.gz \
-    app tests pyproject.toml requirements.txt requirements-dev.txt web .env'
+# 它不随包发布（包里只有 server/ 的内容），每次部署时送过去执行。
+scp deploy/scripts/deploy.sh <deploy-host>:/tmp/
 
-# ④ 服务器：预检——用生产解释器验证新代码能导入
-#    这一步不可省：本地解释器版本可能与生产不同，只有在生产解释器上导入才作数
-ssh <deploy-host> 'rm -rf /tmp/deploy_check && mkdir -p /tmp/deploy_check \
-    && tar xzf /tmp/server_deploy.tar.gz -C /tmp/deploy_check \
-    && cd /tmp/deploy_check \
-    && PYTHONPATH=/tmp/deploy_check /opt/ntu-shower/server/.venv/bin/python \
-       -c "from app.main import create_app; create_app(); print(\"IMPORT OK\")"'
+# ④ 服务器：部署
+#
+# 脚本依次做五件事：用**生产解释器**预检 → 停服并备份（保留最近 5 份到
+# /opt/ntu-shower/backups）→ 保留 .venv／data／ota_releases／.env、其余全删后再解包
+# → requirements.txt 变过才装依赖 → 启动并验证（is-active + /healthz）。
+# 任一步失败自动回滚；预检放在停服之前，所以预检不过时服务一直没停过、无需回滚。
+#
+# **"保留四项、其余全删"是刻意的**：以前是 `rm -rf app tests`，只能清那两个目录，
+# `web/`、`tools/` 只解压覆盖——仓库里删掉的文件会永久留在服务器上。实际已攒下两处：
+# `web/core/log.js`（已删的孤儿）与 `scripts/`（改名成 `tools/` 前的旧目录）。
+# 保留清单与理由写在脚本头部注释里。
+ssh <deploy-host> 'sudo NT_TARBALL=/tmp/server_deploy.tar.gz bash /tmp/deploy.sh'
 
-# ⑤ 服务器：替换并重启
-ssh <deploy-host> 'systemctl stop ntu-shower \
-    && cd /opt/ntu-shower/server && rm -rf app tests \
-    && tar xzf /tmp/server_deploy.tar.gz -C /opt/ntu-shower/server \
-    && systemctl start ntu-shower && sleep 3 && systemctl is-active ntu-shower'
-
-# ⑥ 验证三项
-ssh <deploy-host> 'curl -s http://127.0.0.1:8001/healthz'          # 版本正确
-ssh <deploy-host> 'journalctl -u ntu-shower -n 20 --no-pager'      # 无异常栈
+# ⑤ 人工复核
+#
+# healthz 只回 `{"status":"ok",...,"version":"0.4.23"}`，而版本号冻结在 0.4.23
+# （它要与 android 的 versionName 对齐，不随服务端改动走）——**所以它证明不了这次部署**。
+# 要确认新代码真的上去了，查这次改动的特征串：见脚本输出与其后 `journalctl` 的日志。
+ssh <deploy-host> 'journalctl -u ntu-shower -n 20 --no-pager'      # 无异常栈启动
 # 设备是否重连：看日志出现 "WebSocket /gateway/device [accepted]"
 ```
 
-**回滚**（第 ⑤ 步之后任一项验证失败即执行）：
+**回滚**（部署后发现问题的两步）：
 
 ```bash
-ssh <deploy-host> 'systemctl stop ntu-shower \
-    && cd /opt/ntu-shower/server && rm -rf app tests \
-    && tar xzf /tmp/ntu-shower-backup-<时间戳>.tar.gz -C /opt/ntu-shower/server \
-    && systemctl start ntu-shower && sleep 3 && systemctl is-active ntu-shower'
+# 先看有哪些回滚点
+ssh <deploy-host> 'ls -1t /opt/ntu-shower/backups/server-*.tar.gz | head'
+# 回滚（同一个脚本的 --rollback 入口，走与部署相同的"保留四项、其余全删"逻辑）
+ssh <deploy-host> 'sudo NT_ROLLBACK=/opt/ntu-shower/backups/server-<时间戳>.tar.gz bash /tmp/deploy.sh --rollback'
 ```
 
 ### 注意事项（均为踩过的坑）
 
 - **必须用生产 Python 预检**：本地 3.13 通过不代表生产 3.10 通过。
   曾发生 `typing.TypedDict` 在 3.10 + pydantic 2.13 下被拒（要求 `typing_extensions.TypedDict`），
-  本地全绿而线上启动即崩——第 ④ 步就是为此存在的。
+  本地全绿而线上启动即崩——`deploy.sh` 的第 1 步就是为此存在的，而且它排在停服之前，
+  预检失败时服务一直没停过。
 - 打包排除 `.env`：服务器的 `.env` 是唯一副本，被覆盖将导致管理面令牌丢失。
 - 改 `requirements.txt` 后需在服务器执行 `.venv/bin/pip install -r requirements.txt`；
   仅改业务代码则不需要。
@@ -208,7 +209,8 @@ ssh <deploy-host> 'systemctl is-active ntu-shower; journalctl -u ntu-shower -n 4
 ```
 
 - 日志出现 `PydanticUserError` / `ImportError` → 部署了与本机解释器版本不匹配的代码，
-  按 §2 回滚，并补齐第 ④ 步预检。
+  按 §2 回滚。`deploy.sh` 的第 1 步（生产解释器预检）本该拦住它——若它没拦住，先查那一步
+  是否被跳过。
 
 ### 设备能力集（capabilities）
 
