@@ -36,7 +36,7 @@
 
 | 层 | 表 | 用途 |
 |---|---|---|
-| **原始层** | `door_snapshot`、`device_link_event`、`command_audit`、`api_call` | 设备与调用方的原话，不改写。**它是重算的退路，不是查询入口** |
+| **原始层** | `door_snapshot`、`device_link_event`、`command_audit`、`api_call`、`background_task_run` | 设备与调用方的原话、我们自己做过的事，不改写。**它是重算的退路，不是查询入口** |
 | **派生层** | `door_live`、`door_state_event`、`usage_segment`、`usage_session` | 我们算出来的。**做功能与统计只碰这四张** |
 | **支撑层** | `device`、`global_config`、`device_config`、`access_identity`、`ota_release`、`ota_release_install` | 设备档案、配置、身份、发布 |
 
@@ -129,7 +129,6 @@
 > 喷头有没有变成「等待开阀」、占用者是不是他、那一行有没有被清零。
 
 ### 3.4 `api_call` —— 每一次 HTTP 调用与每次网关连接
-
 | 字段 | 是什么 |
 |---|---|
 | `kind` | `http`（普通 HTTP 请求）／`gateway`（设备 WS 连接的建立与断开） |
@@ -145,6 +144,29 @@
 | `device_id` | 相关设备（可为空） |
 | `problem_type` | RFC 9457 的问题类型；登记表见 `app/core/problems.py` |
 | `detail` | 失败响应的中文说明 |
+
+### 3.5 `background_task_run` —— 每一次后台任务的终局
+
+一行 = 一次**终局**（动手了，或者判定不该动手）。判据阶段（每帧、每个候选都算一次"到点
+没有"）**不落库**——那等于帧数。
+
+| 字段 | 是什么 |
+|---|---|
+| `occurred_at` | 终局时刻（服务端轴）。与 `command_audit.created_at` 对照即知这次发了哪条命令 |
+| `device_id` / `door_no` | 哪台设备的哪个喷头 |
+| `session_id` / `cert_no` | 这一场会话、替谁 |
+| `feature` | `renew_wait` / `renew_session` / `auto_settle` |
+| `action` | `session.settle` / `session.assign`（与 `command_audit.action` 同一套词）；**空 = 批次级失败，还没到具体动作** |
+| `outcome` | 终局是什么，**与日志事件后缀同名**：`settled` / `assigned` / `skipped` / `no-password` / `not-applicable` / `rejected` / `settle-failed` / `assign-waiting` / `assign-failed` / `assign-expired` / `failed` |
+| `reason` | 没动手时的中文原因（"不在名单里"这类） |
+| `threshold_s` | **当时生效的阈值**——配置没有历史，不存这一列，事后说不清"为什么是这一刻" |
+
+**为什么它单独有一张表**：后台任务在**帧**上动手，没有任何 HTTP 请求在途——按上面那条
+口径（"事件发生时有没有一行 HTTP 审计能兜住它"）它就该自己留一行。而它记的是**决定**，
+与 `command_audit` 记的"发了一条什么命令"不是同一件事：上面那些终局里有五个根本没有命令。
+
+**永久保留**：它是运营历史（谁被自动续期过、第几次）。`core.audit.prune` 只清 `api_call`
+与 `command_audit` 两条流水，这张表不在其中。
 
 ---
 
@@ -454,6 +476,7 @@ GET      /ota/manifest                               设备查更新
 
 GET      /api/v1/audit/calls                         HTTP 审计       admin
 GET      /api/v1/audit/commands                      命令审计        admin
+GET      /api/v1/audit/background-task-runs          后台任务审计    admin
 ```
 
 ### 7.3 WebSocket 三条
@@ -618,6 +641,11 @@ App 里自己输学号，设备把它带在帧里报上来（`usage_session.cert
 
 判据在 `app/modules/sessions/decision.py`（纯函数、逐条单测），机制在
 `app/modules/sessions/scheduler.py`。
+
+**每一次终局都留一行**（`background_task_run`，见 §3.5）：日志与落表在同一条路上写
+（`scheduler._record`），所以不会出现"记了日志、没落表"。**三个功能的差异只写在
+`decision.py` 的 `FEATURES` 登记表里**（适用状态、起算点、次数上限、是不是两步），实现里
+没有按功能的分叉——加第四个功能是加一条登记，不是再抄一遍判据。
 
 ---
 

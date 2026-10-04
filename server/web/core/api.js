@@ -129,6 +129,6 @@ export const api = {
     send(`${API_V1}/ota/releases/${encodeURIComponent(version)}/rearm/${encodeURIComponent(deviceId)}`, post()),
 
   // ── 审计 ──（admin）
-  auditCalls: (params) => send(`${API_V1}/audit/calls${query(params)}`),
-  commands: (params) => send(`${API_V1}/audit/commands${query(params)}`),
+  /** 审计三类共用这一条：`kind` 取 `calls` / `commands` / `background-task-runs`。 */
+  audit: (kind, params) => send(`${API_V1}/audit/${kind}${query(params)}`),
 }
