@@ -82,6 +82,9 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# `app` 包的导入要靠 server/ 在 sys.path 上：裸 `pytest` 不注入当前目录
+# （`python -m pytest` 才注入），不声明它，CI 上 conftest 第一步就 ImportError。
+pythonpath = ["."]
 # 单条用例的超时上限。正常用例在 1 秒内（最慢的是端口退避重试，1.25 秒），
 # 超过 5 秒就说明它在等待一个永不到来的事件——例如权限被拒后，"等设备回帧"
 # 的用例永远等不到。这道闸要卡得紧：宽到 30 秒等于没卡，一次挂起就是白等半分钟。
