@@ -18,7 +18,7 @@ import { deviceNowMs, fmtDateTime, fmtDuration, fmtServerTimeNow, fmtSkew, fmtUp
 import { EVENT_TYPES } from './core/contract.js'
 import { promptClockSet, restartBathApp } from './core/device-actions.js'
 import { $, esc, listen, PLACEHOLDER } from './core/dom.js'
-import { problemText } from './core/outcome.js'
+import { problemText, report } from './core/outcome.js'
 import { toast } from './core/toast.js'
 import {
   currentDevice,
@@ -241,11 +241,9 @@ function tickDeviceInfo() {
 function onDeviceInfoAction(event) {
   const btn = event.target.closest('button[data-act]')
   if (!btn || !store.deviceId) return
-  // 面板是浮层，没有放结果区的位置，结果报成 toast；'info' 那一档（"正在…"）不报，
-  // 否则每次操作都先弹一条再弹结果
-  const say = (text, kind) => {
-    if (kind !== 'info') toast(text)
-  }
+  // 浮层面板没有结果区的位置，所以只报浮层——那条规则由 report 一处承担（`id` 传空即
+  // 只弹浮层），这里不再写第二遍。
+  const say = (text, kind) => report(null, text, kind)
   if (btn.dataset.act === 'clock-set') promptClockSet(store.deviceId, say)
   if (btn.dataset.act === 'bath-restart') restartBathApp(store.deviceId, say)
 }
