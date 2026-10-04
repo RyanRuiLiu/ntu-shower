@@ -5,9 +5,11 @@
 """
 
 import asyncio
+import re
 import uuid
 from collections.abc import Iterator
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,6 +20,7 @@ from app.core.clock import now_rfc3339, shift_rfc3339
 from app.core.db import get_conn
 from app.core.problems import ApiProblemError, Problem
 from app.core.protocol import JsonObject
+from app.modules.audit import repository as audit_repository
 from app.modules.doors import service as doors_service
 from app.modules.doors.schemas import DoorState
 from app.modules.sessions import scheduler
@@ -29,6 +32,8 @@ from app.modules.sessions.decision import (
     Candidate,
 )
 from app.modules.sessions.schemas import AssignRequest, CommandOutcome, SettleRequest
+
+SCHEDULER_PATH = Path(scheduler.__file__)
 
 CONFIG: dict[str, object] = {
     "renew_wait_enabled": True,
@@ -262,6 +267,65 @@ def _assign_job(door_no: int = 3) -> scheduler._AssignJob:
         session_id=WAITING.session_id,
         threshold_s=THRESHOLDS[FEATURE_RENEW_WAIT],
     )
+
+
+def test_terminal_outcomes_are_recorded_on_one_path() -> None:
+    """终局只能在 `_record` 里记：日志与落表是**一件事**，散开写迟早只做一半。
+
+    这是源码级检查，不靠行为测试覆盖：行为测试只走得到那几条路径，而"新加一处终局却
+    忘了落表"恰恰发生在没被覆盖的那条上。`started` / `stopped` 是生命周期、不是终局，
+    所以它们直接写日志——这份白名单就是它们，多一个都要在这里说清楚。
+    """
+    source = SCHEDULER_PATH.read_text(encoding="utf-8")
+
+    literals = sorted(re.findall(r'"background-task\.([a-z-]+)"', source))
+    assert literals == ["started", "stopped"], f"还有别处直接写终局日志：{literals}"
+    assert source.count("insert_background_task_run(") == 1, "落表必须只有一处"
+
+
+def test_settle_lands_in_the_audit_table_with_its_own_fields(monkeypatch: pytest.MonkeyPatch, fresh_db: str) -> None:
+    """一次结算落一行，字段齐——审计表要能自己解释自己。
+
+    重点在 `threshold_s`：配置没有历史，事后再去查"当时阈值多少"是查不到的，而那一行
+    要能说清"为什么是这一刻"。
+    """
+
+    async def body() -> None:
+        _prepare(monkeypatch, [WAITING])
+        await scheduler._perform_settle(_settle_job(FEATURE_RENEW_WAIT))
+
+    asyncio.run(body())
+
+    rows = audit_repository.list_background_task_runs()
+    assert [row["outcome"] for row in rows] == ["settled"]
+    row = rows[0]
+    assert row["feature"] == FEATURE_RENEW_WAIT
+    assert row["action"] == "session.settle"
+    assert row["session_id"] == WAITING.session_id
+    assert row["cert_no"] == WAITING.cert_no
+    assert row["threshold_s"] == THRESHOLDS[FEATURE_RENEW_WAIT]
+    assert row["reason"] is None  # 成了就有没理由要说
+
+
+def test_a_rejected_settle_is_recorded_with_its_reason(monkeypatch: pytest.MonkeyPatch, fresh_db: str) -> None:
+    """领域层拒了也留一行，并带上理由——"没动手"同样是要留痕的事实。"""
+
+    async def body() -> None:
+        _prepare(monkeypatch, [WAITING])
+
+        async def reject(_device_id: str, _req: object) -> object:
+            raise ApiProblemError(problems.NO_OCCUPIED_DOOR, "已经没有占用中的喷头了")
+
+        monkeypatch.setattr(scheduler.sessions_routes, "perform_settle", reject)
+        await scheduler._perform_settle(_settle_job(FEATURE_AUTO_SETTLE))
+
+    asyncio.run(body())
+
+    rows = audit_repository.list_background_task_runs()
+    assert [row["outcome"] for row in rows] == ["not-applicable"]
+    assert rows[0]["feature"] == FEATURE_AUTO_SETTLE
+    assert rows[0]["action"] == "session.settle"
+    assert rows[0]["threshold_s"] == THRESHOLDS[FEATURE_AUTO_SETTLE]
 
 
 def test_same_door_is_not_queued_twice(monkeypatch: pytest.MonkeyPatch) -> None:
