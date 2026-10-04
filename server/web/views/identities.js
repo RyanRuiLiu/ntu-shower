@@ -4,7 +4,7 @@
  * ## 模型（能力位 × 作用域）
  *
  * - **能力位**（capabilities）回答"能做什么"：session（分配/结算）、photo（拍照）、
- *   admin（管理台）。清单来自 `GET /identities` 的域读模型（服务端 Capability
+ *   admin（管理台）、tasks（后台任务名单维护）。清单来自 `GET /identities` 的域读模型（服务端 Capability
  *   枚举是唯一来源），不硬编码第二份。
  * - **设备作用域**（device_scope）回答"对哪些设备做"：`["*"]` 即全部设备，否则
  *   是设备 id 列表。开关在两种模式间切换，勾选与展示一律用设备名；登记与编辑

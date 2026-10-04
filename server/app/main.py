@@ -9,7 +9,11 @@ X-Identity 头）：
 - /api/v1/devices、/api/v1/doors     设备域：精简清单公开；runtime 档案与远程
                                       操作 admin；分配/结算/拍照按 session/photo 能力位
 - /api/v1/config                     配置域（admin）
-- /api/v1/identities                 身份域（admin）
+- /api/v1/identities                 身份域：名单与签发/编辑/撤销 admin；`/identities/me`
+                                      是自己的记录（凭 X-Identity）
+- /api/v1/tasks                      后台任务登记：按 tasks 能力位增删某个学号的登记
+- /api/v1/stats                      浴室统计：按 stats 能力位读一台设备的聚合、某一天的
+                                     状态序列（客户端本地重放）、个人的跨设备统计
 - /api/v1/ota、/ota/manifest         发布域：清单与下载公开，发布/下架/重推 admin；
                                       manifest 为设备硬编码契约（无前缀，路径冻结）
 - /api/v1/audit                      审计域（admin）
@@ -37,6 +41,7 @@ from .core.version import APP_VERSION
 from .gateway.routes import router as gateway_router
 from .modules.access import repository as access_repository
 from .modules.access.routes import admin_router as identities_admin_router
+from .modules.access.routes import router as identity_router
 from .modules.audit import repository as command_audit_repository
 from .modules.audit.routes import admin_router as audit_admin_router
 from .modules.bridge.routes import admin_router as bridge_admin_router
@@ -55,6 +60,8 @@ from .modules.ota.routes import device_router as ota_device_router
 from .modules.ota.routes import router as ota_router
 from .modules.sessions import scheduler as sessions_scheduler
 from .modules.sessions.routes import router as sessions_router
+from .modules.stats.routes import router as stats_router
+from .modules.tasks.routes import router as tasks_router
 
 #: 要求浏览器每次回来验证的前端资源后缀。
 STATIC_SUFFIXES = (".html", ".js", ".css")
@@ -116,7 +123,12 @@ def create_app() -> FastAPI:
     app.include_router(bridge_router)
     app.include_router(bridge_admin_router)
     app.include_router(audit_admin_router)
+    # identity_router 必须排在 identities_admin_router 之前：后者挂着 `require_admin`，
+    # 将来它的 `/identities/{identity}` 若加上 GET，会把这个 `/identities/me` 抢走。
+    app.include_router(identity_router)
     app.include_router(identities_admin_router)
+    app.include_router(tasks_router)
+    app.include_router(stats_router)
 
     @app.get("/healthz", tags=["meta"])
     def health() -> HealthStatus:

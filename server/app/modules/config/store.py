@@ -9,6 +9,8 @@
 """
 
 import json
+import threading
+from collections.abc import Callable
 from typing import NoReturn
 
 from app.core.db import get_conn, write
@@ -23,6 +25,14 @@ from .spec import (
     format_time,
     parse_time,
 )
+
+#: 全局覆盖的写锁。`put_global_overrides` 是**覆盖式**写入——收整份配置、剔掉等于默认值
+#: 的项、整体写回——所以"读现状 → 改一项 → 写回"这三步之间必须串行：否则两个改动各自
+#: 读到旧值，后写的把先写的抹掉（A 刚登记、B 同时登记，名单里只剩 B）。
+#:
+#: 可重入：`update_global` 在锁内还要调 `put_global_overrides`。锁内**不许 await**，
+#: 否则把事件循环卡住。
+_global_lock = threading.RLock()
 
 
 class InvalidConfigError(ValueError):
@@ -154,16 +164,48 @@ def get_global_overrides() -> tuple[int, ConfigValues]:
 
 def put_global_overrides(values: ConfigValues) -> tuple[int, ConfigValues]:
     """覆盖式写入全局覆盖项；返回新修订号与入库内容。"""
-    revision, _previous = get_global_overrides()
-    overrides = _as_overrides(values)
-    new_revision = revision + 1
-    write("UPDATE global_config SET revision = ?, config = ? WHERE id = 1", (new_revision, json.dumps(overrides)))
-    return new_revision, overrides
+    with _global_lock:
+        revision, _previous = get_global_overrides()
+        overrides = _as_overrides(values)
+        new_revision = revision + 1
+        write(
+            "UPDATE global_config SET revision = ?, config = ? WHERE id = 1",
+            (new_revision, json.dumps(overrides)),
+        )
+        return new_revision, overrides
+
+
+def update_global(augment: Callable[[ConfigValues], ConfigValues]) -> tuple[int, ConfigValues]:
+    """在一个键上做读—改—写，整段串行；返回新的修订号与入库内容。
+
+    `augment` 收到的是**全局有效配置**（默认 ← 全局覆盖，不含设备覆盖），必须返回一份
+    同样完整的配置。**只回传要改的那一项是不行的**：`_as_overrides` 会把"没出现在输入
+    里"的键当成等于默认值而剔掉，于是管理员设过的开关被一次不相干的改动悄悄清掉。
+
+    读的为什么不是 `effective(device_id)`：那会把设备覆盖一起合并进来，而设备覆盖属于
+    另一张表，混进来就会在写全局的时候把某台设备的覆盖当成全局值固化。
+
+    `*_students` 名单的增删走这里。"先读后写"若不在同一把锁里，两个人同时登记会各写
+    各读到的旧名单，后写的把先写的抹掉。
+    """
+    with _global_lock:
+        return put_global_overrides(augment(global_effective()))
+
+
+def _device_scoped(values: ConfigValues) -> ConfigValues:
+    """丢掉服务端的键：设备覆盖里不该有它们。
+
+    服务端的键在服务器上运行、不按设备区分，写入侧（`config/routes.py` 的
+    `_validated_device_overrides`）已经拒掉。读侧再滤一遍，是为了让 `effective(device)`
+    与 `global_effective()` 对同一个服务端键**构造上**给出同一个值：后台任务按前者判、
+    接口按后者报状态，两者一旦分叉，表现是"开关明明开着却没生效"，而库里看不出异常。
+    """
+    return {key: value for key, value in values.items() if SPECS_BY_KEY[key].scope is not ConfigScope.SERVER}
 
 
 def get_device_overrides(device_id: str) -> tuple[int, ConfigValues] | None:
     row = get_conn().execute("SELECT revision, config FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
-    return (int(row["revision"]), _known(json.loads(row["config"]))) if row else None
+    return (int(row["revision"]), _device_scoped(_known(json.loads(row["config"])))) if row else None
 
 
 def put_device_overrides(device_id: str, values: ConfigValues) -> tuple[int, ConfigValues]:

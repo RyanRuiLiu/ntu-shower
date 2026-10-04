@@ -116,6 +116,11 @@ def init_tables() -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_door_state_event_door
             ON door_state_event(device_id, door_no, occurred_at);
+        -- 按设备 + 时间范围取一串事件（统计的时间点回放：拉某一天的完整序列）。
+        -- 上面那条的前缀是 (device_id, door_no)，按时间范围筛时它只能定位到设备，
+        -- 剩下的排序要临时 B 树；这条让范围与顺序都走索引。
+        CREATE INDEX IF NOT EXISTS idx_door_state_event_time
+            ON door_state_event(device_id, occurred_at);
 
         -- 段层：一次连续出水。两端时刻都在服务端轴上，设备轴的两份原文另存。
         CREATE TABLE IF NOT EXISTS usage_segment (

@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from tests import helpers
 
 from app.core import config as config_module
-from app.core.db import get_conn
+from app.core.db import get_conn, write
 from app.modules.config import store
 from app.modules.config.spec import CONFIG_SPECS
 
@@ -32,6 +32,125 @@ def test_put_global_stores_only_differences(fresh_db: str) -> None:
 
     assert revision == 2
     assert overrides == {"heartbeat_interval_s": 15}
+
+
+def test_update_global_keeps_the_keys_it_did_not_touch(fresh_db: str) -> None:
+    """在名单上做一次增删，别的键一个不动。
+
+    `_as_overrides` 判"哪些偏离默认值"看的是**递进去的那份配置**，所以 `augment` 必须
+    回传完整的全局有效配置。只回传要改的那一项，管理员设过的开关会因为"没出现在输入里"
+    而被当成等于默认值剔掉——表现是"我加个人进名单，自动结算被关了"。
+    """
+    store.put_global_overrides({"auto_settle_enabled": True, "auto_settle_students": {"99990052": "000000"}})
+
+    store.update_global(
+        lambda config: {**config, "auto_settle_students": {"99990052": "000000", "99990057": "111111"}}
+    )
+
+    effective = store.global_effective()
+    assert effective["auto_settle_enabled"] is True
+    assert effective["auto_settle_students"] == {"99990052": "000000", "99990057": "111111"}
+
+
+def test_update_global_drops_a_roster_emptied_back_to_default(fresh_db: str) -> None:
+    """名单清空到等于默认值时那个键从覆盖里消失，回落默认——语义相同。"""
+    store.put_global_overrides({"auto_settle_students": {"99990052": "000000"}})
+
+    store.update_global(lambda config: {**config, "auto_settle_students": {}})
+
+    _revision, overrides = store.get_global_overrides()
+    assert "auto_settle_students" not in overrides
+    assert store.global_effective()["auto_settle_students"] == {}
+
+
+#: 生产 `global_config` 里真实存在的那一组覆盖键（2026-10-04 只读查询所得，值取同形状的
+#: 假数据）。**四个开关在线上全是开的、四份名单各有一人**，所以下面两条测试用的是真事：
+#: `update_global` 少带回任何一个键，那个键就会因为"等于默认值"被剔掉——线上就是关掉一个
+#: 功能、删掉一个人的登记。
+PRODUCTION_OVERRIDES = {
+    "auto_settle_enabled": True,
+    "renew_session_enabled": True,
+    "renew_wait_enabled": True,
+    "extend_hours_enabled": True,
+    "automation_trace_enabled": True,
+    "boot_time_sync_enabled": True,
+    "auto_settle_students": {"99990052": "000000"},
+    "renew_session_students": {"99990057": "111111"},
+    "renew_wait_students": {"99990053": "000000"},
+    "extend_hours_students": {"2217110058": "111111"},
+}
+
+
+def test_update_global_keeps_every_override_that_production_actually_has(fresh_db: str) -> None:
+    """改一份名单，其余九个覆盖键逐键不变。
+
+    键组取自线上（不是随手编几个）：少带回一个，那个开关或那份名单就会被写回默认值。
+    """
+    store.put_global_overrides(dict(PRODUCTION_OVERRIDES))
+    before = store.get_global_overrides()[1]
+    assert before == PRODUCTION_OVERRIDES, "夹具没能完整写进库里，后面的比对就不成立"
+
+    new_cert = "99990099"
+    store.update_global(
+        lambda config: {
+            **config,
+            "auto_settle_students": {**config["auto_settle_students"], new_cert: "000000"},
+        }
+    )
+
+    after = store.get_global_overrides()[1]
+    for key, value in before.items():
+        if key == "auto_settle_students":
+            continue
+        assert after[key] == value, f"{key} 被这次登记改动了"
+    assert after["auto_settle_students"] == {**before["auto_settle_students"], new_cert: "000000"}
+
+
+def test_concurrent_joins_keep_every_entry(fresh_db: str) -> None:
+    """并发登记一个不丢。
+
+    `update_global` 是"读整份 → 改一项 → 整份写回"，三步不在同一把锁里的话，两个线程会
+    各自读到同一份旧名单，后写的把先写的整个替换掉——名单里只剩最后那个人。**必须用真
+    线程**：顺序调用测不出这件事，每一步都能看到上一步的结果。
+    """
+    cert_nos = [f"2530110{index:03d}" for index in range(16)]
+    start = threading.Barrier(len(cert_nos))
+
+    def join(cert_no: str) -> None:
+        start.wait()
+        store.update_global(
+            lambda config: {
+                **config,
+                "auto_settle_students": {**config["auto_settle_students"], cert_no: "000000"},
+            }
+        )
+
+    threads = [threading.Thread(target=join, args=(cert_no,)) for cert_no in cert_nos]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert set(store.global_effective()["auto_settle_students"]) == set(cert_nos)
+
+
+def test_device_overrides_drop_server_keys(fresh_db: str) -> None:
+    """设备覆盖里混进服务端键时，读侧把它滤掉。
+
+    服务端的键在服务器上运行、不按设备区分，写入侧（config 域的
+    `_validated_device_overrides`）已经拒掉。读侧再滤一遍是为了让 `effective(device)`
+    与 `global_effective()` **构造上**给出同一个值：后台任务按前者判、接口按后者报状态，
+    一旦分叉，表现是"开关明明开着却没生效"，而库里看不出任何异常。
+    """
+    write(
+        "INSERT OR REPLACE INTO device_config (device_id, revision, config) VALUES (?,?,?)",
+        ("dev-A", 7, json.dumps({"overlay_enabled": False, "auto_settle_enabled": False})),
+    )
+
+    _revision, overrides = store.get_device_overrides("dev-A")
+
+    assert overrides == {"overlay_enabled": False}
+    assert store.effective("dev-A")["auto_settle_enabled"] == store.global_effective()["auto_settle_enabled"]
 
 
 def test_default_change_reaches_devices_with_overrides(fresh_db: str) -> None:
