@@ -22,11 +22,28 @@ from app.core.problems import UNKNOWN_CAPABILITY, VALIDATION_FAILED, ApiProblemE
 
 from . import service
 from .capabilities import ALL_CAPABILITIES, Capability, cap_label
-from .dependencies import require_admin
+from .dependencies import require_admin, require_identity
 from .identity import IdentityKind
 from .schemas import IdentityCatalog, IdentityRecord, IdentityRequest
 
+#: 身份域里"我自己"那一面。要排在那条带 require_admin 的 router 之前注册（见 app/main.py）。
+router = APIRouter(prefix="/api/v1/identities", tags=["identities"])
+
 admin_router = APIRouter(prefix="/api/v1/identities", dependencies=[Depends(require_admin)], tags=["identities"])
+
+
+@router.get("/me")
+def get_own_identity(caller: IdentityRecord = Depends(require_identity)) -> IdentityRecord:
+    """自己的身份记录：标识、能力位、设备作用域。
+
+    客户端要判断"我有没有某个能力位"，不带上它就只能拿"调那个接口收 403"反推——而那是
+    一次**常态查询**，用错误码回答会往审计与日志里灌一串本可避免的 403。这里一次 200
+    说完，顺带也是名单的对照面：名单是管理员看的全部，这里是我自己那一条。
+
+    路径不是 `/identity`：那个单数顶层路径曾作为独立资源存在过，已被
+    `tests/test_access.py` 钉成 404——统一资源树的取向是 URL 只表达资源。
+    """
+    return caller
 
 
 @admin_router.get("")
