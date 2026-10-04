@@ -7,13 +7,34 @@
 
 | 文件 | 服务器位置 | 生效方式 |
 |---|---|---|
+| `scripts/deploy.sh` | **不上服务器常驻**：随用随 `scp` 到 `/tmp` 再执行 | 见下「部署」 |
 | `nginx/ntu-shower.conf` | `/etc/nginx/sites-available/ntu-shower.conf`（软链到 sites-enabled） | `nginx -t && systemctl reload nginx` |
 | `systemd/ntu-shower.service` | `/etc/systemd/system/ntu-shower.service` | `systemctl daemon-reload && systemctl restart ntu-shower` |
 | `backup/ntu-shower-backup.sh` | `/opt/ntu-shower-backup/ntu-shower-backup.sh` | 由单元调用 |
 | `backup/ntu-shower-backup.{service,timer}` | `/etc/systemd/system/` | `systemctl daemon-reload && systemctl enable --now ntu-shower-backup.timer` |
 | `publish_apk.ps1` | **不上服务器**：本地工具 | `.\deploy\publish_apk.ps1 -Identity <admin>` |
 
-**发布流程、备份、表结构变更的顺序见 `docs/RUNBOOK.md`**——这里只放配置资产本身。
+**发布流程的顺序见 `docs/RUNBOOK.md`**——这里只放配置资产本身。
+
+## 部署
+
+代码替换由 `scripts/deploy.sh` 完成（停服 → 备份 → **保留四项状态目录、其余全删**后再解包
+→ 启动验证 → 失败自动回滚）。**四项保留项与"为什么不是列举要删的"写在脚本头部注释里**，
+那是它的机制说明，此处不复述。
+
+脚本**不常驻服务器**（随包发布的只有 `server/` 的内容），每次部署时送过去再执行：
+
+```bash
+scp deploy/scripts/deploy.sh iseekdream.com:/tmp/
+ssh iseekdream.com 'sudo NT_TARBALL=/tmp/server_deploy.tar.gz bash /tmp/deploy.sh'
+```
+
+回滚：
+
+```bash
+ssh iseekdream.com 'ls -1t /opt/ntu-shower/backups/server-*.tar.gz | head'
+ssh iseekdream.com 'sudo NT_ROLLBACK=/opt/ntu-shower/backups/server-<时间戳>.tar.gz bash /tmp/deploy.sh --rollback'
+```
 
 ## 同步命令
 
