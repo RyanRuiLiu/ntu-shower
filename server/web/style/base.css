@@ -9,7 +9,17 @@
   box-sizing: border-box;
 }
 
+/*
+ * 页面是列向 flex 容器：顶栏是第一个条目，视图容器是第二个。
+ *
+ * 视图要撑满"顶栏之下的剩余高度"（界面检视与审计分栏靠分配来得高度，不靠内容撑），
+ * 而顶栏在窄屏会变成两行。让 flex 去分配，这两件事就只有一处口径——写
+ * `calc(100vh - 顶栏高度)` 的话，顶栏一换行，那个减数就在几个文件里同时失效。
+ */
 body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
   font-family: var(--font-ui);
   font-size: var(--fs-body);
   background: var(--bg);
