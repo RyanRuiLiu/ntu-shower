@@ -1,8 +1,9 @@
 """测试隔离与共享夹具：独立临时库、进程级单例清理、标准调用方身份。
 
-四个夹具的组合约定：fresh_db 是根（模板库复制出的独立临时文件），admin_headers
+五个夹具的组合约定：fresh_db 是根（模板库复制出的独立临时文件），admin_headers
 与 ops_headers 在其上登记身份，client 起常驻 portal 的应用（实例全会话共享）；
-_reset_process_singletons 对每个用例自动生效。
+_reset_process_singletons 与 _isolate_default_db 对每个用例自动生效——后者保证
+没声明 fresh_db 的用例也碰不到仓库里的真实库与发布目录。
 """
 
 import shutil
@@ -59,6 +60,23 @@ def _reset_process_singletons() -> Iterator[None]:
     clear()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_default_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """没带 fresh_db 的用例也碰不到仓库里的真实库与发布目录。
+
+    有些通路把"审计落库"当副作用顺手发生（后台任务的 `_record` 日志与审计表同路双写），
+    只验编排、不断言库内容的用例于是也在写库；而 db_path 只有 fresh_db 补丁，没带它的
+    用例就把这些行写进了默认路径——开发库。调度器测试每跑一轮漏约 23 行审计进
+    `data/ntu-shower.db`，攒起来在网页端像"后台任务全失败"。
+
+    所以隔离下沉为默认：每个用例的库与发布目录都先指到一次性临时文件。需要表结构的
+    用例仍必须显式带 fresh_db——临时文件没有表，漏带会当场炸（`no such table`），
+    而不是静默写错地方。fresh_db 显式依赖本夹具，覆盖顺序因此是确定的。
+    """
+    monkeypatch.setattr(config_module.settings, "db_path", str(tmp_path / "undeclared.db"))
+    monkeypatch.setattr(config_module.settings, "ota_dir", str(tmp_path / "undeclared-ota"))
+
+
 @pytest.fixture(scope="session")
 def _schema_template(tmp_path_factory: pytest.TempPathFactory) -> str:
     """会话级空库模板：表结构只建一次，之后每个用例复制这份文件。
@@ -79,8 +97,16 @@ def _schema_template(tmp_path_factory: pytest.TempPathFactory) -> str:
 
 
 @pytest.fixture
-def fresh_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _schema_template: str) -> Iterator[str]:
+def fresh_db(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _schema_template: str,
+    _isolate_default_db: None,
+) -> Iterator[str]:
     """换到独立临时库并建好全部表。
+
+    显式依赖 _isolate_default_db：先落到的"未声明"路径之上，再覆盖成本用例的
+    test.db——覆盖顺序靠夹具依赖钉死，不靠同一作用域内的声明次序。
 
     表结构来自会话级模板的整文件复制（见 _schema_template）：隔离性与逐用例
     建表完全等价，成本从 15 毫秒降到亚毫秒。桥端口换到测试段，命令超时收紧到

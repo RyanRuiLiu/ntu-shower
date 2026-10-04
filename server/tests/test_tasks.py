@@ -104,7 +104,7 @@ def test_format_duration_reads_like_a_sentence() -> None:
     assert tasks_spec.format_duration(45) == "45秒"
 
 
-def test_description_template_has_no_unfilled_placeholder() -> None:
+def test_description_template_has_no_unfilled_placeholder(fresh_db: str) -> None:
     """模板里的每个占位符都取得到值，且填完不留残渣。
 
     这条防"改了文案忘了改取值"：`str.format` 缺键会抛 `KeyError`，但那要等到用户请求到达
