@@ -122,11 +122,14 @@ async def put_global_config(req: ConfigUpdateRequest) -> GlobalConfigUpdateRepor
 
 @admin_router.get("/devices/{device_id}/config")
 def get_device_config(device_id: str) -> DeviceConfigView:
-    """该设备的有效配置与它自己的覆盖项（区分"被特殊设置过"与"跟随全局"）。"""
+    """该设备的有效配置与它自己的覆盖项（区分"被特殊设置过"与"跟随全局"）。
+
+    `revision` 是**这台设备自己的覆盖修订号**，没有覆盖时为 0；它与全局那个各自计数、
+    不能比大小。要看全局的走 `GET /api/v1/config`。
+    """
     override = store.get_device_overrides(device_id)
-    revision = override[0] if override else store.get_global_overrides()[0]
     return {
-        "revision": revision,
+        "revision": override[0] if override else 0,
         "config": store.effective(device_id),
         "overrides": override[1] if override else None,
     }
@@ -158,11 +161,29 @@ async def put_device_config(device_id: str, req: ConfigUpdateRequest) -> DeviceC
 
 
 @admin_router.delete("/devices/{device_id}/config")
-def delete_device_config(device_id: str) -> DeviceConfigRemovalReport:
-    """删除设备级覆盖，该设备回落为跟随全局。"""
+async def delete_device_config(device_id: str) -> DeviceConfigRemovalReport:
+    """删除设备级覆盖：该设备回落为跟随全局，并把回落后的值推给它。
+
+    **改了生效值就得让设备知道**——与 PUT 同一条规矩。只落库不推的话，那台设备会一直
+    用着旧覆盖，直到它重连（`link.hello_ack` 带回新值）、或者下一次全局配置推送顺带带上它。
+
+    修订号取全局那个：覆盖删掉之后这台设备已经没有自己的修订号，而它此刻的生效值就是
+    全局版本。而设备端的 `config.ack` 也不回传修订号，所以这个值只进日志与审计。
+    """
     removed = store.delete_device_overrides(device_id)
-    if removed:
-        # 该设备回落为跟随全局：后台任务的定时器也要按新值重算
-        sessions_scheduler.reload()
-        log_event("INFO", "config.device-override-removed", "设备覆盖配置已移除", device_id=device_id)
-    return {"device_id": device_id, "override_removed": removed, "config": store.effective(device_id)}
+    if not removed:
+        return {"device_id": device_id, "override_removed": False, "config": store.effective(device_id)}
+
+    # 该设备回落为跟随全局：后台任务的定时器也要按新值重算
+    sessions_scheduler.reload()
+    revision, _overrides = store.get_global_overrides()
+    result = await sessions_service.push_config_update(device_id, revision, store.device_effective(device_id))
+    log_event(
+        "INFO",
+        "config.device-override-removed",
+        "设备覆盖已移除并推送",
+        device_id=device_id,
+        revision=revision,
+        notified=result.get("notified", False),
+    )
+    return {"device_id": device_id, "override_removed": True, "config": store.effective(device_id)}

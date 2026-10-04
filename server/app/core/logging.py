@@ -15,6 +15,7 @@ import contextvars
 import json
 import logging
 import sys
+import traceback
 from typing import Any
 
 from .clock import now_rfc3339
@@ -83,3 +84,13 @@ def log_event(level: str, event: str, message: str, /, **attrs: Any) -> None:  #
             raise TypeError(detail)
     logger = logging.getLogger(ROOT_LOGGER_NAME)
     logger.log(logging.getLevelName(level.upper()), message, extra={"event": event, "attrs": attrs})
+
+
+def exc_info_text() -> str:
+    """当前异常的单行摘要：给结构化日志的 `error` 属性，多行堆栈压成一行可检索。
+
+    它是日志设施的一部分而不是某个调用方的：`error=` 这个属性就是按"一行可检索"设计的，
+    凡是把异常写进日志的地方都需要它。此前它住在 `core/audit`，那是它第一个用处的所在，
+    而不是它该在的地方——第二个调用方出现时就会变成两处实现。
+    """
+    return traceback.format_exc(limit=8).replace("\n", " | ")

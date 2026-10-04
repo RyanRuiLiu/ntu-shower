@@ -35,11 +35,14 @@ from app.modules.sessions.schemas import AssignRequest, CommandOutcome, SettleRe
 
 SCHEDULER_PATH = Path(scheduler.__file__)
 
+#: 这一层测的是**编排**，所以把时长上限放得极大：下面那些夹具动辄是"一小时前分配"，
+#: 撞上真实默认值（900 秒）的话判据会先停手，测到的是"没动手"而不是"编排对不对"。
+#: 时长上限本身由 test_decision.py 的专用用例盯。
 CONFIG: dict[str, object] = {
     "renew_wait_enabled": True,
     "renew_wait_students": {"99990052": "000000"},
     "renew_wait_threshold_s": 270,
-    "renew_wait_max_count": 3,
+    "renew_wait_max_duration_s": 86_400,
     "renew_session_enabled": True,
     "renew_session_students": {"99990052": "000000"},
     "renew_session_threshold_s": 1140,
@@ -56,7 +59,7 @@ WAITING = Candidate(
     state=DoorState.WAITING,
     assigned_at="2026-10-05T11:00:00.000Z",  # 早已过点：必然排上
     paused_at="",
-    renew_count=0,
+    run_started_at="2026-10-05T11:00:00.000Z",
 )
 
 
@@ -84,8 +87,6 @@ def _clean_scheduler() -> Iterator[None]:
 def _prepare(
     monkeypatch: pytest.MonkeyPatch,
     candidates: list[Candidate],
-    live: dict[int, JsonObject] | None = None,
-    active_by_cert: object = None,
     sent: list[tuple[str, str, dict[str, object]]] | None = None,
 ) -> list[tuple[str, str, dict[str, object]]]:
     """把取数与**领域层的两个入口**换成可控的桩，返回记录下来的命令。
@@ -97,12 +98,6 @@ def _prepare(
     """
     monkeypatch.setattr(scheduler.config_store, "effective", lambda _device_id: CONFIG)
     monkeypatch.setattr(scheduler, "_snapshots", lambda _device_id: candidates)
-    monkeypatch.setattr(
-        scheduler.doors_repository,
-        "get_all_live",
-        lambda _device_id: live if live is not None else {3: {"state": "free", "close_time": ""}},
-    )
-    monkeypatch.setattr(scheduler.doors_repository, "get_active_by_cert", lambda _device_id, _cert: active_by_cert)
     calls = sent if sent is not None else []
 
     async def fake_settle(device_id: str, req: SettleRequest) -> CommandOutcome:
@@ -162,7 +157,7 @@ def test_each_door_gets_exactly_one_timer(monkeypatch: pytest.MonkeyPatch) -> No
             state=DoorState.PAUSED,
             assigned_at="2026-10-05T11:00:00.000Z",
             paused_at="2026-10-05T11:00:00.000Z",
-            renew_count=0,
+            run_started_at="2026-10-05T11:00:00.000Z",
         )
         _prepare(monkeypatch, [paused])
         scheduler.reschedule("dev-1")
@@ -210,7 +205,7 @@ def test_closed_sessions_are_forgotten_without_touching_other_devices(monkeypatc
     而会话 id 是全库自增的，所以**只清本设备的**——否则 B 设备的帧会把 A 设备的记录一起
     清掉，那一场就会被重复动手。
     """
-    monkeypatch.setattr(scheduler.doors_repository, "list_open_sessions_of", lambda _device_id: [])
+    monkeypatch.setattr(scheduler.doors_service, "open_sessions", lambda _device_id: [])
     scheduler._attempted.add(("dev-1", 7, FEATURE_RENEW_WAIT))
     scheduler._attempted.add(("dev-2", 8, FEATURE_RENEW_WAIT))
 
@@ -439,14 +434,9 @@ def test_assign_is_sent_exactly_once(monkeypatch: pytest.MonkeyPatch) -> None:
 # ── 待补分配 ──
 
 
-def _arm(
-    monkeypatch: pytest.MonkeyPatch,
-    live: dict[int, JsonObject] | None = None,
-    active_by_cert: object = None,
-    **overrides: object,
-) -> None:
+def _arm(monkeypatch: pytest.MonkeyPatch, **overrides: object) -> None:
     scheduler.start()
-    _prepare(monkeypatch, [], live=live, active_by_cert=active_by_cert)
+    _prepare(monkeypatch, [])
     fields: dict[str, object] = {
         "device_id": "dev-1",
         "door_no": 3,
@@ -469,7 +459,7 @@ def test_pending_assign_is_handed_to_the_domain_layer(monkeypatch: pytest.Monkey
     """
 
     async def body() -> None:
-        _arm(monkeypatch, live={3: {"state": "bathing", "close_time": ""}})
+        _arm(monkeypatch)
         scheduler._flush_pending_assign("dev-1")
 
         assert ("dev-1", 3) in scheduler._pending_assigns
@@ -674,7 +664,7 @@ def test_snapshots_reads_only_the_derived_layer(fresh_db: str) -> None:
     assert found[0].door_no == 3
     assert found[0].cert_no == "99990052"
     assert found[0].assigned_at == "2026-10-05T11:00:00.000Z"
-    assert found[0].renew_count == 0
+    assert found[0].run_started_at == "2026-10-05T11:00:00.000Z"
     assert found[0].session_id > 0
 
 
@@ -686,12 +676,12 @@ def test_snapshots_skips_a_session_without_a_live_row(fresh_db: str) -> None:
     assert scheduler._snapshots("dev-1") == []
 
 
-def test_renew_count_counts_sessions_in_the_same_run(fresh_db: str) -> None:
-    """数的是同一串里的会话条数：第一场是学生自己的分配，不算续。"""
+def test_run_started_at_is_the_first_session_of_the_run(fresh_db: str) -> None:
+    """这一串的起点是学生自己那一次分配——续出来的每一场都不该把它往后挪。"""
     doors_service.process_snapshot(
         "dev-1", _frame(captured_at="2026-10-05T11:00:00.000Z", card_no=1001, open_time="2026-10-05T11:00:00.000Z")
     )
-    assert scheduler._snapshots("dev-1")[0].renew_count == 0
+    assert scheduler._snapshots("dev-1")[0].run_started_at == "2026-10-05T11:00:00.000Z"
 
     # 我们自己续出来的那一场：门空了、紧接着又被分配回同一个喷头
     doors_service.process_snapshot("dev-1", _frame(captured_at="2026-10-05T11:05:00.000Z"))
@@ -699,11 +689,12 @@ def test_renew_count_counts_sessions_in_the_same_run(fresh_db: str) -> None:
         "dev-1", _frame(captured_at="2026-10-05T11:05:04.000Z", card_no=1001, open_time="2026-10-05T11:05:04.000Z")
     )
 
-    assert scheduler._snapshots("dev-1")[0].renew_count == 1
+    # 换了一场，起点仍是第一场——时长上限从第一场算起，挪了它这个上限就永远到不了
+    assert scheduler._snapshots("dev-1")[0].run_started_at == "2026-10-05T11:00:00.000Z"
 
 
-def test_renew_count_starts_over_after_a_real_break(fresh_db: str) -> None:
-    """喷头空着超过 300 秒，说明那个人的占用真的结束了——次数从头数。"""
+def test_run_started_at_moves_after_a_real_break(fresh_db: str) -> None:
+    """喷头空着超过 300 秒，说明那个人的占用真的结束了——计时从头开始。"""
     doors_service.process_snapshot(
         "dev-1", _frame(captured_at="2026-10-05T11:00:00.000Z", card_no=1001, open_time="2026-10-05T11:00:00.000Z")
     )
@@ -713,7 +704,7 @@ def test_renew_count_starts_over_after_a_real_break(fresh_db: str) -> None:
         "dev-1", _frame(captured_at="2026-10-05T12:05:00.000Z", card_no=1001, open_time="2026-10-05T12:05:00.000Z")
     )
 
-    assert scheduler._snapshots("dev-1")[0].renew_count == 0
+    assert scheduler._snapshots("dev-1")[0].run_started_at == "2026-10-05T12:05:00.000Z"
 
 
 # ── 接缝：一帧进来，到命令出、再到补上分配 ────────────────────────────────

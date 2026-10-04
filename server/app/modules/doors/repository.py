@@ -37,7 +37,12 @@ from sqlite3 import Row
 from app.core.clock import seconds_between
 from app.core.db import get_conn, read_one, write
 from app.core.protocol import JsonObject
-from app.modules.doors.schemas import DoorView
+from app.modules.doors.schemas import OCCUPIED_STATES, DoorView
+
+#: 占用态取值的定序副本，供 SQL 的 IN 子句生成占位符。
+#: **不能把取值写死在 SQL 里**：新增一个占用态时枚举会变、字符串不会，那是静默漏判。
+_OCCUPIED_VALUES: tuple[str, ...] = tuple(state.value for state in OCCUPIED_STATES)
+_OCCUPIED_PLACEHOLDERS = ",".join("?" * len(_OCCUPIED_VALUES))
 
 
 def init_tables() -> None:
@@ -213,11 +218,13 @@ def get_door_live(device_id: str, door_no: int) -> Row | None:
 
 
 def get_occupied_by_cert(device_id: str, cert_no: str) -> Row | None:
-    """按证件号查占用中的门（无卡模式下占用者标识记录在 cert_no）。"""
+    """按证件号查占用中的门（无卡模式下占用者标识记录在 cert_no）。
+
+    "哪些态算占用"取自 [OCCUPIED_STATES]，在 SQL 里只出现占位符——见 [_OCCUPIED_VALUES]。
+    """
     return read_one(
-        "SELECT * FROM door_live WHERE device_id = ? AND cert_no = ?"
-        " AND state IN ('waiting','bathing','paused') LIMIT 1",
-        (device_id, cert_no),
+        f"SELECT * FROM door_live WHERE device_id = ? AND cert_no = ? AND state IN ({_OCCUPIED_PLACEHOLDERS}) LIMIT 1",
+        (device_id, cert_no, *_OCCUPIED_VALUES),
     )
 
 
@@ -545,31 +552,38 @@ def get_active_by_cert(device_id: str, cert_no: str) -> Row | None:
 
 
 def list_open_sessions_of(device_id: str) -> list[Row]:
-    """这台设备上未结束的会话。后台任务的判定入口——按设备取，每帧问一遍。"""
+    """这台设备上未结束的会话，按喷头号排。后台任务的判定入口——按设备取，每帧问一遍。
+
+    排序是给调用方的可预期性：延长服务时间的重新分配按这份名单逐个动手，而**结果与顺序
+    无关**（同一时刻一个喷头只可能有一个人，两份名单不会争同一个）。但日志与审计里的
+    先后稳定下来，排障时能直接对着看，不必先怀疑"这次为什么顺序不一样"。
+    """
     return (
         get_conn()
-        .execute("SELECT * FROM usage_session WHERE device_id = ? AND ended_at IS NULL", (device_id,))
+        .execute(
+            "SELECT * FROM usage_session WHERE device_id = ? AND ended_at IS NULL ORDER BY door_no",
+            (device_id,),
+        )
         .fetchall()
     )
 
 
-#: 数"连续续期次数"时往前最多走多少场。一次预约续期最多十来次，五十场足够；
+#: 走"同一串"时往前最多看多少场。一次预约续期最多十来次，五十场足够；
 #: 它挡住的是脏数据里那种病态长链。
 _RUN_WALK_LIMIT = 50
 
 
-def count_renewals_in_run(device_id: str, door_no: int, cert_no: str, gap_s: int) -> int:
-    """这一串里我们已经续过几次。
+def run_started_at(device_id: str, door_no: int, cert_no: str, gap_s: int) -> str:
+    """这一串的第一场是什么时候分配的；一场都没有时给空串。
 
     "同一串"由**喷头的空档**划断：相邻两场之间「前一场的 `ended_at` → 后一场的
     `assigned_at`」的间隔不超过 `gap_s` 就算同一串。判据取的是浴室 App 那条
     "连续无水就释放"的门槛（300 秒）：我们自己的续期间隔是秒级，真人走了再回来是
     分钟级，两者分得开。
 
-    在名单里数的是**场数**而不是"谁开的"——会话不记是谁发起它，也没有必要记：
-    第一场是学生自己的分配，从第二场起就是我们替他续的。
-
-    返回**场数减一**：第一场不算续。
+    这里数的是**场**而不是"谁开的"——会话不记是谁发起它，也没有必要记：第一场是
+    学生自己那一次分配，从第二场起就是我们替他续的。所以这个时刻就是"他这一次
+    从头到现在"的起点，预约续期的时长上限从它起算。
     """
     rows = (
         get_conn()
@@ -581,18 +595,16 @@ def count_renewals_in_run(device_id: str, door_no: int, cert_no: str, gap_s: int
         )
         .fetchall()
     )
-    run = 0
+    started = ""
     newer_assigned = ""
-    for row in rows:
-        if run == 0:
-            run = 1
-            newer_assigned = str(row["assigned_at"] or "")
+    for index, row in enumerate(rows):
+        if index == 0:
+            started = newer_assigned = str(row["assigned_at"] or "")
             continue
         previous_ended = str(row["ended_at"] or "")
         if not previous_ended:
-            break  # 前一场还开着（数据异常）：到此为止，不硬数下去
+            break  # 前一场还开着（数据异常）：到此为止，不硬往更早走
         if seconds_between(previous_ended, newer_assigned) > gap_s:
             break
-        run += 1
-        newer_assigned = str(row["assigned_at"] or "")
-    return max(0, run - 1)
+        started = newer_assigned = str(row["assigned_at"] or "")
+    return started

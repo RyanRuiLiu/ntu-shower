@@ -113,7 +113,7 @@ def _kotlin() -> str:
 
 
 def _kotlin_config_defaults() -> str:
-    """下发给设备的每个配置键的默认值。
+    """下发给设备的每个配置键的默认值，以及把它们拼成一个对象的入口。
 
     设备端的 `RuntimeConfig` 需要**一个初值**才能编译——它在拿到服务端下发的配置之前
     得先有个能用的值。此前那些初值是手抄的，与 `spec.py` 的默认值是两份独立的东西：
@@ -121,10 +121,17 @@ def _kotlin_config_defaults() -> str:
     它一定是没到的那一份。
 
     只生成 `scope=DEVICE` 的键：SERVER 归属的键根本不下发，设备端也不需要它们。
+
+    `asJson()` 供 `RuntimeConfig.resetToDefaults` 复位用。**它必须生成**：手写一份
+    拼装就是第三个可能与登记表漂移的地方（`ConfigCache` 的类注释警告过同一件事）。
     """
     kotlin_type = {INT: "Long", BOOL: "Boolean", TEXT: "String"}
+    device_specs = [spec for spec in CONFIG_SPECS if spec.scope is DEVICE]
+
     lines = [
         "package com.ryanliu.ntushower.core.config",
+        "",
+        "import org.json.JSONObject",
         "",
         "/**",
         " * 远程配置的默认值。",
@@ -139,17 +146,17 @@ def _kotlin_config_defaults() -> str:
         " */",
         "object ConfigDefaults {",
     ]
-    device_lines_emitted = 0
-    for spec in CONFIG_SPECS:
-        if spec.scope is not DEVICE:
-            continue
-        if device_lines_emitted > 0:
+    for index, spec in enumerate(device_specs):
+        if index > 0:
             lines.append("")
-        device_lines_emitted += 1
-        name = _constant_of_key(spec.key)
-        value = _kotlin_literal(spec, kotlin_type)
         lines.append(f"    /** {spec.title} */")
-        lines.append(f"    const val {name} = {value}")
+        lines.append(f"    const val {_constant_of_key(spec.key)} = {_kotlin_literal(spec, kotlin_type)}")
+
+    lines.append("")
+    lines.append("    /** 全部默认值拼成一个对象，供 `RuntimeConfig.resetToDefaults` 复位用。 */")
+    lines.append("    fun asJson(): JSONObject = JSONObject()")
+    for spec in device_specs:
+        lines.append(f'        .put("{spec.key}", {_constant_of_key(spec.key)})')
     lines.append("}")
     lines.append("")
     return "\n".join(lines)

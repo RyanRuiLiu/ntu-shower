@@ -15,7 +15,6 @@ import contextlib
 import json
 import re
 import time
-import traceback
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import cast
@@ -31,7 +30,7 @@ from typing_extensions import TypedDict
 from . import db
 from .clock import now_rfc3339
 from .config import settings
-from .logging import log_event, request_id_var, trace_id_var
+from .logging import exc_info_text, log_event, request_id_var, trace_id_var
 
 
 class ApiCallRecord(TypedDict):
@@ -60,11 +59,6 @@ class ApiCallRecord(TypedDict):
     problem_type: str | None
     detail: str | None
     response_body: str | None
-
-
-def exc_info_text() -> str:
-    """当前异常的单行摘要：给结构化日志的 error 属性，多行堆栈压成一行可检索。"""
-    return traceback.format_exc(limit=8).replace("\n", " | ")
 
 
 #: 需要审计的路径前缀 = 版本化对外面的全部域（/api/v1，见 main.py 的模块注释）。

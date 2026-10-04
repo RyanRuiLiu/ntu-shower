@@ -11,6 +11,7 @@
 
 - 能力、执行通路、命名规则 → `server/app/core/actions.py`
 - **后台任务的规则**（预约续期 / 会话续期 / 自动结算）→ `server/app/modules/sessions/`
+- **延长服务时间**（拨钟、重新分配、调回）→ `server/app/modules/extend_hours/`
 - **术语的唯一正名与弃用词**（同一个概念只许一个中文说法）→ `server/app/core/terms.py`
 - 失败原因码 → `server/app/core/reason_codes.py`
 - HTTP 问题类型 → `server/app/core/problems.py`

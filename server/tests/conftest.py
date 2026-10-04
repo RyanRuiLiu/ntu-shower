@@ -30,11 +30,16 @@ def _reset_process_singletons() -> Iterator[None]:
     设备钟偏差同样在此列：它存在模块级字典里，而**它会改变推导结果**（起点由设备报的
     `open_time` 平移而来还是退回观测时刻，取决于有没有偏差）。不清理的话，前一个用例
     留下的偏差会让后一个用例的会话起点凭空平移一段。
+
+    延长服务时间的两份进程内状态也一样。在途的重新分配任务留着，`on_frame` 那条"已经
+    有一轮在跑"的互斥判据就永远为真，之后的用例一次都排不进去；而"替他试过却失败了"的
+    记忆留着，下一个用例里的人会被直接跳过。
     """
     from app.core import device_clock, events
     from app.core.connections import manager
     from app.modules.bridge.manager import registry
     from app.modules.doors import service as doors_service
+    from app.modules.extend_hours import service as extend_hours_service
     from app.modules.sessions import service as sessions_service
 
     def clear() -> None:
@@ -46,6 +51,8 @@ def _reset_process_singletons() -> Iterator[None]:
         sessions_service._channel_waiting.clear()
         events._subscribers.clear()
         device_clock.clear()
+        extend_hours_service._reassign_tasks.clear()
+        extend_hours_service._reassign_failed.clear()
 
     clear()
     yield
