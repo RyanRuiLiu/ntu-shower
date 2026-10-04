@@ -5,6 +5,9 @@
 
 RFC 3339 profile：UTC 用 "Z" 后缀（RFC 3339 §5.6），毫秒精度足以
 表达本系统的时序分辨率（设备心跳、命令截止、帧时间）。
+
+**对外输出恒为 UTC；[to_local] 只服务"按当地时间分桶"这一种场合**（统计的小时与
+星期、回放选的日期）。分桶要的是一个本地的小时数，不是又一个字符串。
 """
 
 from datetime import datetime, timedelta, timezone
@@ -87,3 +90,21 @@ def wall_clock_text(value: object) -> str | None:
     if moment is None:
         return None
     return moment.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def to_local(value: object, offset_minutes: int) -> datetime | None:
+    """把一个 UTC 时刻换算成指定偏移的当地时间；无法解析时返回 None。
+
+    与 [shift_rfc3339] 的区别是**它不回到字符串**：分桶要的是本地的小时与星期，
+    再拼一次字符串、再解析一遍纯属绕路。返回的 `datetime` 带着那个固定偏移，
+    所以 `.hour`、`.weekday()`、`.date()` 拿到的直接就是当地时间。
+
+    偏移用**固定分钟数**而不是 IANA 时区名：服务对象所在的时区不实行夏令时，
+    用固定偏移就不必引入 tz 数据库，也不会在切换日算错一小时。偏移的方向是
+    「本地 − UTC」（UTC+8 即 480），与 `extend_hours_zone_offset_minutes` 一致；
+    JavaScript 的 `Date.getTimezoneOffset()` 给的是**反的**，调用方传进来之前要取负。
+    """
+    moment = parse_rfc3339(value)
+    if moment is None:
+        return None
+    return moment.astimezone(timezone(timedelta(minutes=offset_minutes)))

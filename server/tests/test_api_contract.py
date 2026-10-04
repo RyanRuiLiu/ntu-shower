@@ -90,6 +90,7 @@ def test_contract_models_exist_for_every_client_facing_row() -> None:
         "DoorView",
         "IdentityCatalog",
         "IdentityRecord",
+        "TaskView",
         "ConfigSpecCatalog",
         "GlobalConfigView",
         "DeviceConfigView",
