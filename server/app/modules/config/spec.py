@@ -77,7 +77,6 @@ SECTIONS: tuple[tuple[str, str], ...] = (
 #: 与时间校正（开不开）；后面的链路、守护、自更新是一次性调好的。
 #: 分组元数据只在这里一份，前端据此分卡片渲染，不在各处硬编码键表。
 GROUPS: tuple[GroupSpec, ...] = (
-    GroupSpec("session_ops", "会话维护名单", "business"),
     GroupSpec("renew_wait", "预约续期", "business"),
     GroupSpec("renew_session", "会话续期", "business"),
     GroupSpec("auto_settle", "自动结算", "business"),
@@ -542,37 +541,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         unit="秒",
         group="debug",
     ),
-    # ── 会话维护（服务端侧，名单见 session_ops 组）──
-    ConfigSpec(
-        "renew_wait_students",
-        TEXT_MAP,
-        SERVER,
-        {},  # 可变默认值：defaults() 每次返回新副本，勿在此就地修改
-        "预约续期名单",
-        "只对这些学号做预约续期，一行一个（格式：学号=密码）。留空表示谁都不做。"
-        "**凭证跟着这份名单走**：同一个学号要开两个功能，就在那两份名单里各写一遍——"
-        "三份名单各自完整、互不依赖，配一份就读得懂一份",
-        group="session_ops",
-    ),
-    ConfigSpec(
-        "renew_session_students",
-        TEXT_MAP,
-        SERVER,
-        {},
-        "会话续期名单",
-        "只对这些学号做会话续期，一行一个（格式：学号=密码）。留空表示谁都不做。"
-        "与预约续期各自独立——同一个人可以只开其中一个",
-        group="session_ops",
-    ),
-    ConfigSpec(
-        "auto_settle_students",
-        TEXT_MAP,
-        SERVER,
-        {},
-        "自动结算名单",
-        "只对这些学号做自动结算，一行一个（格式：学号=密码）。留空表示谁都不做",
-        group="session_ops",
-    ),
+    # ── 会话维护（服务端侧）：一个功能一块，块内按"开关 → 阈值 → 名单"排 ──
     ConfigSpec(
         "renew_wait_enabled",
         BOOL,
@@ -611,6 +580,17 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         group="renew_wait",
     ),
     ConfigSpec(
+        "renew_wait_students",
+        TEXT_MAP,
+        SERVER,
+        {},  # 可变默认值：defaults() 每次返回新副本，勿在此就地修改
+        "预约续期名单",
+        "只对这些学号做预约续期，一行一个（格式：学号=密码）。留空表示谁都不做。"
+        "**凭证跟着这份名单走**：同一个学号要开两个功能，就在那两份名单里各写一遍——"
+        "三份名单各自完整、互不依赖，配一份就读得懂一份",
+        group="renew_wait",
+    ),
+    ConfigSpec(
         "renew_session_enabled",
         BOOL,
         SERVER,
@@ -634,6 +614,16 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         group="renew_session",
     ),
     ConfigSpec(
+        "renew_session_students",
+        TEXT_MAP,
+        SERVER,
+        {},
+        "会话续期名单",
+        "只对这些学号做会话续期，一行一个（格式：学号=密码）。留空表示谁都不做。"
+        "与预约续期各自独立——同一个人可以只开其中一个",
+        group="renew_session",
+    ),
+    ConfigSpec(
         "auto_settle_enabled",
         BOOL,
         SERVER,
@@ -654,6 +644,15 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         minimum=15,
         maximum=300,
         unit="秒",
+        group="auto_settle",
+    ),
+    ConfigSpec(
+        "auto_settle_students",
+        TEXT_MAP,
+        SERVER,
+        {},
+        "自动结算名单",
+        "只对这些学号做自动结算，一行一个（格式：学号=密码）。留空表示谁都不做",
         group="auto_settle",
     ),
 )
