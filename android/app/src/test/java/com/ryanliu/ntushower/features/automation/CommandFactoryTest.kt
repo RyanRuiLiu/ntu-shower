@@ -111,6 +111,9 @@ class CommandFactoryTest {
         assertNull(create(SupportedActions.APP_RESTART))
         assertNull(create(SupportedActions.BRIDGE_OPEN))
         assertNull(create(SupportedActions.BRIDGE_CLOSE))
+        // 免费名单的读写直接落文件，没有界面步骤要排
+        assertNull(create(SupportedActions.FREELIST_READ))
+        assertNull(create(SupportedActions.FREELIST_WRITE))
     }
 
     @Test
@@ -127,6 +130,8 @@ class CommandFactoryTest {
             SupportedActions.APP_RESTART,
             SupportedActions.BATH_RESTART,
             SupportedActions.CLOCK_SET,
+            SupportedActions.FREELIST_READ,
+            SupportedActions.FREELIST_WRITE,
             SupportedActions.BRIDGE_OPEN,
             SupportedActions.BRIDGE_CLOSE,
         )
@@ -146,6 +151,8 @@ class CommandFactoryTest {
             SupportedActions.APP_RESTART,
             SupportedActions.BATH_RESTART,
             SupportedActions.CLOCK_SET,
+            SupportedActions.FREELIST_READ,
+            SupportedActions.FREELIST_WRITE,
         )
         maintenance.forEach { action ->
             assertTrue("$action 没有维护类处理器", DeviceMaintenance.handles(action))

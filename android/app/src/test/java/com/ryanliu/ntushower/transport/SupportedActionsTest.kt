@@ -26,6 +26,8 @@ class SupportedActionsTest {
             "app.restart",
             "bath.restart",
             "clock.set",
+            "freelist.read",
+            "freelist.write",
             "bridge.open",
             "bridge.close",
             "ui.dump",
@@ -55,11 +57,14 @@ class SupportedActionsTest {
         assertTrue(SupportedActions.UI_SCROLL in SupportedActions.ALL)
         assertTrue(SupportedActions.UI_KEY in SupportedActions.ALL)
         assertTrue(SupportedActions.UI_INPUT in SupportedActions.ALL)
+        assertTrue(SupportedActions.FREELIST_READ in SupportedActions.ALL)
+        assertTrue(SupportedActions.FREELIST_WRITE in SupportedActions.ALL)
     }
 
     @Test
     fun `actions use the object dot action form`() {
-        // 命名约定：<对象>.<动作>。对象是"被操作的东西"，不是代码模块也不是用途
+        // 命名约定：<对象>.<动作>。对象是"被操作的东西"，不是代码模块也不是用途。
+        // 对象那一半只许小写字母——所以 freelist 不能写成 free_list
         SupportedActions.ALL.forEach { action ->
             assertTrue("不符合 <对象>.<动作>：$action", action.matches(Regex("""^[a-z]+\.[a-z_]+$""")))
         }

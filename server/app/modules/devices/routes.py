@@ -23,16 +23,15 @@ from fastapi import APIRouter, Depends
 
 from app.core import actions
 from app.core.problems import DEVICE_NOT_FOUND, ApiProblemError
-from app.core.protocol import JsonObject, as_int
+from app.core.protocol import as_int
 from app.modules.access.capabilities import user_actions
 from app.modules.access.dependencies import optional_identity, require_admin
 from app.modules.access.schemas import IdentityRecord
 from app.modules.config import store as config_store
-from app.modules.sessions import service as sessions_service
 from app.modules.sessions.schemas import CommandOutcome
 
 from . import service
-from .dependencies import require_trusted_online_device
+from .dependencies import DEVICE_ACTION_TIMEOUT_S, device_action
 from .schemas import (
     DeviceClockSetRequest,
     DeviceExecRequest,
@@ -48,9 +47,6 @@ from .schemas import (
 router = APIRouter(prefix="/api/v1", tags=["devices"])
 admin_router = APIRouter(prefix="/api/v1/devices", dependencies=[Depends(require_admin)], tags=["devices-admin"])
 
-# 设备动作的默认超时：覆盖 root shell 执行、截图编解码这类耗时动作。
-DEVICE_ACTION_TIMEOUT_S = 30.0
-
 
 def _ui_timeout_s(device_id: str) -> float:
     """界面操作的等待上限，取该设备的配置项 `ui_operation_timeout_s`。
@@ -60,15 +56,6 @@ def _ui_timeout_s(device_id: str) -> float:
     """
     timeout_s = as_int(config_store.effective(device_id)["ui_operation_timeout_s"], int(DEVICE_ACTION_TIMEOUT_S))
     return float(timeout_s)
-
-
-async def _device_action(device_id: str, action: str, params: JsonObject, timeout_s: float) -> CommandOutcome:
-    """远程动作的公共路径：设备须已信任在线，命令经统一下发与等待取回结果。
-
-    全部 admin 动作端点共用——差别只在动作名、参数与超时，守卫与下发只有这一份。
-    """
-    require_trusted_online_device(device_id)
-    return await sessions_service.send_command_and_wait(device_id, action, params, timeout_s=timeout_s)
 
 
 # ── 查询 ──
@@ -127,7 +114,7 @@ def patch_device(device_id: str, req: DevicePatchRequest) -> DeviceRecord:
 @admin_router.post("/{device_id}/exec")
 async def exec_command(device_id: str, req: DeviceExecRequest) -> CommandOutcome:
     """远程调试：在设备上以 root 执行 shell 命令并取回输出（审计留痕）。"""
-    return await _device_action(device_id, actions.DEVICE_EXEC, {"command": req.command}, DEVICE_ACTION_TIMEOUT_S)
+    return await device_action(device_id, actions.DEVICE_EXEC, {"command": req.command}, DEVICE_ACTION_TIMEOUT_S)
 
 
 @admin_router.post("/{device_id}/capture")
@@ -137,31 +124,31 @@ async def capture_screen(device_id: str) -> CommandOutcome:
     设备端走 screenrecord + MediaCodec 解码首帧：本机 framebuffer 与 screencap
     取不到画面（硬件合成器直出）。
     """
-    return await _device_action(device_id, actions.SCREEN_CAPTURE, {}, DEVICE_ACTION_TIMEOUT_S)
+    return await device_action(device_id, actions.SCREEN_CAPTURE, {}, DEVICE_ACTION_TIMEOUT_S)
 
 
 @admin_router.post("/{device_id}/app/restart")
 async def restart_app(device_id: str) -> CommandOutcome:
     """重启 NTU Shower 进程（不重启整机，也不动浴室 APP）。"""
-    return await _device_action(device_id, actions.APP_RESTART, {}, DEVICE_ACTION_TIMEOUT_S)
+    return await device_action(device_id, actions.APP_RESTART, {}, DEVICE_ACTION_TIMEOUT_S)
 
 
 @admin_router.post("/{device_id}/clock/set")
 async def set_clock(device_id: str, req: DeviceClockSetRequest) -> CommandOutcome:
     """设置设备系统时钟（datetime 为设备本地墙钟时间）。浴室 App 的每日开关机计划依赖它。"""
-    return await _device_action(device_id, actions.CLOCK_SET, {"datetime": req.datetime}, DEVICE_ACTION_TIMEOUT_S)
+    return await device_action(device_id, actions.CLOCK_SET, {"datetime": req.datetime}, DEVICE_ACTION_TIMEOUT_S)
 
 
 @admin_router.post("/{device_id}/bath/restart")
 async def restart_bath_app(device_id: str) -> CommandOutcome:
     """重启浴室 App：先强停再冷启动，让它重读每日定时开关机计划。"""
-    return await _device_action(device_id, actions.BATH_RESTART, {}, DEVICE_ACTION_TIMEOUT_S)
+    return await device_action(device_id, actions.BATH_RESTART, {}, DEVICE_ACTION_TIMEOUT_S)
 
 
 @admin_router.post("/{device_id}/reboot")
 async def reboot_device(device_id: str) -> CommandOutcome:
     """重启整机。设备重启后 agent 随之重来，会话与喷头现态由重连后的全貌帧重建。"""
-    return await _device_action(device_id, actions.DEVICE_REBOOT, {}, DEVICE_ACTION_TIMEOUT_S)
+    return await device_action(device_id, actions.DEVICE_REBOOT, {}, DEVICE_ACTION_TIMEOUT_S)
 
 
 # ── 设备界面 ──
@@ -175,7 +162,7 @@ async def dump_ui_tree(device_id: str) -> CommandOutcome:
 
     格式与 uiautomator dump 一致；节点上限取配置项 ui_dump_max_nodes。
     """
-    return await _device_action(device_id, actions.UI_DUMP, {}, _ui_timeout_s(device_id))
+    return await device_action(device_id, actions.UI_DUMP, {}, _ui_timeout_s(device_id))
 
 
 @admin_router.post("/{device_id}/touch")
@@ -190,25 +177,25 @@ async def touch(device_id: str, req: DeviceUiTouchRequest) -> CommandOutcome:
         params["to_y"] = req.to_y
     if req.duration_ms is not None:
         params["duration_ms"] = req.duration_ms
-    return await _device_action(device_id, actions.UI_TOUCH, params, _ui_timeout_s(device_id))
+    return await device_action(device_id, actions.UI_TOUCH, params, _ui_timeout_s(device_id))
 
 
 @admin_router.post("/{device_id}/scroll")
 async def scroll(device_id: str, req: DeviceUiScrollRequest) -> CommandOutcome:
     """滚动可滚动容器。与 touch 的滑动分开：作用于容器而非坐标。"""
-    return await _device_action(device_id, actions.UI_SCROLL, {"direction": req.direction}, _ui_timeout_s(device_id))
+    return await device_action(device_id, actions.UI_SCROLL, {"direction": req.direction}, _ui_timeout_s(device_id))
 
 
 @admin_router.post("/{device_id}/key")
 async def send_key(device_id: str, req: DeviceUiKeyRequest) -> CommandOutcome:
     """发送系统按键（闭集，路由层 422 挡下非法值）。"""
-    return await _device_action(device_id, actions.UI_KEY, {"key": req.key}, _ui_timeout_s(device_id))
+    return await device_action(device_id, actions.UI_KEY, {"key": req.key}, _ui_timeout_s(device_id))
 
 
 @admin_router.post("/{device_id}/input")
 async def input_text(device_id: str, req: DeviceUiTextRequest) -> CommandOutcome:
     """向当前焦点控件输入文本；channel 在两条并列通路中显式选择。"""
-    return await _device_action(
+    return await device_action(
         device_id, actions.UI_INPUT, {"text": req.text, "channel": req.channel}, _ui_timeout_s(device_id)
     )
 

@@ -55,6 +55,7 @@ from .modules.doors import repository as doors_repository
 from .modules.doors.routes import router as doors_router
 from .modules.extend_hours import repository as extend_hours_repository
 from .modules.extend_hours import service as extend_hours_service
+from .modules.freelist.routes import router as freelist_router
 from .modules.ota import repository as ota_repository
 from .modules.ota.routes import device_router as ota_device_router
 from .modules.ota.routes import router as ota_router
@@ -117,6 +118,7 @@ def create_app() -> FastAPI:
     app.include_router(sessions_router)
     app.include_router(devices_router)
     app.include_router(devices_admin_router)
+    app.include_router(freelist_router)
     app.include_router(config_admin_router)
     app.include_router(ota_router)
     app.include_router(ota_device_router)

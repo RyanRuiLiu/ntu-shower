@@ -1,8 +1,9 @@
 """设备命令动作名与执行通道的唯一登记处。
 
 动作命名规则为 `<对象>.<动作>`：对象是被操作的东西（session 会话、screen 屏幕、
-device 设备、bridge 调试桥、ui 界面），不是代码模块或用途。HTTP 路径遵循同一套词：
-集合用复数无动词，对单个资源施加动作用 `<资源>/<动词>`，改档案用 PATCH 带字段。
+device 设备、bridge 调试桥、ui 界面、freelist 免费名单），不是代码模块或用途。
+HTTP 路径遵循同一套词：集合用复数无动词，对单个资源施加动作用 `<资源>/<动词>`，
+改档案用 PATCH 带字段。
 动作名与设备端 transport/SupportedActions.kt 由 tests/test_action_names.py 对账。
 """
 
@@ -61,6 +62,29 @@ CLOCK_SET = "clock.set"
 
 浴室 App 按系统时钟装载每日定时开关机计划，而设备无 NTP：开机自动校正
 （设备端 TimeSync）与网页端手动设置共用本动作。
+"""
+
+# ── 免费名单（freelist）──
+# 浴室 App 读的那份文件：一行一个学号，名单里的人不收费。对象名取 freelist 而不是
+# free_list：**对象必须是单个全小写字母词**（`test_actions_follow_the_object_dot_action_form`），
+# 而下划线只允许出现在动作那一半。
+#
+# **路径不在协议里**——它登记在设备端的 AppConfig，服务端只给内容。给得了路径就等于把
+# "写哪个文件"交给对端，而这个动作的安全性正来自"只有那一个文件可写"。
+#
+# 读写都是即时完成的短操作，不动界面、不进自动化队列，所以归维护通道。
+
+FREELIST_READ = "freelist.read"
+"""读免费名单：取回文件原文，结果在 data.content。
+
+原样进出，不在设备端解析：行尾与分行是服务端的事，两端各拆一次必然分叉。
+"""
+
+FREELIST_WRITE = "freelist.write"
+"""写免费名单：params.content 是文件原文，整份替换。
+
+**空内容是合法内容**——名单为空就等于没人免费，所以不因为空而拒绝它；缺这个参数
+才是请求本身不成立。
 """
 
 # ── 调试通道 ──
@@ -124,6 +148,8 @@ ALL_ACTIONS: tuple[str, ...] = (
     APP_RESTART,
     BATH_RESTART,
     CLOCK_SET,
+    FREELIST_READ,
+    FREELIST_WRITE,
     BRIDGE_OPEN,
     BRIDGE_CLOSE,
     UI_DUMP,
@@ -145,7 +171,7 @@ CHANNEL_CAPTURE = "capture"
 """采集：拍照与截屏。与自动化并行，一条慢截图不会堵住操作序列。"""
 
 CHANNEL_MAINTENANCE = "maintenance"
-"""设备自身维护：执行命令、重启本程序、重启整机、开关调试桥。设备端即时执行，不进队列。"""
+"""设备自身维护：执行命令、重启本程序、重启整机、开关调试桥、读写免费名单。设备端即时执行，不进队列。"""
 
 #: 动作 → 执行通道。每个动作恰好属于一个通道。
 ACTION_CHANNELS: dict[str, str] = {
@@ -163,6 +189,8 @@ ACTION_CHANNELS: dict[str, str] = {
     APP_RESTART: CHANNEL_MAINTENANCE,
     BATH_RESTART: CHANNEL_MAINTENANCE,
     CLOCK_SET: CHANNEL_MAINTENANCE,
+    FREELIST_READ: CHANNEL_MAINTENANCE,
+    FREELIST_WRITE: CHANNEL_MAINTENANCE,
     BRIDGE_OPEN: CHANNEL_MAINTENANCE,
     BRIDGE_CLOSE: CHANNEL_MAINTENANCE,
 }
