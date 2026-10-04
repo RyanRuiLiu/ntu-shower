@@ -9,11 +9,18 @@
 
 /* ── 视图外壳 ───────────────────────────────────────────── */
 
-/* 高度链必须一路撑到底：中间断一节，右列面板会被内容顶开、画面区随之塌掉。
-   这是工具型布局与卡片式布局最大的区别——它靠 flex 分配空间，不靠内容撑高 */
+/*
+ * 高度链必须一路撑到底：中间断一节，右列面板会被内容顶开、画面区随之塌掉。
+ * 这是工具型布局与卡片式布局最大的区别——它靠 flex 分配空间，不靠内容撑高。
+ *
+ * 高度由 `flex: 1 1 0` 从 .view 那里领（`body` 是列向 flex 容器）：basis 取 0 而不是
+ * `auto`，因为这里要的正是"格子严格等于顶栏之下的剩余高度、内容多自己滚"，而不是
+ * "按内容撑高"。顶栏窄屏变两行时，这个格子自动变矮，不需要谁去改一个减数。
+ */
 #view-inspector {
   position: relative; /* 恢复把手（.tree-restore）的定位基准 */
-  height: calc(100vh - var(--bar-height));
+  flex: 1 1 0;
+  min-height: 0;
   max-width: none;
   padding: 0;
   gap: 0;
@@ -349,12 +356,7 @@
   color: var(--text);
 }
 
-@media (width <= 1100px) {
-  .tree-panel {
-    border-top: 1px solid var(--border);
-    border-left: none;
-  }
-}
+/* 窄屏下树面板换到画面下方（宽度、边框方向、画面比例都在 style/narrow.css） */
 
 .panel-header {
   display: flex;
