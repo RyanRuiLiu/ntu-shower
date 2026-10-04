@@ -46,6 +46,11 @@ DEVICE_VERIFY_PAGE_TIMEOUT = Reason("device.verify_page_timeout", "无法进入�
 DEVICE_LOGIN_INPUT_FAILED = Reason("device.login_input_failed", "输入账号或密码失败")
 DEVICE_BATH_SERVER_TIMEOUT = Reason("device.bath_server_timeout", "浴室服务器未在预期时间内回应")
 
+# 免费名单读写各一个码，不合并成一个"文件操作失败"：排障时这两条指向完全不同的
+# 原因——读不出来多半是路径变了，写不进去多半是权限或磁盘。
+DEVICE_FREELIST_READ_FAILED = Reason("device.freelist_read_failed", "读免费名单失败")
+DEVICE_FREELIST_WRITE_FAILED = Reason("device.freelist_write_failed", "写免费名单失败")
+
 # ── 服务端侧 ──
 
 SERVER_OVERLOADED = Reason("server.overloaded", "服务端同时处理的命令过多，请稍后再试")
@@ -101,6 +106,8 @@ REGISTRY: tuple[Reason, ...] = (
     DEVICE_VERIFY_PAGE_TIMEOUT,
     DEVICE_LOGIN_INPUT_FAILED,
     DEVICE_BATH_SERVER_TIMEOUT,
+    DEVICE_FREELIST_READ_FAILED,
+    DEVICE_FREELIST_WRITE_FAILED,
     SERVER_OVERLOADED,
     PORT_BIND_FAILED,
     DEADLINE_EXCEEDED,

@@ -1,11 +1,19 @@
 package com.ryanliu.ntushower.core.config
 
-/** 设备环境锚点：目标设备上的固定事实（浴室 App、其数据库位置与本应用工作目录）。 */
+/** 设备环境锚点：目标设备上的固定事实（浴室 App、它的数据库与名单文件、本应用工作目录）。 */
 object AppConfig {
     const val BATH_APP_PACKAGE = "com.datalook.bath"
     const val BATH_DB_DIR = "/sdcard/datalook/db"
     const val BATH_DB_FILE = "bath.db"
     const val BATH_DB_PATH = "$BATH_DB_DIR/$BATH_DB_FILE"
+
+    /**
+     * 浴室 App 读的免费名单：一行一个学号，名单里的人不收费。
+     *
+     * 路径写在这里而不由服务端下发——服务端只给内容。**给得了路径就等于把"写哪个
+     * 文件"交给对端**，而这份名单的全部安全性正来自"只有这一个文件可写"。
+     */
+    const val BATH_FREELIST_PATH = "/sdcard/datalook/readfile/free.txt"
 
     /** 本应用在共享存储上的工作目录（OTA 下载、崩溃日志）。 */
     const val WORK_DIR = "/sdcard/ntu-shower"
