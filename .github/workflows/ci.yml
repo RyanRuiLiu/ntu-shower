@@ -39,7 +39,9 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "21"
+          # 与本机发布构建（publish_apk.ps1 → assembleRelease）的 JDK 一致；源级别声明
+          # 是 22（app/build.gradle.kts），21 连编译初始化都过不去——CI 曾因此从未绿过
+          java-version: "25"
       - uses: gradle/actions/setup-gradle@v4
       # 真实的 gradle.properties 已 gitignore（内含签名口令）；构建期要读 serverDomain
       # 与签名属性，CI 用 example 铺一份——占位口令够 detekt/lint/单测/assembleDebug 用
