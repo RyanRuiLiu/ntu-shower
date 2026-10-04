@@ -150,16 +150,54 @@ def test_config_spec_rendering_contract(client: TestClient, admin_headers: dict[
     """spec 端点渲染登记表：分区、分组与每键的控件元数据。"""
     spec = client.get("/api/v1/config/spec", headers=admin_headers).json()
 
-    assert [s["key"] for s in spec["sections"]] == ["business", "infra"]
+    # 两个页签按"这个键去哪"分：服务端的键在服务器上跑、不下发；设备的键会推到设备。
+    assert [s["key"] for s in spec["sections"]] == ["server", "device"]
+    assert [s["title"] for s in spec["sections"]] == ["服务端业务", "设备下发"]
     groups = {g["key"]: g for g in spec["groups"]}
-    assert groups["gateway"]["section"] == "infra"
-    assert groups["renew_wait"]["section"] == "business"
+    assert groups["gateway"]["section"] == "device"
+    assert groups["renew_wait"]["section"] == "server"
+    assert groups["server_bridge"]["section"] == "server"
     heartbeat = next(item for item in spec["specs"] if item["key"] == "heartbeat_interval_s")
     assert heartbeat["kind"] == "int"
     assert heartbeat["scope"] == "device"
     assert heartbeat["minimum"] == 5
     assert heartbeat["unit"] == "秒"
     assert heartbeat["group"] == "gateway"
+
+
+def test_device_override_rejects_server_only_keys(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    fresh_db: str,
+) -> None:
+    """服务端的键不按设备区分，写进单台覆盖就该被拒。
+
+    收进来的话：`device_effective` 会把它滤掉、永不下发，而 `effective` 会把它当真——
+    于是"同一份阈值、每台设备各不相同"这种既推不出去又说得出口的状态就存在了。
+    """
+    # 设备在线但不回应 ack：推送要等它，默认 15 秒会把测试拖成超时
+    monkeypatch.setattr(config_module.settings, "config_ack_timeout_s", 0.2)
+    device_id = "dev-no-server-key"
+
+    with helpers.trusted_online(client, device_id, admin_headers):
+        rejected = client.put(
+            f"/api/v1/devices/{device_id}/config",
+            headers=admin_headers,
+            json={"config": {"renew_wait_threshold_s": 200}},
+        )
+        assert rejected.status_code == 422
+        assert "renew_wait_threshold_s" in rejected.json()["detail"]
+
+        # 设备域的键照旧可以覆盖
+        accepted = client.put(
+            f"/api/v1/devices/{device_id}/config",
+            headers=admin_headers,
+            json={"config": {"heartbeat_interval_s": 20}},
+        )
+        assert accepted.status_code == 200
+        override = client.get(f"/api/v1/devices/{device_id}/config", headers=admin_headers).json()
+        assert override["overrides"] == {"heartbeat_interval_s": 20}
 
 
 def test_config_surface_requires_admin(client: TestClient, ops_headers: dict[str, str]) -> None:
