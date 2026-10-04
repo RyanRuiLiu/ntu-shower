@@ -51,4 +51,7 @@ ACTION_DATA: dict[str, dict[str, str]] = {
         "output": "命令的输出（stdout 与 stderr 合并）",
         "exit_code": "进程退出码；命令超时或 shell 不可用时为 null",
     },
+    "freelist.read": {
+        "content": "免费名单文件的原文，含行尾",
+    },
 }

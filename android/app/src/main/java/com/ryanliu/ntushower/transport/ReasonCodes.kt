@@ -56,6 +56,12 @@ object ReasonCodes {
     /** 浴室服务器未在预期时间内回应 */
     const val DEVICE_BATH_SERVER_TIMEOUT = "device.bath_server_timeout"
 
+    /** 读免费名单失败 */
+    const val DEVICE_FREELIST_READ_FAILED = "device.freelist_read_failed"
+
+    /** 写免费名单失败 */
+    const val DEVICE_FREELIST_WRITE_FAILED = "device.freelist_write_failed"
+
     /** 服务端同时处理的命令过多，请稍后再试 */
     const val SERVER_OVERLOADED = "server.overloaded"
 

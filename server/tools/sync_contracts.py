@@ -58,6 +58,7 @@ OBJECT_LABELS = {
     "device": "设备自身",
     "bridge": "调试通道",
     "ui": "设备界面（无障碍）",
+    "freelist": "免费名单",
 }
 
 

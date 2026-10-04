@@ -481,6 +481,7 @@ POST     /api/v1/devices/{id}/reboot                 重启整机        admin
 POST     /api/v1/devices/{id}/clock/set              修改设备端时间  admin
 GET      /api/v1/devices/{id}/bridge                 调试通道状态    admin
 POST     /api/v1/devices/{id}/bridge/open|close      开关调试通道    admin
+GET,PUT  /api/v1/devices/{id}/freelist               免费名单        admin
 
 GET,PUT  /api/v1/config                              全局配置        admin
 GET      /api/v1/config/spec                          配置键规格      admin
