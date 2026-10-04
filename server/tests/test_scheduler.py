@@ -2,6 +2,10 @@
 
 取数与命令下发都用 monkeypatch 换掉——这一层要验的是**编排**，不是 SQL 也不是协议。
 每条都跑在真实的 asyncio 循环里，因为定时器与队列都是循环上的东西。
+
+终局记录（`_record`）不在换掉之列：日志与审计表同路双写是它的全部意义，桩掉它就等于
+换了被测对象。所以凡是走到终局的用例都带 `fresh_db`——审计行落进本用例的临时库；
+conftest 的 `_isolate_default_db` 保证没带的用例碰不到仓库里的真实库。
 """
 
 import asyncio
@@ -218,7 +222,7 @@ def test_closed_sessions_are_forgotten_without_touching_other_devices(monkeypatc
 # ── 到点 ──
 
 
-def test_fire_skips_when_recheck_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fire_skips_when_recheck_fails(monkeypatch: pytest.MonkeyPatch, fresh_db: str) -> None:
     """到点只说明该看一眼了；现态变了就放弃，而且**不告警**。"""
 
     async def body() -> None:
@@ -231,7 +235,7 @@ def test_fire_skips_when_recheck_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     asyncio.run(body())
 
 
-def test_fire_enqueues_a_settle(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fire_enqueues_a_settle(monkeypatch: pytest.MonkeyPatch, fresh_db: str) -> None:
     async def body() -> None:
         scheduler.start()
         _prepare(monkeypatch, [WAITING])
@@ -323,7 +327,7 @@ def test_a_rejected_settle_is_recorded_with_its_reason(monkeypatch: pytest.Monke
     assert rows[0]["threshold_s"] == THRESHOLDS[FEATURE_AUTO_SETTLE]
 
 
-def test_same_door_is_not_queued_twice(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_same_door_is_not_queued_twice(monkeypatch: pytest.MonkeyPatch, fresh_db: str) -> None:
     async def body() -> None:
         scheduler.start()
         _prepare(monkeypatch, [WAITING])
@@ -338,7 +342,7 @@ def test_same_door_is_not_queued_twice(monkeypatch: pytest.MonkeyPatch) -> None:
 # ── 执行 ──
 
 
-def test_settle_stops_when_there_is_no_password(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_settle_stops_when_there_is_no_password(monkeypatch: pytest.MonkeyPatch, fresh_db: str) -> None:
     """名单里有他却没有他的凭证：发不出去，也不能假装发了。"""
 
     async def body() -> None:
@@ -353,7 +357,7 @@ def test_settle_stops_when_there_is_no_password(monkeypatch: pytest.MonkeyPatch)
     asyncio.run(body())
 
 
-def test_renewal_arms_a_pending_assign_but_settle_does_not(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_renewal_arms_a_pending_assign_but_settle_does_not(monkeypatch: pytest.MonkeyPatch, fresh_db: str) -> None:
     """续期类要在结算之后再分配；自动结算只要前半步。"""
 
     async def body() -> None:
@@ -368,7 +372,7 @@ def test_renewal_arms_a_pending_assign_but_settle_does_not(monkeypatch: pytest.M
     asyncio.run(body())
 
 
-def test_settle_records_the_attempt_before_sending(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_settle_records_the_attempt_before_sending(monkeypatch: pytest.MonkeyPatch, fresh_db: str) -> None:
     """先记后发：否则失败之后重算出的到点还是同一刻，会自旋。"""
 
     async def body() -> None:
@@ -380,7 +384,7 @@ def test_settle_records_the_attempt_before_sending(monkeypatch: pytest.MonkeyPat
     asyncio.run(body())
 
 
-def test_settle_stops_when_the_roster_changed_underneath(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_settle_stops_when_the_roster_changed_underneath(monkeypatch: pytest.MonkeyPatch, fresh_db: str) -> None:
     """复查到下单之间隔着取数与排队，所以下单前要再问一次名单。"""
 
     async def body() -> None:
@@ -395,7 +399,9 @@ def test_settle_stops_when_the_roster_changed_underneath(monkeypatch: pytest.Mon
     asyncio.run(body())
 
 
-def test_domain_rejections_are_split_into_normal_and_noteworthy(caplog: pytest.LogCaptureFixture) -> None:
+def test_domain_rejections_are_split_into_normal_and_noteworthy(
+    caplog: pytest.LogCaptureFixture, fresh_db: str
+) -> None:
     """领域层拒了要分清两类：门还被占着/他还有会话/他已经走了是正常，"设备离线"之类不是。
 
     分错的两个方向都坏：把正常当失败会刷满告警，把失败当正常就没人知道这次的维护没做成。
@@ -418,7 +424,7 @@ def test_domain_rejections_are_split_into_normal_and_noteworthy(caplog: pytest.L
     assert [record.levelname for record in caplog.records] == ["WARNING"]
 
 
-def test_assign_is_sent_exactly_once(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_assign_is_sent_exactly_once(monkeypatch: pytest.MonkeyPatch, fresh_db: str) -> None:
     """单次执行：失败也不重发。"""
 
     async def body() -> None:
@@ -451,7 +457,7 @@ def _arm(monkeypatch: pytest.MonkeyPatch, **overrides: object) -> None:
     scheduler._pending_assigns[("dev-1", 3)] = scheduler._PendingAssign(**fields)  # type: ignore[arg-type]
 
 
-def test_pending_assign_is_handed_to_the_domain_layer(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pending_assign_is_handed_to_the_domain_layer(monkeypatch: pytest.MonkeyPatch, fresh_db: str) -> None:
     """帧到了就把待补的分配交给领域层——"门空没空"由它判，这里不再自写一遍判据。
 
     所以即使门还占着，队列里也会有一项：那是"去试一次"，而试的结果由领域层的前置给。
@@ -468,7 +474,7 @@ def test_pending_assign_is_handed_to_the_domain_layer(monkeypatch: pytest.Monkey
     asyncio.run(body())
 
 
-def test_a_wait_rejection_keeps_the_pending_assign(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_wait_rejection_keeps_the_pending_assign(monkeypatch: pytest.MonkeyPatch, fresh_db: str) -> None:
     """领域层说"还轮不到"（门还占着、或他名下还有会话）→ 留着待办等下一帧。
 
     命令根本没下发，所以留待办不是"重试"——重试指的是把同一条命令再发一遍。
@@ -488,7 +494,7 @@ def test_a_wait_rejection_keeps_the_pending_assign(monkeypatch: pytest.MonkeyPat
     asyncio.run(body())
 
 
-def test_any_other_rejection_drops_the_pending_assign(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_any_other_rejection_drops_the_pending_assign(monkeypatch: pytest.MonkeyPatch, fresh_db: str) -> None:
     """其它拒绝（设备离线、通道积压……）→ 放弃这次分配。
 
     单次执行的边界就在这里：等下一帧是给"还轮不到"的，不是给"发失败了"的。
@@ -508,7 +514,7 @@ def test_any_other_rejection_drops_the_pending_assign(monkeypatch: pytest.Monkey
     asyncio.run(body())
 
 
-def test_pending_assign_fires_once_the_door_is_free(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pending_assign_fires_once_the_door_is_free(monkeypatch: pytest.MonkeyPatch, fresh_db: str) -> None:
     """够条件就把分配排进队列。
 
     **待办这时还不摘**：摘除只在命令真下发（或明确放弃）时做——万一真下发时前置又变了，
@@ -525,7 +531,7 @@ def test_pending_assign_fires_once_the_door_is_free(monkeypatch: pytest.MonkeyPa
     asyncio.run(body())
 
 
-def test_pending_assign_expires(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pending_assign_expires(monkeypatch: pytest.MonkeyPatch, fresh_db: str) -> None:
     """没有这个时限，设备离线几小时再上线会给一个早已走掉的学生开一场会话。"""
 
     async def body() -> None:
@@ -540,7 +546,7 @@ def test_pending_assign_expires(monkeypatch: pytest.MonkeyPatch) -> None:
 # ── 串行 ──
 
 
-def test_each_device_has_its_own_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_each_device_has_its_own_worker(monkeypatch: pytest.MonkeyPatch, fresh_db: str) -> None:
     """串行的边界是设备：两台设备各排各的，互相不等。"""
 
     async def body() -> None:
@@ -558,7 +564,7 @@ def test_each_device_has_its_own_worker(monkeypatch: pytest.MonkeyPatch) -> None
     asyncio.run(body())
 
 
-def test_worker_runs_jobs_back_to_back(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_worker_runs_jobs_back_to_back(monkeypatch: pytest.MonkeyPatch, fresh_db: str) -> None:
     """队列之间不睡：取一项跑一项。"""
 
     async def body() -> None:
@@ -573,7 +579,7 @@ def test_worker_runs_jobs_back_to_back(monkeypatch: pytest.MonkeyPatch) -> None:
     asyncio.run(body())
 
 
-def test_worker_survives_a_failing_job(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_worker_survives_a_failing_job(monkeypatch: pytest.MonkeyPatch, fresh_db: str) -> None:
     """单次失败只该带走那一项，不该终止这台设备的处理。"""
 
     async def body() -> None:
