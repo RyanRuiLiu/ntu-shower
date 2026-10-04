@@ -31,12 +31,25 @@ import { toast } from '../core/toast.js'
 
 let groups = []
 let specs = []
-/** 分区清单（业务功能/运行基础），来自服务端登记表。 */
+/** 分区清单（服务端业务/设备下发），来自服务端登记表。 */
 let SECTIONS = []
+/** 当前页签的分区键；空串表示登记表还没到位。 */
+let section = ''
 /** 设备覆盖项的键集合（设备视图下其余键处于继承态）。 */
 let overriddenKeys = new Set()
-/** 编辑目标：global（主）或 device（辅）。 */
+/** 编辑目标：global（主）或 device（辅）。只在支持按设备区分的分区里有意义。 */
 let target = 'global'
+
+/**
+ * 这个分区能不能按设备区分：它的键里有设备 scope 的才行。
+ *
+ * 服务端的键在服务器上运行、不下发，也就没有"这台设备单独设一个值"这回事——服务端那页
+ * 因此不出现设备选择与继承/覆盖标记。判据取自登记表的 `scope`，不在前端硬编码分区名。
+ */
+function sectionIsPerDevice(sectionKey) {
+  const groupKeys = new Set(groups.filter((group) => group.section === sectionKey).map((group) => group.key))
+  return specs.some((spec) => groupKeys.has(spec.group) && spec.scope === 'device')
+}
 
 function badge(isOverridden) {
   return isOverridden
@@ -131,7 +144,10 @@ function renderForm(values) {
         })
         .join('')
       if (!groupCards) return ''
-      return `<div class="cfg-section"><div class="cfg-section-title">${esc(sectionTitle)}</div><div class="cfg-grid">${groupCards}</div></div>`
+      // 非当前分区只是隐藏，**不从 DOM 里去掉**：保存时 readForm 要收全部键——服务端是
+      // 覆盖式写入（`store.put_global_overrides`），只提交一半会把另一半的覆盖当成已删除。
+      const hidden = sectionKey === section ? '' : ' hidden'
+      return `<div class="cfg-section" data-section="${esc(sectionKey)}"${hidden}><div class="cfg-section-title">${esc(sectionTitle)}</div><div class="cfg-grid">${groupCards}</div></div>`
     })
     .join('')
   const orphans = specs.filter((spec) => !used.has(spec.key))
@@ -171,29 +187,63 @@ function readForm() {
   return config
 }
 
-/** 当前编辑目标的有效值；device 视图下同时更新继承/覆盖标记。 */
+/** 页签、按钮文案与那句说明：都跟着（分区 + 编辑目标）走，一处写完。 */
+function refreshChrome() {
+  const perDevice = sectionIsPerDevice(section)
+  $('cfgSections').innerHTML = SECTIONS.map(
+    ([key, title]) =>
+      `<span class="cfg-tab${key === section ? ' is-active' : ''}" data-section="${esc(key)}">${esc(title)}</span>`,
+  ).join('')
+  $('cfgTargets').innerHTML = perDevice
+    ? `<span class="cfg-tab${target === 'global' ? ' is-active' : ''}" data-target="global">全部设备（全局默认）</span>
+       <span class="cfg-tab${target === 'device' ? ' is-active' : ''}" data-target="device">单台设备（覆盖）</span>`
+    : ''
+  $('cfgHint').textContent = perDevice
+    ? '设备下发的配置：全局默认为主，设备覆盖为辅。标记「继承」的项跟随全局默认值，改过即成为该设备的覆盖项，可恢复为继承。各模块与单项都提供「恢复默认」，恢复后需点「保存」才生效。'
+    : '服务端业务：这些在服务器上运行，不下发设备、也不按设备区分。点「保存」即刻生效。'
+}
+
+/** 切分区；切到不按设备区分的分区时把编辑目标收回全局。 */
+function setSection(next) {
+  if (section === next) return
+  section = next
+  if (!sectionIsPerDevice(section)) target = 'global'
+  reload()
+}
+
+/**
+ * 重载当前（分区 + 编辑目标）的表单值、标记与按钮文案。
+ *
+ * `target === 'device'` 只在支持按设备区分的分区里成立——服务端那页没有单台覆盖。
+ */
 async function reload() {
   try {
-    if (target === 'global') {
-      const view = await api.globalConfig()
-      overriddenKeys = new Set()
+    if (sectionIsPerDevice(section) && target === 'device') {
+      if (!store.deviceId) {
+        $('configGrid').innerHTML = '<div class="empty">请先在顶栏选择设备</div>'
+        $('cfgNote').textContent = ''
+        $('btnSave').textContent = '保存'
+        refreshChrome()
+        return
+      }
+      const view = await api.deviceConfig(store.deviceId)
+      overriddenKeys = new Set(Object.keys(view.overrides || {}))
       renderForm(view.config)
-      $('cfgNote').textContent = `已保存 ${view.revision} 次 · 作用于所有设备`
-      $('btnSave').textContent = '保存并推送全部'
+      $('cfgNote').textContent = view.overrides
+        ? `${store.deviceId} · ${overriddenKeys.size} 项单独设置，其余跟随全局`
+        : `${store.deviceId} · 全部跟随全局`
+      $('btnSave').textContent = '保存至当前设备'
+      refreshChrome()
       return
     }
-    if (!store.deviceId) {
-      $('configGrid').innerHTML = '<div class="empty">请先在顶栏选择设备</div>'
-      $('cfgNote').textContent = ''
-      return
-    }
-    const view = await api.deviceConfig(store.deviceId)
-    overriddenKeys = new Set(Object.keys(view.overrides || {}))
+    const view = await api.globalConfig()
+    overriddenKeys = new Set()
     renderForm(view.config)
-    $('cfgNote').textContent = view.overrides
-      ? `${store.deviceId} · ${overriddenKeys.size} 项单独设置，其余跟随全局`
-      : `${store.deviceId} · 全部跟随全局`
-    $('btnSave').textContent = '保存至当前设备'
+    $('cfgNote').textContent = sectionIsPerDevice(section)
+      ? `已保存 ${view.revision} 次 · 作用于所有设备`
+      : `已保存 ${view.revision} 次 · 在服务端运行，不下发设备`
+    $('btnSave').textContent = sectionIsPerDevice(section) ? '保存并推送全部' : '保存'
+    refreshChrome()
   } catch (error) {
     report('configResult', problemText(error), 'err')
   }
@@ -203,14 +253,22 @@ async function save() {
   report('configResult', '正在保存…', 'info')
   try {
     const values = readForm()
-    if (target === 'global') {
+    if (sectionIsPerDevice(section) && target === 'device') {
+      const result = await api.saveDeviceConfig(store.deviceId, values)
+      report('configResult', result.applied ? '已保存，设备已生效' : `已保存，${result.reason || '设备暂未生效'}`, 'ok')
+    } else {
       const result = await api.saveGlobalConfig(values)
       const notified = result.notified || []
       const applied = notified.filter((item) => item.applied).length
-      report('configResult', `已保存并推送：${notified.length} 台设备已接收，${applied} 台已生效`, 'ok')
-    } else {
-      const result = await api.saveDeviceConfig(store.deviceId, values)
-      report('configResult', result.applied ? '已保存，设备已生效' : `已保存，${result.reason || '设备暂未生效'}`, 'ok')
+      // 服务端那页保存时设备侧没有变化，服务端就不推送（见 `put_global_config`），
+      // 所以这里也不能一律写"已推送"——那句话在服务端那页会是不实的。
+      report(
+        'configResult',
+        notified.length === 0
+          ? '已保存 · 设备侧没有变化，未推送'
+          : `已保存并推送：${notified.length} 台设备已接收，${applied} 台已生效`,
+        'ok',
+      )
     }
     await reload()
   } catch (error) {
@@ -240,8 +298,8 @@ export const configView = {
     root.innerHTML = `
       <section class="panel">
         <div class="panel-head">
-          <span class="cfg-tab is-active" data-target="global">全部设备（全局默认）</span>
-          <span class="cfg-tab" data-target="device">单台设备（覆盖）</span>
+          <span class="cfg-tabs" id="cfgSections"></span>
+          <span class="cfg-tabs" id="cfgTargets"></span>
           <span class="panel-note" id="cfgNote"></span>
           <div class="panel-tools">
             <button type="button" class="btn btn-ghost btn-sm" id="btnResetAll">全部恢复默认</button>
@@ -249,21 +307,31 @@ export const configView = {
           </div>
         </div>
         <div class="panel-body">
-          <div class="muted" style="margin-bottom:8px">全局默认为主，设备覆盖为辅。在单台设备视图下，标记「继承」的配置项跟随全局默认值，修改后即成为该设备的覆盖项，可恢复为继承。各模块与单项均提供「恢复默认」，恢复后需点击「保存」方可生效。</div>
+          <div class="muted" id="cfgHint" style="margin-bottom:8px"></div>
           <div id="configGrid"><div class="empty">正在加载…</div></div>
         </div>
       </section>
       <div class="result" id="configResult" style="padding:0 4px"></div>`
 
     dispose = disposer()
-    dispose.add(subscribe('device', () => { if (target === 'device') reload() }))
+    dispose.add(subscribe('device', () => { if (sectionIsPerDevice(section) && target === 'device') reload() }))
     dispose.add(subscribe('view', (id) => { if (id !== 'config') dispose.dispose() }))
     dispose.add(listen($('btnSave'), 'click', save))
     dispose.add(listen($('btnResetAll'), 'click', resetAll))
 
-    root.querySelectorAll('.cfg-tab').forEach((tab) => {
-      dispose.add(listen(tab, 'click', () => setTarget(tab.dataset.target)))
-    })
+    // 页签整体重建，所以用委托而不是逐个挂监听
+    dispose.add(
+      listen($('cfgSections'), 'click', (event) => {
+        const tab = event.target.closest('.cfg-tab')
+        if (tab) setSection(tab.dataset.section)
+      }),
+    )
+    dispose.add(
+      listen($('cfgTargets'), 'click', (event) => {
+        const tab = event.target.closest('.cfg-tab')
+        if (tab) setTarget(tab.dataset.target)
+      }),
+    )
 
     // 模块/单项恢复默认走事件委托：网格整体重建后监听器仍在
     dispose.add(
@@ -281,9 +349,10 @@ export const configView = {
     api
       .configSpec()
       .then((view) => {
-        SECTIONS = view.sections.map((section) => [section.key, section.title])
+        SECTIONS = view.sections.map((item) => [item.key, item.title])
         groups = view.groups
         specs = view.specs
+        section = SECTIONS.length > 0 ? SECTIONS[0][0] : ''
         return reload()
       })
       .catch((error) => report('configResult', problemText(error), 'err'))

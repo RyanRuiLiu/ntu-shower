@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from app.modules.config.spec import DEVICE_KEYS, SPECS_BY_KEY
+from app.modules.config.spec import CONFIG_SPECS, DEVICE_KEYS, GROUPS, SPECS_BY_KEY
 
 ANDROID_RUNTIME_CONFIG = (
     Path(__file__).resolve().parents[2]
@@ -60,6 +60,28 @@ def test_device_keys_are_all_scoped_to_device() -> None:
     """下发给设备的键必须都标了 scope=device，否则会被 device_effective 过滤掉。"""
     for key in DEVICE_KEYS:
         assert SPECS_BY_KEY[key].scope.value == "device"
+
+
+def test_each_group_holds_one_scope_and_sits_in_the_matching_section() -> None:
+    """一组里的键必须同属一个 scope，且与它所在的分区相符。
+
+    分区的划分依据就是"这个键去哪"：服务端那些在服务器上运行、不下发；设备那些会推到
+    设备。一组混两种 scope，页面上那张卡片就同时属于两个页签，而后续所有按去处做的判断
+    （要不要推送、能不能单台覆盖）都会在它身上失效——所以这里连"混"都不许。
+    """
+    for group in GROUPS:
+        keys = [spec for spec in CONFIG_SPECS if spec.group == group.key]
+        assert keys, f"分组 {group.key} 一个键都没有"
+        scopes = {spec.scope.value for spec in keys}
+        assert len(scopes) == 1, f"分组 {group.key} 混了两种 scope：{sorted(scopes)}"
+        assert group.section == scopes.pop(), f"分组 {group.key} 的分区与它的 scope 不符"
+
+
+def test_every_spec_belongs_to_a_declared_group() -> None:
+    """每个键都要挂在一个声明过的分组里，否则它在配置页上没有卡片可渲染。"""
+    declared = {group.key for group in GROUPS}
+    for spec in CONFIG_SPECS:
+        assert spec.group in declared, f"{spec.key} 挂在未声明的分组 {spec.group}"
 
 
 def test_every_spec_has_a_unique_key() -> None:

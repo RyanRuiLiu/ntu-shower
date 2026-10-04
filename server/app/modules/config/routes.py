@@ -29,6 +29,7 @@ from .schemas import (
     GlobalConfigUpdateReport,
     GlobalConfigView,
 )
+from .spec import GROUPS, SECTIONS, SERVER, SPECS_BY_KEY
 
 admin_router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_admin)], tags=["config"])
 
@@ -39,6 +40,11 @@ class ConfigUpdateRequest(BaseModel):
     config: ConfigValues = Field(default_factory=dict)
 
 
+def _device_scope(overrides: ConfigValues) -> ConfigValues:
+    """只取设备域的那部分。用来判断"这次改动需不需要惊动设备"。"""
+    return {key: value for key, value in overrides.items() if SPECS_BY_KEY[key].scope is not SERVER}
+
+
 def _validated(values: ConfigValues) -> ConfigValues:
     """校验入参，把领域异常转成 problem+json。"""
     try:
@@ -47,14 +53,27 @@ def _validated(values: ConfigValues) -> ConfigValues:
         raise ApiProblemError(INVALID_CONFIG, exc.reason) from exc
 
 
+def _validated_device_overrides(values: ConfigValues) -> ConfigValues:
+    """校验单台覆盖的入参，并拒掉只服务于服务端的键。
+
+    服务端的键在服务器上运行（会话维护、链路维持、调试通道那些），它们**不按设备区分**：
+    收进来之后 `device_effective` 会把它滤掉、永远不下发，而 `effective` 会把它当真——
+    于是"同一份阈值、每台设备各不相同"这种既推不出去又说得出口的状态就悄悄存在了。
+    与其留这么一个口子，不如在这里拒掉。
+    """
+    checked = _validated(values)
+    server_only = sorted(key for key in checked if SPECS_BY_KEY[key].scope is SERVER)
+    if server_only:
+        raise ApiProblemError(INVALID_CONFIG, f"这些键在服务端运行、不按设备区分：{server_only}")
+    return checked
+
+
 @admin_router.get("/config/spec")
 def get_config_spec() -> ConfigSpecCatalog:
     """配置登记表：每个键的类型、范围、默认值、归属、分组与说明。
 
     客户端据此渲染控件（布尔用开关、整数输入框带上下限），不硬编码第二份键表。
     """
-    from .spec import GROUPS, SECTIONS
-
     return {
         "sections": [{"key": key, "title": title} for key, title in SECTIONS],
         "groups": [{"key": g.key, "title": g.title, "section": g.section} for g in GROUPS],
@@ -72,20 +91,24 @@ def get_global_config() -> GlobalConfigView:
 @admin_router.put("/config")
 async def put_global_config(req: ConfigUpdateRequest) -> GlobalConfigUpdateReport:
     """更新全局覆盖，并把新的有效配置推送给所有在线设备。"""
+    _before_revision, before = store.get_global_overrides()
     revision, overrides = store.put_global_overrides(_validated(req.config))
     # 会话维护的阈值与名单也在配置里，而定时器是按旧值挂着的——这里立刻重算，保存即生效。
     sessions_scheduler.reload()
     notified: list[ConfigPushNotice] = []
-    for device_id, _ws in manager.online_connections():
-        result = await sessions_service.push_config_update(device_id, revision, store.device_effective(device_id))
-        notified.append(
-            {
-                "device_id": device_id,
-                "notified": result.get("notified", False),
-                "applied": result.get("applied", False),
-                "reason": result.get("reason", ""),
-            }
-        )
+    # 服务端的键不下发，所以只有**设备域那部分真的变了**才需要惊动设备：在服务器上运行的
+    # 那些改动保存即生效，再推一条与上次一模一样的 config.update 只是白跑一趟。
+    if _device_scope(before) != _device_scope(overrides):
+        for device_id, _ws in manager.online_connections():
+            result = await sessions_service.push_config_update(device_id, revision, store.device_effective(device_id))
+            notified.append(
+                {
+                    "device_id": device_id,
+                    "notified": result.get("notified", False),
+                    "applied": result.get("applied", False),
+                    "reason": result.get("reason", ""),
+                }
+            )
     log_event(
         "INFO",
         "config.global-updated",
@@ -113,7 +136,7 @@ def get_device_config(device_id: str) -> DeviceConfigView:
 async def put_device_config(device_id: str, req: ConfigUpdateRequest) -> DeviceConfigUpdateReport:
     """设置设备级覆盖并推送给该设备。"""
     require_trusted_online_device(device_id)
-    revision, overrides = store.put_device_overrides(device_id, _validated(req.config))
+    revision, overrides = store.put_device_overrides(device_id, _validated_device_overrides(req.config))
     sessions_scheduler.reload()
     result = await sessions_service.push_config_update(device_id, revision, store.device_effective(device_id))
     log_event(
