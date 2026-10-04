@@ -89,13 +89,26 @@ function controlHtml(spec, value, id, isOverridden) {
                value="${esc(value)}" spellcheck="false">
       </div>${desc}`
   }
-  const min = spec.minimum === null ? '' : `min="${spec.minimum}"`
-  const max = spec.maximum === null ? '' : `max="${spec.maximum}"`
-  return `<div class="field">
-      <label for="${esc(id)}">${esc(spec.title)}${spec.unit ? `（${esc(spec.unit)}）` : ''}${badgeHtml}${resetButton}</label>
-      <input id="${esc(id)}" type="number" data-key="${esc(spec.key)}" data-kind="int"
-             value="${esc(value)}" ${min} ${max}>
-    </div>${desc}`
+  if (spec.kind === 'time') {
+    return `<div class="field">
+        <label for="${esc(id)}">${esc(spec.title)}${badgeHtml}${resetButton}</label>
+        <input id="${esc(id)}" type="time" data-key="${esc(spec.key)}" data-kind="time"
+               value="${esc(value)}" step="60">
+      </div>${desc}`
+  }
+  if (spec.kind === 'int') {
+    const min = spec.minimum === null ? '' : `min="${spec.minimum}"`
+    const max = spec.maximum === null ? '' : `max="${spec.maximum}"`
+    return `<div class="field">
+        <label for="${esc(id)}">${esc(spec.title)}${spec.unit ? `（${esc(spec.unit)}）` : ''}${badgeHtml}${resetButton}</label>
+        <input id="${esc(id)}" type="number" data-key="${esc(spec.key)}" data-kind="int"
+               value="${esc(value)}" ${min} ${max}>
+      </div>${desc}`
+  }
+  // 新增了 kind 却没写控件，在这里当场报错而不是落进一个默认出口：静默渲染成别的形状
+  // 会让人看到一个"看起来正常"的输入框，而它的值根本送不出去。与 renderForm 那句
+  // 「配置键缺少分组」同一种做法——宁可页面打不开，也不要它看起来是对的。
+  throw new Error(`控件未实现：${spec.key}（kind=${spec.kind}）`)
 }
 
 /** 单键恢复默认：重填 spec.default（后续保存时服务端自动丢弃该键的覆盖）。 */
@@ -173,16 +186,15 @@ function readForm() {
   const config = {}
   for (const input of $('configGrid').querySelectorAll('[data-key]')) {
     const key = input.dataset.key
-    if (input.dataset.kind === 'bool') {
-      config[key] = input.checked
-    } else if (input.dataset.kind === 'text_map') {
-      config[key] = parseTextMap(input.value)
-    } else if (input.dataset.kind === 'text') {
-      config[key] = input.value
-    } else {
+    const kind = input.dataset.kind
+    // 只有 int 要转数字、bool 要看勾选、text_map 要拆行，**其余一律取原文**：把"字符串"
+    // 当默认出口，将来加一个文本类 kind 时不会因为漏了一个分支而被静默丢掉值
+    if (kind === 'bool') config[key] = input.checked
+    else if (kind === 'text_map') config[key] = parseTextMap(input.value)
+    else if (kind === 'int') {
       const value = Number(input.value)
       if (Number.isFinite(value)) config[key] = value
-    }
+    } else config[key] = input.value
   }
   return config
 }

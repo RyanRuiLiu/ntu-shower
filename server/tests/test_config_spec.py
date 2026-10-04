@@ -10,7 +10,14 @@ from pathlib import Path
 
 import pytest
 
-from app.modules.config.spec import CONFIG_SPECS, DEVICE_KEYS, GROUPS, SPECS_BY_KEY
+from app.modules.config.spec import (
+    CONFIG_SPECS,
+    DEVICE_KEYS,
+    GROUPS,
+    SPECS_BY_KEY,
+    TIME,
+    parse_time,
+)
 
 ANDROID_RUNTIME_CONFIG = (
     Path(__file__).resolve().parents[2]
@@ -106,6 +113,17 @@ def test_integer_specs_declare_bounds() -> None:
 
 
 def test_defaults_are_within_declared_bounds() -> None:
+    """默认值必须落在自己声明的范围内。
+
+    时刻键的默认值是 `HH:MM` 文本，而范围用自 0 点起的分钟数表达，所以先经 [parse_time]
+    换算——与校验用的是同一个函数，不在测试里另写一份。
+    """
     for spec in SPECS_BY_KEY.values():
-        if spec.minimum is not None:
-            assert spec.minimum <= spec.default <= (spec.maximum or spec.default), f"{spec.key} 的默认值不在范围内"
+        if spec.minimum is None:
+            continue
+        default: object = spec.default
+        if spec.kind is TIME:
+            assert isinstance(spec.default, str), f"{spec.key} 的默认值应当是 HH:MM 文本"
+            default = parse_time(spec.default)
+        assert isinstance(default, int), f"{spec.key} 的默认值不是合法时刻：{spec.default!r}"
+        assert spec.minimum <= default <= (spec.maximum or default), f"{spec.key} 的默认值不在范围内"

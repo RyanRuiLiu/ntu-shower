@@ -1,5 +1,7 @@
 package com.ryanliu.ntushower.core.config
 
+import org.json.JSONObject
+
 /**
  * 远程配置的默认值。
  *
@@ -58,7 +60,7 @@ object ConfigDefaults {
     const val CERT_VERIFY_WAIT_MS = 5000L
 
     /** 回首页预算 */
-    const val HOME_TIMEOUT_MS = 10000L
+    const val HOME_TIMEOUT_MS = 15000L
 
     /** 界面轮询间隔 */
     const val UI_POLL_INTERVAL_MS = 60L
@@ -95,4 +97,35 @@ object ConfigDefaults {
 
     /** 开机校时触发阈值 */
     const val BOOT_TIME_SYNC_THRESHOLD_S = 60L
+
+    /** 全部默认值拼成一个对象，供 `RuntimeConfig.resetToDefaults` 复位用。 */
+    fun asJson(): JSONObject = JSONObject()
+        .put("heartbeat_interval_s", HEARTBEAT_INTERVAL_S)
+        .put("reconnect_base_ms", RECONNECT_BASE_MS)
+        .put("reconnect_max_ms", RECONNECT_MAX_MS)
+        .put("watchdog_interval_s", WATCHDOG_INTERVAL_S)
+        .put("door_report_debounce_ms", DOOR_REPORT_DEBOUNCE_MS)
+        .put("outbox_max_rows", OUTBOX_MAX_ROWS)
+        .put("overlay_enabled", OVERLAY_ENABLED)
+        .put("overlay_message", OVERLAY_MESSAGE)
+        .put("overlay_text_size_sp", OVERLAY_TEXT_SIZE_SP)
+        .put("overlay_text_color", OVERLAY_TEXT_COLOR)
+        .put("overlay_margin_left_dp", OVERLAY_MARGIN_LEFT_DP)
+        .put("automation_trace_enabled", AUTOMATION_TRACE_ENABLED)
+        .put("command_dedup_max_count", COMMAND_DEDUP_MAX_COUNT)
+        .put("bath_response_timeout_ms", BATH_RESPONSE_TIMEOUT_MS)
+        .put("cert_verify_wait_ms", CERT_VERIFY_WAIT_MS)
+        .put("home_timeout_ms", HOME_TIMEOUT_MS)
+        .put("ui_poll_interval_ms", UI_POLL_INTERVAL_MS)
+        .put("ui_click_delay_ms", UI_CLICK_DELAY_MS)
+        .put("ui_dump_max_nodes", UI_DUMP_MAX_NODES)
+        .put("ui_swipe_duration_ms", UI_SWIPE_DURATION_MS)
+        .put("device_exec_max_output_bytes", DEVICE_EXEC_MAX_OUTPUT_BYTES)
+        .put("ota_check_interval_s", OTA_CHECK_INTERVAL_S)
+        .put("bath_app_guard_enabled", BATH_APP_GUARD_ENABLED)
+        .put("bath_app_exit_window_ms", BATH_APP_EXIT_WINDOW_MS)
+        .put("bath_app_exit_max_count", BATH_APP_EXIT_MAX_COUNT)
+        .put("bath_app_exit_cooldown_ms", BATH_APP_EXIT_COOLDOWN_MS)
+        .put("boot_time_sync_enabled", BOOT_TIME_SYNC_ENABLED)
+        .put("boot_time_sync_threshold_s", BOOT_TIME_SYNC_THRESHOLD_S)
 }

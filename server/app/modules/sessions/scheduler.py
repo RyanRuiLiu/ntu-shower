@@ -57,12 +57,10 @@ from app.core import actions, outcomes, problems
 from app.core.clock import now_rfc3339
 from app.core.logging import log_event
 from app.core.problems import ApiProblemError
-from app.core.protocol import as_int
 from app.modules.audit import repository as audit_repository
 from app.modules.config import store as config_store
-from app.modules.doors import repository as doors_repository
+from app.modules.doors import service as doors_service
 from app.modules.doors.schemas import DoorState
-from app.modules.doors.service import NO_WATER_RELEASE_S
 
 from . import routes as sessions_routes
 from .decision import (
@@ -275,31 +273,28 @@ def _now_s() -> float:
 def _snapshots(device_id: str) -> list[Candidate]:
     """这台设备上此刻所有未结束的会话，连同判据要用的现态。
 
-    只取派生层：`usage_session` 给会话，`door_live` 给现态。原始帧一概不读——判定不需要
-    它，而读了就等于把两套真相都摆上台面。
+    取数一律经 `doors` 域公开的功能，不读它的表：会话、现态、串的划断规则都是它的
+    事情。原始帧一概不读——判定不需要它，而读了就等于把两套真相都摆上台面。
 
-    `door_live` 的三个时间字段要经钟偏差换算，所以**设备还没有偏差记录时它们是空的**
-    （测试里要显式建立，否则测的不是线上的样子；线上连上后一个往返内就有，且跨重启持久化）。
+    现态的关阀时刻已经过钟偏差换算，所以**设备还没有偏差记录时它是空的**（测试里要
+    显式建立，否则测的不是线上的样子；线上连上后一个往返内就有，且跨重启持久化）。
     """
-    live = doors_repository.get_all_live(device_id)
+    live = doors_service.live_doors(device_id)
     found: list[Candidate] = []
-    for session in doors_repository.list_open_sessions_of(device_id):
-        door_no = as_int(session["door_no"])
-        row = live.get(door_no)
+    for session in doors_service.open_sessions(device_id):
+        row = live.get(session.door_no)
         if row is None:
             continue  # 会话还在、门的现态却没了：不判，等下一帧
-        cert_no = str(session["cert_no"] or "")
-        raw_state = str(row["state"])
         found.append(
             Candidate(
-                session_id=as_int(session["id"]),
+                session_id=session.session_id,
                 device_id=device_id,
-                door_no=door_no,
-                cert_no=cert_no,
-                state=DoorState(raw_state) if raw_state in _STATES else DoorState.FREE,
-                assigned_at=str(session["assigned_at"] or ""),
-                paused_at=str(row["close_time"] or ""),
-                renew_count=doors_repository.count_renewals_in_run(device_id, door_no, cert_no, NO_WATER_RELEASE_S),
+                door_no=session.door_no,
+                cert_no=session.cert_no,
+                state=DoorState(row.state) if row.state in _STATES else DoorState.FREE,
+                assigned_at=session.assigned_at,
+                paused_at=row.close_time,
+                run_started_at=doors_service.run_started_at(device_id, session.door_no, session.cert_no),
             )
         )
     return found
@@ -376,7 +371,7 @@ def _forget_closed_sessions(device_id: str) -> None:
     留着只会让集合一直长；清掉是安全的——那一场不会再触发（它已经结束），重新开的那一场
     有自己的 `session_id`。
     """
-    open_ids = {as_int(session["id"]) for session in doors_repository.list_open_sessions_of(device_id)}
+    open_ids = {session.session_id for session in doors_service.open_sessions(device_id)}
     for key in [item for item in _attempted if item[0] == device_id and item[1] not in open_ids]:
         _attempted.discard(key)
 
