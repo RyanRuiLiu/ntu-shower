@@ -180,6 +180,10 @@ def test_trust_flow_and_device_listing(client: TestClient, admin_headers: dict[s
         ack = helpers.recv_until(ws, "link.hello_ack")
         assert ack["payload"]["trusted"] is False
         assert ack["payload"]["config"]["heartbeat_interval_s"] == 30
+        # 只给设备端消费的键——服务端自己的键不占设备的解析路径。这条与 `config.update`
+        # 那条路必须一致，否则设备连上与连上之后看到的键集不同。
+        assert "renew_wait_students" not in ack["payload"]["config"]
+        assert "auto_settle_pause_threshold_s" not in ack["payload"]["config"]
 
         ws.send_text(helpers.frame("link.ping", {"sender_time": "2026-09-30T12:00:01.000Z"}))
         helpers.recv_until(ws, "link.pong")
