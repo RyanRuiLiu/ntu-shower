@@ -33,6 +33,9 @@ RELEASE_TOO_LARGE = Problem("release-too-large", 413, "安装包超过体积上�
 UNTRUSTED_DEVICE = Problem("untrusted-device", 403, "设备尚未被信任")
 DUPLICATE_SESSION = Problem("duplicate-session", 409, "该学号已有进行中的会话")
 
+# ── 后台任务 ──
+TASK_NOT_FOUND = Problem("task-not-found", 404, "找不到后台任务")
+
 # ── 访问授权 ──
 UNAUTHENTICATED = Problem("unauthenticated", 401, "需要身份")
 UNKNOWN_IDENTITY = Problem("unknown-identity", 401, "该身份尚未被授权")
@@ -58,6 +61,7 @@ REGISTRY: tuple[Problem, ...] = (
     RELEASE_TOO_LARGE,
     UNTRUSTED_DEVICE,
     DUPLICATE_SESSION,
+    TASK_NOT_FOUND,
     UNAUTHENTICATED,
     UNKNOWN_IDENTITY,
     CAPABILITY_DENIED,
