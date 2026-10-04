@@ -41,5 +41,8 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/setup-gradle@v4
+      # 真实的 gradle.properties 已 gitignore（内含签名口令）；构建期要读 serverDomain
+      # 与签名属性，CI 用 example 铺一份——占位口令够 detekt/lint/单测/assembleDebug 用
+      - run: cp gradle.properties.example gradle.properties
       - run: ./gradlew detekt :app:lintDebug :app:testDebugUnitTest :app:jacocoUnitTestCoverageVerification
       - run: ./gradlew assembleDebug
