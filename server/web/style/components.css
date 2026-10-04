@@ -209,10 +209,11 @@
   color: var(--accent);
 }
 
-/* 小卡片网格：一模块一小卡，auto-fill 自动多列；卡内键少，一眼看完一个模块 */
+/* 小卡片网格：一模块一小卡，auto-fill 自动多列；卡内键少，一眼看完一个模块。
+   最小轨道宽度取 `min(300px, 100%)`：窄屏落成一列，而不是撑破容器横向溢出 */
 .cfg-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
   gap: var(--sp-3);
   /* 同一行卡片等高拉伸（align-items 默认 stretch），高矮随内容自适应但排列整齐 */
   align-items: stretch;
@@ -294,14 +295,17 @@
 
 /*
  * 主从分栏：左列表右详情，**视口高度内各自滚动**。详情放右栏常驻而不是页面底部，
- * 比对几行时眼睛不用上下跑。窄屏退化为上下堆叠（此时详情回到下方是可接受的，
- * 因为屏幕本来就得滚动）。
+ * 比对几行时眼睛不用上下跑。窄屏上下堆叠（此时详情回到下方是可接受的，
+ * 因为屏幕本来就得滚动），规则在 style/narrow.css。
  */
 .audit-split {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(360px, 460px);
   gap: var(--sp-4);
-  height: calc(100vh - var(--bar-height) - var(--sp-4) * 2);
+  /* 高度由 flex 分配（.view 是列向 flex 容器），不写 `calc(100vh - 顶栏高度)`：
+     顶栏在窄屏是两行，那个减数会在几处同时失准 */
+  flex: 1 1 0;
+  min-height: 0;
   align-items: stretch;
 }
 
@@ -322,17 +326,6 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-}
-
-@media (width <= 1100px) {
-  .audit-split {
-    grid-template-columns: minmax(0, 1fr);
-    height: auto;
-  }
-
-  .audit-split > .panel > .panel-body.flush {
-    max-height: 60vh;
-  }
 }
 
 /* 标签：面板头里的两组数据源切换，激活项用主色下边线标出 */

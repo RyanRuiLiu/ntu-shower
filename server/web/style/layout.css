@@ -139,9 +139,19 @@
 
 /* ── 视图容器 ───────────────────────────────────────────── */
 
+/*
+ * `flex: 1 1 auto` 里的 basis 必须是 `auto` 而不是 `0`：内容高的视图（配置页有上千像素）
+ * 要能把 body 撑高、让整页滚动；basis 为 0 时容器按视口高度封顶，内容会溢出到页面之外。
+ * 内容矮的视图（概览）则由 flex-grow 补满剩余高度。
+ *
+ * `width: 100%` 与 `margin: 0 auto` 配套：在 flex 容器里 auto 外边距会优先吃掉横轴自由
+ * 空间，条目的宽度随之收缩到内容宽度，"居中"就变成了缩成一条。
+ */
 .view {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  width: 100%;
   gap: var(--sp-4);
   padding: var(--sp-4);
   max-width: 1600px;
@@ -203,35 +213,35 @@
   color: var(--muted);
 }
 
+/*
+ * 承载表格的面板体（设备、身份、发布、审计四张表都挂在它上面）。
+ *
+ * 表格的列数由业务决定，窄屏放不下是常态；不给它滚动，多出来的列会被 .panel 的
+ * `overflow: hidden` 直接裁掉——看着就像"这几列本来就没有"。四张表各自写一遍
+ * `overflow-x` 会漏掉将来新加的那一张，所以由容器统一给。
+ */
 .panel-body.flush {
   padding: 0;
+  overflow: auto;
 }
 
 /* ── 网格：面板内并排两块 ───────────────────────────────── */
 
+/*
+ * 两张网格都用 `minmax(min(360px, 100%), 1fr)`：`100%` 那一项让最小轨道宽度不超过
+ * 容器，窄屏自动落成一列。没有它，`minmax(360px, 1fr)` 在 343px 宽的容器里会撑出
+ * 360px 的轨道——页面横向溢出。`auto-fit` 会折叠多余的空轨道，所以宽屏上仍是
+ * "几个子项就几列、各占等分"。
+ */
 .grid {
   display: grid;
   gap: var(--sp-4);
 }
 
 .grid-2 {
-  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
 }
 
 .grid-3 {
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-}
-
-/* 主区 + 侧栏：界面检视这类"左边看、右边操作"的布局 */
-.split {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 420px;
-  gap: var(--sp-4);
-  align-items: start;
-}
-
-@media (width <= 1200px) {
-  .split {
-    grid-template-columns: minmax(0, 1fr);
-  }
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
 }

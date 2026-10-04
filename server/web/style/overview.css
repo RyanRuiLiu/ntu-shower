@@ -9,8 +9,9 @@
 .kpi {
   display: grid;
   /* 每格至少 150px，宽度足够时增加列数。写死 repeat(6, 1fr) 是强制等分：
-     宽屏上每格被拉得过宽，与内容体量不相称 */
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+     宽屏上每格被拉得过宽，与内容体量不相称。
+     `min(150px, 100%)` 让窄屏落成一列时不撑破容器 */
+  grid-template-columns: repeat(auto-fill, minmax(min(150px, 100%), 1fr));
   gap: 10px;
 }
 
@@ -82,8 +83,9 @@
   display: grid;
   /* 每张至少 320px：喷头卡片内容是"编号 + 状态标签 + 最多六行明细"，320px 刚好容得下
      两列文字不折行。写死 `repeat(3, 1fr)` 时宽屏上每张能到 500px 以上，空闲的门
-     只有一行字，剩下的全是空白 */
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+     只有一行字，剩下的全是空白。
+     `min(320px, 100%)` 让容器比 320px 还窄时落成一列，而不是撑出轨道横溢 */
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
   gap: 10px;
 }
 
@@ -229,10 +231,22 @@
 
 /* ── 控制操作 ───────────────────────────────────────────── */
 
+/*
+ * 控制操作两张卡：并排放不下时落成一列。
+ *
+ * 用 flex 而不是 `repeat(auto-fit, minmax(min(320px, 100%), 1fr))`：后者在宽屏上会按
+ * 320px 切出四五列，卡片被切得太碎。flex 的 basis 只决定换行点、不决定列数——
+ * 两张卡永远平分整行，容器窄于 656px（两张 basis 加间距）时换成上下两行。
+ */
 .actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+}
+
+.actions > .act-card {
+  flex: 1 1 320px;
+  min-width: 0;
 }
 
 .act-card {
@@ -287,23 +301,3 @@
   border-radius: var(--radius-sm);
 }
 
-/* ── 响应式 ─────────────────────────────────────────────── */
-
-/* KPI 与喷头卡片自己按最小宽度决定列数，不需要在这里逐档写死；
-   只有操作区在窄屏下要放弃并排——两张卡片挤在半屏宽里谁都读不清 */
-@media (width <= 1024px) {
-  .actions {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* 窄屏下把最小宽度降下来，否则一列都放不下，会横向溢出 */
-@media (width <= 640px) {
-  .kpi {
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  }
-
-  .doors {
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  }
-}
