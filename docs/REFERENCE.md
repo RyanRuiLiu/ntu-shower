@@ -38,7 +38,12 @@
 |---|---|---|
 | **原始层** | `door_snapshot`、`device_link_event`、`command_audit`、`api_call`、`background_task_run` | 设备与调用方的原话、我们自己做过的事，不改写。**它是重算的退路，不是查询入口** |
 | **派生层** | `door_live`、`door_state_event`、`usage_segment`、`usage_session` | 我们算出来的。**做功能与统计只碰这四张** |
-| **支撑层** | `device`、`global_config`、`device_config`、`access_identity`、`ota_release`、`ota_release_install` | 设备档案、配置、身份、发布 |
+| **支撑层** | `device`、`global_config`、`device_config`、`access_identity`、`ota_release`、`ota_release_install` | 设备档案、配置、身份、发布——**都是"配上去"的东西，删了重建即可** |
+
+> **能不能删，看它是不是"重配得回来"**：支撑层是配置与档案（重配一遍就有）；原始层与派生层
+> 是设备报过的原话与从它算出来的历史（会话、段、状态事件、帧）——**删了就回不来**，统计口径
+> 全靠它攒着。开发阶段重建库（见 `AGENTS.md`）动的是支撑层与空表；**生产上的历史数据任何
+> 情况下都不删**。
 
 原始层为什么必须在：派生规则一旦发现缺陷、或将来要加一个现在想不到的指标，没有原始帧就永久无法重算。旧系统只留了原始帧，那 100 天今天才能重放。
 
