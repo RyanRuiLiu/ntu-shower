@@ -153,7 +153,7 @@ def test_config_spec_rendering_contract(client: TestClient, admin_headers: dict[
     assert [s["key"] for s in spec["sections"]] == ["business", "infra"]
     groups = {g["key"]: g for g in spec["groups"]}
     assert groups["gateway"]["section"] == "infra"
-    assert groups["session_ops"]["section"] == "business"
+    assert groups["renew_wait"]["section"] == "business"
     heartbeat = next(item for item in spec["specs"] if item["key"] == "heartbeat_interval_s")
     assert heartbeat["kind"] == "int"
     assert heartbeat["scope"] == "device"
