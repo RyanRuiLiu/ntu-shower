@@ -2,6 +2,7 @@ package com.ryanliu.ntushower.service
 
 import android.util.Log
 import com.ryanliu.ntushower.BuildConfig
+import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.shell.RootShell
 import com.ryanliu.ntushower.features.automation.BathAppRestart
 import com.ryanliu.ntushower.features.automation.CommandOutcome
@@ -10,6 +11,7 @@ import com.ryanliu.ntushower.transport.OutcomeStatus
 import com.ryanliu.ntushower.transport.ReasonCodes
 import com.ryanliu.ntushower.transport.SupportedActions
 import org.json.JSONObject
+import java.io.File
 
 /**
  * 设备自身的维护命令：执行 shell、重启本程序、重启整机、重启浴室 APP、设置系统时钟。
@@ -31,6 +33,8 @@ object DeviceMaintenance {
         SupportedActions.DEVICE_REBOOT,
         SupportedActions.BATH_RESTART,
         SupportedActions.CLOCK_SET,
+        SupportedActions.FREELIST_READ,
+        SupportedActions.FREELIST_WRITE,
     )
 
     /**
@@ -102,6 +106,16 @@ object DeviceMaintenance {
 
                 SupportedActions.CLOCK_SET -> {
                     onOutcome(clockSetOutcome(params, commandId))
+                    reported = true
+                }
+
+                SupportedActions.FREELIST_READ -> {
+                    onOutcome(freelistReadOutcome(commandId))
+                    reported = true
+                }
+
+                SupportedActions.FREELIST_WRITE -> {
+                    onOutcome(freelistWriteOutcome(params, commandId))
                     reported = true
                 }
             }
@@ -216,6 +230,63 @@ object DeviceMaintenance {
                 OutcomeStatus.FAILED,
                 ReasonCodes.DEVICE_INTERNAL_ERROR,
                 "设置系统时钟失败（格式或写入有误，见 device.log）",
+            )
+        }
+    }
+
+    /**
+     * 读免费名单的原文。
+     *
+     * 返回原文而不在设备端拆行：行尾与分行是服务端的事（见 `freelist.read` 的注释），
+     * 两端各拆一次必然分叉，而分叉的表现是名单里多出或少了几个学号。
+     */
+    private fun freelistReadOutcome(commandId: String): CommandOutcome = try {
+        CommandOutcome(
+            commandId,
+            OutcomeStatus.OK,
+            "",
+            "",
+            data = JSONObject().put("content", File(AppConfig.BATH_FREELIST_PATH).readText()),
+        )
+    } catch (e: Throwable) {
+        Log.e(TAG, "读免费名单失败：${e.message}", e)
+        CommandOutcome(
+            commandId,
+            OutcomeStatus.FAILED,
+            ReasonCodes.DEVICE_FREELIST_READ_FAILED,
+            "读取免费名单失败：${e.message}",
+        )
+    }
+
+    /**
+     * 写免费名单：整份替换。
+     *
+     * **原地截断重写，不落临时文件再改名**：那个目录（`readfile`）是浴室 App 读的，
+     * 多出来的文件会被它一并读到。代价是它恰好在写入那一瞬读时会读到空文件——而空
+     * 名单在浴室 App 那边的含义是"没人免费"，那是安全的方向。
+     *
+     * `writeText` 原样落字节、不做换行转换，所以行尾由服务端拼好再传进来。**空内容是
+     * 合法内容**（名单为空即没人免费），不因它为空而拒绝；缺这个参数才是请求不成立。
+     */
+    private fun freelistWriteOutcome(params: JSONObject, commandId: String): CommandOutcome {
+        if (!params.has("content")) {
+            return CommandOutcome(
+                commandId,
+                OutcomeStatus.REJECTED,
+                ReasonCodes.DEVICE_FREELIST_WRITE_FAILED,
+                "命令里没有名单内容",
+            )
+        }
+        return try {
+            File(AppConfig.BATH_FREELIST_PATH).writeText(params.optString("content"))
+            CommandOutcome(commandId, OutcomeStatus.OK, "", "")
+        } catch (e: Throwable) {
+            Log.e(TAG, "写免费名单失败：${e.message}", e)
+            CommandOutcome(
+                commandId,
+                OutcomeStatus.FAILED,
+                ReasonCodes.DEVICE_FREELIST_WRITE_FAILED,
+                "写入免费名单失败：${e.message}",
             )
         }
     }

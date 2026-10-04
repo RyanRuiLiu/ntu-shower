@@ -55,18 +55,32 @@ function renderTable() {
     </tr></thead><tbody>${rows}</tbody></table>`
 }
 
+/**
+ * 收起名单编辑区并清空它。
+ *
+ * 换设备与点「收起」都要这一下：上一台的内容留在框里，下一次按保存就会把那份名单写到
+ * 眼前这台设备上。
+ */
+function closeFreelist() {
+  $('freelistEditor').hidden = true
+  $('freelistInput').value = ''
+  report('freelistResult', '', 'info')
+}
+
 /** 命令与调试通道都只作用于"当前设备"，所以它们要能感知选择变化。 */
 function renderCurrent() {
   const device = store.devices.find((item) => item.device_id === store.deviceId)
   $('currentDevice').textContent = device ? `${device.name || device.device_id}（${device.online ? '在线' : '离线'}）` : '未选择'
   const usable = Boolean(device)
-  for (const id of ['btnClockSet', 'btnRestart', 'btnBathRestart', 'btnReboot', 'btnExec', 'btnBridgeOpen', 'btnBridgeClose', 'btnBridgeStatus']) {
+  for (const id of ['btnClockSet', 'btnFreelist', 'btnRestart', 'btnBathRestart', 'btnReboot', 'btnExec', 'btnBridgeOpen', 'btnBridgeClose', 'btnBridgeStatus']) {
     $(id).disabled = !usable
   }
-  // 换了设备，上一条连接命令与上一份状态都不再属于眼前这台，收起来免得照着旧端口去连
+  // 换了设备，上一条连接命令、上一份名单与上一批状态都不再属于眼前这台：收起来，
+  // 免得照着旧端口去连、或者对着另一台的名单按保存
   $('bridgeSteps').hidden = true
   $('bridgeHint').hidden = false
   $('execOutput').hidden = true
+  closeFreelist()
   report('execResult', '', 'info')
   report('maintResult', '', 'info')
   report('bridgeResult', '', 'info')
@@ -156,6 +170,49 @@ async function doReboot() {
  */
 function sayMaint(text, kind) {
   report('maintResult', text, kind)
+}
+
+/**
+ * 展开名单编辑区，并先把设备上那份读进来。
+ *
+ * 读回来的行直接填进框里：不填的话框是空的，而"看着像是空名单"正是最容易按出误删的
+ * 那种误判。
+ */
+async function openFreelist() {
+  $('freelistEditor').hidden = false
+  $('freelistInput').value = ''
+  report('freelistResult', '正在读取…', 'info')
+  try {
+    const result = await api.freelist(store.deviceId)
+    if (result.status !== 'ok') {
+      report('freelistResult', outcomeText(result), 'err')
+      return
+    }
+    $('freelistInput').value = result.students.join('\n')
+    report('freelistResult', `已读取 ${result.students.length} 行`, 'info')
+  } catch (error) {
+    report('freelistResult', problemText(error), 'err')
+  }
+}
+
+/**
+ * 保存名单：整份替换。空框是合法内容（没人免费），所以不拦它。
+ *
+ * 空行在这里滤掉而不是交给服务端拒：多行文本框里末尾那一下回车不是学号，而人的动作
+ * 是"按保存"，不该被 422 挡回来。服务端那一侧的校验照旧——两边各自成立。
+ */
+async function saveFreelist() {
+  const students = $('freelistInput')
+    .value.split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '')
+  report('freelistResult', '正在保存…', 'info')
+  try {
+    const result = await api.saveFreelist(store.deviceId, students)
+    report('freelistResult', outcomeText(result), result.status === 'ok' ? 'ok' : 'err')
+  } catch (error) {
+    report('freelistResult', problemText(error), 'err')
+  }
 }
 
 /**
@@ -275,11 +332,25 @@ export const devicesView = {
                  破坏性的排最后并用红色，免得误点。 -->
             <div class="btn-row">
               <button type="button" class="btn btn-ghost btn-sm" id="btnClockSet">修改设备端时间</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnFreelist">免费名单</button>
               <button type="button" class="btn btn-ghost btn-sm" id="btnRestart">重启 NTU Shower</button>
               <button type="button" class="btn btn-ghost btn-sm" id="btnBathRestart">重启浴室 App</button>
               <button type="button" class="btn btn-danger btn-sm" id="btnReboot">重启设备</button>
             </div>
             <div class="result" id="maintResult"></div>
+
+            <!-- 名单编辑区按需展开：那是个多行的框，常年摊在这里会把下面的命令区挤下去。
+                 与调试通道那块同一个做法（默认收起，点按钮才出来）。 -->
+            <div class="field" id="freelistEditor" hidden>
+              <label for="freelistInput">免费名单<span class="muted"> · 一行一个学号，名单里的人不收费</span></label>
+              <textarea id="freelistInput" rows="8" spellcheck="false"></textarea>
+              <div class="muted">改动在浴室 App 下次启动时生效。</div>
+              <div class="btn-row">
+                <button type="button" class="btn btn-sm" id="btnFreelistSave">保存</button>
+                <button type="button" class="btn btn-ghost btn-sm" id="btnFreelistClose">收起</button>
+              </div>
+              <div class="result" id="freelistResult"></div>
+            </div>
 
             <div class="panel-split">
               <div class="field">
@@ -349,6 +420,9 @@ export const devicesView = {
     )
     dispose.add(listen($('btnExec'), 'click', runExec))
     dispose.add(listen($('btnClockSet'), 'click', () => promptClockSet(store.deviceId, sayMaint)))
+    dispose.add(listen($('btnFreelist'), 'click', openFreelist))
+    dispose.add(listen($('btnFreelistSave'), 'click', saveFreelist))
+    dispose.add(listen($('btnFreelistClose'), 'click', closeFreelist))
     dispose.add(listen($('btnRestart'), 'click', doAppRestart))
     dispose.add(listen($('btnBathRestart'), 'click', () => restartBathApp(store.deviceId, sayMaint)))
     dispose.add(listen($('btnReboot'), 'click', doReboot))

@@ -39,6 +39,10 @@ object SupportedActions {
     // ── clock ──
     const val CLOCK_SET = "clock.set"
 
+    // ── 免费名单 ──
+    const val FREELIST_READ = "freelist.read"
+    const val FREELIST_WRITE = "freelist.write"
+
     // ── 调试通道 ──
     const val BRIDGE_OPEN = "bridge.open"
     const val BRIDGE_CLOSE = "bridge.close"
@@ -61,6 +65,8 @@ object SupportedActions {
         APP_RESTART,
         BATH_RESTART,
         CLOCK_SET,
+        FREELIST_READ,
+        FREELIST_WRITE,
         BRIDGE_OPEN,
         BRIDGE_CLOSE,
         UI_DUMP,

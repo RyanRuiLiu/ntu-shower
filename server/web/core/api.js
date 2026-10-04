@@ -102,6 +102,11 @@ export const api = {
   // channel 必填："clipboard"（粘贴，支持中文）或 "keys"（按键注入，仅 ASCII）
   input: (id, text, channel) => send(devicePath(id, '/input'), post({ text, channel })),
 
+  // ── 免费名单 ──（admin）
+  // 读回的是行、交出去的也是行：文件的行尾形状由服务端负责，页面不碰它。
+  freelist: (id) => send(devicePath(id, '/freelist')),
+  saveFreelist: (id, students) => send(devicePath(id, '/freelist'), put({ students })),
+
   // ── 调试通道 ──（admin）
   bridgeStatus: (id) => send(devicePath(id, '/bridge')),
   bridgeOpen: (id) => send(devicePath(id, '/bridge/open'), post()),
