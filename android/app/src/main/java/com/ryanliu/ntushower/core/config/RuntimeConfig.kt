@@ -152,112 +152,81 @@ object RuntimeConfig {
      * 把每个键复位为 [ConfigDefaults] 的值。
      *
      * 存在的原因是本对象是进程内的全局单例：一处改过之后，别处读到的不再是默认值，
-     * 而测试需要在每个用例开始前拿回确定的状态。**复位必须也读 [ConfigDefaults]**——
-     * 测试里另写一份默认值副本是与它必然分叉的第二个来源，而且分叉了测试照样通过
-     * （它断言的是自己刚设进去的那个值）。
+     * 而测试需要在每个用例开始前拿回确定的状态。
+     *
+     * **实现就是喂一份默认值给 [apply]**：那份默认值由生成器产出（[ConfigDefaults.asJson]），
+     * 所以这里不再逐键抄一遍——手抄的那份是与 [ConfigDefaults] 必然分叉的第二个来源，
+     * 而且分叉了测试照样通过（它断言的是自己刚设进去的那个值）。
      *
      * 生产代码不走这里：配置一旦下发就生效到进程结束。
      */
     fun resetToDefaults() {
-        heartbeatIntervalS = ConfigDefaults.HEARTBEAT_INTERVAL_S.toInt()
-        reconnectBaseMs = ConfigDefaults.RECONNECT_BASE_MS
-        reconnectMaxMs = ConfigDefaults.RECONNECT_MAX_MS
-        watchdogIntervalS = ConfigDefaults.WATCHDOG_INTERVAL_S
-        reportDebounceMs = ConfigDefaults.DOOR_REPORT_DEBOUNCE_MS
-        outboxMaxRows = ConfigDefaults.OUTBOX_MAX_ROWS
-        overlayEnabled = ConfigDefaults.OVERLAY_ENABLED
-        overlayMessage = ConfigDefaults.OVERLAY_MESSAGE
-        overlayTextSizeSp = ConfigDefaults.OVERLAY_TEXT_SIZE_SP.toInt()
-        overlayTextColor = ConfigDefaults.OVERLAY_TEXT_COLOR
-        overlayMarginLeftDp = ConfigDefaults.OVERLAY_MARGIN_LEFT_DP.toInt()
-        automationTraceEnabled = ConfigDefaults.AUTOMATION_TRACE_ENABLED
-        commandDedupMaxCount = ConfigDefaults.COMMAND_DEDUP_MAX_COUNT
-        serverResponseTimeoutMs = ConfigDefaults.BATH_RESPONSE_TIMEOUT_MS
-        idVerifyWaitMs = ConfigDefaults.CERT_VERIFY_WAIT_MS
-        homeBudgetMs = ConfigDefaults.HOME_TIMEOUT_MS
-        pollIntervalMs = ConfigDefaults.UI_POLL_INTERVAL_MS
-        uiClickDelayMs = ConfigDefaults.UI_CLICK_DELAY_MS
-        uiDumpMaxNodes = ConfigDefaults.UI_DUMP_MAX_NODES
-        uiSwipeDurationMs = ConfigDefaults.UI_SWIPE_DURATION_MS
-        deviceExecMaxOutputBytes = ConfigDefaults.DEVICE_EXEC_MAX_OUTPUT_BYTES
-        otaCheckIntervalS = ConfigDefaults.OTA_CHECK_INTERVAL_S.toInt()
-        bathGuardEnabled = ConfigDefaults.BATH_APP_GUARD_ENABLED
-        bathExitWindowMs = ConfigDefaults.BATH_APP_EXIT_WINDOW_MS
-        bathExitMaxCount = ConfigDefaults.BATH_APP_EXIT_MAX_COUNT.toInt()
-        bathExitCooldownMs = ConfigDefaults.BATH_APP_EXIT_COOLDOWN_MS
-        bootTimeSyncEnabled = ConfigDefaults.BOOT_TIME_SYNC_ENABLED
-        bootTimeSyncThresholdS = ConfigDefaults.BOOT_TIME_SYNC_THRESHOLD_S
+        apply(ConfigDefaults.asJson())
     }
 
     /**
      * 键 → 应用函数映射表：新增配置键只需加一行（复杂度不随键数增长）。
      *
+     * **键名只出现在这一处**：lambda 的第二个参数就是 map 的那个键，取值时用它，不再
+     * 手抄一遍。抄两遍的时候敲错一个字母不报错——那一项从此永远读默认值，而
+     * `test_config_spec.py` 只查 map 的键，查不出来。
+     *
      * 每个时长与计数取值都经 atLeastOne 取下限：见类注释的"取值下限"。
      */
-    private val appliers: Map<String, (JSONObject) -> Unit> = mapOf(
+    private val appliers: Map<String, (JSONObject, String) -> Unit> = mapOf(
         "heartbeat_interval_s" to
-            { c -> heartbeatIntervalS = atLeastOne(c.optInt("heartbeat_interval_s", heartbeatIntervalS)) },
+            { c, key -> heartbeatIntervalS = atLeastOne(c.optInt(key, heartbeatIntervalS)) },
         "reconnect_base_ms" to
-            { c -> reconnectBaseMs = atLeastOne(c.optLong("reconnect_base_ms", reconnectBaseMs)) },
+            { c, key -> reconnectBaseMs = atLeastOne(c.optLong(key, reconnectBaseMs)) },
         "reconnect_max_ms" to
-            { c -> reconnectMaxMs = atLeastOne(c.optLong("reconnect_max_ms", reconnectMaxMs)) },
+            { c, key -> reconnectMaxMs = atLeastOne(c.optLong(key, reconnectMaxMs)) },
         "watchdog_interval_s" to
-            { c -> watchdogIntervalS = atLeastOne(c.optLong("watchdog_interval_s", watchdogIntervalS)) },
+            { c, key -> watchdogIntervalS = atLeastOne(c.optLong(key, watchdogIntervalS)) },
         "door_report_debounce_ms" to
-            { c -> reportDebounceMs = c.optLong("door_report_debounce_ms", reportDebounceMs) },
+            { c, key -> reportDebounceMs = c.optLong(key, reportDebounceMs) },
         "outbox_max_rows" to
-            { c -> outboxMaxRows = atLeastOne(c.optLong("outbox_max_rows", outboxMaxRows)) },
-        "overlay_enabled" to { c -> overlayEnabled = c.optBoolean("overlay_enabled", overlayEnabled) },
-        "overlay_message" to { c -> overlayMessage = c.optString("overlay_message", overlayMessage) },
+            { c, key -> outboxMaxRows = atLeastOne(c.optLong(key, outboxMaxRows)) },
+        "overlay_enabled" to { c, key -> overlayEnabled = c.optBoolean(key, overlayEnabled) },
+        "overlay_message" to { c, key -> overlayMessage = c.optString(key, overlayMessage) },
         "overlay_text_size_sp" to
-            { c -> overlayTextSizeSp = atLeastOne(c.optInt("overlay_text_size_sp", overlayTextSizeSp)) },
-        "overlay_text_color" to { c -> overlayTextColor = c.optString("overlay_text_color", overlayTextColor) },
+            { c, key -> overlayTextSizeSp = atLeastOne(c.optInt(key, overlayTextSizeSp)) },
+        "overlay_text_color" to { c, key -> overlayTextColor = c.optString(key, overlayTextColor) },
         "overlay_margin_left_dp" to
-            { c -> overlayMarginLeftDp = atLeastOne(c.optInt("overlay_margin_left_dp", overlayMarginLeftDp)) },
+            { c, key -> overlayMarginLeftDp = atLeastOne(c.optInt(key, overlayMarginLeftDp)) },
         "automation_trace_enabled" to
-            { c -> automationTraceEnabled = c.optBoolean("automation_trace_enabled", automationTraceEnabled) },
+            { c, key -> automationTraceEnabled = c.optBoolean(key, automationTraceEnabled) },
         "command_dedup_max_count" to
-            { c ->
-                commandDedupMaxCount = atLeastOne(c.optLong("command_dedup_max_count", commandDedupMaxCount))
-            },
+            { c, key -> commandDedupMaxCount = atLeastOne(c.optLong(key, commandDedupMaxCount)) },
         "bath_response_timeout_ms" to
-            { c ->
-                serverResponseTimeoutMs = atLeastOne(c.optLong("bath_response_timeout_ms", serverResponseTimeoutMs))
-            },
+            { c, key -> serverResponseTimeoutMs = atLeastOne(c.optLong(key, serverResponseTimeoutMs)) },
         "cert_verify_wait_ms" to
-            { c -> idVerifyWaitMs = atLeastOne(c.optLong("cert_verify_wait_ms", idVerifyWaitMs)) },
+            { c, key -> idVerifyWaitMs = atLeastOne(c.optLong(key, idVerifyWaitMs)) },
         "home_timeout_ms" to
-            { c -> homeBudgetMs = atLeastOne(c.optLong("home_timeout_ms", homeBudgetMs)) },
+            { c, key -> homeBudgetMs = atLeastOne(c.optLong(key, homeBudgetMs)) },
         "ui_poll_interval_ms" to
-            { c -> pollIntervalMs = atLeastOne(c.optLong("ui_poll_interval_ms", pollIntervalMs)) },
+            { c, key -> pollIntervalMs = atLeastOne(c.optLong(key, pollIntervalMs)) },
         "ui_click_delay_ms" to
-            { c -> uiClickDelayMs = c.optLong("ui_click_delay_ms", uiClickDelayMs) },
+            { c, key -> uiClickDelayMs = c.optLong(key, uiClickDelayMs) },
         "ui_dump_max_nodes" to
-            { c -> uiDumpMaxNodes = atLeastOne(c.optLong("ui_dump_max_nodes", uiDumpMaxNodes)) },
+            { c, key -> uiDumpMaxNodes = atLeastOne(c.optLong(key, uiDumpMaxNodes)) },
         "ui_swipe_duration_ms" to
-            { c -> uiSwipeDurationMs = atLeastOne(c.optLong("ui_swipe_duration_ms", uiSwipeDurationMs)) },
+            { c, key -> uiSwipeDurationMs = atLeastOne(c.optLong(key, uiSwipeDurationMs)) },
         "device_exec_max_output_bytes" to
-            { c ->
-                deviceExecMaxOutputBytes =
-                    atLeastOne(c.optLong("device_exec_max_output_bytes", deviceExecMaxOutputBytes))
-            },
+            { c, key -> deviceExecMaxOutputBytes = atLeastOne(c.optLong(key, deviceExecMaxOutputBytes)) },
         "ota_check_interval_s" to
-            { c -> otaCheckIntervalS = atLeastOne(c.optInt("ota_check_interval_s", otaCheckIntervalS)) },
+            { c, key -> otaCheckIntervalS = atLeastOne(c.optInt(key, otaCheckIntervalS)) },
         "bath_app_guard_enabled" to
-            { c -> bathGuardEnabled = c.optBoolean("bath_app_guard_enabled", bathGuardEnabled) },
+            { c, key -> bathGuardEnabled = c.optBoolean(key, bathGuardEnabled) },
         "bath_app_exit_window_ms" to
-            { c -> bathExitWindowMs = atLeastOne(c.optLong("bath_app_exit_window_ms", bathExitWindowMs)) },
+            { c, key -> bathExitWindowMs = atLeastOne(c.optLong(key, bathExitWindowMs)) },
         "bath_app_exit_max_count" to
-            { c -> bathExitMaxCount = atLeastOne(c.optInt("bath_app_exit_max_count", bathExitMaxCount)) },
+            { c, key -> bathExitMaxCount = atLeastOne(c.optInt(key, bathExitMaxCount)) },
         "bath_app_exit_cooldown_ms" to
-            { c -> bathExitCooldownMs = atLeastOne(c.optLong("bath_app_exit_cooldown_ms", bathExitCooldownMs)) },
+            { c, key -> bathExitCooldownMs = atLeastOne(c.optLong(key, bathExitCooldownMs)) },
         "boot_time_sync_enabled" to
-            { c -> bootTimeSyncEnabled = c.optBoolean("boot_time_sync_enabled", bootTimeSyncEnabled) },
+            { c, key -> bootTimeSyncEnabled = c.optBoolean(key, bootTimeSyncEnabled) },
         "boot_time_sync_threshold_s" to
-            { c ->
-                bootTimeSyncThresholdS =
-                    atLeastOne(c.optLong("boot_time_sync_threshold_s", bootTimeSyncThresholdS))
-            },
+            { c, key -> bootTimeSyncThresholdS = atLeastOne(c.optLong(key, bootTimeSyncThresholdS)) },
     )
 
     /** 应用下发的配置；未知键忽略（服务端可能比设备端新，新增键由后续版本消化）。 */
@@ -265,7 +234,7 @@ object RuntimeConfig {
         val keys = config.keys()
         while (keys.hasNext()) {
             val key = keys.next()
-            appliers[key]?.invoke(config)
+            appliers[key]?.invoke(config, key)
         }
     }
 

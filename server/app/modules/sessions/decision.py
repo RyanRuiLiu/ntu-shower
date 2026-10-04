@@ -44,8 +44,8 @@ class FeatureSpec:
     """哪些状态下这个任务适用。"""
     start: Literal["assigned_at", "paused_at"]
     """从哪一刻起算：整场会话（浴室 App 那两条上限管着它）还是关阀那一刻。"""
-    max_count_key: str | None
-    """次数上限的配置键；None 表示无上限。"""
+    max_duration_key: str | None
+    """时长上限的配置键；None 表示不限。从这一串第一场起算，到了就停。"""
     two_step: bool
     """续期是两步（先结算、等门空的那一帧再分配回同一个喷头）；自动结算只做前半步。"""
 
@@ -60,7 +60,7 @@ FEATURES: tuple[FeatureSpec, ...] = (
         threshold_key="renew_wait_threshold_s",
         states=(DoorState.WAITING,),
         start="assigned_at",
-        max_count_key="renew_wait_max_count",
+        max_duration_key="renew_wait_max_duration_s",
         two_step=True,
     ),
     FeatureSpec(
@@ -70,7 +70,7 @@ FEATURES: tuple[FeatureSpec, ...] = (
         threshold_key="renew_session_threshold_s",
         states=(DoorState.BATHING, DoorState.PAUSED),
         start="assigned_at",
-        max_count_key=None,
+        max_duration_key=None,
         two_step=True,
     ),
     FeatureSpec(
@@ -80,7 +80,7 @@ FEATURES: tuple[FeatureSpec, ...] = (
         threshold_key="auto_settle_pause_threshold_s",
         states=(DoorState.PAUSED,),
         start="paused_at",
-        max_count_key=None,
+        max_duration_key=None,
         two_step=False,
     ),
 )
@@ -108,8 +108,11 @@ class Candidate:
     一个往返内就有（网关在 `link.hello` 之后立刻主动 ping），而且偏差跨重启持久化
     （`device_clock.load`），所以线上不会落在这个空窗里。测试里要显式建立它，否则测的
     不是线上的样子。"""
-    renew_count: int
-    """这一串里我们已经续过的几次。第一场是学生自己的分配，不算续。"""
+    run_started_at: str
+    """这一串的第一场是什么时候分配的——**学生自己那一次**，之后每一场都是我们替他续的。
+
+    预约续期的时长上限从它起算，而不是从当前这一场的 `assigned_at`：后者每续一次就往后
+    挪一次，拿它算永远到不了头。"""
 
 
 @dataclass(frozen=True)
@@ -132,13 +135,15 @@ def roster(config: JsonObject, key: str) -> dict[str, str]:
     出现"名单里有他、却没有他的密码"那种静默不执行。代价是同一个学号开两个功能要在两份
     名单里各写一遍，那是刻意的：**配一份就读得懂一份**，不必再去别处对照。
 
-    学号必须**逐字**对上门上报的 `cert_no`——前导零、空格对不上就是不在名单里（我们会
-    静默不动手）。去 `door_state_event.cert_no` 里抄原样最稳。
+    学号必须**逐字**对上门上报的 `cert_no`（前导零就是前导零）——对不上就是不在名单里，
+    我们会静默不动手。**两端空格则一律去掉**：配置页那侧提交时已经去过一次，这里再去
+    一次覆盖"直接调接口"的情形，两处的处理必须一致——同一份名单在两处解释成不同的键，
+    表现是"配了却不生效"。
     """
     value = config.get(key)
     if not isinstance(value, dict):
         return {}
-    return {str(item).strip(): str(password) for item, password in value.items()}
+    return {str(item).strip(): str(password).strip() for item, password in value.items()}
 
 
 def password_of(config: JsonObject, feature: str, cert_no: str) -> str:
@@ -159,7 +164,7 @@ def decide(candidate: Candidate, config: JsonObject, now: str) -> Trigger | None
             continue
         if candidate.cert_no not in roster(config, spec.students_key):
             continue
-        started = _started_at(candidate, spec, config)
+        started = _started_at(candidate, spec, config, now)
         if started is None:
             continue
         threshold = as_int(config[spec.threshold_key])
@@ -170,16 +175,23 @@ def decide(candidate: Candidate, config: JsonObject, now: str) -> Trigger | None
     return min(hits, key=lambda hit: hit.delay_s)
 
 
-def _started_at(candidate: Candidate, spec: FeatureSpec, config: JsonObject) -> str | None:
-    """这条判据从哪一刻起算；状态对不上或次数用尽就返回 None（不适用）。
+def _started_at(candidate: Candidate, spec: FeatureSpec, config: JsonObject, now: str) -> str | None:
+    """这条判据从哪一刻起算；状态对不上或时长用尽就返回 None（不适用）。
 
     **三个功能的差异全在 [FeatureSpec] 里**，所以这里一处按功能的分叉都没有：适用状态、
-    起算点、次数上限都是数据。起算点为空（已暂停却拿不到关阀时刻）就是判不了，返回 None。
+    起算点、上限都是数据。起算点为空（已暂停却拿不到关阀时刻）就是判不了，返回 None。
+
+    时长上限比的是 [Candidate.run_started_at] 到此刻的距离，也就是"他这一次从头到现在
+    已经多久"，不是"我们续了几次"——阈值一改，按次数算出来的时长会跟着漂。
     """
     if candidate.state not in spec.states:
         return None
-    if spec.max_count_key is not None and candidate.renew_count >= as_int(config[spec.max_count_key]):
-        return None  # 续满了：停止续期，让浴室端正常释放
+    if (
+        spec.max_duration_key is not None
+        and candidate.run_started_at
+        and seconds_between(candidate.run_started_at, now) >= as_int(config[spec.max_duration_key])
+    ):
+        return None  # 续够了：停止续期，让浴室端正常释放
     started = candidate.assigned_at if spec.start == "assigned_at" else candidate.paused_at
     return started or None
 

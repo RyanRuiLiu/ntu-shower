@@ -96,13 +96,14 @@ selected > free。"有人" = `cardno ≠ 0` **或** `accno` 既非空串也非 `
 """
 
 import threading
+from dataclasses import dataclass
 from sqlite3 import Row
 
 from app.core import device_clock, events
 from app.core.clock import now_rfc3339, parse_rfc3339, seconds_between, shift_rfc3339
 from app.core.protocol import JsonObject, as_int, text_of
 from app.modules.doors import repository
-from app.modules.doors.schemas import OCCUPIED_STATES, DoorState, DoorView
+from app.modules.doors.schemas import ASSIGNABLE_STATES, OCCUPIED_STATES, DoorState, DoorView
 
 # t_doorlist.status 的原始值（设备上报的 int，仅作辅助判据）
 RAW_STATUS_REPAIR = 1
@@ -184,6 +185,92 @@ def list_doors(device_id: str | None = None) -> list[DoorView]:
     数据源打架的问题在契约层就不成立。
     """
     return repository.list_doors(device_id)
+
+
+# ── 供会话域取数 ──────────────────────────────────────────────────────────
+# 别的领域不读本域的表：门与喷头的形状、"哪些态算占用"、"哪些态可分配"、串的划断
+# 规则都在本文件里，出去的是答案而不是行对象——sqlite3.Row 是存储细节。
+
+
+@dataclass(frozen=True)
+class OpenSession:
+    """这台设备上一个未结束的会话，判据要的那几个字段。"""
+
+    session_id: int
+    door_no: int
+    cert_no: str
+    assigned_at: str
+
+
+@dataclass(frozen=True)
+class LiveDoor:
+    """一个喷头此刻的现态：状态取值与本次关阀时刻。"""
+
+    state: str
+    close_time: str
+
+
+def live_doors(device_id: str) -> dict[int, LiveDoor]:
+    """这台设备每个喷头此刻的现态（门号 → 现态）。
+
+    `state` 是 [derive_state] 落在 `door_live` 上的结果。**调用方读它，不要自己再推
+    一遍**——"这个喷头现在什么状态"只有一处判据。
+    """
+    return {
+        door_no: LiveDoor(state=str(row["state"]), close_time=str(row["close_time"] or ""))
+        for door_no, row in repository.get_all_live(device_id).items()
+    }
+
+
+def open_sessions(device_id: str) -> list[OpenSession]:
+    """这台设备上全部未结束的会话。"""
+    return [
+        OpenSession(
+            session_id=as_int(row["id"]),
+            door_no=as_int(row["door_no"]),
+            cert_no=str(row["cert_no"] or ""),
+            assigned_at=str(row["assigned_at"] or ""),
+        )
+        for row in repository.list_open_sessions_of(device_id)
+    ]
+
+
+def run_started_at(device_id: str, door_no: int, cert_no: str) -> str:
+    """这一串的第一场是什么时候分配的；一场都没有时给空串。
+
+    串由浴室 App 那条无水释放门槛划断（[NO_WATER_RELEASE_S]）——那是本域的规则，
+    所以阈值不由调用方给。
+    """
+    return repository.run_started_at(device_id, door_no, cert_no, NO_WATER_RELEASE_S)
+
+
+def can_assign(device_id: str, door_no: int) -> tuple[bool, str] | None:
+    """这个喷头此刻能不能被分配；从未上报过该喷头时给 None。
+
+    返回（可以与否，它此刻的状态取值）——后者用于把拒绝的原因如实说出去。可分配的
+    判据只有 [ASSIGNABLE_STATES] 一处。
+    """
+    row = repository.get_door_live(device_id, door_no)
+    if row is None:
+        return None
+    raw = str(row["state"])
+    try:
+        state: DoorState | None = DoorState(raw)
+    except ValueError:
+        # 设备报了本端不认识的状态：不分配，也不去猜它是什么意思
+        state = None
+    return state in ASSIGNABLE_STATES, raw
+
+
+def open_session_door(device_id: str, cert_no: str) -> int | None:
+    """这个学号在这台设备上未结束的会话占着几号喷头；没有则 None。"""
+    row = repository.get_active_by_cert(device_id, cert_no)
+    return None if row is None else as_int(row["door_no"])
+
+
+def is_occupied(device_id: str, cert_no: str) -> bool:
+    """这个学号在这台设备上有没有占用中的喷头（[OCCUPIED_STATES]）。"""
+    return repository.get_occupied_by_cert(device_id, cert_no) is not None
 
 
 def derive_state(door: JsonObject) -> DoorState:

@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from tests import helpers
 
 from app.core import config as config_module
+from app.core.db import get_conn
 from app.modules.config import store
 from app.modules.config.spec import CONFIG_SPECS
 
@@ -77,6 +78,29 @@ def test_device_effective_excludes_server_only_keys(fresh_db: str) -> None:
     assert "heartbeat_interval_s" in device_view
 
 
+def test_unknown_keys_in_stored_overrides_are_ignored(fresh_db: str) -> None:
+    """库里存着登记表已经不认的键时，生效值里不能有它、也不能抛。
+
+    这一条锁的是一条真实的失效路径：**删掉一个键之后，生产上那份覆盖还在**。而
+    `device_effective` 与配置路由的 `_device_scope` 都要按键查登记表，查不到就是
+    KeyError——两处都在设备上线的路上（`link.hello_ack`），表现是设备一连上就被断开。
+
+    直接写库而不走 `put_*`：那两处入口本来就该拒绝未知键，这里要造的是"表变了、库没变"。
+    """
+    store.put_global_overrides({"heartbeat_interval_s": 45})
+    conn = get_conn()
+    conn.execute(
+        "UPDATE global_config SET config = ? WHERE id = 1",
+        ('{"heartbeat_interval_s": 45, "gone_key": 1}',),
+    )
+    conn.commit()
+
+    effective = store.global_effective()
+    assert effective["heartbeat_interval_s"] == 45
+    assert "gone_key" not in effective
+    assert store.device_effective("dev-1")["heartbeat_interval_s"] == 45
+
+
 def test_put_device_override_bumps_revision(fresh_db: str) -> None:
     rev1, _ = store.put_device_overrides("dev-1", {"heartbeat_interval_s": 10})
     rev2, _ = store.put_device_overrides("dev-1", {"heartbeat_interval_s": 11})
@@ -123,6 +147,24 @@ def test_validate_passes_normalized_values(fresh_db: str) -> None:
         "overlay_message": "处理中",
         "renew_wait_students": {"2021001": "pw"},
     }
+
+
+def test_validate_accepts_and_rejects_times(fresh_db: str) -> None:
+    """时刻键：先看格式再看范围，两者报的是不同的错。
+
+    分开报是有用的：填错格式（`23:60`）与填得太早（`22:59`）是两种失误，混成一句
+    "不在范围内"会让人去范围里找问题，而问题在写法上。
+    """
+    assert store.validate({"extend_hours_at": "23:49"}) == {"extend_hours_at": "23:49"}
+
+    with pytest.raises(store.InvalidConfigError, match="HH:MM"):
+        store.validate({"extend_hours_at": "23:60"})
+    with pytest.raises(store.InvalidConfigError, match="HH:MM"):
+        store.validate({"extend_hours_at": "2349"})
+    with pytest.raises(store.InvalidConfigError, match="需要时刻文本"):
+        store.validate({"extend_hours_at": 2349})
+    with pytest.raises(store.InvalidConfigError, match="不得早于 23:00"):
+        store.validate({"extend_hours_at": "22:59"})
 
 
 def test_defaults_returns_independent_maps(fresh_db: str) -> None:
