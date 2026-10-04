@@ -22,7 +22,12 @@ from app.modules.doors import service as doors_service
 from app.modules.doors.schemas import DoorState
 from app.modules.sessions import scheduler
 from app.modules.sessions import service as sessions_service
-from app.modules.sessions.decision import FEATURE_AUTO_SETTLE, FEATURE_RENEW_WAIT, Candidate
+from app.modules.sessions.decision import (
+    FEATURE_AUTO_SETTLE,
+    FEATURE_RENEW_SESSION,
+    FEATURE_RENEW_WAIT,
+    Candidate,
+)
 from app.modules.sessions.schemas import AssignRequest, CommandOutcome, SettleRequest
 
 CONFIG: dict[str, object] = {
@@ -219,7 +224,7 @@ def test_fire_skips_when_recheck_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     async def body() -> None:
         scheduler.start()
         _prepare(monkeypatch, [])  # 会话没了
-        scheduler._fire("dev-1", WAITING, scheduler.Trigger(FEATURE_RENEW_WAIT, 0.0))
+        scheduler._fire("dev-1", WAITING, scheduler.Trigger(FEATURE_RENEW_WAIT, delay_s=0.0, threshold_s=270))
 
         assert scheduler._workers["dev-1"].queue.empty()
 
@@ -230,7 +235,7 @@ def test_fire_enqueues_a_settle(monkeypatch: pytest.MonkeyPatch) -> None:
     async def body() -> None:
         scheduler.start()
         _prepare(monkeypatch, [WAITING])
-        scheduler._fire("dev-1", WAITING, scheduler.Trigger(FEATURE_RENEW_WAIT, 0.0))
+        scheduler._fire("dev-1", WAITING, scheduler.Trigger(FEATURE_RENEW_WAIT, delay_s=0.0, threshold_s=270))
 
         assert scheduler._workers["dev-1"].queue.qsize() == 1
         assert 3 in scheduler._workers["dev-1"].busy
@@ -238,12 +243,33 @@ def test_fire_enqueues_a_settle(monkeypatch: pytest.MonkeyPatch) -> None:
     asyncio.run(body())
 
 
+THRESHOLDS = {FEATURE_RENEW_WAIT: 270, FEATURE_RENEW_SESSION: 1140, FEATURE_AUTO_SETTLE: 60}
+
+
+def _settle_job(feature: str = FEATURE_RENEW_WAIT) -> scheduler._SettleJob:
+    """`_record` 要的那套字段（见 `_Auditable`）——用结算待办当载体最省。"""
+    return scheduler._SettleJob(candidate=WAITING, feature=feature, threshold_s=THRESHOLDS[feature])
+
+
+def _assign_job(door_no: int = 3) -> scheduler._AssignJob:
+    """补分配待办。`session_id` 用 WAITING 那一场——续期两步共用它，查起来是一件事。"""
+    return scheduler._AssignJob(
+        device_id="dev-1",
+        door_no=door_no,
+        cert_no="99990052",
+        password="000000",
+        feature=FEATURE_RENEW_WAIT,
+        session_id=WAITING.session_id,
+        threshold_s=THRESHOLDS[FEATURE_RENEW_WAIT],
+    )
+
+
 def test_same_door_is_not_queued_twice(monkeypatch: pytest.MonkeyPatch) -> None:
     async def body() -> None:
         scheduler.start()
         _prepare(monkeypatch, [WAITING])
-        scheduler._enqueue_settle(WAITING, FEATURE_RENEW_WAIT)
-        scheduler._enqueue_settle(WAITING, FEATURE_RENEW_WAIT)
+        scheduler._enqueue_settle(WAITING, FEATURE_RENEW_WAIT, THRESHOLDS[FEATURE_RENEW_WAIT])
+        scheduler._enqueue_settle(WAITING, FEATURE_RENEW_WAIT, THRESHOLDS[FEATURE_RENEW_WAIT])
 
         assert scheduler._workers["dev-1"].queue.qsize() == 1
 
@@ -261,7 +287,7 @@ def test_settle_stops_when_there_is_no_password(monkeypatch: pytest.MonkeyPatch)
         monkeypatch.setattr(
             scheduler.config_store, "effective", lambda _device_id: {**CONFIG, "renew_wait_students": {}}
         )
-        await scheduler._perform_settle(scheduler._SettleJob(candidate=WAITING, feature=FEATURE_RENEW_WAIT))
+        await scheduler._perform_settle(_settle_job(FEATURE_RENEW_WAIT))
 
         assert calls == []
 
@@ -273,11 +299,11 @@ def test_renewal_arms_a_pending_assign_but_settle_does_not(monkeypatch: pytest.M
 
     async def body() -> None:
         _prepare(monkeypatch, [WAITING])
-        await scheduler._perform_settle(scheduler._SettleJob(candidate=WAITING, feature=FEATURE_RENEW_WAIT))
+        await scheduler._perform_settle(_settle_job(FEATURE_RENEW_WAIT))
         assert ("dev-1", 3) in scheduler._pending_assigns
 
         scheduler._pending_assigns.clear()
-        await scheduler._perform_settle(scheduler._SettleJob(candidate=WAITING, feature=FEATURE_AUTO_SETTLE))
+        await scheduler._perform_settle(_settle_job(FEATURE_AUTO_SETTLE))
         assert scheduler._pending_assigns == {}
 
     asyncio.run(body())
@@ -288,7 +314,7 @@ def test_settle_records_the_attempt_before_sending(monkeypatch: pytest.MonkeyPat
 
     async def body() -> None:
         _prepare(monkeypatch, [WAITING])
-        await scheduler._perform_settle(scheduler._SettleJob(candidate=WAITING, feature=FEATURE_RENEW_WAIT))
+        await scheduler._perform_settle(_settle_job(FEATURE_RENEW_WAIT))
 
         assert (WAITING.device_id, WAITING.session_id, FEATURE_RENEW_WAIT) in scheduler._attempted
 
@@ -303,7 +329,7 @@ def test_settle_stops_when_the_roster_changed_underneath(monkeypatch: pytest.Mon
         monkeypatch.setattr(
             scheduler.config_store, "effective", lambda _device_id: {**CONFIG, "renew_wait_enabled": False}
         )
-        await scheduler._perform_settle(scheduler._SettleJob(candidate=WAITING, feature=FEATURE_RENEW_WAIT))
+        await scheduler._perform_settle(_settle_job(FEATURE_RENEW_WAIT))
 
         assert calls == []
 
@@ -324,12 +350,12 @@ def test_domain_rejections_are_split_into_normal_and_noteworthy(caplog: pytest.L
     for code in normal:
         caplog.clear()
         with caplog.at_level("INFO"):
-            scheduler._report_problem(problem(code), "dev-1", 3, "99990052", FEATURE_AUTO_SETTLE)
+            scheduler._report_problem(problem(code), _settle_job(FEATURE_AUTO_SETTLE))
         assert [record.levelname for record in caplog.records] == ["INFO"], code
 
     caplog.clear()
     with caplog.at_level("INFO"):
-        scheduler._report_problem(problem(problems.DEVICE_OFFLINE.code), "dev-1", 3, "99990052", FEATURE_AUTO_SETTLE)
+        scheduler._report_problem(problem(problems.DEVICE_OFFLINE.code), _settle_job(FEATURE_AUTO_SETTLE))
     assert [record.levelname for record in caplog.records] == ["WARNING"]
 
 
@@ -338,9 +364,7 @@ def test_assign_is_sent_exactly_once(monkeypatch: pytest.MonkeyPatch) -> None:
 
     async def body() -> None:
         calls = _prepare(monkeypatch, [])
-        await scheduler._perform_assign(
-            scheduler._AssignJob(device_id="dev-1", door_no=3, cert_no="99990052", password="000000")
-        )
+        await scheduler._perform_assign(_assign_job(3))
 
         assert len(calls) == 1
         assert calls[0][1] == "session.assign"
@@ -364,6 +388,9 @@ def _arm(
         "door_no": 3,
         "cert_no": "99990052",
         "password": "000000",
+        "feature": FEATURE_RENEW_WAIT,
+        "session_id": WAITING.session_id,
+        "threshold_s": THRESHOLDS[FEATURE_RENEW_WAIT],
         "expires_at": 1e9,
     }
     fields.update(overrides)
@@ -400,9 +427,7 @@ def test_a_wait_rejection_keeps_the_pending_assign(monkeypatch: pytest.MonkeyPat
             raise ApiProblemError(problems.DOOR_NOT_FREE, "还被占着")
 
         monkeypatch.setattr(scheduler.sessions_routes, "perform_assign", reject)
-        await scheduler._perform_assign(
-            scheduler._AssignJob(device_id="dev-1", door_no=3, cert_no="99990052", password="000000")
-        )
+        await scheduler._perform_assign(_assign_job(3))
 
         assert ("dev-1", 3) in scheduler._pending_assigns
 
@@ -422,9 +447,7 @@ def test_any_other_rejection_drops_the_pending_assign(monkeypatch: pytest.Monkey
             raise ApiProblemError(problems.DEVICE_OFFLINE, "设备离线")
 
         monkeypatch.setattr(scheduler.sessions_routes, "perform_assign", reject)
-        await scheduler._perform_assign(
-            scheduler._AssignJob(device_id="dev-1", door_no=3, cert_no="99990052", password="000000")
-        )
+        await scheduler._perform_assign(_assign_job(3))
 
         assert ("dev-1", 3) not in scheduler._pending_assigns
 
@@ -470,8 +493,8 @@ def test_each_device_has_its_own_worker(monkeypatch: pytest.MonkeyPatch) -> None
         scheduler.start()
         _prepare(monkeypatch, [WAITING])
         other = replace(WAITING, device_id="dev-2", door_no=1)
-        scheduler._enqueue_settle(WAITING, FEATURE_RENEW_WAIT)
-        scheduler._enqueue_settle(other, FEATURE_AUTO_SETTLE)
+        scheduler._enqueue_settle(WAITING, FEATURE_RENEW_WAIT, THRESHOLDS[FEATURE_RENEW_WAIT])
+        scheduler._enqueue_settle(other, FEATURE_AUTO_SETTLE, THRESHOLDS[FEATURE_AUTO_SETTLE])
 
         assert set(scheduler._workers) == {"dev-1", "dev-2"}
         assert scheduler._workers["dev-1"].queue.qsize() == 1
@@ -488,9 +511,7 @@ def test_worker_runs_jobs_back_to_back(monkeypatch: pytest.MonkeyPatch) -> None:
         calls = _prepare(monkeypatch, [])
         scheduler.start()
         for door_no in (3, 4):
-            scheduler._enqueue_assign(
-                scheduler._AssignJob(device_id="dev-1", door_no=door_no, cert_no="99990052", password="000000")
-            )
+            scheduler._enqueue_assign(_assign_job(door_no))
         await asyncio.wait_for(scheduler._workers["dev-1"].queue.join(), timeout=3)
 
         assert [call[2]["door_no"] for call in calls] == [3, 4]
@@ -511,7 +532,7 @@ def test_worker_survives_a_failing_job(monkeypatch: pytest.MonkeyPatch) -> None:
             raise RuntimeError(message)
 
         monkeypatch.setattr(scheduler, "_perform_settle", boom)
-        scheduler._enqueue_settle(WAITING, FEATURE_RENEW_WAIT)
+        scheduler._enqueue_settle(WAITING, FEATURE_RENEW_WAIT, THRESHOLDS[FEATURE_RENEW_WAIT])
         await asyncio.wait_for(scheduler._workers["dev-1"].queue.join(), timeout=3)
 
         assert scheduler._workers["dev-1"].busy == set()
@@ -546,7 +567,7 @@ def test_stop_cancels_timers_and_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
         scheduler.start()
         _prepare(monkeypatch, [WAITING])
         scheduler.reschedule("dev-1")
-        scheduler._enqueue_settle(WAITING, FEATURE_RENEW_WAIT)
+        scheduler._enqueue_settle(WAITING, FEATURE_RENEW_WAIT, THRESHOLDS[FEATURE_RENEW_WAIT])
         worker = scheduler._workers["dev-1"]
         assert worker.timers
         assert worker.task is not None

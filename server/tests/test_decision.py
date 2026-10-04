@@ -95,7 +95,7 @@ def test_renew_wait_counts_from_assignment_not_from_valve() -> None:
     """
     trigger = decide(candidate(), BASE_CONFIG, NOW)
 
-    assert trigger == Trigger(feature=FEATURE_RENEW_WAIT, delay_s=-30.0)
+    assert trigger == Trigger(FEATURE_RENEW_WAIT, delay_s=-30.0, threshold_s=270)
 
 
 def test_renew_wait_fires_past_due_with_negative_delay() -> None:
@@ -127,7 +127,7 @@ def test_renew_wait_only_applies_while_waiting() -> None:
 def test_renew_session_applies_to_both_occupied_states() -> None:
     for state in (DoorState.BATHING, DoorState.PAUSED):
         trigger = decide(candidate(state=state, assigned_at="2026-10-05T11:41:30.000Z"), BASE_CONFIG, NOW)
-        assert trigger == Trigger(feature=FEATURE_RENEW_SESSION, delay_s=30.0)
+        assert trigger == Trigger(FEATURE_RENEW_SESSION, delay_s=30.0, threshold_s=1140)
 
 
 def test_renew_session_has_no_count_cap() -> None:
@@ -145,7 +145,7 @@ def test_auto_settle_counts_from_valve_close_not_from_assignment() -> None:
     """暂停从关阀那一刻起算：分配时刻早在几十分钟前，拿它算等于立刻结算。"""
     trigger = decide(candidate(state=DoorState.PAUSED, paused_at="2026-10-05T11:59:30.000Z"), BASE_CONFIG, NOW)
 
-    assert trigger == Trigger(feature=FEATURE_AUTO_SETTLE, delay_s=30.0)
+    assert trigger == Trigger(FEATURE_AUTO_SETTLE, delay_s=30.0, threshold_s=60)
 
 
 def test_auto_settle_needs_a_close_time() -> None:
@@ -174,7 +174,7 @@ def test_earliest_trigger_wins() -> None:
     # 分配 11:55、现在 12:00：会话续期还有 840 秒才到点（1140 − 300）
     trigger = decide(candidate(state=DoorState.BATHING), BASE_CONFIG, NOW)
 
-    assert trigger == Trigger(feature=FEATURE_RENEW_SESSION, delay_s=840.0)
+    assert trigger == Trigger(FEATURE_RENEW_SESSION, delay_s=840.0, threshold_s=1140)
 
 
 def test_paused_is_claimed_by_two_features_and_renewal_wins() -> None:
@@ -186,7 +186,7 @@ def test_paused_is_claimed_by_two_features_and_renewal_wins() -> None:
     """
     trigger = decide(candidate(state=DoorState.PAUSED, paused_at="2026-10-05T11:59:00.000Z"), BASE_CONFIG, NOW)
 
-    assert trigger == Trigger(feature=FEATURE_AUTO_SETTLE, delay_s=0.0)
+    assert trigger == Trigger(FEATURE_AUTO_SETTLE, delay_s=0.0, threshold_s=60)
 
 
 def test_renewal_beats_settle_when_the_session_is_nearly_full() -> None:
@@ -199,7 +199,7 @@ def test_renewal_beats_settle_when_the_session_is_nearly_full() -> None:
 
     trigger = decide(nearly_full, BASE_CONFIG, NOW)
 
-    assert trigger == Trigger(feature=FEATURE_RENEW_SESSION, delay_s=0.0)
+    assert trigger == Trigger(FEATURE_RENEW_SESSION, delay_s=0.0, threshold_s=1140)
 
 
 # ── 到点复查 ──
@@ -207,12 +207,12 @@ def test_renewal_beats_settle_when_the_session_is_nearly_full() -> None:
 
 def test_recheck_passes_when_nothing_moved() -> None:
     expected = candidate()
-    assert recheck(expected, expected, Trigger(FEATURE_RENEW_WAIT, 0.0), BASE_CONFIG) is None
+    assert recheck(expected, expected, Trigger(FEATURE_RENEW_WAIT, delay_s=0.0, threshold_s=270), BASE_CONFIG) is None
 
 
 def test_recheck_reports_every_kind_of_change() -> None:
     expected = candidate()
-    trigger = Trigger(FEATURE_RENEW_WAIT, 0.0)
+    trigger = Trigger(FEATURE_RENEW_WAIT, delay_s=0.0, threshold_s=270)
 
     assert recheck(None, expected, trigger, BASE_CONFIG) == "会话已结束"
     assert recheck(candidate(session_id=8), expected, trigger, BASE_CONFIG) == "换了会话"

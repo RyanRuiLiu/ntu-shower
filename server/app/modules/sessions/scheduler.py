@@ -51,12 +51,14 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from typing import Protocol
 
-from app.core import outcomes, problems
+from app.core import actions, outcomes, problems
 from app.core.clock import now_rfc3339
 from app.core.logging import log_event
 from app.core.problems import ApiProblemError
 from app.core.protocol import as_int
+from app.modules.audit import repository as audit_repository
 from app.modules.config import store as config_store
 from app.modules.doors import repository as doors_repository
 from app.modules.doors.schemas import DoorState
@@ -64,7 +66,7 @@ from app.modules.doors.service import NO_WATER_RELEASE_S
 
 from . import routes as sessions_routes
 from .decision import (
-    RENEWING_FEATURES,
+    FEATURES_BY_KEY,
     Candidate,
     Trigger,
     decide,
@@ -96,22 +98,78 @@ _STATES = {state.value for state in DoorState}
 # ── 待办 ──────────────────────────────────────────────────────────────────
 
 
+class _Auditable(Protocol):
+    """审计那一行要的字段。三种待办（结算、补分配、等门变空的待办）都暴露这一套，
+    所以落表与记日志那处不必按待办类型分叉。"""
+
+    @property
+    def device_id(self) -> str: ...
+
+    @property
+    def door_no(self) -> int: ...
+
+    @property
+    def cert_no(self) -> str: ...
+
+    @property
+    def feature(self) -> str: ...
+
+    @property
+    def session_id(self) -> int: ...
+
+    @property
+    def threshold_s(self) -> int: ...
+
+    @property
+    def action(self) -> str: ...
+
+
 @dataclass
 class _SettleJob:
     """一次结算。续期类功能在结算成功之后还要补一次分配。"""
 
     candidate: Candidate
     feature: str
+    threshold_s: int
+
+    # 与 _AssignJob 暴露同一套只读字段：审计那一行要的东西两处一样，
+    # 收口后调用处读法一致，不必按待办类型分叉。
+    @property
+    def device_id(self) -> str:
+        return self.candidate.device_id
+
+    @property
+    def door_no(self) -> int:
+        return self.candidate.door_no
+
+    @property
+    def cert_no(self) -> str:
+        return self.candidate.cert_no
+
+    @property
+    def session_id(self) -> int:
+        return self.candidate.session_id
+
+    @property
+    def action(self) -> str:
+        return actions.SESSION_SETTLE
 
 
 @dataclass
 class _AssignJob:
-    """补上那一次分配。"""
+    """补上那一次分配。`session_id` 是**被结算的那一场**——续期两步共用它，查起来是一件事。"""
 
     device_id: str
     door_no: int
     cert_no: str
     password: str
+    feature: str
+    session_id: int
+    threshold_s: int
+
+    @property
+    def action(self) -> str:
+        return actions.SESSION_ASSIGN
 
 
 @dataclass
@@ -122,7 +180,14 @@ class _PendingAssign:
     door_no: int
     cert_no: str
     password: str
+    feature: str
+    session_id: int
+    threshold_s: int
     expires_at: float
+
+    @property
+    def action(self) -> str:
+        return actions.SESSION_ASSIGN
 
 
 class _DeviceWorker:
@@ -149,6 +214,47 @@ _pending_assigns: dict[tuple[str, int], _PendingAssign] = {}
 _attempted: set[tuple[str, int, str]] = set()
 
 _running = False
+
+
+def _record(
+    outcome: str,
+    message: str,
+    subject: _Auditable,
+    *,
+    level: str = "INFO",
+    reason: str = "",
+    **extra: object,
+) -> None:
+    """一次后台任务的终局：**日志与审计表在同一条路上写**。
+
+    收口成一处，是因为每个终局都要发生两次——散在各处写迟早出现"记了日志、没落表"，
+    而落表才是这张表存在的理由。`outcome` 用的是日志事件名的后缀（`background-task.<它>`），
+    两边同一套说法；`extra` 只进日志（状态码、设备原话这类给人看的细节）。
+
+    待办的字段就是这一行要的字段（见 [_Auditable]）：`feature` / `action` / `session_id`
+    / `threshold_s` 都是落库的列，所以这里一处按类型或按功能的分叉都没有。
+    """
+    log_event(
+        level,
+        f"background-task.{outcome}",
+        message,
+        device_id=subject.device_id,
+        door_no=subject.door_no,
+        cert_no=subject.cert_no,
+        feature=subject.feature,
+        **extra,
+    )
+    audit_repository.insert_background_task_run(
+        device_id=subject.device_id,
+        door_no=subject.door_no,
+        cert_no=subject.cert_no,
+        feature=subject.feature,
+        outcome=outcome,
+        action=subject.action,
+        session_id=subject.session_id,
+        reason=reason,
+        threshold_s=subject.threshold_s,
+    )
 
 
 def _worker(device_id: str) -> _DeviceWorker:
@@ -286,28 +392,25 @@ def _fire(device_id: str, candidate: Candidate, trigger: Trigger) -> None:
 
     reason = recheck(fresh, expected=candidate, trigger=trigger, config=config)
     if reason is not None:
-        log_event(
-            "INFO",
-            "background-task.skipped",
+        _record(
+            "skipped",
             "到点复查未通过，放弃这一次",
-            device_id=device_id,
-            door_no=candidate.door_no,
-            feature=trigger.feature,
+            _SettleJob(candidate=candidate, feature=trigger.feature, threshold_s=trigger.threshold_s),
             reason=reason,
         )
         reschedule(device_id)
         return
 
-    _enqueue_settle(fresh or candidate, trigger.feature)
+    _enqueue_settle(fresh or candidate, trigger.feature, trigger.threshold_s)
 
 
-def _enqueue_settle(candidate: Candidate, feature: str) -> None:
+def _enqueue_settle(candidate: Candidate, feature: str, threshold_s: int) -> None:
     """把一次结算排进该设备的队列。同一喷头已在途就不再排。"""
     worker = _worker(candidate.device_id)
     if candidate.door_no in worker.busy:
         return
     worker.busy.add(candidate.door_no)
-    worker.queue.put_nowait(_SettleJob(candidate=candidate, feature=feature))
+    worker.queue.put_nowait(_SettleJob(candidate=candidate, feature=feature, threshold_s=threshold_s))
     _ensure_worker_task(candidate.device_id)
 
 
@@ -331,21 +434,14 @@ async def _worker_loop(device_id: str) -> None:
     worker = _worker(device_id)
     while True:
         job = await worker.queue.get()
-        door_no = job.candidate.door_no if isinstance(job, _SettleJob) else job.door_no
+        door_no = job.door_no
         try:
             if isinstance(job, _AssignJob):
                 await _perform_assign(job)
             else:
                 await _perform_settle(job)
         except Exception as exc:  # noqa: BLE001 - 单次失败不得终止这台设备的处理
-            log_event(
-                "ERROR",
-                "background-task.failed",
-                "后台任务执行异常",
-                device_id=device_id,
-                door_no=door_no,
-                error=str(exc),
-            )
+            _record("failed", "后台任务执行异常", job, level="ERROR", error=str(exc))
         finally:
             worker.busy.discard(door_no)
             worker.queue.task_done()
@@ -369,29 +465,13 @@ async def _perform_settle(job: _SettleJob) -> None:
     config = config_store.effective(candidate.device_id)
     still = still_allowed(candidate.cert_no, feature, config)
     if still is not None:
-        log_event(
-            "INFO",
-            "background-task.skipped",
-            "下单前复查未通过，放弃这一次",
-            device_id=candidate.device_id,
-            door_no=candidate.door_no,
-            feature=feature,
-            reason=still,
-        )
+        _record("skipped", "下单前复查未通过，放弃这一次", job, reason=still)
         return
 
     password = password_of(config, feature, candidate.cert_no)
     if not password:
         # 名单里有他、却没有他的凭证：动作发不出去。属于配置漏项，要人看见。
-        log_event(
-            "ERROR",
-            "background-task.no-password",
-            "名单里有这个学号，但没有他的凭证",
-            device_id=candidate.device_id,
-            door_no=candidate.door_no,
-            cert_no=candidate.cert_no,
-            feature=feature,
-        )
+        _record("no-password", "名单里有这个学号，但没有他的凭证", job, level="ERROR")
         return
 
     try:
@@ -399,23 +479,19 @@ async def _perform_settle(job: _SettleJob) -> None:
             candidate.device_id, SettleRequest(cert_no=candidate.cert_no, password=password)
         )
     except ApiProblemError as error:
-        _report_problem(error, candidate.device_id, candidate.door_no, candidate.cert_no, feature)
+        _report_problem(error, job)
         return
 
     if result.get("status") != outcomes.OK.value:
-        _report_outcome(result, candidate, feature)
+        _report_outcome(result, job)
         return
 
-    log_event(
-        "INFO",
-        "background-task.settled",
-        "续期已结算，等门空闲后补分配" if feature in RENEWING_FEATURES else "自动结算已下发",
-        device_id=candidate.device_id,
-        door_no=candidate.door_no,
-        cert_no=candidate.cert_no,
-        feature=feature,
+    _record(
+        "settled",
+        "续期已结算，等门空闲后补分配" if FEATURES_BY_KEY[feature].two_step else "自动结算已下发",
+        job,
     )
-    if feature not in RENEWING_FEATURES:
+    if not FEATURES_BY_KEY[feature].two_step:
         return
 
     # 分配的前置是服务端**先看见门空了**——`perform_assign` 自己要去读 door_live。门被释放
@@ -425,6 +501,9 @@ async def _perform_settle(job: _SettleJob) -> None:
         door_no=candidate.door_no,
         cert_no=candidate.cert_no,
         password=password,
+        feature=feature,
+        session_id=candidate.session_id,
+        threshold_s=job.threshold_s,
         expires_at=_now_s() + ASSIGN_PENDING_TIMEOUT_S,
     )
 
@@ -440,69 +519,53 @@ async def _perform_assign(job: _AssignJob) -> None:
         if error.problem.code in _WAIT_PROBLEMS:
             # 门还没空、或他名下还有未结束的会话：命令**根本没下发**，所以留着待办等下一帧
             # 不是"重试"——重试指的是把同一条命令再发一遍。
-            log_event(
-                "INFO",
-                "background-task.assign-waiting",
-                "还轮不到分配，等下一帧",
-                device_id=job.device_id,
-                door_no=job.door_no,
-                cert_no=job.cert_no,
-                problem=error.problem.code,
-            )
+            _record("assign-waiting", "还轮不到分配，等下一帧", job, problem=error.problem.code)
             return
         _pending_assigns.pop(key, None)
-        _report_problem(error, job.device_id, job.door_no, job.cert_no, "_assign")
+        _report_problem(error, job)
         return
 
     _pending_assigns.pop(key, None)
     ok = result.get("status") == outcomes.OK.value
-    log_event(
-        "INFO" if ok else "WARNING",
-        "background-task.assigned" if ok else "background-task.assign-failed",
+    _record(
+        "assigned" if ok else "assign-failed",
         "续期已补分配" if ok else "续期补分配失败，请人工确认",
-        device_id=job.device_id,
-        door_no=job.door_no,
-        cert_no=job.cert_no,
+        job,
+        level="INFO" if ok else "WARNING",
         status=str(result.get("status")),
         reason_code=str(result.get("reason_code") or "-"),
     )
 
 
-def _report_problem(error: ApiProblemError, device_id: str, door_no: int, cert_no: str, feature: str) -> None:
+def _report_problem(error: ApiProblemError, subject: _Auditable) -> None:
     """领域层的前置检查拒了。分清"现在还不该做"与"真出问题了"。
 
     前者（门还被占着、他还有会话、他已经走了）是正常情形，记 INFO 就够了；后者要人看见
-    ——它意味着这次维护没做成，而喷头会一直占着，直到浴室端自己释放。
+    ——它意味着这次后台任务没做成，而喷头会一直占着，直到浴室端自己释放。
     """
     code = error.problem.code
     expected = code in _WAIT_PROBLEMS or code in _DONE_PROBLEMS
-    log_event(
-        "INFO" if expected else "WARNING",
-        "background-task.not-applicable" if expected else "background-task.rejected",
-        "现在还不该做，跳过" if expected else "领域层拒绝了这次维护，请人工确认",
-        device_id=device_id,
-        door_no=door_no,
-        cert_no=cert_no,
-        feature=feature,
+    _record(
+        "not-applicable" if expected else "rejected",
+        "现在还不该做，跳过" if expected else "领域层拒绝了这次后台任务，请人工确认",
+        subject,
+        level="INFO" if expected else "WARNING",
         problem=code,
         detail=error.detail,
     )
 
 
-def _report_outcome(result: CommandOutcome, candidate: Candidate, feature: str) -> None:
+def _report_outcome(result: CommandOutcome, subject: _Auditable) -> None:
     """命令发出去了但没成。
 
     只认命令结果（见模块注释）——命令报 ok 也可能被浴室端拒了，而那种"没帮上忙"我们不
     追究。真失败的（设备半路卡住、超时）要人看见。
     """
-    log_event(
-        "WARNING",
-        "background-task.settle-failed",
+    _record(
+        "settle-failed",
         "结算失败，请人工确认",
-        device_id=candidate.device_id,
-        door_no=candidate.door_no,
-        cert_no=candidate.cert_no,
-        feature=feature,
+        subject,
+        level="WARNING",
         status=str(result.get("status")),
         reason_code=str(result.get("reason_code") or "-"),
         terminal_message=str(result.get("terminal_message") or ""),
@@ -527,14 +590,7 @@ def _flush_pending_assign(device_id: str) -> None:
         waiting = _pending_assigns[key]
         if now > waiting.expires_at:
             _pending_assigns.pop(key, None)
-            log_event(
-                "WARNING",
-                "background-task.assign-expired",
-                "等门空闲超时，放弃这次分配",
-                device_id=device_id,
-                door_no=waiting.door_no,
-                cert_no=waiting.cert_no,
-            )
+            _record("assign-expired", "等门空闲超时，放弃这次分配", waiting, level="WARNING")
             continue
 
         _enqueue_assign(
@@ -543,6 +599,9 @@ def _flush_pending_assign(device_id: str) -> None:
                 door_no=waiting.door_no,
                 cert_no=waiting.cert_no,
                 password=waiting.password,
+                feature=waiting.feature,
+                session_id=waiting.session_id,
+                threshold_s=waiting.threshold_s,
             )
         )
 
