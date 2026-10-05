@@ -404,3 +404,8 @@
   font-size: 13px;
   color: var(--muted);
 }
+
+.task-board .task-at {
+  margin-left: auto;
+  font-family: var(--font-mono);
+}
