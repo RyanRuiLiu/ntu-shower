@@ -392,7 +392,7 @@ function renderTaskBoard(data) {
                   ${deviceCell(row.device_id)}
                   <span>#${esc(row.door_no)}</span>
                   <span class="mono">${esc(row.cert_no || PLACEHOLDER)}</span>
-                  <span class="task-at">到点 ${esc(fmtDateTime(row.at))}</span>
+                  <span class="task-at">下次动手 ${esc(fmtDateTime(row.at))}</span>
                 </div>
                 <div class="task-sub">
                   <span>会话 #${esc(row.session_id)}</span>
