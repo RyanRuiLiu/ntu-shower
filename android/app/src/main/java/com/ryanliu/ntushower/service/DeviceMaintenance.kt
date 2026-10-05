@@ -6,6 +6,7 @@ import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.shell.RootShell
 import com.ryanliu.ntushower.features.automation.BathAppRestart
 import com.ryanliu.ntushower.features.automation.CommandOutcome
+import com.ryanliu.ntushower.features.selfmanage.McuPowerSchedule
 import com.ryanliu.ntushower.features.selfmanage.TimeSync
 import com.ryanliu.ntushower.transport.OutcomeStatus
 import com.ryanliu.ntushower.transport.ReasonCodes
@@ -14,7 +15,8 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * 设备自身的维护命令：执行 shell、重启本程序、重启整机、重启浴室 APP、设置系统时钟。
+ * 设备自身的维护命令：执行 shell、重启本程序、重启整机、重启浴室 APP、设置系统时钟、
+ * 重布定时开关机。
  *
  * 独立于 [AgentService]：那是传输层的宿主，而这里的命令共同点是
  * **不经调度队列、即时执行**——重启本程序与重启整机会停掉本进程，排队没有意义；
@@ -33,6 +35,7 @@ object DeviceMaintenance {
         SupportedActions.DEVICE_REBOOT,
         SupportedActions.BATH_RESTART,
         SupportedActions.CLOCK_SET,
+        SupportedActions.POWER_SCHEDULE,
         SupportedActions.FREELIST_READ,
         SupportedActions.FREELIST_WRITE,
     )
@@ -106,6 +109,11 @@ object DeviceMaintenance {
 
                 SupportedActions.CLOCK_SET -> {
                     onOutcome(clockSetOutcome(params, commandId))
+                    reported = true
+                }
+
+                SupportedActions.POWER_SCHEDULE -> {
+                    onOutcome(powerScheduleOutcome(params, commandId))
                     reported = true
                 }
 
@@ -230,6 +238,21 @@ object DeviceMaintenance {
                 OutcomeStatus.FAILED,
                 ReasonCodes.DEVICE_INTERNAL_ERROR,
                 "设置系统时钟失败（格式或写入有误，见 device.log）",
+            )
+        }
+    }
+
+    /** 重布定时开关机：off_at 断电、on_at 上电，都是设备表盘上的 HH:MM。 */
+    private fun powerScheduleOutcome(params: JSONObject, commandId: String): CommandOutcome {
+        val ok = McuPowerSchedule.schedule(params.optString("off_at", ""), params.optString("on_at", ""))
+        return if (ok) {
+            CommandOutcome(commandId, OutcomeStatus.OK, "", "")
+        } else {
+            CommandOutcome(
+                commandId,
+                OutcomeStatus.FAILED,
+                ReasonCodes.DEVICE_INTERNAL_ERROR,
+                "重布定时开关机失败（时刻格式或写入有误，见 device.log）",
             )
         }
     }

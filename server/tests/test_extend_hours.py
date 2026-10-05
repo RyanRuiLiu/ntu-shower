@@ -29,6 +29,8 @@ CONFIG: dict[str, object] = {
     "extend_hours_hold_s": 3600,
     "extend_hours_zone_offset_minutes": 480,
     "extend_hours_students": {"99990052": "000000", "99990057": "111111"},
+    "power_off_at": "23:58",
+    "power_on_at": "10:55",
 }
 
 #: 设备钟与服务端对齐（偏差 0）。用例里的时刻一律读作**设备表盘上的**时刻，服务端
@@ -139,17 +141,26 @@ def test_local_now_adds_the_zone_offset(fresh_db: str) -> None:
 # ── 拨钟 ──────────────────────────────────────────────────────────────────
 
 
-def test_shift_writes_the_clock_then_restarts_the_bath_app(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """两件事成对且有序：先写钟再重启，否则 App 读到的是旧时刻。"""
+def test_shift_rearms_power_then_writes_the_clock(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """两件事成对且有序：先重布 MCU 再写钟——拨快会让旧截止立刻越界即当场断电。"""
     sent: list[tuple[str, object]] = []
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", sent)
     _with_session("2026-10-05T23:40:00.000Z")
 
     asyncio.run(extend_hours.tick_once())
 
-    assert [action for action, _params in sent] == [actions.CLOCK_SET, actions.BATH_RESTART]
+    # 名单里的人从未离场（App 还没来得及清空），重布随即完成——一个 tick 走完①②③④
+    assert [action for action, _params in sent] == [
+        actions.POWER_SCHEDULE,
+        actions.CLOCK_SET,
+        actions.POWER_SCHEDULE,
+    ]
+    # 保护性重布的断电目标：表盘 23:50 + 拨走的一小时 + 保持一小时 + 富余十分钟
+    assert sent[0][1] == {"off_at": "02:00", "on_at": "10:55"}
     # 写进去的是"拨完之后的设备表盘时刻"：23:50 加满一小时
-    assert sent[0][1] == {"datetime": "2026-10-06 00:50:00"}
+    assert sent[1][1] == {"datetime": "2026-10-06 00:50:00"}
+    # 常规重布的目标就是配置里的那一对钟面时刻
+    assert sent[2][1] == {"off_at": "23:58", "on_at": "10:55"}
 
 
 def test_shift_is_skipped_when_disabled(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -209,7 +220,7 @@ def test_restore_waits_for_the_hold_duration(fresh_db: str, monkeypatch: pytest.
     sent: list[tuple[str, object]] = []
     server_now = _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", sent)
     repository.record(DEVICE, server_now, [])
-    repository.mark_restarted(DEVICE, server_now)
+    repository.mark_rearmed(DEVICE, server_now)
 
     asyncio.run(extend_hours.tick_once())
 
@@ -222,11 +233,12 @@ def test_restore_moves_the_clock_back_and_clears_the_row(fresh_db: str, monkeypa
     server_now = _prepare(monkeypatch, "2026-10-06T00:50:00.000Z", sent)
     # 一小时前拨的：已经满了保持时长。重启早就做过了，所以现在轮到调回
     repository.record(DEVICE, shift_rfc3339(server_now, -3600) or "", [])
-    repository.mark_restarted(DEVICE, shift_rfc3339(server_now, -3590) or "")
+    repository.mark_rearmed(DEVICE, shift_rfc3339(server_now, -3590) or "")
 
     asyncio.run(extend_hours.tick_once())
 
-    assert [action for action, _params in sent] == [actions.CLOCK_SET, actions.BATH_RESTART]
+    # 调回之后不再重布：第④步的截止记在钟面上，调回后恰好落回真实时刻
+    assert [action for action, _params in sent] == [actions.CLOCK_SET]
     assert repository.get(DEVICE) is None
 
 
@@ -359,21 +371,21 @@ def test_helpers_are_available(fresh_db: str) -> None:
 # ── 半成功与早退 ──────────────────────────────────────────────────────────
 
 
-def test_restart_failure_is_reported_separately(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """钟拨走了而 App 没重启：计划按旧钟算，等于白拨。
+def test_power_schedule_failure_is_reported_separately(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """钟拨走了而 MCU 没重布：断电点还停在旧截止上，当晚照样断。
 
-    它要单独记一句，而不是并进"拨钟失败"——那会让人以为钟也没动。重启失败**不清行**，
+    它要单独记一句，而不是并进"拨钟失败"——那会让人以为钟也没动。重布失败**不清行**，
     下一轮还会再试。
     """
     events: list[str] = []
     sent: list[tuple[str, object]] = []
     server_now = _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", sent)
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
-    # 拨钟在一分钟前：分配的窗口已经过了，于是不必等人齐就该重启
+    # 拨钟在一分钟前：分配的窗口已经过了，于是不必等人齐就该重布
     repository.record(DEVICE, shift_rfc3339(server_now, -120) or "", [{"door_no": 3, "cert_no": "99990052"}])
 
     async def half(_device_id: str, action: str, _params: object, **_kw: object) -> object:
-        if action == actions.BATH_RESTART:
+        if action == actions.POWER_SCHEDULE:
             return {"status": "failed", "reason_code": "device.offline", "terminal_message": "", "data": None}
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
 
@@ -381,10 +393,10 @@ def test_restart_failure_is_reported_separately(fresh_db: str, monkeypatch: pyte
 
     asyncio.run(extend_hours.tick_once())
 
-    assert "extend-hours.restart-failed" in events
+    assert "extend-hours.power-failed" in events
     row = repository.get(DEVICE)
     assert row is not None
-    assert str(row["restarted_at"] or "") == ""
+    assert str(row["rearmed_at"] or "") == ""
 
 
 def test_shift_is_skipped_without_a_skew_record(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -496,7 +508,7 @@ def test_the_failure_memory_is_cleared_when_the_extension_ends(fresh_db: str, mo
     """调回之后记忆要清：不然下一次延长里那个人会被永久跳过。"""
     server_now = _prepare(monkeypatch, "2026-10-06T00:50:00.000Z")
     repository.record(DEVICE, shift_rfc3339(server_now, -3600) or "", [])
-    repository.mark_restarted(DEVICE, shift_rfc3339(server_now, -3590) or "")
+    repository.mark_rearmed(DEVICE, shift_rfc3339(server_now, -3590) or "")
     extend_hours._reassign_failed.add((DEVICE, "99990052"))
 
     asyncio.run(extend_hours.tick_once())
@@ -521,15 +533,15 @@ def test_restart_waits_until_everyone_is_back(fresh_db: str, monkeypatch: pytest
 
     asyncio.run(extend_hours.tick_once())
 
-    # 试过分配，但没有重启——他还没真的进占用态，而窗口还有 50 秒
-    assert actions.BATH_RESTART not in [action for action, _params in sent]
+    # 试过分配，但没有重布——他还没真的进占用态，而窗口还有 50 秒
+    assert actions.POWER_SCHEDULE not in [action for action, _params in sent]
     row = repository.get(DEVICE)
     assert row is not None
-    assert str(row["restarted_at"] or "") == ""
+    assert str(row["rearmed_at"] or "") == ""
 
 
-def test_an_emptied_roster_still_restarts(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """名单被清空时没人可分配，但那不等于"不用重启"——重启关系到 MCU。"""
+def test_an_emptied_roster_still_rearms(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """名单被清空时没人可分配，但那不等于"不用重布"——重布关系到 MCU。"""
     sent: list[tuple[str, object]] = []
     server_now = _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", sent)
     monkeypatch.setitem(CONFIG, "extend_hours_students", {})
@@ -537,10 +549,12 @@ def test_an_emptied_roster_still_restarts(fresh_db: str, monkeypatch: pytest.Mon
 
     asyncio.run(extend_hours.tick_once())
 
-    assert [action for action, _params in sent] == [actions.BATH_RESTART]
+    assert [action for action, _params in sent] == [actions.POWER_SCHEDULE]
+    # 常规重布的目标就是配置里的那一对钟面时刻
+    assert sent[0][1] == {"off_at": "23:58", "on_at": "10:55"}
     row = repository.get(DEVICE)
     assert row is not None
-    assert str(row["restarted_at"] or "") != ""
+    assert str(row["rearmed_at"] or "") != ""
 
 
 def test_reassign_reports_when_the_domain_layer_refuses(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
