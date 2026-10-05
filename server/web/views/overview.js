@@ -318,11 +318,15 @@ function renderTaskBoard(data) {
             ? '<div class="muted task-hint">当前没有设备在延长中</div>'
             : data.extending
                 .map((shift) => {
-                  const people = shift.assignments.map((item) => `#${item.door_no} ${item.cert_no}`).join('、')
+                  const people = shift.assignments
+                    .map((item) => `#${item.door_no} ${item.cert_no}`)
+                    .join('、')
                   return `
-                  <div class="task-row">
-                    ${deviceCell(shift.device_id)}
-                    <span class="muted">${esc(fmtDateTime(shift.shifted_at))} 拨快 · 待分配 ${esc(people || '无')}</span>
+                  <div class="task-block">
+                    <div class="task-row">${deviceCell(shift.device_id)}
+                      <span class="muted">钟已拨快 ${esc(shift.shift_minutes)} 分钟 · 于 ${esc(fmtDateTime(shift.shifted_at))}</span>
+                    </div>
+                    <div class="task-row"><span class="muted">待分配回原喷头：${esc(people || '无')}</span></div>
                   </div>`
                 })
                 .join('')
@@ -332,15 +336,21 @@ function renderTaskBoard(data) {
           rows.length === 0
             ? '<div class="muted task-hint">当前没有排定的动作</div>'
             : rows
-                .map(
-                  (row) => `
-                  <div class="task-row">
-                    ${deviceCell(row.device_id)}
-                    <span>#${esc(row.door_no)}</span>
-                    <span class="mono">${esc(row.cert_no || PLACEHOLDER)}</span>
-                    <span class="time">${esc(fmtDateTime(row.at))}</span>
-                  </div>`,
-                )
+                .map((row) => {
+                  const detail =
+                    `会话 #${row.session_id} · 现态 ${esc(row.state)} · ` +
+                    `起算 ${esc(fmtDateTime(row.started_at))} · 阈值 ${fmtDuration(row.threshold_s)}`
+                  return `
+                  <div class="task-block">
+                    <div class="task-row">
+                      ${deviceCell(row.device_id)}
+                      <span>#${esc(row.door_no)}</span>
+                      <span class="mono">${esc(row.cert_no || PLACEHOLDER)}</span>
+                      <span class="time">到点 ${esc(fmtDateTime(row.at))}</span>
+                    </div>
+                    <div class="task-row muted">${detail}</div>
+                  </div>`
+                })
                 .join('')
       }
       return `
