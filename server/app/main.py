@@ -62,6 +62,7 @@ from .modules.ota.routes import router as ota_router
 from .modules.sessions import scheduler as sessions_scheduler
 from .modules.sessions.routes import router as sessions_router
 from .modules.stats.routes import router as stats_router
+from .modules.tasks.routes import admin_router as tasks_admin_router
 from .modules.tasks.routes import router as tasks_router
 
 #: 要求浏览器每次回来验证的前端资源后缀。
@@ -130,6 +131,7 @@ def create_app() -> FastAPI:
     app.include_router(identity_router)
     app.include_router(identities_admin_router)
     app.include_router(tasks_router)
+    app.include_router(tasks_admin_router)
     app.include_router(stats_router)
 
     @app.get("/healthz", tags=["meta"])

@@ -9,7 +9,7 @@ from datetime import timedelta
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.clock import now_rfc3339, rfc3339_ago, to_local
+from app.core.clock import now_rfc3339, rfc3339_ago, shift_rfc3339, to_local
 from app.core.db import write
 from app.modules.access import repository as access_repository
 from app.modules.access.identity import IdentityKind
@@ -320,12 +320,21 @@ def test_mine_follows_the_window(client: TestClient, seeded: dict[str, str]) -> 
 
 
 def test_replay_returns_that_day_only(client: TestClient, seeded: dict[str, str]) -> None:
-    """回放按当地日期切，且按时刻升序——客户端要靠顺序做重放。"""
-    _event(1, DoorState.WAITING, 3600)
-    _event(1, DoorState.BATHING, 3500)
-    _event(1, DoorState.FREE, 3400)
+    """回放按当地日期切，且按时刻升序——客户端要靠顺序做重放。
+
+    事件时刻按"今天当地的上午"显式构造，而不是"现在减 N 秒"：后者在午夜前后一小时内
+    跑测试会落到昨天，用例就随钟点间歇性地挂。
+    """
     day = to_local(now_rfc3339(), TZ)
     assert day is not None
+    for _offset, (state, index) in enumerate([(DoorState.WAITING, 0), (DoorState.BATHING, 60), (DoorState.FREE, 120)]):
+        at = shift_rfc3339(f"{day.date().isoformat()}T02:00:00.000Z", index)
+        assert at is not None
+        write(
+            "INSERT INTO door_state_event (occurred_at, device_id, door_no, from_state, to_state,"
+            " card_no, cert_no, bath_time_s) VALUES (?,?,?,?,?,?,?,?)",
+            (at, DEVICE, 1, DoorState.FREE.value, state.value, 0, "", 0),
+        )
 
     body = client.get(
         f"/api/v1/stats/devices/{DEVICE}/replay?day={day.date().isoformat()}&tz_offset_minutes={TZ}",
