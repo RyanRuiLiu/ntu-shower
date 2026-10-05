@@ -110,6 +110,7 @@ GROUPS: tuple[GroupSpec, ...] = (
     GroupSpec("renew_session", "会话续期", "server"),
     GroupSpec("auto_settle", "自动结算", "server"),
     GroupSpec("extend_hours", "延长服务时间", "server"),
+    GroupSpec("power", "电源计划", "device"),
     GroupSpec("server_link", "链路维持", "server"),
     GroupSpec("server_ui", "界面操作超时", "server"),
     GroupSpec("server_bridge", "调试通道", "server"),
@@ -717,20 +718,6 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         group="extend_hours",
     ),
     ConfigSpec(
-        "extend_hours_hold_s",
-        INT,
-        SERVER,
-        3600,
-        "保持时长",
-        "拨钟成功起算，保持这么久之后把设备钟调回。**到期时还挂着的会话会被浴室端清掉**——"
-        "它判「开阀时刻与此刻之差」用的是绝对值，钟一退这个差值就跳过去了。借来的那一小时要还，"
-        "这是这个功能自身的终点",
-        minimum=60,
-        maximum=14400,
-        unit="秒",
-        group="extend_hours",
-    ),
-    ConfigSpec(
         "extend_hours_zone_offset_minutes",
         INT,
         SERVER,
@@ -758,21 +745,21 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
     ConfigSpec(
         "power_off_at",
         TIME,
-        SERVER,
+        DEVICE,
         "23:58",
         "每日断电时刻",
         "设备 MCU 每日定时断电的时刻（浴室 App 从 V8 平台拿到的是同一个值）。"
-        "延长服务流程用它换算重布 MCU 时的目标时刻；改它要与浴室平台那侧保持一致",
-        group="extend_hours",
+        "延长服务与开机校时都用它换算重布 MCU 的目标时刻；改它要与浴室平台那侧保持一致",
+        group="power",
     ),
     ConfigSpec(
         "power_on_at",
         TIME,
-        SERVER,
+        DEVICE,
         "10:55",
         "每日上电时刻",
         "设备 MCU 每日定时上电的时刻。重布 MCU 时与「每日断电时刻」成对使用：开机延时从断电时刻起算，到这个时刻上电",
-        group="extend_hours",
+        group="power",
     ),
 )
 

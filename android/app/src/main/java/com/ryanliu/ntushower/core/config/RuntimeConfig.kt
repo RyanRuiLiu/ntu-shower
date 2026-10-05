@@ -148,6 +148,13 @@ object RuntimeConfig {
     @Volatile var bootTimeSyncThresholdS = ConfigDefaults.BOOT_TIME_SYNC_THRESHOLD_S
         private set
 
+    // ── 电源计划 ──
+    @Volatile var powerOffAt = ConfigDefaults.POWER_OFF_AT
+        private set
+
+    @Volatile var powerOnAt = ConfigDefaults.POWER_ON_AT
+        private set
+
     /**
      * 把每个键复位为 [ConfigDefaults] 的值。
      *
@@ -227,6 +234,10 @@ object RuntimeConfig {
             { c, key -> bootTimeSyncEnabled = c.optBoolean(key, bootTimeSyncEnabled) },
         "boot_time_sync_threshold_s" to
             { c, key -> bootTimeSyncThresholdS = atLeastOne(c.optLong(key, bootTimeSyncThresholdS)) },
+        "power_off_at" to
+            { c, key -> powerOffAt = c.optString(key, powerOffAt) },
+        "power_on_at" to
+            { c, key -> powerOnAt = c.optString(key, powerOnAt) },
     )
 
     /** 应用下发的配置；未知键忽略（服务端可能比设备端新，新增键由后续版本消化）。 */

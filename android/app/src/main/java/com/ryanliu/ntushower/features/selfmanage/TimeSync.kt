@@ -7,7 +7,6 @@ import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.log.DeviceLog
 import com.ryanliu.ntushower.core.shell.RootShell
-import com.ryanliu.ntushower.features.automation.BathAppRestart
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -16,13 +15,14 @@ import java.util.TimeZone
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * 开机时间自校正：以 `link.hello_ack` 的 `server_time` 为准把系统时钟写对，再重启
- * 浴室 App。
+ * 开机时间自校正：以 `link.hello_ack` 的 `server_time` 为准把系统时钟写对，再**直写
+ * MCU 重布定时开关机**。
  *
  * 这台设备没有 NTP，墙上时钟靠 RTC 维持，时区误设或掉电都会跑偏（真机 2026-10-02
- * 实测快了整 1 小时）。浴室 App 启动时读取系统时钟装载每日定时开关机计划：时钟错着
- * 启动，它一整天的开关机计划全错。因此校正必须成对——**先把时钟写对，再重启浴室
- * App** 让它带着正确时钟重读计划；只改时钟不重启，已启动的浴室 App 不会重读。
+ * 实测快了整 1 小时）。MCU 里的开关机截止是按布防那一刻的钟面换算的，钟一动截止就
+ * 跟着在真实时间里漂（见 docs/device-poweroff.md §11）。因此校正必须成对——**先把
+ * 时钟写对，再按服务端下发的电源计划（power_off_at / power_on_at）重布 MCU**；目标
+ * 由服务端全权控制，不再依赖重启浴室 App 让它"重读"什么。
  *
  * ## 开关与阈值
  *
@@ -90,9 +90,11 @@ object TimeSync {
             deviceLog.error("clock.correct-failed", "residual=${residual}ms")
             return
         }
-        Log.i(TAG, "clock corrected (residual=${residual}ms), restarting bath app")
+        Log.i(TAG, "clock corrected (residual=${residual}ms), rearming mcu power schedule")
         deviceLog.lifecycle("clock.corrected", "residual=${residual}ms")
-        BathAppRestart.restart()
+        // 目标取自下发的电源计划：开关机时刻由服务端配置全权决定（校钟之后截止随钟面
+        // 移动，必须在校正后的框架里重写一次，否则真实断电时刻会偏差一个校钟量）。
+        McuPowerSchedule.schedule(RuntimeConfig.powerOffAt, RuntimeConfig.powerOnAt)
     }
 
     /**
