@@ -61,6 +61,9 @@ def _prepare(
     device_clock.load(DEVICE, skew_s)
     # 必须登记：tick_once 遍历的是 `device` 表里的设备，没登记的话它连看都不看这台
     helpers.register_trusted_device(DEVICE)
+    # 放回与失败的记忆是模块级的：上一个用例的"已放回"会让这一个用例被跳过
+    extend_hours._reassigned.clear()
+    extend_hours._reassign_failed.clear()
     server_now = shift_rfc3339(local_now, -ZONE_MINUTES * 60)
     assert server_now is not None
     monkeypatch.setattr(extend_hours, "now_rfc3339", lambda: server_now)
@@ -604,11 +607,13 @@ def test_the_failure_memory_is_cleared_when_the_extension_ends(fresh_db: str, mo
     # shifted_at 是真实轴上的拨钟时刻（10 月 5 日 23:49:30 北京）：午夜已过、无人占用
     repository.record(DEVICE, "2026-10-05T15:49:30.000Z", [])
     extend_hours._reassign_failed.add((DEVICE, "2530110052"))
+    extend_hours._reassigned.add((DEVICE, "2530110052"))
 
     asyncio.run(extend_hours.tick_once())
 
     assert repository.get(DEVICE) is None
     assert extend_hours._reassign_failed == set()
+    assert extend_hours._reassigned == set()
 
 
 # ── 运行时钟校正（延长之外的偏差自愈） ────────────────────────────────────
@@ -848,3 +853,34 @@ def test_tick_clears_the_shift_row_of_a_delisted_device(fresh_db: str, monkeypat
     assert repository.get("dev-gone") is None
     assert sent == []
     assert "extend-hours.device-gone" in events
+
+
+def test_reassign_is_one_shot_per_extension(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """放回原喷头每人只此一次：浴室端 300 秒收回他之后，不再重新预约。
+
+    2026-10-06 深夜实测的循环：放回做成循环时，人走了也被反复重新预约（收回后 1 秒
+    又被分配），会话永不空闲、拨回条件永远不成立、滚动重布通宵跑、设备通宵不断电。
+    """
+    _prepare(monkeypatch, "2026-10-05T23:50:00.000Z")
+    attempts: list[AssignRequest] = []
+
+    async def fake_assign(_device_id: str, req: AssignRequest) -> object:
+        attempts.append(req)
+        return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
+
+    monkeypatch.setattr(extend_hours.sessions_routes, "perform_assign", fake_assign)
+
+    # 第一次：他不在占用态，放回
+    asyncio.run(extend_hours._reassign(DEVICE, ((3, "2530110052"),), CONFIG["extend_hours_students"]))
+    assert len(attempts) == 1
+
+    # 已经放回过，不再动
+    asyncio.run(extend_hours._reassign(DEVICE, ((3, "2530110052"),), CONFIG["extend_hours_students"]))
+    assert len(attempts) == 1
+
+    # 观察到他占着同样算"已成立"：之后哪怕会话结束（他走了），也不再重新预约
+    extend_hours._reassigned.discard((DEVICE, "2530110052"))
+    _with_session("2026-10-05T23:55:00.000Z")
+    asyncio.run(extend_hours._reassign(DEVICE, ((3, "2530110052"),), CONFIG["extend_hours_students"]))
+    assert len(attempts) == 1
+    assert (DEVICE, "2530110052") in extend_hours._reassigned
