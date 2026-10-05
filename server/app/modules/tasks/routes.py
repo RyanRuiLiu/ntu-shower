@@ -2,10 +2,12 @@
 
 ## 两道分开的门
 
-- **能力位**（`tasks`）决定谁调得动这些端点。名单是不分设备的全局配置，所以判定走
+- **能力位**（`tasks`）决定谁调得动登记端点。名单是不分设备的全局配置，所以判定走
   `require_capability` 而不是 `enforce`——作用域这一维对它不成立，理由见 capabilities。
 - **管理员设的 `*_enabled`** 决定登记的人到底会不会被服务。本域**没有任何端点能改它**，
   用户碰不到。
+
+另有第三道门 [admin_router]（admin 能力位）：后台任务的当前态看板，只读、不改任何东西。
 
 ## 为什么写入口是 async
 
@@ -17,15 +19,51 @@ from fastapi import APIRouter, Depends, Query
 
 from app.core.problems import TASK_NOT_FOUND, ApiProblemError
 from app.modules.access.capabilities import Capability
-from app.modules.access.dependencies import require_capability, require_identity
+from app.modules.access.dependencies import require_admin, require_capability, require_identity
 from app.modules.access.schemas import IdentityRecord
+from app.modules.config import store as config_store
+from app.modules.extend_hours import service as extend_hours_service
 from app.modules.sessions import scheduler as sessions_scheduler
 
-from . import service
+from . import schemas, service
 from .schemas import TaskMembershipRequest, TaskView
-from .spec import TASKS_BY_KEY
+from .spec import TASKS, TASKS_BY_KEY
 
 router = APIRouter(prefix="/api/v1/tasks", tags=["tasks"])
+
+#: 运维可见性：概览页的后台任务卡。与登记域同一模块，但走 admin 能力位——
+#: 它回答"现在系统在替谁做什么"，是管理面的问题，不涉及任何名单改动。
+admin_router = APIRouter(
+    prefix="/api/v1/background-tasks",
+    tags=["tasks"],
+    dependencies=[Depends(require_admin)],
+)
+
+
+@admin_router.get("/status", response_model=schemas.BackgroundTasksStatus)
+def background_tasks_status() -> schemas.BackgroundTasksStatus:
+    """后台任务的当前态：开关与名单、延长中的设备、调度器的即时计划。
+
+    纯只读的组合：三处（全局配置、extend_hours 的落库状态、调度器内存里的定时器）
+    各自公开自己的只读读数，这里不做任何判断——判据只有一个出处，看板只报告状态。
+    """
+    config = config_store.global_effective()
+    tasks = []
+    for spec in TASKS:
+        roster = config[spec.students_key]
+        tasks.append(
+            schemas.BackgroundTaskStatus(
+                key=spec.key,
+                title=spec.label,
+                enabled=bool(config[spec.enabled_key]),
+                roster=len(roster) if isinstance(roster, dict) else 0,
+            )
+        )
+    return schemas.BackgroundTasksStatus(
+        tasks=tasks,
+        extending=[schemas.ExtendingDevice.model_validate(row) for row in extend_hours_service.current_shifts()],
+        scheduled=[schemas.ScheduledAction.model_validate(row) for row in sessions_scheduler.snapshot()],
+    )
 
 
 @router.get("")

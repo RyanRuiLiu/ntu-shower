@@ -390,3 +390,52 @@ def test_membership_endpoint_is_a_coroutine_function() -> None:
     所以直接查模块里那一个即可。
     """
     assert inspect.iscoroutinefunction(set_membership_endpoint)
+
+
+# ── 当前态看板（admin）──
+
+
+def test_status_reports_tasks_extending_and_scheduled(
+    client: TestClient, admin_headers: dict[str, str], fresh_db: str
+) -> None:
+    """当前态的形状：四任务（开关与名单数）、延长中的设备、调度器的即时计划。
+
+    新库上四任务全关、无延长、无排定——看板在"系统闲着"时也必须能如实显示闲着。
+    """
+    resp = client.get("/api/v1/background-tasks/status", headers=admin_headers)
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert [task["key"] for task in data["tasks"]] == [
+        "renew_wait",
+        "renew_session",
+        "auto_settle",
+        "extend_hours",
+    ]
+    assert all(task["enabled"] is False and task["roster"] == 0 for task in data["tasks"])
+    assert data["extending"] == []
+    assert data["scheduled"] == []
+
+
+def test_status_includes_the_extending_device(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:
+    """延长中的设备是"哪台设备钟是拨快着的"唯一可见面：表里有行，看板就报。"""
+    from app.modules.extend_hours import repository as extend_repository
+
+    extend_repository.record("dev-status-ext", "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": CERT_NO}])
+
+    data = client.get("/api/v1/background-tasks/status", headers=admin_headers).json()
+
+    assert data["extending"] == [
+        {
+            "device_id": "dev-status-ext",
+            "shifted_at": "2026-10-05T15:49:30.000Z",
+            "assignments": [{"door_no": 3, "cert_no": CERT_NO}],
+        }
+    ]
+
+
+def test_status_requires_admin(client: TestClient, fresh_db: str, tasks_headers: dict[str, str]) -> None:
+    """当前态是管理面的问题：tasks 位调不动它。"""
+    resp = client.get("/api/v1/background-tasks/status", headers=tasks_headers)
+
+    assert resp.status_code == 403

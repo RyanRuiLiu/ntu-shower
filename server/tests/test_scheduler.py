@@ -10,6 +10,7 @@ conftest 的 `_isolate_default_db` 保证没带的用例碰不到仓库里的真
 
 import asyncio
 import re
+import time
 import uuid
 from collections.abc import Iterator
 from dataclasses import replace
@@ -20,7 +21,7 @@ from fastapi.testclient import TestClient
 from tests import helpers
 
 from app.core import device_clock, outcomes, problems
-from app.core.clock import now_rfc3339, shift_rfc3339
+from app.core.clock import now_rfc3339, parse_rfc3339, shift_rfc3339
 from app.core.db import get_conn
 from app.core.problems import ApiProblemError, Problem
 from app.core.protocol import JsonObject
@@ -872,3 +873,48 @@ def test_a_student_outside_the_roster_is_never_touched(
 
     with helpers.trusted_online(client, "dev-1", admin_headers):
         asyncio.run(body())
+
+
+def test_snapshot_reports_scheduled_timers(fresh_db: str) -> None:
+    """只读读出：把内存里的定时器报成可显示的行，到点换算成服务端 RFC 3339。
+
+    这是概览页后台任务卡"已排定的动作"的来源——判据仍只在 reschedule 一处，
+    读数不做任何判断。
+    """
+    candidate = Candidate(
+        session_id=1,
+        device_id="dev-snap-status",
+        door_no=3,
+        cert_no="99990052",
+        state=DoorState.BATHING,
+        assigned_at="2026-10-05T12:00:00.000Z",
+        paused_at="",
+        run_started_at="2026-10-05T12:00:00.000Z",
+    )
+    trigger = scheduler.Trigger(feature="renew_session", delay_s=5.0, threshold_s=1140)
+
+    async def body() -> None:
+        loop = asyncio.get_running_loop()
+        worker = scheduler._worker("dev-snap-status")
+        worker.timers[3] = scheduler._Planned(
+            at=time.monotonic() + 5.0,
+            candidate=candidate,
+            trigger=trigger,
+            handle=loop.call_later(5.0, lambda: None),
+        )
+        try:
+            rows = scheduler.snapshot()
+        finally:
+            worker.timers.clear()
+        assert rows == [
+            {
+                "device_id": "dev-snap-status",
+                "door_no": 3,
+                "cert_no": "99990052",
+                "feature": "renew_session",
+                "at": rows[0]["at"],
+            }
+        ]
+        assert parse_rfc3339(str(rows[0]["at"])) is not None
+
+    asyncio.run(body())
