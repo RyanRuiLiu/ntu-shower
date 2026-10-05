@@ -7,6 +7,8 @@
 错误若下发到设备，后果是设备侧行为异常（例如心跳间隔为 0 会导致心跳风暴）。
 """
 
+import asyncio
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
@@ -99,16 +101,25 @@ async def put_global_config(req: ConfigUpdateRequest) -> GlobalConfigUpdateRepor
     # 服务端的键不下发，所以只有**设备域那部分真的变了**才需要惊动设备：在服务器上运行的
     # 那些改动保存即生效，再推一条与上次一模一样的 config.update 只是白跑一趟。
     if _device_scope(before) != _device_scope(overrides):
-        for device_id, _ws in manager.online_connections():
-            result = await sessions_service.push_config_update(device_id, revision, store.device_effective(device_id))
-            notified.append(
-                {
-                    "device_id": device_id,
-                    "notified": result.get("notified", False),
-                    "applied": result.get("applied", False),
-                    "reason": result.get("reason", ""),
-                }
+        # 逐台推送但**并发等待**：每台的 ack 至多等 config_ack_timeout_s，串行的话一台
+        # 慢设备就把整个保存拖慢一倍时长的乘数，几十台设备下一次保存能挂到分钟级。
+        # 设备之间互不相干（在途回执按 device_id 记），并发没有共享状态。
+        targets = list(manager.online_connections())
+        results = await asyncio.gather(
+            *(
+                sessions_service.push_config_update(device_id, revision, store.device_effective(device_id))
+                for device_id, _ws in targets
             )
+        )
+        notified = [
+            {
+                "device_id": device_id,
+                "notified": result.get("notified", False),
+                "applied": result.get("applied", False),
+                "reason": result.get("reason", ""),
+            }
+            for (device_id, _ws), result in zip(targets, results, strict=True)
+        ]
     log_event(
         "INFO",
         "config.global-updated",
