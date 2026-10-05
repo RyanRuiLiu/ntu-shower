@@ -28,7 +28,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * 功能默认**关闭**，由设备配置项 `boot_time_sync_enabled` 控制（配置页「时间校正」）；
  * 触发阈值为 `boot_time_sync_threshold_s`（默认 60 秒，无上限）：偏差超过阈值才校正
- * 并重启浴室 App，阈值内的秒级噪声不动。手动设置（setWallClock）是显式动作，
+ * 并直写 MCU 重布定时开关机，阈值内的秒级噪声不动。手动设置（setWallClock）是显式动作，
  * 不受这两个配置影响。
  *
  * ## 写时钟的命令（真机验证 2026-10-02，勿改）
