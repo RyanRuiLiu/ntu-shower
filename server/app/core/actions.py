@@ -64,6 +64,19 @@ CLOCK_SET = "clock.set"
 （设备端 TimeSync）与网页端手动设置共用本动作。
 """
 
+POWER_SCHEDULE = "power.schedule"
+"""重布设备定时开关机（/dev/McuCom，ioctl 0xA1，见 docs/device-poweroff.md §11）。
+
+params.off_at 与 params.on_at 是设备**表盘上**的目标时刻（HH:MM）：off_at 是断电
+时刻，on_at 是断电之后到上电的时刻；设备端用自己的钟换算成相对延时（分钟粒度）
+写入 MCU。三个行为要点，都来自实测：
+
+- 延时是相对时长，**截止判定却用实时钟**——钟被拨到越过已布防的截止即当场断电，
+  回拨则等量推迟。拨钟之前必须先重布（extend_hours 的顺序由此而来）。
+- 一次布防覆盖上一次；enable 固定 3（关机+开机都使能），不作为参数暴露。
+- MCU 只吃分钟，秒被截断；参数在 HTTP 边界即拦格式，不发给设备。
+"""
+
 # ── 免费名单（freelist）──
 # 浴室 App 读的那份文件：一行一个学号，名单里的人不收费。对象名取 freelist 而不是
 # free_list：**对象必须是单个全小写字母词**（`test_actions_follow_the_object_dot_action_form`），
@@ -148,6 +161,7 @@ ALL_ACTIONS: tuple[str, ...] = (
     APP_RESTART,
     BATH_RESTART,
     CLOCK_SET,
+    POWER_SCHEDULE,
     FREELIST_READ,
     FREELIST_WRITE,
     BRIDGE_OPEN,
@@ -189,6 +203,7 @@ ACTION_CHANNELS: dict[str, str] = {
     APP_RESTART: CHANNEL_MAINTENANCE,
     BATH_RESTART: CHANNEL_MAINTENANCE,
     CLOCK_SET: CHANNEL_MAINTENANCE,
+    POWER_SCHEDULE: CHANNEL_MAINTENANCE,
     FREELIST_READ: CHANNEL_MAINTENANCE,
     FREELIST_WRITE: CHANNEL_MAINTENANCE,
     BRIDGE_OPEN: CHANNEL_MAINTENANCE,

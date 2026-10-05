@@ -260,6 +260,7 @@ def test_device_action_endpoints_require_admin(client: TestClient) -> None:
         ("dump", actions.UI_DUMP, None),
         ("bath/restart", actions.BATH_RESTART, None),
         ("clock/set", actions.CLOCK_SET, {"datetime": "2026-10-02 12:00:00"}),
+        ("power/schedule", actions.POWER_SCHEDULE, {"off_at": "23:58", "on_at": "10:55"}),
     ],
 )
 def test_action_endpoints_dispatch_registered_actions(
@@ -281,6 +282,23 @@ def test_action_endpoints_dispatch_registered_actions(
 def test_clock_set_rejects_malformed_datetime(client: TestClient, admin_headers: dict[str, str]) -> None:
     """datetime 形状在 HTTP 边界即拦（422），不发给设备。"""
     r = client.post("/api/v1/devices/ghost/clock/set", headers=admin_headers, json={"datetime": "nope"})
+
+    assert r.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("payload", "field"),
+    [
+        ({"off_at": "nope", "on_at": "10:55"}, "off_at"),
+        ({"off_at": "23:58", "on_at": "25:00"}, "on_at"),
+        ({"off_at": "23:58"}, "on_at"),
+    ],
+)
+def test_power_schedule_rejects_malformed_targets(
+    client: TestClient, admin_headers: dict[str, str], payload: dict[str, str], field: str
+) -> None:
+    """HH:MM 形状在 HTTP 边界即拦（422），不发给设备。"""
+    r = client.post("/api/v1/devices/ghost/power/schedule", headers=admin_headers, json=payload)
 
     assert r.status_code == 422
 

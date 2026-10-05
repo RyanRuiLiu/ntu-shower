@@ -39,6 +39,9 @@ object SupportedActions {
     // ── clock ──
     const val CLOCK_SET = "clock.set"
 
+    // ── power ──
+    const val POWER_SCHEDULE = "power.schedule"
+
     // ── 免费名单 ──
     const val FREELIST_READ = "freelist.read"
     const val FREELIST_WRITE = "freelist.write"
@@ -65,6 +68,7 @@ object SupportedActions {
         APP_RESTART,
         BATH_RESTART,
         CLOCK_SET,
+        POWER_SCHEDULE,
         FREELIST_READ,
         FREELIST_WRITE,
         BRIDGE_OPEN,
