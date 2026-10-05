@@ -193,20 +193,24 @@ def _hhmm_minutes(text: str) -> int | None:
 
 
 def current_shifts() -> list[dict[str, object]]:
-    """正在延长中的设备：拨快时刻与记下的"谁在哪个喷头"。
+    """正在延长中的设备：拨快幅度、拨快时刻与记下的"谁在哪个喷头"。
 
     只读的运维可见性（概览页的后台任务卡）：表里一行就是"这台设备钟是拨快着的"，
     派生自它的现态与要分配回去的人。
     """
-    return [
-        {
-            "device_id": shift.device_id,
-            "shifted_at": shift.shifted_at,
-            "assignments": [{"door_no": door_no, "cert_no": cert_no} for door_no, cert_no in shift.assignments],
-        }
-        for row in repository.list_shifted()
-        for shift in [_as_shift(row)]
-    ]
+    rows: list[dict[str, object]] = []
+    for row in repository.list_shifted():
+        shift = _as_shift(row)
+        config = config_store.effective(shift.device_id)
+        rows.append(
+            {
+                "device_id": shift.device_id,
+                "shift_minutes": as_int(config["extend_shift_minutes"]),
+                "shifted_at": shift.shifted_at,
+                "assignments": [{"door_no": door_no, "cert_no": cert_no} for door_no, cert_no in shift.assignments],
+            }
+        )
+    return rows
 
 
 # ── 动作 ──────────────────────────────────────────────────────────────────

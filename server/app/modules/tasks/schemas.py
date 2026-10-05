@@ -58,21 +58,30 @@ class DoorAssignment(BaseModel):
 
 
 class ExtendingDevice(BaseModel):
-    """正在延长服务中的设备：拨快时刻与拨之前谁在哪个喷头。"""
+    """正在延长服务中的设备：拨快幅度、拨快时刻与拨之前谁在哪个喷头。"""
 
     device_id: str
+    shift_minutes: int
     shifted_at: str
     assignments: list[DoorAssignment]
 
 
 class ScheduledAction(BaseModel):
-    """调度器已排定的下一次动作：到点替谁做哪个功能。"""
+    """调度器已排定的下一次动作：在等谁、等到什么时候、为什么是这一刻。
+
+    `state` 是门现态，`started_at` 是这条判据的起算时刻（分配时刻或关阀时刻，随功能
+    而定），`threshold_s` 是当时生效的阈值——面板据此能解释"为什么在这一刻动手"。
+    """
 
     device_id: str
     door_no: int
     cert_no: str
     feature: str
     at: str
+    state: str
+    session_id: int
+    started_at: str
+    threshold_s: int
 
 
 class BackgroundTasksStatus(BaseModel):
