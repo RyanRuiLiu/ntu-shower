@@ -340,3 +340,9 @@
 .task-board .task-hint {
   font-size: 13px;
 }
+
+.task-board .task-section-title {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}

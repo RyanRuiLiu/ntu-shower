@@ -295,56 +295,62 @@ async function doPhoto() {
 // ── 后台任务看板 ──────────────────────────────────────────────────────────
 
 /**
- * 四任务开关、延长中的设备、调度器此刻排定的动作。
+ * 四个后台任务各一段：开关与名单、此刻在等什么。
  *
- * 只报告状态、不做判断：判据在服务端只有一处出处，这里把它显示出来。延长中与已排定
- * 是全 fleet 的（任务与名单是全局的，卡上带设备列）；每 30 秒刷新一次——调度器的计划
- * 随帧变，逐帧推送不值得，这个节奏跟得上"看见异常"。
+ * 只报告状态、不做判断：判据在服务端只有一处出处，这里把它显示出来。排定的动作按
+ * 功能归到各自的任务段下（extend_hours 不走调度器，它的现状是"延长中的设备"）；
+ * 设备名沿用审计页的做法——从共享的 store.devices 映射，悬停看 id。数据随帧刷新，
+ * 30 秒轮询兜住"状态不变就没有帧"的空窗。
  */
 function renderTaskBoard(data) {
-  const featureTitles = new Map(data.tasks.map((task) => [task.key, task.title]))
-  const taskRows = data.tasks
-    .map(
-      (task) => `
-      <div class="task-row">
-        <span class="task-name">${esc(task.title)}</span>
+  const names = new Map(store.devices.map((device) => [device.device_id, device.name]))
+  const deviceCell = (id) => `<span class="mono" title="${esc(id)}">${esc(names.get(id) || id)}</span>`
+
+  const scheduledByFeature = {}
+  for (const row of data.scheduled) (scheduledByFeature[row.feature] ||= []).push(row)
+
+  return data.tasks
+    .map((task) => {
+      let body
+      if (task.key === 'extend_hours') {
+        body =
+          data.extending.length === 0
+            ? '<div class="muted task-hint">当前没有设备在延长中</div>'
+            : data.extending
+                .map((shift) => {
+                  const people = shift.assignments.map((item) => `#${item.door_no} ${item.cert_no}`).join('、')
+                  return `
+                  <div class="task-row">
+                    ${deviceCell(shift.device_id)}
+                    <span class="muted">${esc(fmtDateTime(shift.shifted_at))} 拨快 · 待分配 ${esc(people || '无')}</span>
+                  </div>`
+                })
+                .join('')
+      } else {
+        const rows = scheduledByFeature[task.key] || []
+        body =
+          rows.length === 0
+            ? '<div class="muted task-hint">当前没有排定的动作</div>'
+            : rows
+                .map(
+                  (row) => `
+                  <div class="task-row">
+                    ${deviceCell(row.device_id)}
+                    <span>#${esc(row.door_no)}</span>
+                    <span class="mono">${esc(row.cert_no || PLACEHOLDER)}</span>
+                    <span class="time">${esc(fmtDateTime(row.at))}</span>
+                  </div>`,
+                )
+                .join('')
+      }
+      return `
+      <div class="task-section-title">
+        ${esc(task.title)}
         <span class="task-state ${task.enabled ? 'on' : 'off'}">${task.enabled ? '启用' : '停用'}</span>
         <span class="muted">名单 ${task.roster} 人</span>
-      </div>`,
-    )
+      </div>${body}`
+    })
     .join('')
-  const extending =
-    data.extending.length === 0
-      ? '<div class="muted task-hint">没有设备在延长服务中</div>'
-      : data.extending
-          .map((shift) => {
-            const people = shift.assignments.map((item) => `#${item.door_no} ${item.cert_no}`).join('、')
-            return `
-            <div class="task-row">
-              <span class="task-name mono">${esc(shift.device_id)}</span>
-              <span class="muted">${esc(fmtDateTime(shift.shifted_at))} 拨快 · 待分配 ${esc(people || '无')}</span>
-            </div>`
-          })
-          .join('')
-  const scheduled =
-    data.scheduled.length === 0
-      ? '<div class="muted task-hint">没有排定的动作——喷头空闲时调度器无事可做</div>'
-      : data.scheduled
-          .map(
-            (row) => `
-            <div class="task-row">
-              <span class="task-name mono">${esc(row.device_id)}</span>
-              <span>#${esc(row.door_no)}</span>
-              <span class="mono">${esc(row.cert_no || PLACEHOLDER)}</span>
-              <span>${esc(featureTitles.get(row.feature) || row.feature)}</span>
-              <span class="time">${esc(fmtDateTime(row.at))}</span>
-            </div>`,
-          )
-          .join('')
-  return `
-    <div class="task-section">${taskRows}</div>
-    <div class="task-section-title">延长服务中</div>${extending}
-    <div class="task-section-title">已排定的动作</div>${scheduled}`
 }
 
 async function refreshTaskBoard() {
