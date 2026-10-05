@@ -27,7 +27,7 @@ import org.json.JSONObject
  * - 连接成功后首帧发 link.hello；
  * - hello_ack 带回配置（心跳间隔等）与 trusted 标志；[HANDSHAKE_TIMEOUT_MS] 内等不到就断掉重连；
  * - 按配置间隔发 link.ping；服务端 ping → 给 [ServerClock] 立锚点、再回 pong；
- * - 断线自动重连，指数退避（5s 起、60s 封顶）；
+ * - 断线自动重连，指数退避加抖动（5s 起、60s 封顶；实际等待落在各级的一半到上限之间，几十台设备共用一次断网时不至于同一波次同时重连）；
  * - 业务消息一律回调 onMessage 交给上层。
  *
  * [connected] 与 [authenticated] 是两件事：前者是链路连上，后者是服务端已认下这台设备。
