@@ -110,13 +110,13 @@ GROUPS: tuple[GroupSpec, ...] = (
     GroupSpec("renew_session", "会话续期", "server"),
     GroupSpec("auto_settle", "自动结算", "server"),
     GroupSpec("extend_hours", "延长服务时间", "server"),
-    GroupSpec("power", "电源计划", "device"),
     GroupSpec("server_link", "链路维持", "server"),
     GroupSpec("server_ui", "界面操作超时", "server"),
     GroupSpec("server_bridge", "调试通道", "server"),
     # ── 设备下发：会推到设备，支持单台覆盖 ──
-    GroupSpec("overlay", "操作遮罩", "device"),
+    GroupSpec("power", "电源计划", "device"),
     GroupSpec("clock", "时间校正", "device"),
+    GroupSpec("overlay", "操作遮罩", "device"),
     GroupSpec("doors", "喷头状态采集", "device"),
     GroupSpec("ui", "界面操作", "device"),
     GroupSpec("automation", "自动化流程", "device"),
@@ -715,6 +715,20 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "日界，浴室 App 的下一次扫描仍会把所有人放掉。实测它在 23:53 动手放人（关机前五分钟），"
         "所以这个时刻要留足余量让拨钟与重启跑完（十几秒）",
         minimum=23 * 60,
+        group="extend_hours",
+    ),
+    ConfigSpec(
+        "extend_shift_minutes",
+        INT,
+        SERVER,
+        15,
+        "拨快幅度",
+        "设备表盘从触发时刻向前跳过的分钟数。落点必须跨过午夜（触发时刻 + 幅度 ≥ 00:00），"
+        "这样才能一次跳过 23:50 起的新人关闭窗口、23:58 的断电，以及两者之间的全部释放判定。"
+        "默认 15 分钟：23:49 拨快落在 00:04",
+        minimum=10,
+        maximum=120,
+        unit="分钟",
         group="extend_hours",
     ),
     ConfigSpec(
