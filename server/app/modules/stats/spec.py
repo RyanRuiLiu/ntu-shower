@@ -32,6 +32,13 @@ from typing import Literal
 HOUR_START = 11
 HOUR_COUNT = 13
 
+#: 在多个句子里复用的词。**词在这里只有一份**：改措辞不会漏掉任何一处。
+_NEAR_DAYS = "近 {days} 天"
+_AVG_SHOWER = "平均淋浴"
+_LONGEST = "最长一次"
+_COUNT_MORE = "次数最多"
+_COUNT_LESS = "次数最少"
+
 #: 每个榜展示前几名。**展示参数，不是业务规则**——它只影响列表长度，
 #: 不影响任何一条统计口径。
 LEADERBOARD_SIZE = 10
@@ -43,9 +50,94 @@ LEADERBOARD_SIZE = 10
 #: 完全不同的设备，都不用调这里的门槛。绝对占用率做不到——它的门槛要按设备重定，
 #: 否则就是一台全红、另一台全绿。
 #:
-#: **最高档是"本设备最忙"不是"满"**：实测两段学期里峰值只占容量 53%–55%。图例说
-#: "闲 → 忙"；判断"现在去有没有位置"要看点击说明里的绝对占用（"平均占用 3/7"）。
-HEAT_LEVELS: tuple[float, ...] = (0.15, 0.35, 0.55, 0.75)
+#: **界限取 (0.15, 0.40, 0.65, 0.85) 的原因**：读者把颜色当绝对读——红色就是"挤"。
+#: 忙时段的格子普遍落在峰值的 0.4–0.8，若 0.35 就给黄、0.55 给橙、0.75 就红，大半个图
+#: 常年暖色，而峰值本身可能只占容量一两成，红色名不副实（"大多数格子总是红的黄的，
+#: 看不懂什么意思"）。上调之后绿与浅色覆盖日常，暖色只随"接近本室最忙"递进；绝对
+#: 占用始终在逐格说明里（`_heat_texts`），"现在去有没有位置"以它为准。
+#:
+#: **最高档是"本设备最忙"不是"满"**：实测两段学期里峰值只占容量 53%–55%。图例
+#: （`HEAT_LEGEND`）说的是"最忙"；判断"现在去有没有位置"看逐格说明里的绝对占用。
+HEAT_LEVELS: tuple[float, ...] = (0.15, 0.40, 0.65, 0.85)
+
+#: 热力图区块的标题。**描述文案由服务端下发**——改字不该要求客户端发版。
+HEAT_TITLE = "各时段占用"
+
+#: 热力图副标。窗口天数由 service 按 `days` 填（`str.format`），措辞改在这里一处。
+HEAT_NOTE = f"{_NEAR_DAYS} · 颜色深浅看该时段相对本设备最忙时刻的繁忙程度"
+
+#: 六个色阶的名字，下标即色阶值（0–5）。图例两端显示首尾两档，整句说明在逐格文字里。
+#:
+#: **最高档叫「最忙」不叫「满」**：色阶相对本设备峰值（见 `HEAT_LEVELS`），红色承诺
+#: 的是"这是本室最忙的时段"，不是"没有空位"——图例若写"满"，读者拿它对容量，
+#: 而它答不了那个问题。
+HEAT_LEGEND: tuple[str, ...] = ("没人", "空", "较空", "一般", "较忙", "最忙")
+
+#: 星期几的展示名，下标与 Python `date.weekday()` 一致（0 是周一）。
+#: 逐格说明要写"周二 21 时"，星期名是文案的一部分，归这里一份。
+WEEKDAY_LABELS: tuple[str, ...] = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+
+#: 说明行的初始内容：落在服务时段内时，"现在"那一格说明的前缀。
+HEAT_NOW_PREFIX = "现在 · "
+
+#: 说明行在服务时段之外时的整句引导——那一刻没有"现在"那一格可指。
+HEAT_HINT = "点格子看各时段详情，颜色越红越挤"
+
+#: 统计页其余区块的描述文案登记表，接口以 `copy` 一个字典整表下发。
+#:
+#: **为什么收在服务端**：客户端发一次版成本高，而这些句子是口径的表述（"进行中
+#: 不计入时长""同星期平均"）——写在客户端就成了第二份，改一处另一处不跟着动，
+#: 而两处都不会报错。先例是 `config/spec.py` 的 `GROUPS`（分组元数据只在这里一份）。
+#:
+#: **占位符的分工**：`{days}` 由 service 在下发前填（窗口天数是请求参数）；其余
+#: （`{as_of}` `{t}` `{pct}` `{doors}` `{states}` `{text}` `{door}` `{hour}`）是运行时
+#: 值，客户端用 `shower-utils` 的格式化函数填入——**词归服务端，数归客户端**，
+#: 数值格式化全仓只有 shower-utils 一处。
+
+STATS_COPY: dict[str, str] = {
+    "empty_devices": "暂无已登记的设备",
+    "empty_window": "这个窗口内没有会话记录",
+    "today_title": "今日",
+    "today_note": "截至 {as_of} · 进行中不计入时长",
+    "served_label": "已洗人次",
+    "bathing_label": "淋浴中",
+    "avg_label": _AVG_SHOWER,
+    "replay_title": "时间点回放",
+    "replay_sub": "按日期查看某一时刻各喷头的状态",
+    "replay_summary": "{doors} 个喷头：{states}",
+    "replay_detail_bathing": "已洗 {t}",
+    "replay_detail_paused": "已停 {t}",
+    "replay_detail_waiting": "已等 {t}",
+    "replay_detail_idle": "上次 {text}",
+    "doors_title": "喷头使用次数",
+    "doors_note": f"{_NEAR_DAYS} · 次数与平均淋浴时长",
+    "compare_title": "各楼层",
+    "compare_note": _NEAR_DAYS,
+    "mine_title": f"我的{_NEAR_DAYS}",
+    "mine_last": "最近一次 {when} · 洗了 {t}",
+    "mine_fav": "常用喷头 {door} · 常在 {hour} 点前后",
+    "mine_faster_fast": "你比 {pct}% 的人洗得快",
+    "mine_faster_slow": "你比 {pct}% 的人洗得久",
+    "lb_title": "排行榜",
+    "lb_sub": _NEAR_DAYS,
+    "lb_foot": "学号为浴室系统账号，在榜单与回放中公开显示",
+    "cmp_sessions": "人次",
+    "cmp_flow": _AVG_SHOWER,
+    "cmp_peak": "高峰",
+    "cmp_wait": "平均等待",
+    "mine_count": "次数",
+    "mine_total": "总时长",
+    "mine_avg": _AVG_SHOWER,
+    "mine_longest": _LONGEST,
+    "mine_scope": "个人统计跨全部设备；上面各块都按当前这一台设备算",
+    "mine_need_credential": "先在设置页配置浴室账号密码，这里才会显示你的统计",
+    "foot_title": "统计口径",
+    "foot_1": "只统计真正出过水的会话：开了喷头却没出水的，不计入次数、时长与榜单",
+    "foot_2": "淋浴时长只算出水的时间，中间关阀的不计入",
+    "foot_3": "占用与高峰按「喷头被占着」算，与出没出水无关",
+    "foot_4": "平均等待是满员时段的平均：喷头全被占着，从占满到有一个空出来，这样一段算一次",
+    "foot_5": "今日是「截至现在」，还在淋浴的那一场不计入人次与平均",
+}
 
 
 @dataclass(frozen=True)
@@ -155,15 +247,15 @@ BOARDS: tuple[LeaderboardSpec, ...] = (
         # 而它**含未出水的会话**，与会话数榜的口径一致。
         detail="assigned_avg_s",
         detail_label="平均占用",
-        orders=(BoardOrder("desc", "次数最多"), BoardOrder("asc", "次数最少")),
+        orders=(BoardOrder("desc", _COUNT_MORE), BoardOrder("asc", _COUNT_LESS)),
     ),
     LeaderboardSpec(
         "sessions_flowed",
         "淋浴次数",
         note="窗口内真正出过水的会话数",
         detail="flow_avg_s",
-        detail_label="平均淋浴",
-        orders=(BoardOrder("desc", "次数最多"), BoardOrder("asc", "次数最少")),
+        detail_label=_AVG_SHOWER,
+        orders=(BoardOrder("desc", _COUNT_MORE), BoardOrder("asc", _COUNT_LESS)),
     ),
     LeaderboardSpec(
         "flow",
@@ -184,7 +276,7 @@ BOARDS: tuple[LeaderboardSpec, ...] = (
         "单次淋浴时长",
         note="按单场淋浴时长排名",
         kind="single",
-        orders=(BoardOrder("desc", "最长一次"), BoardOrder("asc", "最短一次")),
+        orders=(BoardOrder("desc", _LONGEST), BoardOrder("asc", "最短一次")),
     ),
     LeaderboardSpec(
         "streak",

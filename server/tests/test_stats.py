@@ -13,6 +13,8 @@ from app.core.clock import now_rfc3339, rfc3339_ago, to_local
 from app.core.db import write
 from app.modules.access import repository as access_repository
 from app.modules.access.identity import IdentityKind
+from app.modules.devices import repository as devices_repository
+from app.modules.devices.schemas import LINK_OFFLINE, LINK_ONLINE
 from app.modules.doors.schemas import DoorState, state_label
 from app.modules.doors.service import SESSION_MAX_S
 from app.modules.stats import service, spec
@@ -598,6 +600,78 @@ def test_heat_levels_rank_against_the_boards_own_peak(client: TestClient, seeded
                 assert level == 0, week
             if peak > 0 and busy == peak:
                 assert level == top, week
+
+
+def test_heat_copy_is_served_by_the_backend(client: TestClient, seeded: dict[str, str]) -> None:
+    """热力图的标题、副标、图例与逐格说明都由服务端下发。
+
+    客户端发一次版成本高，而这些是文案与口径的表述——收在服务端，改字不必发版，
+    也不存在两份文案各自漂移的可能。断言形状与来源，不锁定具体字句（字句会随
+    措辞调整，字句由 `spec` 与测试同源保证）。
+    """
+    body = client.get(f"/api/v1/stats/devices/{DEVICE}?days=90", headers=seeded).json()
+    assert body["heat_title"] == spec.HEAT_TITLE
+    assert body["heat_note"] == spec.HEAT_NOTE.format(days=90)
+    assert [item["key"] for item in body["heat_legend"]] == [str(i) for i in range(len(spec.HEAT_LEGEND))]
+    assert [item["label"] for item in body["heat_legend"]] == list(spec.HEAT_LEGEND)
+
+    texts = body["heat_texts"]
+    assert len(texts) == 7
+    for weekday, row in enumerate(texts):
+        assert len(row) == body["hour_count"], weekday
+        for column, text in enumerate(row):
+            assert text.startswith(spec.WEEKDAY_LABELS[weekday]), (weekday, column)
+            assert "平均占用" in text or "没有人" in text, (weekday, column)
+
+    # 说明行的初始内容也是服务端成文：服务时段内是"现在"那格的说明，之外是整句引导。
+    now_text = body["heat_now_text"]
+    assert now_text == spec.HEAT_HINT or now_text.startswith(spec.HEAT_NOW_PREFIX)
+    if now_text.startswith(spec.HEAT_NOW_PREFIX):
+        assert any(now_text.removeprefix(spec.HEAT_NOW_PREFIX) in row for row in texts)
+
+
+def test_stats_copy_is_served_with_days_filled(client: TestClient, seeded: dict[str, str]) -> None:
+    """整页描述文案整表下发：键集与登记表一致，`{days}` 已填，其余占位符保留。
+
+    键集断言保证"客户端要用的新键"与"登记表"同步——服务端删了键而客户端还在读，
+    或加了键忘了下发，页面上只是那句话空了，不会报错。
+    """
+    body = client.get(f"/api/v1/stats/devices/{DEVICE}?days=90", headers=seeded).json()
+    copy = body["copy"]
+    assert set(copy) == set(spec.STATS_COPY)
+    assert copy["doors_note"] == "近 90 天 · 次数与平均淋浴时长"
+    assert "{days}" not in copy["doors_note"]
+    # 运行时占位符原样下发，客户端填值。
+    assert "{as_of}" in copy["today_note"]
+    assert "{t}" in copy["replay_detail_bathing"]
+    assert "{pct}" in copy["mine_faster_fast"]
+
+
+@pytest.mark.usefixtures("client")
+def test_heat_denominator_excludes_offline_time() -> None:
+    """热力图分母剔除设备离线的时段（口径 8）。
+
+    离线期间没有帧、占用分子必为空，分母若照算，每次掉线之后整张图都系统性偏低。
+    窗口固定为本地 09-28（周一）12:00 到 09-29（周二）12:00，设备在本地周一
+    12–14 时离线：那两格的分母归零，相邻格不受影响。用独立的设备号，离线事件
+    不渗进其他用例的窗口。
+    """
+    link_device = "dev-stats-link"
+    devices_repository.insert_link_event(link_device, LINK_OFFLINE, "2026-09-28T04:00:00Z")
+    devices_repository.insert_link_event(link_device, LINK_ONLINE, "2026-09-28T06:00:00Z")
+
+    elapsed = service._cell_seconds("2026-09-28T04:00:00Z", "2026-09-29T04:00:00Z", TZ, link_device)
+
+    assert elapsed[(0, 1)] == 0.0  # 周一 12 时，整格离线
+    assert elapsed[(0, 2)] == 0.0  # 周一 13 时，整格离线
+    assert elapsed[(0, 3)] == 3600.0  # 周一 14 时，已恢复在线
+    assert elapsed[(1, 0)] == 3600.0  # 周二 11 时，与离线无关
+
+    # 解析不了的时刻成不了分母，也不抛错：坏窗口给空表，坏事件被跳过。
+    assert service._cell_seconds("not-a-time", "2026-09-29T04:00:00Z", TZ, link_device) == {}
+    assert service._offline_seconds("not-a-time", "not-a-time", TZ, link_device) == {}
+    devices_repository.insert_link_event(link_device, LINK_OFFLINE, "0")
+    assert service._cell_seconds("2026-09-28T04:00:00Z", "2026-09-29T04:00:00Z", TZ, link_device) == elapsed
 
 
 def test_each_board_names_a_detail_field_that_exists(client: TestClient, seeded: dict[str, str]) -> None:
