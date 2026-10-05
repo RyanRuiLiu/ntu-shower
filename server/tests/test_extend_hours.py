@@ -61,9 +61,11 @@ def _prepare(
     device_clock.load(DEVICE, skew_s)
     # 必须登记：tick_once 遍历的是 `device` 表里的设备，没登记的话它连看都不看这台
     helpers.register_trusted_device(DEVICE)
-    # 放回与失败的记忆是模块级的：上一个用例的"已放回"会让这一个用例被跳过
+    # 放回/失败/滚动限频的记忆是模块级的：上一个用例的痕迹会让这一个用例失真
     extend_hours._reassigned.clear()
     extend_hours._reassign_failed.clear()
+    extend_hours._last_roll_at.clear()
+    extend_hours._last_roll.clear()
     server_now = shift_rfc3339(local_now, -ZONE_MINUTES * 60)
     assert server_now is not None
     monkeypatch.setattr(extend_hours, "now_rfc3339", lambda: server_now)
@@ -163,20 +165,15 @@ def test_shift_rearms_power_with_precompensated_target_then_writes_the_clock(
 
     asyncio.run(extend_hours.tick_once())
 
-    assert [action for action, _params in sent] == [
-        actions.POWER_SCHEDULE,
-        actions.CLOCK_SET,
-        actions.POWER_SCHEDULE,
-    ]
+    # 预补偿续写武装了"拨快后表盘再 +10 分钟"的截止，同轮推进的续写被限频跳过：
+    # 武装未满 2 分钟，不必重复下发
+    assert [action for action, _params in sent] == [actions.POWER_SCHEDULE, actions.CLOCK_SET]
     # 预补偿：表盘 23:50 + 拨走的十五分钟 + 滚动窗口十分钟 → 次日 00:15
     assert sent[0][1] == {"off_at": "00:15", "on_at": "10:55"}
     # 写进去的是"拨完之后的设备表盘时刻"：23:50 加满十五分钟
     assert sent[1][1] == {"datetime": "2026-10-06 00:05:00", "rearm": False}
-    # 同一轮 tick 的推进里滚动续写跟着跑一次。拨钟后偏差记录当场跟上（不等下一次
-    # pong），所以它读到的是拨快后的表盘：00:05 + 窗口十分钟 → 00:15。此前记录滞后，
-    # 这一发会写回拨快前的表盘（00:00），把失效安全上界撑大到约 24 小时。
-    assert sent[2][1] == {"off_at": "00:15", "on_at": "10:55"}
-    # 偏差记录同步改过：设备被拨快 900 秒，偏差（服务端 − 设备）减同量
+    # 偏差记录当场跟上：设备被拨快 900 秒，偏差（服务端 − 设备）减同量——否则下一次
+    # 续写会带着过时偏差，把截止写回拨快前的表盘（实测写回过 00:00）
     assert device_clock.get(DEVICE) == -900.0
 
 
@@ -884,3 +881,23 @@ def test_reassign_is_one_shot_per_extension(fresh_db: str, monkeypatch: pytest.M
     asyncio.run(extend_hours._reassign(DEVICE, ((3, "2530110052"),), CONFIG["extend_hours_students"]))
     assert len(attempts) == 1
     assert (DEVICE, "2530110052") in extend_hours._reassigned
+
+
+def test_rolling_rearm_is_throttled_within_the_interval(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """滚动续写限频：武装未满 2 分钟不重复下发。
+
+    窗口 10 分钟、续写 2 分钟，截止永远领先至少 8 分钟——保证不变，命令量降为 1/4。
+    """
+    sent: list[tuple[str, object]] = []
+    _prepare(monkeypatch, "2026-10-06T00:50:00.000Z", sent, skew_s=SKEW_FAST_S)
+    repository.record(
+        DEVICE,
+        shift_rfc3339("2026-10-06T00:50:00.000Z", -ZONE_MINUTES * 60) or "",
+        [{"door_no": 3, "cert_no": "2530110052"}],
+    )
+
+    asyncio.run(extend_hours.tick_once())
+    asyncio.run(extend_hours.tick_once())
+
+    assert [action for action, _params in sent].count(actions.POWER_SCHEDULE) == 1
+    assert repository.get(DEVICE) is not None

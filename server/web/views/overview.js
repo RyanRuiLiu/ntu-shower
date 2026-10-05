@@ -362,7 +362,7 @@ function renderTaskBoard(data) {
                   <div class="task-line">
                     ${deviceCell(shift.device_id)}
                     <span class="muted">钟已拨快 ${shift.shift_minutes} 分钟（${esc(fmtDateTime(shift.shifted_at))}）</span>
-                    <span class="task-next">滚动续写每 ${shift.tick_interval_s} 秒</span>
+                    <span class="task-next">滚动续写每 ${Math.round(shift.rearm_interval_s / 60)} 分钟</span>
                   </div>
                   <div class="task-sub">
                     <span>MCU 截止 <span class="mono">${esc(shift.mcu_off_at || '—')}</span></span>
