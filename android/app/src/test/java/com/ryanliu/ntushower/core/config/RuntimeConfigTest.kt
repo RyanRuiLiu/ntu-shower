@@ -93,7 +93,7 @@ class RuntimeConfigTest {
     fun supportedKeys_hasExpectedCount() {
         // 真正的键集合对账在服务端（server/tests/test_config_spec.py，按名字比对）。
         // 这里只守住数量：设备端键凭空变少或变多都该是有意的改动。
-        assertEquals(28, RuntimeConfig.supportedKeys.size)
+        assertEquals(30, RuntimeConfig.supportedKeys.size)
     }
 
     @Test
@@ -141,7 +141,7 @@ class RuntimeConfigTest {
                 RuntimeConfig.apply(JSONObject().put(key, value))
             }
         }
-        assertEquals(28, RuntimeConfig.supportedKeys.size)
+        assertEquals(30, RuntimeConfig.supportedKeys.size)
     }
 
     @Test
