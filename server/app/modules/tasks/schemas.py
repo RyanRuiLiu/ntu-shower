@@ -61,18 +61,20 @@ class ExtendingDevice(BaseModel):
     """正在延长服务中的设备：拨快幅度、拨快时刻、MCU 武装的截止与恢复条件。
 
     恢复条件两项（`past_midnight` 真实时间过午夜、`idle` 喷头全部空闲）逐项给出：
-    两项齐了之后的一轮 tick（`tick_interval_s` 内）就会拨回。
+    两项齐了之后的一轮 tick（`tick_interval_s` 内）就会拨回。`pending` 是尚未放回
+    的人——浴室端收回谁，谁就是走了，放回是一次性的。
     """
 
     device_id: str
     shift_minutes: int
     shifted_at: str
-    assignments: list[DoorAssignment]
+    total: int
+    reassigned_count: int
+    pending: list[DoorAssignment]
     mcu_off_at: str
     tick_interval_s: int
     idle: bool
     past_midnight: bool
-    reassigned_count: int
 
 
 class ScheduledAction(BaseModel):
