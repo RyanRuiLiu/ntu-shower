@@ -16,7 +16,7 @@
 命令。要对照两边，按 `occurred_at` 与 `command_audit.created_at` 排着看。
 
 **延长服务时间不在这三条里。** 它的每一次动手都是一个命令（`clock.set` /
-`bath.restart` / `session.assign`），不存在"动手了却没有命令"的终局；而这张表的
+`power.schedule` / `session.assign`），不存在"动手了却没有命令"的终局；而这张表的
 `door_no` 与 `cert_no` 都是非空的，判定粒度却是**整台设备**——它装不下。它的"为什么
 动手"由结构化日志说（事件名 `extend-hours.*`），动作本身由 command_audit 覆盖，
 两边按设备与时间排着看。
