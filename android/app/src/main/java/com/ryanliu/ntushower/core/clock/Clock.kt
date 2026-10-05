@@ -10,8 +10,8 @@ import java.util.TimeZone
  *
  * 对应协议信封的 `ts`——两端的时间字符串都经由此处，格式不会各自漂移。
  *
- * 解析有两个消费者：开机时间自校正（TimeSync）拿 `link.hello_ack` 的 `server_time`
- * 与本机墙钟比一次偏差；[ServerClock] 拿它立锚点。**墙钟本身仍不得用于"判断某个时刻
+ * 解析的消费者是 [ServerClock]：拿 `link.hello_ack` 的 `server_time` 与每一轮
+ * `link.ping` 的 `sender_time` 立锚点。**墙钟本身仍不得用于"判断某个时刻
  * 过了没有"**——那类判定依赖两台机器的时钟一致，而这台设备没有 NTP；命令的有效期因此
  * 仍是相对时长（见 `protocol/schema/session.command.json` 的 `timeout_ms`）。
  *

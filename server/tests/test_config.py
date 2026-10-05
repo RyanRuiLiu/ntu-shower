@@ -64,7 +64,8 @@ def test_update_global_drops_a_roster_emptied_back_to_default(fresh_db: str) -> 
 
 
 #: 生产 `global_config` 里真实存在的那一组覆盖键（2026-10-04 只读查询所得，值取同形状的
-#: 假数据）。**四个开关在线上全是开的、四份名单各有一人**，所以下面两条测试用的是真事：
+#: 假数据；`boot_time_sync_enabled` 于 2026-10-05 改名 `time_sync_enabled`，覆盖键随之）。
+#: **四个开关在线上全是开的、四份名单各有一人**，所以下面两条测试用的是真事：
 #: `update_global` 少带回任何一个键，那个键就会因为"等于默认值"被剔掉——线上就是关掉一个
 #: 功能、删掉一个人的登记。
 PRODUCTION_OVERRIDES = {
@@ -73,7 +74,7 @@ PRODUCTION_OVERRIDES = {
     "renew_wait_enabled": True,
     "extend_hours_enabled": True,
     "automation_trace_enabled": True,
-    "boot_time_sync_enabled": True,
+    "time_sync_enabled": True,
     "auto_settle_students": {"99990052": "000000"},
     "renew_session_students": {"99990057": "111111"},
     "renew_wait_students": {"99990053": "000000"},
