@@ -104,6 +104,10 @@ ROLL_WINDOW_MIN = 10
 
 _task: asyncio.Task[None] | None = None
 
+#: 设备 → 最近一次成功滚动续写的断电目标（表盘 HH:MM）。看板用它显示"MCU 里此刻
+#: 武装的截止"；进程重启后为空，下一轮 tick（30 秒内）重新武装时自动填上。
+_last_roll: dict[str, str] = {}
+
 #: (设备, 学号) → 这次延长里我们已经替他放回过、或确认他自己已经有会话。
 #:
 #: 放回是**一次性**的（见 `_reassign` 的注释）：这一次结束之后，浴室端的 300 秒无水
@@ -193,21 +197,32 @@ def _hhmm_minutes(text: str) -> int | None:
 
 
 def current_shifts() -> list[dict[str, object]]:
-    """正在延长中的设备：拨快幅度、拨快时刻与记下的"谁在哪个喷头"。
+    """正在延长中的设备：拨快幅度、拨快时刻、MCU 里武装的截止、恢复条件与放回进度。
 
-    只读的运维可见性（概览页的后台任务卡）：表里一行就是"这台设备钟是拨快着的"，
-    派生自它的现态与要分配回去的人。
+    只读的运维可见性（概览页的后台任务卡）：表里一行就是"这台设备钟是拨快着的"。
+    恢复条件两项（真实时间过午夜、喷头全部空闲）逐项给出——面板能直接回答
+    "什么时候拨回"：两项齐了之后的一轮 tick（30 秒内）就会动手。
     """
     rows: list[dict[str, object]] = []
     for row in repository.list_shifted():
         shift = _as_shift(row)
         config = config_store.effective(shift.device_id)
+        zone = as_int(config["extend_hours_zone_offset_minutes"])
+        shift_local = to_local(shift.shifted_at, zone)
+        now_local = to_local(now_rfc3339(), zone)
+        past_midnight = shift_local is not None and now_local is not None and now_local.date() > shift_local.date()
+        idle = not doors_service.open_sessions(shift.device_id)
         rows.append(
             {
                 "device_id": shift.device_id,
                 "shift_minutes": as_int(config["extend_shift_minutes"]),
                 "shifted_at": shift.shifted_at,
                 "assignments": [{"door_no": door_no, "cert_no": cert_no} for door_no, cert_no in shift.assignments],
+                "mcu_off_at": _last_roll.get(shift.device_id, ""),
+                "tick_interval_s": int(TICK_INTERVAL_S),
+                "idle": idle,
+                "past_midnight": past_midnight,
+                "reassigned_count": sum(1 for item in _reassigned if item[0] == shift.device_id),
             }
         )
     return rows
@@ -309,14 +324,18 @@ async def _roll_power(device_id: str, config: ConfigValues, pre_shift: bool) -> 
     """滚动重布一次；返回是否成功。
 
     设备离线时命令失败如实回报——最迟一个窗口后按最后一次布防断电，上电目标仍是次日
-    `power_on_at`，失效安全。
+    `power_on_at`，失效安全。成功的那一笔断电目标记进 `_last_roll`，看板据此显示
+    "MCU 里此刻武装的截止"。
     """
     targets = _roll_target(device_id, config, pre_shift)
     if targets is None:
         log_event("WARNING", "extend-hours.no-skew", "还没有这台设备的钟偏差记录，不动它", device_id=device_id)
         return False
     off_at, on_at = targets
-    return await _schedule_power(device_id, off_at, on_at)
+    if await _schedule_power(device_id, off_at, on_at):
+        _last_roll[device_id] = off_at
+        return True
+    return False
 
 
 async def _maybe_correct_clock(device_id: str, config: ConfigValues) -> None:

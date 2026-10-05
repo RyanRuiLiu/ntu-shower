@@ -8,7 +8,7 @@
  * 数据取 GET /doors，管理面写操作同域。
  */
 import { api } from '../core/api.js'
-import { elapsedSince, fmtDateTime, fmtDuration, fmtTime } from '../core/clock.js'
+import { elapsedSince, fmtDateTime, fmtDuration, fmtTime, serverNowMs } from '../core/clock.js'
 import { DOOR_STATES } from '../core/contract.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
 import { outcomeText, problemText, report } from '../core/outcome.js'
@@ -206,7 +206,11 @@ let tickTimer = null
 
 function startTicking() {
   if (tickTimer !== null) return
-  tickTimer = setInterval(refreshDurations, 1000)
+  tickTimer = setInterval(() => {
+    refreshDurations()
+    // 喷头时长与任务倒计时共用同一根秒针
+    refreshTaskCountdowns()
+  }, 1000)
 }
 
 function stopTicking() {
@@ -294,73 +298,113 @@ async function doPhoto() {
 
 // ── 后台任务看板 ──────────────────────────────────────────────────────────
 
+/** 倒计时文案：到点之前是"多久之后"，过了就是"到点执行中"。按服务端钟算。 */
+function countdownText(at) {
+  const remaining = Math.round((Date.parse(at) - serverNowMs()) / 1000)
+  if (remaining <= 0) return '到点执行中'
+  return `${fmtDuration(remaining)}后`
+}
+
+/** 每秒把看板上的倒计时重算一遍（与喷头时长的秒针共用同一条定时器）。 */
+function refreshTaskCountdowns() {
+  for (const node of $('taskBoard').querySelectorAll('[data-at]')) {
+    node.textContent = countdownText(node.dataset.at)
+  }
+}
+
 /**
- * 四个后台任务各一段：开关与名单、此刻在等什么。
+ * 四个后台任务各一段：开关与名单、下次执行（倒计时）、每条在等动作的完整明细。
  *
  * 只报告状态、不做判断：判据在服务端只有一处出处，这里把它显示出来。排定的动作按
- * 功能归到各自的任务段下（extend_hours 不走调度器，它的现状是"延长中的设备"）；
- * 设备名沿用审计页的做法——从共享的 store.devices 映射，悬停看 id。数据随帧刷新，
- * 30 秒轮询兜住"状态不变就没有帧"的空窗。
+ * 功能归到各自的任务段；extend_hours 不走调度器，它自己的现状是"拨快状态 + MCU
+ * 武装的截止 + 恢复条件逐项"。设备名沿用审计页做法：从共享的 store.devices 映射，
+ * 悬停看 id。倒计时是这块的锚点——每秒走字，其余一切安静。
  */
 function renderTaskBoard(data) {
   const names = new Map(store.devices.map((device) => [device.device_id, device.name]))
-  const deviceCell = (id) => `<span class="mono" title="${esc(id)}">${esc(names.get(id) || id)}</span>`
+  const deviceCell = (id) => `<span class="task-dev" title="${esc(id)}">${esc(names.get(id) || id)}</span>`
 
   const scheduledByFeature = {}
   for (const row of data.scheduled) (scheduledByFeature[row.feature] ||= []).push(row)
 
-  return data.tasks
-    .map((task) => {
-      let body
-      if (task.key === 'extend_hours') {
-        body =
-          data.extending.length === 0
-            ? '<div class="muted task-hint">当前没有设备在延长中</div>'
-            : data.extending
-                .map((shift) => {
-                  const people = shift.assignments
-                    .map((item) => `#${item.door_no} ${item.cert_no}`)
-                    .join('、')
-                  return `
-                  <div class="task-block">
-                    <div class="task-row">${deviceCell(shift.device_id)}
-                      <span class="muted">钟已拨快 ${esc(shift.shift_minutes)} 分钟 · 于 ${esc(fmtDateTime(shift.shifted_at))}</span>
-                    </div>
-                    <div class="task-row"><span class="muted">待分配回原喷头：${esc(people || '无')}</span></div>
-                  </div>`
-                })
-                .join('')
-      } else {
-        const rows = scheduledByFeature[task.key] || []
-        body =
-          rows.length === 0
-            ? '<div class="muted task-hint">当前没有排定的动作</div>'
-            : rows
-                .map((row) => {
-                  const detail =
-                    `会话 #${row.session_id} · 现态 ${esc(row.state)} · ` +
-                    `起算 ${esc(fmtDateTime(row.started_at))} · 阈值 ${fmtDuration(row.threshold_s)}`
-                  return `
-                  <div class="task-block">
-                    <div class="task-row">
-                      ${deviceCell(row.device_id)}
-                      <span>#${esc(row.door_no)}</span>
-                      <span class="mono">${esc(row.cert_no || PLACEHOLDER)}</span>
-                      <span class="time">到点 ${esc(fmtDateTime(row.at))}</span>
-                    </div>
-                    <div class="task-row muted">${detail}</div>
-                  </div>`
-                })
-                .join('')
-      }
-      return `
-      <div class="task-section-title">
-        ${esc(task.title)}
-        <span class="task-state ${task.enabled ? 'on' : 'off'}">${task.enabled ? '启用' : '停用'}</span>
-        <span class="muted">名单 ${task.roster} 人</span>
-      </div>${body}`
-    })
-    .join('')
+  const taskSections = data.tasks.map((task) => {
+    const rows = scheduledByFeature[task.key] || []
+    const nextAt = rows.length ? rows.map((row) => row.at).sort()[0] : ''
+    const head = `
+      <div class="task-head">
+        <span class="task-name">${esc(task.title)}</span>
+        <span class="task-chip ${task.enabled ? 'on' : 'off'}">${task.enabled ? '启用' : '停用'}</span>
+        <span class="task-meta">名单 ${task.roster} 人</span>
+        ${nextAt ? `<span class="task-next">下次执行 <span data-at="${esc(nextAt)}">${esc(countdownText(nextAt))}</span></span>` : ''}
+      </div>`
+
+    if (task.key === 'extend_hours') {
+      const body =
+        data.extending.length === 0
+          ? '<div class="task-hint">当前没有设备在延长中</div>'
+          : data.extending
+              .map((shift) => {
+                const total = shift.assignments.length
+                const people = shift.assignments.map((item) => `#${item.door_no} ${item.cert_no}`).join('  ')
+                const flags = [
+                  { ok: shift.past_midnight, yes: '午夜已过', no: '未过午夜' },
+                  { ok: shift.idle, yes: '喷头空闲', no: '仍有会话' },
+                ]
+                  .map(({ ok, yes, no }) => `<span class="task-flag ${ok ? 'ok' : 'no'}">${ok ? '✓' : '✗'} ${ok ? yes : no}</span>`)
+                  .join('')
+                  + (shift.past_midnight && shift.idle ? '<span class="task-flag ok">即将拨回</span>' : '')
+                return `
+                <div class="task-entry">
+                  <div class="task-line">
+                    ${deviceCell(shift.device_id)}
+                    <span class="task-next">滚动续写每 ${shift.tick_interval_s} 秒</span>
+                  </div>
+                  <div class="task-sub">
+                    <span>钟已拨快 ${shift.shift_minutes} 分钟</span>
+                    <span>于 ${esc(fmtDateTime(shift.shifted_at))}</span>
+                    <span>MCU 截止 <span class="mono">${esc(shift.mcu_off_at || '—')}</span></span>
+                    <span>已放回 ${shift.reassigned_count}/${total}</span>
+                  </div>
+                  <div class="task-sub">${flags}<span class="muted">待分配：${esc(people || '无')}</span></div>
+                </div>`
+              })
+              .join('')
+      return `<div class="task-section">${head}${body}</div>`
+    }
+
+    const body =
+      rows.length === 0
+        ? '<div class="task-hint">当前没有排定的动作</div>'
+        : rows
+            .map((row) => {
+              const chain =
+                row.max_duration_s === null
+                  ? ''
+                  : `<span>本轮自 ${esc(fmtDateTime(row.run_started_at))}</span>` +
+                    `<span>上限 ${fmtDuration(row.max_duration_s)}</span>`
+              return `
+              <div class="task-entry">
+                <div class="task-line">
+                  ${deviceCell(row.device_id)}
+                  <span>#${esc(row.door_no)}</span>
+                  <span class="mono">${esc(row.cert_no || PLACEHOLDER)}</span>
+                  <span class="task-countdown" data-at="${esc(row.at)}">${esc(countdownText(row.at))}</span>
+                </div>
+                <div class="task-sub">
+                  <span>会话 #${esc(row.session_id)}</span>
+                  <span>${esc(row.state)}</span>
+                  <span>起算 ${esc(fmtDateTime(row.started_at))}</span>
+                  <span>阈值 ${fmtDuration(row.threshold_s)}</span>
+                  <span>到点 ${esc(fmtDateTime(row.at))}</span>
+                  ${chain}
+                </div>
+              </div>`
+            })
+            .join('')
+    return `<div class="task-section">${head}${body}</div>`
+  })
+
+  return taskSections.join('')
 }
 
 async function refreshTaskBoard() {

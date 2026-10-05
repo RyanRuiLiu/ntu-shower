@@ -425,14 +425,17 @@ def test_status_includes_the_extending_device(client: TestClient, admin_headers:
 
     data = client.get("/api/v1/background-tasks/status", headers=admin_headers).json()
 
-    assert data["extending"] == [
-        {
-            "device_id": "dev-status-ext",
-            "shift_minutes": 15,
-            "shifted_at": "2026-10-05T15:49:30.000Z",
-            "assignments": [{"door_no": 3, "cert_no": CERT_NO}],
-        }
-    ]
+    extending = data["extending"]
+    assert len(extending) == 1
+    row = extending[0]
+    assert row["device_id"] == "dev-status-ext"
+    assert row["shift_minutes"] == 15
+    assert row["shifted_at"] == "2026-10-05T15:49:30.000Z"
+    assert row["assignments"] == [{"door_no": 3, "cert_no": CERT_NO}]
+    assert row["mcu_off_at"] == ""  # 没经过滚动：尚无武装的截止
+    assert row["tick_interval_s"] == 30
+    assert row["idle"] is True
+    assert row["reassigned_count"] == 0
 
 
 def test_status_requires_admin(client: TestClient, fresh_db: str, tasks_headers: dict[str, str]) -> None:

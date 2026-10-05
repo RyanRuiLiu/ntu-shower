@@ -58,19 +58,29 @@ class DoorAssignment(BaseModel):
 
 
 class ExtendingDevice(BaseModel):
-    """正在延长服务中的设备：拨快幅度、拨快时刻与拨之前谁在哪个喷头。"""
+    """正在延长服务中的设备：拨快幅度、拨快时刻、MCU 武装的截止与恢复条件。
+
+    恢复条件两项（`past_midnight` 真实时间过午夜、`idle` 喷头全部空闲）逐项给出：
+    两项齐了之后的一轮 tick（`tick_interval_s` 内）就会拨回。
+    """
 
     device_id: str
     shift_minutes: int
     shifted_at: str
     assignments: list[DoorAssignment]
+    mcu_off_at: str
+    tick_interval_s: int
+    idle: bool
+    past_midnight: bool
+    reassigned_count: int
 
 
 class ScheduledAction(BaseModel):
     """调度器已排定的下一次动作：在等谁、等到什么时候、为什么是这一刻。
 
     `state` 是门现态，`started_at` 是这条判据的起算时刻（分配时刻或关阀时刻，随功能
-    而定），`threshold_s` 是当时生效的阈值——面板据此能解释"为什么在这一刻动手"。
+    而定），`threshold_s` 是当时生效的阈值；`run_started_at` 与 `max_duration_s` 是
+    本轮续期链的起点与上限（无上限的功能给 null）——面板据此能回答"什么时候到头"。
     """
 
     device_id: str
@@ -82,6 +92,8 @@ class ScheduledAction(BaseModel):
     session_id: int
     started_at: str
     threshold_s: int
+    run_started_at: str
+    max_duration_s: int | None
 
 
 class BackgroundTasksStatus(BaseModel):
