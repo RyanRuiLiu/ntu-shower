@@ -302,47 +302,105 @@
 }
 
 
-/* ── 后台任务卡：开关行、延长中的设备、调度器排定的动作 ─────────────────────── */
+/* ── 后台任务看板 ──────────────────────────────────────────────────────────
+   机器读数一律等宽；唯一的亮色给倒计时（"还有多久动手"是这块的锚点），
+   其余安静。条目之间发丝线分隔，不做卡中卡。 */
 
-.task-board .task-row {
+.task-board .task-section + .task-section {
+  border-top: 1px solid var(--border);
+}
+
+.task-board .task-head {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 12px;
+  gap: 4px 10px;
   align-items: baseline;
-  padding: 2px 0;
-  font-size: 14px;
+  padding: 8px 0 2px;
 }
 
 .task-board .task-name {
-  min-width: 7em;
+  font-weight: 600;
 }
 
-.task-board .task-state.on {
+.task-board .task-chip {
+  padding: 0 6px;
+  font-size: 12px;
+  border-radius: 3px;
+}
+
+.task-board .task-chip.on {
+  color: var(--green);
+  background: var(--green-bg);
+}
+
+.task-board .task-chip.off {
+  color: var(--muted);
+  background: rgb(110 118 129 / 12%);
+}
+
+.task-board .task-meta {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.task-board .task-next {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.task-board .task-next [data-at] {
+  color: var(--amber);
+  font-family: var(--font-mono);
+}
+
+.task-board .task-entry + .task-entry {
+  border-top: 1px solid var(--border);
+}
+
+.task-board .task-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  align-items: baseline;
+  padding-top: 4px;
+}
+
+.task-board .task-dev {
+  font-weight: 600;
+}
+
+.task-board .task-line .task-countdown {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 15px;
+  color: var(--amber);
+}
+
+.task-board .task-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  margin-top: 2px;
+  padding-bottom: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.task-board .task-sub .mono {
+  font-family: var(--font-mono);
+}
+
+.task-board .task-flag.ok {
   color: var(--green);
 }
 
-.task-board .task-state.off {
-  color: var(--muted);
-}
-
-.task-board .task-section {
-  margin-bottom: 6px;
-}
-
-.task-board .task-section-title {
-  margin: 10px 0 4px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  color: var(--muted);
+.task-board .task-flag.no {
+  color: var(--red);
 }
 
 .task-board .task-hint {
+  padding: 2px 0 8px;
   font-size: 13px;
-}
-
-.task-board .task-section-title {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
+  color: var(--muted);
 }
