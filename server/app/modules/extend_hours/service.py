@@ -12,16 +12,17 @@
   它们统统越界——**设备上所有喷头被清空**，不只是名单里的那几个；
 - 拨完之后等门清空，再替名单里的人把喷头分配回去。
 
-## 滚动重布：为什么截止每 30 秒重写一次
+## 滚动重布：为什么截止要反复重写，以及为什么是每 2 分钟
 
 MCU 的断电截止是**钟面时刻**——钟被拨动，截止就在真实时间里跟着平移；而延长的时长
 本质上由"名单里的人什么时候洗完"决定，**没有天然上界**。任何一次性的固定截止（无论
 写多远）都迟早落到"有人还在用水"的时刻上——那一下就是打断。
 
-所以延长期间 MCU 里的截止不是一条写死的计划，而是**滚动窗口**：定时任务每 30 秒把
-断电时刻重写为"表盘此刻 + `ROLL_WINDOW_MIN` 分钟"。只要服务端在续写，截止永远追不上
-钟，任何人都不会被打断；服务端一旦消失（宕机、断连），最迟一个窗口后断电——失效安全
-且有界。上电目标始终是次日 `power_on_at`，即使服务端消失，次日照常来电。
+所以延长期间 MCU 里的截止不是一条写死的计划，而是**滚动窗口**：武装的截止永远是
+"表盘此刻 + `ROLL_WINDOW_MIN` 分钟"，每 `ROLL_REARM_INTERVAL_S`（2 分钟）续写一次。
+只要服务端在续写，截止永远追不上钟，任何人都不会被打断；服务端一旦消失（宕机、断
+联），最迟一个窗口（10 分钟）后断电——失效安全且有界。上电目标始终是次日
+`power_on_at`，即使服务端消失，次日照常来电。
 
 ## 恢复条件：跳过的断电时刻已过，且设备上无人占用
 
@@ -37,11 +38,11 @@ MCU 的断电截止是**钟面时刻**——钟被拨动，截止就在真实时
 ## 动作顺序
 
 ```
-① 滚动重布（预补偿）  power.schedule  —— 截止推过"拨快的一小时 + 窗口"，拨快才不会当场断电
-② 拨钟                clock.set(+1h)  —— 浴室 App 还在跑，它下一轮扫描就会清空喷头
-③ 重新分配            session.assign  —— 帧与定时任务推动，把名单里的人放回原喷头
-④ 滚动重布            power.schedule  —— 每 30 秒续写一次，延长期间无人被打断
-⑤ 拨回 + 重布         clock.set(-1h) + power.schedule —— 无人占用后执行，节奏恢复
+① 滚动重布（预补偿）  power.schedule  —— 截止推过"拨快的一刻钟 + 窗口"，拨快才不会当场断电
+② 拨钟                clock.set(+15分) —— 浴室 App 还在跑，它下一轮扫描就会清空喷头
+③ 重新分配            session.assign  —— 帧与定时任务推动，把名单里的人放回原喷头（每人一次）
+④ 滚动续写            power.schedule  —— 每 2 分钟续写一次，延长期间无人被打断
+⑤ 拨回 + 重布         clock.set(-15分) + power.schedule —— 无人占用后执行，节奏恢复
 ```
 
 ## 两个入口，各管一段
@@ -67,6 +68,7 @@ MCU 的断电截止是**钟面时刻**——钟被拨动，截止就在真实时
 """
 
 import asyncio
+import time
 from dataclasses import dataclass
 from sqlite3 import Row
 
@@ -97,15 +99,22 @@ def _shift_s(config: ConfigValues) -> int:
 #: 默认 23:49，放人线 23:53）。
 TICK_INTERVAL_S = 30.0
 
-#: 滚动重布的窗口（分钟），也是失效安全的上界：服务端消失（宕机、断连）后，MCU 最迟
+#: 滚动续写间隔。窗口 10 分钟、续写 2 分钟意味着截止永远领先至少 8 分钟；续写失败
+#: 下一轮 tick（30 秒）就重试，不需要等满间隔。命令量由此降为窗口方案的 1/4，
+#: 失效安全上界不变（服务端消失最迟一个窗口后断电）。
+ROLL_REARM_INTERVAL_S = 120.0
+
+#: 滚动重布的窗口（分钟），也是失效安全的上界：服务端消失（宕机、断联）后，MCU 最迟
 #: 一个窗口后按最后一次布防断电，上电目标始终是次日 `power_on_at`。窗口必须远大于
-#: tick 间隔（30 秒）与命令延迟（p50 0.6 秒），10 分钟即"连续丢 19 轮 tick 才会到点"。
+#: 续写间隔（120 秒）与命令延迟（p50 0.6 秒），10 分钟即"连续丢 5 次续写才到点"。
 ROLL_WINDOW_MIN = 10
 
 _task: asyncio.Task[None] | None = None
 
-#: 设备 → 最近一次成功滚动续写的断电目标（表盘 HH:MM）。看板用它显示"MCU 里此刻
-#: 武装的截止"；进程重启后为空，下一轮 tick（30 秒内）重新武装时自动填上。
+#: 设备 → 最近一次成功滚动续写的时刻（单调钟）与断电目标（表盘 HH:MM）。前者做
+#: 限频（武装未满间隔不重复下发），后者给看板显示"MCU 里此刻武装的截止"；进程
+#: 重启后两者为空，下一轮 tick（30 秒内）重新武装时自动填上。
+_last_roll_at: dict[str, float] = {}
 _last_roll: dict[str, str] = {}
 
 #: (设备, 学号) → 这次延长里我们已经替他放回过、或确认他自己已经有会话。
@@ -227,7 +236,7 @@ def current_shifts() -> list[dict[str, object]]:
                 "reassigned_count": len(shift.assignments) - len(pending),
                 "pending": pending,
                 "mcu_off_at": _last_roll.get(shift.device_id, ""),
-                "tick_interval_s": int(TICK_INTERVAL_S),
+                "rearm_interval_s": int(ROLL_REARM_INTERVAL_S),
                 "idle": idle,
                 "past_midnight": past_midnight,
             }
@@ -341,6 +350,7 @@ async def _roll_power(device_id: str, config: ConfigValues, pre_shift: bool) -> 
     off_at, on_at = targets
     if await _schedule_power(device_id, off_at, on_at):
         _last_roll[device_id] = off_at
+        _last_roll_at[device_id] = time.monotonic()
         return True
     return False
 
@@ -593,9 +603,13 @@ async def _advance(shift: Shift, config: ConfigValues) -> None:
     """推进一台正在延长的设备：滚动续写截止、推重新分配、检查恢复条件。
 
     三个动作每轮都做、顺序固定：滚动续写最要紧（它是"谁都不会被打断"的保证）；
-    重新分配幂等（查现状决定做不做）；恢复只在条件齐了才动。
+    重新分配幂等（查现状决定做不做）；恢复只在条件齐了才动。续写有**限频**——
+    武装未满 2 分钟不重复下发（命令量降为 1/4，保证不变）；失败不计入限频，
+    下一轮 tick 照常重试。
     """
-    await _roll_power(shift.device_id, config, pre_shift=False)
+    last = _last_roll_at.get(shift.device_id)
+    if last is None or time.monotonic() - last >= ROLL_REARM_INTERVAL_S:
+        await _roll_power(shift.device_id, config, pre_shift=False)
     students = roster(config, "extend_hours_students")
     if students:
         await _reassign(shift.device_id, shift.assignments, students)
