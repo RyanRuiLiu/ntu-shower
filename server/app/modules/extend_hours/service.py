@@ -70,7 +70,7 @@ from dataclasses import dataclass
 from sqlite3 import Row
 
 from app.core import actions, device_clock, outcomes
-from app.core.clock import now_rfc3339, parse_rfc3339, seconds_between, shift_rfc3339, wall_clock_text
+from app.core.clock import now_rfc3339, parse_rfc3339, shift_rfc3339, to_local, wall_clock_text
 from app.core.logging import exc_info_text, log_event
 from app.core.problems import ApiProblemError
 from app.core.protocol import as_int
@@ -85,10 +85,12 @@ from app.modules.sessions.schemas import AssignRequest
 
 from . import repository
 
-#: 拨钟拨走的时长。**不做配置**：它的作用是把设备钟推过日界，而 `extend_hours_at`
-#: 的下限（23:00）保证"加满一小时即跨日"。多拨没有别的好处，少拨则跨不过去——跨不
-#: 过去意味着浴室 App 的下一次扫描仍在当日的 23:53 命中，当场把所有人放掉。
-SHIFT_S = 3600
+
+#: 拨钟拨走的时长按 `extend_shift_minutes` 现算（秒）：落点必须跨过午夜，才能一次
+#: 跳过 23:50 起的新人关闭窗口、23:58 的断电，以及两者之间的全部释放判定。
+def _shift_s(config: ConfigValues) -> int:
+    return as_int(config["extend_shift_minutes"]) * 60
+
 
 #: 扫表间隔。它要远小于"到点"与"浴室 App 放人"之间那几分钟余量（`extend_hours_at`
 #: 默认 23:49，放人线 23:53）。
@@ -181,19 +183,6 @@ def _hhmm_minutes(text: str) -> int | None:
     return moment.hour * 60 + moment.minute
 
 
-def _skip_gap_s(config: ConfigValues) -> int:
-    """被跳过的断电时刻距拨钟时刻的钟面间隔（秒）。
-
-    = `power_off_at − extend_hours_at`，跨日取模：23:49 拨快跳过的是当晚 23:58 那一次，
-    走过去了才算"跳过"。两个键都是配置，这里现算而不写死。
-    """
-    extend_min = _hhmm_minutes(str(config["extend_hours_at"]))
-    off_min = _hhmm_minutes(str(config["power_off_at"]))
-    if extend_min is None or off_min is None:
-        return 0
-    return ((off_min - extend_min) % 1440) * 60
-
-
 # ── 动作 ──────────────────────────────────────────────────────────────────
 
 
@@ -214,7 +203,10 @@ async def _set_clock(device_id: str, seconds: float, zone_offset_minutes: int) -
         log_event("WARNING", "extend-hours.bad-target", "算不出目标时刻，不动它", device_id=device_id)
         return False
 
-    written = await sessions_service.send_command_and_wait(device_id, actions.CLOCK_SET, {"datetime": text})
+    # rearm=false：延长流程自己管理 MCU 的滚动重布，拨快/拨回不触发设备端的配对重布
+    written = await sessions_service.send_command_and_wait(
+        device_id, actions.CLOCK_SET, {"datetime": text, "rearm": False}
+    )
     if written["status"] != outcomes.OK.value:
         log_event(
             "WARNING",
@@ -273,7 +265,7 @@ def _roll_target(device_id: str, config: ConfigValues, pre_shift: bool) -> tuple
     local_now = _local_now(device_id, as_int(config["extend_hours_zone_offset_minutes"]))
     if local_now is None:
         return None
-    shift_comp = SHIFT_S if pre_shift else 0
+    shift_comp = _shift_s(config) if pre_shift else 0
     off_wall = wall_clock_text(shift_rfc3339(local_now, shift_comp + ROLL_WINDOW_MIN * 60))
     if off_wall is None:
         return None
@@ -292,6 +284,50 @@ async def _roll_power(device_id: str, config: ConfigValues, pre_shift: bool) -> 
         return False
     off_at, on_at = targets
     return await _schedule_power(device_id, off_at, on_at)
+
+
+async def _maybe_correct_clock(device_id: str, config: ConfigValues) -> None:
+    """延长之外的运行时钟偏差校正（`boot_time_sync_enabled` 的运行时形态）。
+
+    设备可能整夜不重启（延长服务就是这种场景），开机校时等不到——而延长之外留下的
+    钟偏差（手工拨动、漂移）会让浴室 App 的全部判据错位。偏差超过阈值且**不在延长中**
+    （延长中的偏差是故意的，拨快本来就是流程的一部分）时，服务端主动下发 clock.set：
+    设备端校钟后按电源计划重布 MCU，节奏自愈。
+    """
+    if not config["boot_time_sync_enabled"]:
+        return
+    if repository.get(device_id) is not None:
+        return  # 延长中：偏差是故意的
+    if not device_clock.has(device_id):
+        return  # 还没有偏差记录（首次 pong 之前），无从判
+    skew = device_clock.get(device_id)  # 服务端 − 设备（秒）
+    threshold = as_int(config["boot_time_sync_threshold_s"])
+    if abs(skew) < threshold:
+        return
+    zone = as_int(config["extend_hours_zone_offset_minutes"])
+    text = wall_clock_text(shift_rfc3339(now_rfc3339(), zone * 60))
+    if text is None:
+        return
+    result = await sessions_service.send_command_and_wait(
+        device_id, actions.CLOCK_SET, {"datetime": text, "rearm": True}
+    )
+    if result["status"] != outcomes.OK.value:
+        log_event(
+            "WARNING",
+            "time-sync.correction-failed",
+            "运行时钟偏差校正失败",
+            device_id=device_id,
+            skew_s=round(skew, 1),
+            reason_code=result["reason_code"] or "-",
+        )
+        return
+    log_event(
+        "INFO",
+        "time-sync.corrected",
+        "运行时钟偏差已校正",
+        device_id=device_id,
+        skew_s=round(skew, 1),
+    )
 
 
 async def _maybe_shift(device_id: str) -> None:
@@ -320,12 +356,32 @@ async def _maybe_shift(device_id: str) -> None:
     # 先记下谁在哪个喷头，再下发拨钟：会话会被清掉，那一刻之后再没有别的地方能说出
     # "他原来在哪个喷头"。
     assignments = [{"door_no": door_no, "cert_no": cert_no} for door_no, cert_no in present]
+    shift_s = _shift_s(config)
+    zone = as_int(config["extend_hours_zone_offset_minutes"])
+    local_now = _local_now(device_id, zone)
+    if local_now is None:
+        log_event("WARNING", "extend-hours.no-skew", "还没有这台设备的钟偏差记录，不动它", device_id=device_id)
+        return
+    # 落点守卫：拨快后的钟面必须跨过午夜（一次跳过新人关闭窗口与断电时刻），否则本轮放弃
+    # landing 与 local_now 同轴（表盘），日期不前进就是没跨过午夜。
+    landing = shift_rfc3339(local_now, shift_s)
+    landing_date = parse_rfc3339(landing)
+    now_date = parse_rfc3339(local_now)
+    if landing_date is None or now_date is None or landing_date.date() == now_date.date():
+        log_event(
+            "WARNING",
+            "extend-hours.landing-unsafe",
+            "拨快落点未跨过午夜，本轮不拨",
+            device_id=device_id,
+            landing=landing,
+        )
+        return
     repository.record(device_id, now_rfc3339(), assignments)
     if not await _roll_power(device_id, config, pre_shift=True):
         repository.clear(device_id)
         log_event("WARNING", "extend-hours.shift-failed", "保护性重布没成功，下一轮再试", device_id=device_id)
         return
-    if not await _set_clock(device_id, SHIFT_S, as_int(config["extend_hours_zone_offset_minutes"])):
+    if not await _set_clock(device_id, shift_s, zone):
         repository.clear(device_id)
         log_event("WARNING", "extend-hours.shift-failed", "拨钟没成功，下一轮再试", device_id=device_id)
         return
@@ -445,8 +501,9 @@ async def tick_once() -> None:
     """
     for record in devices_service.list_devices():
         await _maybe_shift(record["device_id"])
+        config = config_store.effective(record["device_id"])
+        await _maybe_correct_clock(record["device_id"], config)
     for row in repository.list_shifted():
-        config = config_store.effective(row["device_id"])
         await _advance(_as_shift(row), config)
 
 
@@ -470,8 +527,13 @@ def _restore_due(shift: Shift, config: ConfigValues) -> bool:
     两个条件缺一不可——时刻没到，延长还在服务窗口里；有会话在（预约未开阀的、
     淋浴中的），拨回的钟跳会清掉这些会话。"尽可能连续不被打断"由这两条共同保证。
     """
-    if seconds_between(shift.shifted_at, now_rfc3339()) < _skip_gap_s(config):
+    zone = as_int(config["extend_hours_zone_offset_minutes"])
+    shift_local = to_local(shift.shifted_at, zone)
+    now_local = to_local(now_rfc3339(), zone)
+    if shift_local is None or now_local is None:
         return False
+    if now_local.date() <= shift_local.date():
+        return False  # 午夜未过：敌对窗口的尾巴还在
     return not doors_service.open_sessions(shift.device_id)
 
 
@@ -485,7 +547,7 @@ async def _restore(shift: Shift, config: ConfigValues) -> bool:
     的旧值，下一轮滚动会续写、本函数也会重试重布，直到成功。
     """
     zone_offset_minutes = as_int(config["extend_hours_zone_offset_minutes"])
-    if not await _set_clock(shift.device_id, -SHIFT_S, zone_offset_minutes):
+    if not await _set_clock(shift.device_id, -_shift_s(config), zone_offset_minutes):
         log_event("WARNING", "extend-hours.restore-failed", "调回没成功，下一轮再试", device_id=shift.device_id)
         return False
     rearmed = await _schedule_power(
