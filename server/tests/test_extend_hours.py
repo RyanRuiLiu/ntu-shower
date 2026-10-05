@@ -1,11 +1,12 @@
-"""延长服务时间：到点拨钟、滚动续写截止、无人占用且跳过断电时刻后拨回。
+"""延长服务时间：到点拨钟、滚动续写截止、过午夜且无人占用后拨回。
 
 夹具要三样：一台**有偏差记录**的设备（否则算不出"设备表盘上现在几点"，而整个判定都
 落在那个轴上）、一份名单、以及可替换的桩——命令下发与分配都换成桩，这一层测的是判定
 与状态机，不是界面流程本身（那是 test_background_tasks_real_data 的活）。
 
-滚动重布的时间参数在用例里以"表盘时刻"断言：拨快前的那一次预补偿一小时（表盘 23:50
-→ 目标 01:00），拨快之后的滚动续写不再补偿（表盘 00:50 → 目标 01:00）。
+滚动重布的时间参数在用例里以"表盘时刻"断言。延长期间设备钟快 15 分钟（拨快幅度），
+SKEW_FAST_S 取 -900 模拟"偏差已被测量"的状态：`_local_now` 给出的是表盘读数，恢复条件
+的"过午夜"用真实轴（`to_local(now / shifted_at)`）的日期差判定，两者互不干扰。
 """
 
 import asyncio
@@ -29,15 +30,19 @@ DEVICE = "dev-extend"
 CONFIG: dict[str, object] = {
     "extend_hours_enabled": True,
     "extend_hours_at": "23:49",
+    "extend_shift_minutes": 15,
     "extend_hours_zone_offset_minutes": 480,
     "extend_hours_students": {"2530110052": "000000", "2217110057": "111111"},
     "power_off_at": "23:58",
     "power_on_at": "10:55",
+    "boot_time_sync_enabled": True,
+    "boot_time_sync_threshold_s": 60,
 }
 
-#: 设备钟与服务端对齐（偏差 0）。用例里的时刻一律读作**设备表盘上的**时刻，服务端
-#: 时刻由它减去时区偏移反推——这样断言里出现的都是墙上那个字面时间。
-SKEW_S = 0.0
+#: 设备钟快 15 分钟（延长拨快后的状态）：偏差 = 服务端 − 设备 = -900 秒。
+SKEW_FAST_S = -900.0
+
+#: 设备时区偏移（分钟）：UTC+8。所有用例共用。
 ZONE_MINUTES = 480
 
 
@@ -45,14 +50,15 @@ def _prepare(
     monkeypatch: pytest.MonkeyPatch,
     local_now: str,
     sent: list[tuple[str, object]] | None = None,
+    skew_s: float = 0.0,
 ) -> str:
     """把"现在"、配置与命令下发换成可控的桩；返回与之对应的**服务端时刻**。
 
     `local_now` 是设备表盘上的时刻，而判定读的是 `now_rfc3339()`（服务端轴），所以这里
-    把服务端时刻反推出来并桩进去：表盘 = 服务端 − 偏差 + 时区，偏差取 0 时
-    服务端 = 表盘 − 时区。返回它是为了让"一小时前拨的"这种用例能在正确的轴上算时刻。
+    把服务端时刻反推出来并桩进去：表盘 = 服务端 − 偏差 + 时区。返回它是为了让"十分钟前
+    拨的"这种用例能在正确的轴上算时刻。
     """
-    device_clock.load(DEVICE, SKEW_S)
+    device_clock.load(DEVICE, skew_s)
     # 必须登记：tick_once 遍历的是 `device` 表里的设备，没登记的话它连看都不看这台
     helpers.register_trusted_device(DEVICE)
     server_now = shift_rfc3339(local_now, -ZONE_MINUTES * 60)
@@ -140,22 +146,13 @@ def test_local_now_adds_the_zone_offset(fresh_db: str) -> None:
     assert beijing > utc
 
 
-def test_skip_gap_is_clock_face_distance_between_the_two_moments() -> None:
-    """被跳过的断电时刻距拨钟时刻的间隔 = 两个配置时刻的钟面差，跨日取模。"""
-    assert extend_hours._skip_gap_s(CONFIG) == 9 * 60
-
-    crossed = dict(CONFIG, extend_hours_at="23:49", power_off_at="00:20")
-    # 23:49 拨快，跨过日界之后的 00:20 才是被跳过的断电时刻
-    assert extend_hours._skip_gap_s(crossed) == 31 * 60
-
-
 # ── 拨钟：预补偿重布 + 拨快 ──────────────────────────────────────────────
 
 
 def test_shift_rearms_power_with_precompensated_target_then_writes_the_clock(
     fresh_db: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """两件事成对且有序：先重布（目标预补偿拨走的一小时）再写钟——拨快会让旧截止
+    """两件事成对且有序：先重布（目标预补偿拨走的 15 分钟）再写钟——拨快会让旧截止
     立刻越界即当场断电（实测）。"""
     sent: list[tuple[str, object]] = []
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", sent)
@@ -168,10 +165,10 @@ def test_shift_rearms_power_with_precompensated_target_then_writes_the_clock(
         actions.CLOCK_SET,
         actions.POWER_SCHEDULE,
     ]
-    # 预补偿：表盘 23:50 + 拨走的一小时 + 滚动窗口十分钟 → 次日 01:00
-    assert sent[0][1] == {"off_at": "01:00", "on_at": "10:55"}
-    # 写进去的是"拨完之后的设备表盘时刻"：23:50 加满一小时
-    assert sent[1][1] == {"datetime": "2026-10-06 00:50:00"}
+    # 预补偿：表盘 23:50 + 拨走的十五分钟 + 滚动窗口十分钟 → 次日 00:15
+    assert sent[0][1] == {"off_at": "00:15", "on_at": "10:55"}
+    # 写进去的是"拨完之后的设备表盘时刻"：23:50 加满十五分钟
+    assert sent[1][1] == {"datetime": "2026-10-06 00:05:00", "rearm": False}
     # 同一轮 tick 的推进里滚动续写跟着跑一次（目标已切到拨快后的钟面）
     assert sent[2][1] == {"off_at": "00:00", "on_at": "10:55"}
 
@@ -188,7 +185,7 @@ def test_shift_is_skipped_when_disabled(fresh_db: str, monkeypatch: pytest.Monke
 
 
 def test_shift_is_skipped_when_nobody_is_using_it(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """名单里没人占着就不拨：白拨一次会让设备钟无谓地偏一小时。"""
+    """名单里没人占着就不拨：白拨一次会让设备钟无谓地偏一段时间。"""
     sent: list[tuple[str, object]] = []
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", sent)
     _with_session("2026-10-05T23:40:00.000Z", cert_no="9999999999")
@@ -226,68 +223,98 @@ def test_the_row_keeps_who_was_where(fresh_db: str, monkeypatch: pytest.MonkeyPa
     assert repository.parse_assignments(row) == [{"door_no": 5, "cert_no": "2530110052"}]
 
 
+def test_shift_landing_guard_refuses_to_land_inside_the_hostile_window(
+    fresh_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """落点守卫：拨快后的钟面必须跨过午夜。幅度配小了（5 分钟落点在 23:55，仍在
+    23:50-23:58 的敌对窗口里）就本轮放弃，并记一句操作员能看懂的警告。"""
+    events: list[str] = []
+    sent: list[tuple[str, object]] = []
+    monkeypatch.setitem(CONFIG, "extend_shift_minutes", 5)
+    _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", sent)
+    monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
+    _with_session("2026-10-05T23:40:00.000Z")
+
+    asyncio.run(extend_hours.tick_once())
+
+    assert "extend-hours.landing-unsafe" in events
+    assert sent == []
+    assert repository.get(DEVICE) is None
+
+
 # ── 滚动续写与恢复条件 ────────────────────────────────────────────────────
 
 
 def test_extension_rolls_the_deadline_every_tick(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """延长期间每轮 tick 都把截止续写一个窗口，且不再预补偿（钟已经拨快）。"""
+    """延长期间每轮 tick 都把截止续写一个窗口；钟已快 15 分钟，目标按表盘读数 + 窗口。"""
     sent: list[tuple[str, object]] = []
-    server_now = _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", sent)
-    repository.record(DEVICE, server_now, [{"door_no": 3, "cert_no": "2530110052"}])
+    _prepare(monkeypatch, "2026-10-06T00:50:00.000Z", sent, skew_s=SKEW_FAST_S)
+    repository.record(
+        DEVICE,
+        shift_rfc3339("2026-10-06T00:50:00.000Z", -ZONE_MINUTES * 60) or "",
+        [{"door_no": 3, "cert_no": "2530110052"}],
+    )
 
     asyncio.run(extend_hours.tick_once())
 
-    # 滚动目标不再预补偿：表盘此刻 + 十分钟 → 00:00
-    assert sent == [(actions.POWER_SCHEDULE, {"off_at": "00:00", "on_at": "10:55"})]
+    # 滚动目标 = 表盘此刻（00:50，快 15 分钟）+ 十分钟 → 01:00
+    assert sent == [(actions.POWER_SCHEDULE, {"off_at": "01:15", "on_at": "10:55"})]
     assert repository.get(DEVICE) is not None
 
 
-def test_restore_waits_for_the_skipped_moment(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """被跳过的断电时刻（拨钟 + 9 分钟）还没走到，不拨回——延长还在服务窗口里。"""
+def test_restore_waits_until_past_midnight(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """真实时间没过午夜：不拨回（敌对窗口的尾巴还在），滚动续写照常。
+
+    设备表盘读 00:10（快 15 分钟）= 真实 23:55，午夜未过；`to_local` 的日期差判它。
+    """
     sent: list[tuple[str, object]] = []
-    server_now = _prepare(monkeypatch, "2026-10-05T23:55:00.000Z", sent)
-    # 拨钟在 8 分钟前：距被跳过的 23:58 还差 1 分钟
-    repository.record(DEVICE, shift_rfc3339(server_now, -480) or "", [{"door_no": 3, "cert_no": "2530110052"}])
+    _prepare(monkeypatch, "2026-10-05T23:55:00.000Z", sent, skew_s=SKEW_FAST_S)
+    # 拨钟在 20 分钟前（真实 10 月 5 日 23:35）：午夜未过
+    repository.record(
+        DEVICE,
+        shift_rfc3339("2026-10-05T23:55:00.000Z", -ZONE_MINUTES * 60 - 1200) or "",
+        [{"door_no": 3, "cert_no": "2530110052"}],
+    )
 
     asyncio.run(extend_hours.tick_once())
 
-    assert sent == [(actions.POWER_SCHEDULE, {"off_at": "00:05", "on_at": "10:55"})]
+    assert sent == [(actions.POWER_SCHEDULE, {"off_at": "00:20", "on_at": "10:55"})]
     assert repository.get(DEVICE) is not None
 
 
-def test_restore_happens_once_skipped_moment_passed_and_nobody_is_occupying(
+def test_restore_happens_once_midnight_passed_and_nobody_is_occupying(
     fresh_db: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """被跳过的时刻已过、设备上无人占用：拨回 + 新框架重布，节奏恢复。"""
+    """真实时间过了午夜、设备上无人占用：拨回 + 新框架重布，节奏恢复。
+
+    拨回把钟摆回真实时刻（钟面失真清零），重布在新框架里落位：当晚（10 月 6 日）23:58
+    断电、次日 10:55 上电。
+    """
     sent: list[tuple[str, object]] = []
-    server_now = _prepare(monkeypatch, "2026-10-05T23:58:30.000Z", sent)
-    # 拨钟在 10 分钟前：被跳过的 23:58 已经走过去了，且设备上无人占用
-    repository.record(DEVICE, shift_rfc3339(server_now, -600) or "", [{"door_no": 3, "cert_no": "2530110052"}])
+    _prepare(monkeypatch, "2026-10-06T00:45:00.000Z", sent, skew_s=SKEW_FAST_S)
+    repository.record(DEVICE, "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2530110052"}])
 
     asyncio.run(extend_hours.tick_once())
 
-    # 同一轮 tick：先滚动续写一次，恢复条件齐了 → 拨回 + 新框架重布
-    # （断电 = power_off_at，上电 = power_on_at）
-    assert [action for action, _params in sent] == [
-        actions.POWER_SCHEDULE,
-        actions.CLOCK_SET,
-        actions.POWER_SCHEDULE,
-    ]
-    assert sent[0][1] == {"off_at": "00:08", "on_at": "10:55"}
+    assert [action for action, _params in sent] == [actions.POWER_SCHEDULE, actions.CLOCK_SET, actions.POWER_SCHEDULE]
+    # 滚动续写在前（表盘 00:45 + 偏差 15 分钟 + 窗口 10 分钟 = 01:10），
+    # 随后拨回（钟面失真清零，落回真实 00:45）+ 常规重布
+    assert sent[0][1] == {"off_at": "01:10", "on_at": "10:55"}
+    assert sent[1][1] == {"datetime": "2026-10-06 00:45:00", "rearm": False}
     assert sent[2][1] == {"off_at": "23:58", "on_at": "10:55"}
     assert repository.get(DEVICE) is None
 
 
 def test_restore_holds_while_someone_is_still_occupying(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """被跳过的时刻过了但有人还占着（有会话未结束）：不拨回——拨回的钟跳会清掉这些会话。"""
+    """午夜已过但有人还占着（预约未开阀的、淋浴中的）：不拨回——拨回的钟跳会清掉这些
+    会话。滚动续写照常，人不受扰。"""
     sent: list[tuple[str, object]] = []
-    server_now = _prepare(monkeypatch, "2026-10-05T23:59:30.000Z", sent)
-    repository.record(DEVICE, shift_rfc3339(server_now, -600) or "", [{"door_no": 3, "cert_no": "2530110052"}])
-    _with_session("2026-10-05T23:59:00.000Z")
+    _prepare(monkeypatch, "2026-10-06T00:45:00.000Z", sent, skew_s=SKEW_FAST_S)
+    repository.record(DEVICE, "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2530110052"}])
+    _with_session("2026-10-06T00:40:00.000Z")
 
     asyncio.run(extend_hours.tick_once())
 
-    # 滚动续写照常（保住占用中的会话），拨回不发生
     assert [action for action, _params in sent] == [actions.POWER_SCHEDULE]
     assert repository.get(DEVICE) is not None
 
@@ -414,9 +441,13 @@ def test_power_failure_after_shift_keeps_the_row_and_retries(fresh_db: str, monk
     """
     events: list[str] = []
     sent: list[tuple[str, object]] = []
-    server_now = _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", sent)
+    _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", sent)
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
-    repository.record(DEVICE, shift_rfc3339(server_now, -120) or "", [{"door_no": 3, "cert_no": "2530110052"}])
+    repository.record(
+        DEVICE,
+        shift_rfc3339("2026-10-05T23:50:00.000Z", -ZONE_MINUTES * 60 - 120) or "",
+        [{"door_no": 3, "cert_no": "2530110052"}],
+    )
 
     async def half(_device_id: str, action: str, _params: object, **_kw: object) -> object:
         if action == actions.POWER_SCHEDULE:
@@ -439,9 +470,10 @@ def test_restore_rearm_failure_keeps_the_row_for_retry(fresh_db: str, monkeypatc
     """
     events: list[str] = []
     sent: list[tuple[str, object]] = []
-    server_now = _prepare(monkeypatch, "2026-10-05T23:59:30.000Z", sent)
+    # shifted_at 是真实轴上的拨钟时刻（10 月 5 日 23:49:30 北京）：午夜已过
+    _prepare(monkeypatch, "2026-10-06T00:45:00.000Z", sent, skew_s=SKEW_FAST_S)
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
-    repository.record(DEVICE, shift_rfc3339(server_now, -600) or "", [{"door_no": 3, "cert_no": "2530110052"}])
+    repository.record(DEVICE, "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2530110052"}])
 
     async def half(_device_id: str, action: str, params: object, **_kw: object) -> object:
         if action == actions.POWER_SCHEDULE and params.get("off_at") == "23:58":
@@ -564,11 +596,153 @@ def test_a_failed_command_is_not_tried_again(fresh_db: str, monkeypatch: pytest.
 
 def test_the_failure_memory_is_cleared_when_the_extension_ends(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """调回之后记忆要清：不然下一次延长里那个人会被永久跳过。"""
-    server_now = _prepare(monkeypatch, "2026-10-05T23:59:30.000Z")
-    repository.record(DEVICE, shift_rfc3339(server_now, -600) or "", [])
+    _prepare(monkeypatch, "2026-10-06T00:45:00.000Z", skew_s=SKEW_FAST_S)
+    # shifted_at 是真实轴上的拨钟时刻（10 月 5 日 23:49:30 北京）：午夜已过、无人占用
+    repository.record(DEVICE, "2026-10-05T15:49:30.000Z", [])
     extend_hours._reassign_failed.add((DEVICE, "2530110052"))
 
     asyncio.run(extend_hours.tick_once())
 
     assert repository.get(DEVICE) is None
     assert extend_hours._reassign_failed == set()
+
+
+# ── 运行时钟校正（延长之外的偏差自愈） ────────────────────────────────────
+
+
+def test_runtime_correction_fires_when_skewed_outside_extension(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """偏差超阈值且不在延长中：服务端主动下发 clock.set（rearm=true，设备端校钟后
+    按电源计划重布 MCU）——设备整夜不重启也能自愈。"""
+    sent: list[tuple[str, object]] = []
+    _prepare(monkeypatch, "2026-10-06T00:45:00.000Z", sent, skew_s=SKEW_FAST_S)
+
+    asyncio.run(extend_hours.tick_once())
+
+    # 校正目标是拨回之后的真实表盘时刻（表盘读数减去 15 分钟偏差）
+    assert sent == [(actions.CLOCK_SET, {"datetime": "2026-10-06 00:45:00", "rearm": True})]
+
+
+def test_runtime_correction_skipped_during_extension(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """延长中的偏差是故意的：运行时校正跳过，不与拨快打架。
+
+    真实当地 23:55（午夜未过）：滚动续写照常、校正跳过、恢复被挡。
+    """
+    sent: list[tuple[str, object]] = []
+    _prepare(monkeypatch, "2026-10-05T23:55:00.000Z", sent, skew_s=SKEW_FAST_S)
+    repository.record(DEVICE, "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2530110052"}])
+
+    asyncio.run(extend_hours.tick_once())
+
+    assert actions.CLOCK_SET not in [action for action, _params in sent]
+
+
+def test_runtime_correction_skipped_below_threshold(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """偏差在阈值内：不动（秒级噪声不值得一次校钟）。"""
+    sent: list[tuple[str, object]] = []
+    _prepare(monkeypatch, "2026-10-06T00:45:00.000Z", sent, skew_s=-30.0)
+
+    asyncio.run(extend_hours.tick_once())
+
+    assert sent == []
+
+
+def test_runtime_correction_skipped_when_disabled(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: list[tuple[str, object]] = []
+    _prepare(monkeypatch, "2026-10-06T00:45:00.000Z", sent, skew_s=SKEW_FAST_S)
+    monkeypatch.setitem(CONFIG, "boot_time_sync_enabled", False)
+
+    asyncio.run(extend_hours.tick_once())
+
+    assert sent == []
+
+
+# ── 运行时钟校正的失败路径 ────────────────────────────────────────────────
+
+
+def test_runtime_correction_failure_is_logged(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """校正命令失败：记一句 WARNING，下一轮 tick 重试。"""
+    events: list[str] = []
+    _prepare(monkeypatch, "2026-10-06T00:45:00.000Z", skew_s=SKEW_FAST_S)
+    monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
+
+    async def failing(_device_id: str, _action: str, _params: object, **_kw: object) -> object:
+        return {"status": "failed", "reason_code": "device.offline", "terminal_message": "", "data": None}
+
+    monkeypatch.setattr(extend_hours.sessions_service, "send_command_and_wait", failing)
+
+    asyncio.run(extend_hours.tick_once())
+
+    assert "time-sync.correction-failed" in events
+    assert "time-sync.corrected" not in events
+
+
+def test_hhmm_minutes_rejects_garbage(fresh_db: str) -> None:
+    assert extend_hours._hhmm_minutes("不是时刻") is None
+
+
+# ── 补覆盖：内部换算与告警路径 ────────────────────────────────────────────
+
+
+def test_hhmm_minutes_parses_valid_time(fresh_db: str) -> None:
+    assert extend_hours._hhmm_minutes("23:58") == 23 * 60 + 58
+    assert extend_hours._hhmm_minutes("00:00") == 0
+
+
+def test_set_clock_warns_without_skew_record(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """偏差记录不存在时不动它。"""
+    events: list[str] = []
+    _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", skew_s=SKEW_FAST_S)
+    monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
+    device_clock.clear()
+
+    ok = asyncio.run(extend_hours._set_clock(DEVICE, 3600, 480))
+
+    assert not ok
+    assert "extend-hours.no-skew" in events
+
+
+def test_set_clock_warns_on_command_failure(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """设备端 clock.set 失败：记 WARNING 并返回 False。"""
+    events: list[str] = []
+    _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", skew_s=SKEW_FAST_S)
+    monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
+
+    async def failing(_device_id: str, _action: str, _params: object, **_kw: object) -> object:
+        return {"status": "failed", "reason_code": "device.offline", "terminal_message": "", "data": None}
+
+    monkeypatch.setattr(extend_hours.sessions_service, "send_command_and_wait", failing)
+
+    ok = asyncio.run(extend_hours._set_clock(DEVICE, 3600, 480))
+
+    assert not ok
+    assert "extend-hours.clock-failed" in events
+
+
+def test_roll_power_warns_without_skew_record(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """滚动重布在偏差记录缺失时不动它。"""
+    events: list[str] = []
+    sent: list[tuple[str, object]] = []
+    _prepare(monkeypatch, "2026-10-06T00:50:00.000Z", sent, skew_s=SKEW_FAST_S)
+    monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
+    device_clock.clear()
+    repository.record(DEVICE, "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2530110052"}])
+
+    asyncio.run(extend_hours.tick_once())
+
+    assert "extend-hours.no-skew" in events
+    # 滚动重布失败但行保留（下一轮重试）
+    assert repository.get(DEVICE) is not None
+
+
+def test_maybe_shift_warns_without_skew_record(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """到点但偏差记录缺失：不动它。"""
+    events: list[str] = []
+    sent: list[tuple[str, object]] = []
+    _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", sent, skew_s=SKEW_FAST_S)
+    monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
+    device_clock.clear()
+    _with_session("2026-10-05T23:40:00.000Z")
+
+    asyncio.run(extend_hours.tick_once())
+
+    assert sent == []

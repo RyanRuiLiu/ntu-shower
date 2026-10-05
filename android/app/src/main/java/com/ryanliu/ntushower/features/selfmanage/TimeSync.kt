@@ -102,7 +102,7 @@ object TimeSync {
      * （YYYY-MM-DD HH:MM:SS）。与开机校正共用写入与验证路径；返回是否成功，
      * 结果同时落 device.log。
      */
-    fun setWallClock(datetime: String): Boolean {
+    fun setWallClock(datetime: String, rearm: Boolean = true): Boolean {
         if (!DATETIME_SHAPE.matches(datetime)) {
             Log.w(TAG, "rejected malformed datetime: $datetime")
             deviceLog.error("clock.set-failed", "格式不符: $datetime")
@@ -123,8 +123,15 @@ object TimeSync {
         } else {
             Log.e(TAG, "wall clock set failed (residual=${residual}ms)")
             deviceLog.error("clock.set-failed", "residual=${residual}ms")
+            return false
         }
-        return ok
+        // 配对不变式：钟面框架一动，MCU 里的开关机截止必须在新框架里重写一次，
+        // 否则真实断电/上电时刻会偏差一个校钟量。目标取自下发的电源计划。
+        // rearm=false 供延长服务流程内部使用——它自己管理 MCU 的滚动重布。
+        if (rearm) {
+            McuPowerSchedule.schedule(RuntimeConfig.powerOffAt, RuntimeConfig.powerOnAt)
+        }
+        return true
     }
 
     /**
