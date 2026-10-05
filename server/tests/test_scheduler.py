@@ -913,6 +913,10 @@ def test_snapshot_reports_scheduled_timers(fresh_db: str) -> None:
                 "cert_no": "99990052",
                 "feature": "renew_session",
                 "at": rows[0]["at"],
+                "state": "bathing",
+                "session_id": 1,
+                "started_at": "2026-10-05T12:00:00.000Z",
+                "threshold_s": 1140,
             }
         ]
         assert parse_rfc3339(str(rows[0]["at"])) is not None
