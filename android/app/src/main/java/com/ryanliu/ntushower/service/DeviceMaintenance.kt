@@ -229,7 +229,11 @@ object DeviceMaintenance {
 
     /** 设置设备系统时钟：datetime 由网页端给定（设备本地墙钟时间）。 */
     private fun clockSetOutcome(params: JSONObject, commandId: String): CommandOutcome {
-        val ok = TimeSync.setWallClock(params.optString("datetime", ""))
+        val ok = TimeSync.setWallClock(
+            params.optString("datetime", ""),
+            // rearm=false：延长服务流程内部拨钟时自己管理 MCU 的滚动重布，不需要这里配对
+            params.optBoolean("rearm", true),
+        )
         return if (ok) {
             CommandOutcome(commandId, OutcomeStatus.OK, "", "")
         } else {
