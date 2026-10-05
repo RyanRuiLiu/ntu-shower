@@ -13,7 +13,7 @@ import java.util.Date
  * 释放，此外另有 8.5 秒/天的自然漂移。
  *
  * 修法不是"把墙钟改对"。那是 [com.ryanliu.ntushower.features.selfmanage.TimeSync] 的
- * 职责，要 root 改系统时钟，且是**可选项**（`boot_time_sync_enabled` 默认关闭）——不能
+ * 职责，要 root 改系统时钟，且是**可选项**（`time_sync_enabled` 默认关闭）——不能
  * 当作时刻来源的前提。改成**只用本机量增量、锚点交给服务端**：
  *
  * - 服务端每一轮 `link.ping` 都带 `sender_time`，握手应答里另带 `server_time`；

@@ -45,7 +45,7 @@ class ClockTest {
 
     @Test
     fun `parse round-trips the formatted output`() {
-        // 解析只有一个消费者（开机校时比对 server_time），输入就是本类的输出
+        // 解析的消费者是 ServerClock（拿 server_time 立锚点），输入就是本类的输出
         val now = Clock.wallClockRfc3339()
         val parsed = Clock.parseRfc3339(now)
 

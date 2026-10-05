@@ -99,10 +99,10 @@ SECTIONS: tuple[tuple[str, str], ...] = (
     ("device", "设备下发"),
 )
 
-#: 界面分组清单：顺序即配置页卡片顺序（设备侧那几块按改动的频繁程度排——遮罩与时间校正
-#: 实测常改，链路、守护、自更新是一次性调好的）。
+#: 界面分组清单：顺序即配置页卡片顺序（设备侧那几块按改动的频繁程度排——遮罩实测常改，
+#: 链路、守护、自更新是一次性调好的）。
 #: **从原来按主题分的组里拆出来的服务端那几块换了组名**（`server_link` / `server_ui` /
-#: `server_bridge`），不与设备侧的同名组混在一起——同一个名字只能指一件事。
+#: `server_bridge` / `server_clock`），不与设备侧的同名组混在一起——同一个名字只能指一件事。
 #: 分组元数据只在这里一份，前端据此分卡片渲染，不在各处硬编码键表。
 GROUPS: tuple[GroupSpec, ...] = (
     # ── 服务端业务：在服务器上运行，不下发设备 ──
@@ -110,12 +110,12 @@ GROUPS: tuple[GroupSpec, ...] = (
     GroupSpec("renew_session", "会话续期", "server"),
     GroupSpec("auto_settle", "自动结算", "server"),
     GroupSpec("extend_hours", "延长服务时间", "server"),
+    GroupSpec("server_clock", "自动校时", "server"),
     GroupSpec("server_link", "链路维持", "server"),
     GroupSpec("server_ui", "界面操作超时", "server"),
     GroupSpec("server_bridge", "调试通道", "server"),
     # ── 设备下发：会推到设备，支持单台覆盖 ──
     GroupSpec("power", "电源计划", "device"),
-    GroupSpec("clock", "时间校正", "device"),
     GroupSpec("overlay", "操作遮罩", "device"),
     GroupSpec("doors", "喷头状态采集", "device"),
     GroupSpec("ui", "界面操作", "device"),
@@ -515,30 +515,6 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         unit="毫秒",
         group="guard",
     ),
-    # ── 时间校正 ──
-    ConfigSpec(
-        "boot_time_sync_enabled",
-        BOOL,
-        DEVICE,
-        False,
-        "开机自动校时",
-        "每次开机联网后，把设备时钟校准为服务端时间，并按电源计划直写 MCU 重布定时"
-        "开关机。设备没有 NTP，时钟靠 RTC 维持、会跑偏（实测快过整 1 小时）；"
-        "依赖开关机计划准确时应开启。默认关闭",
-        group="clock",
-    ),
-    ConfigSpec(
-        "boot_time_sync_threshold_s",
-        INT,
-        DEVICE,
-        60,
-        "开机校时触发阈值",
-        "开机校时的门槛：设备时钟与服务端的偏差超过该秒数才执行校正并重布 MCU 定时"
-        "开关机，偏差在阈值内不动。仅在「开机自动校时」开启时生效",
-        minimum=60,
-        unit="秒",
-        group="clock",
-    ),
     # ── 调试通道 ──
     ConfigSpec(
         "bridge_max_lifetime_s",
@@ -756,6 +732,32 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "四份名单各自完整，配一份就读得懂一份",
         group="extend_hours",
     ),
+    # ── 自动校时 ──
+    ConfigSpec(
+        "time_sync_enabled",
+        BOOL,
+        SERVER,
+        False,
+        "启用自动校时",
+        "服务端每 30 秒检查一次设备钟偏差，超过阈值即把设备钟写准，并按电源计划重布 MCU。"
+        "设备没有 NTP，时钟靠 RTC 维持、会跑偏（实测快过整 1 小时）；依赖开关机计划准确时"
+        "应开启。三种情形自动让位：延长服务期间（偏差是故意的）、设备上有人占用（校钟的"
+        "跳变会清掉会话）、还没有偏差记录（无从判）。设备页的「校正时间」是手动动作，"
+        "不受此开关影响。默认关闭",
+        group="server_clock",
+    ),
+    ConfigSpec(
+        "time_sync_threshold_s",
+        INT,
+        SERVER,
+        60,
+        "校时触发阈值",
+        "自动校时的门槛：设备时钟与服务端的偏差超过该秒数才执行校正并重布 MCU，"
+        "偏差在阈值内不动。仅在「启用自动校时」开启时生效",
+        minimum=60,
+        unit="秒",
+        group="server_clock",
+    ),
     ConfigSpec(
         "power_off_at",
         TIME,
@@ -763,7 +765,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "23:58",
         "每日断电时刻",
         "设备 MCU 每日定时断电的时刻（浴室 App 从 V8 平台拿到的是同一个值）。"
-        "延长服务与开机校时都用它换算重布 MCU 的目标时刻；改它要与浴室平台那侧保持一致",
+        "延长服务与自动校时都用它换算重布 MCU 的目标时刻；改它要与浴室平台那侧保持一致",
         group="power",
     ),
     ConfigSpec(

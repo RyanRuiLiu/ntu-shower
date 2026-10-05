@@ -48,7 +48,8 @@ MCU 的断电截止是**钟面时刻**——钟被拨动，截止就在真实时
 
 - [on_frame]：普通帧到达时调，推**重新分配**那一步。拨钟会让浴室 App 清空所有喷头，
   而清空必然写库、必然出一帧，所以"等门空"不需要轮询。
-- [tick_once]：定时任务每半分钟调一次。它负责**拨钟**、**滚动续写**与**拨回**——那几件
+- [tick_once]：定时任务每半分钟调一次。它负责**拨钟**、**滚动续写**、**拨回**与
+  **自动校时**（`_maybe_correct_clock`：延长之外把超阈值的钟偏差写准）——那几件
   到点时没有帧可等（帧是事件驱动的，状态不变就不报），只能自己看表。它还顺带推一次
   重新分配：帧平均四分钟一份，而那一步等不起。
 
@@ -287,21 +288,24 @@ async def _roll_power(device_id: str, config: ConfigValues, pre_shift: bool) -> 
 
 
 async def _maybe_correct_clock(device_id: str, config: ConfigValues) -> None:
-    """延长之外的运行时钟偏差校正（`boot_time_sync_enabled` 的运行时形态）。
+    """自动校时（`time_sync_enabled`）：偏差超过阈值就把设备钟写准。
 
-    设备可能整夜不重启（延长服务就是这种场景），开机校时等不到——而延长之外留下的
-    钟偏差（手工拨动、漂移）会让浴室 App 的全部判据错位。偏差超过阈值且**不在延长中**
-    （延长中的偏差是故意的，拨快本来就是流程的一部分）时，服务端主动下发 clock.set：
-    设备端校钟后按电源计划重布 MCU，节奏自愈。
+    设备没有 NTP，整夜不重启（延长服务就是这种场景）钟也会漂，手工拨动更会留下大偏差。
+    偏差超过阈值时服务端主动下发 clock.set，设备端校钟后按电源计划重布 MCU，节奏自愈。
+    校正的跳变与拨回一样会清掉当时挂着的会话，所以三种情形让位：**延长中不校**（偏差是
+    故意的，拨快本来就是流程的一部分）、**有人在占用不校**（判定与 `_restore_due` 同源）、
+    **还没有偏差记录不校**（首次 pong 之前无从判）。
     """
-    if not config["boot_time_sync_enabled"]:
+    if not config["time_sync_enabled"]:
         return
     if repository.get(device_id) is not None:
         return  # 延长中：偏差是故意的
     if not device_clock.has(device_id):
         return  # 还没有偏差记录（首次 pong 之前），无从判
+    if doors_service.open_sessions(device_id):
+        return  # 有人占用：校钟的跳变会清掉会话，等人走再校
     skew = device_clock.get(device_id)  # 服务端 − 设备（秒）
-    threshold = as_int(config["boot_time_sync_threshold_s"])
+    threshold = as_int(config["time_sync_threshold_s"])
     if abs(skew) < threshold:
         return
     zone = as_int(config["extend_hours_zone_offset_minutes"])
