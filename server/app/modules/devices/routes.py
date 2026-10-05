@@ -153,7 +153,7 @@ async def schedule_power(device_id: str, req: DevicePowerScheduleRequest) -> Com
 
 @admin_router.post("/{device_id}/bath/restart")
 async def restart_bath_app(device_id: str) -> CommandOutcome:
-    """重启浴室 App：先强停再冷启动，让它重读每日定时开关机计划。"""
+    """重启浴室 App：先强停再冷启动。排障用——延长服务流程已改用 power.schedule。"""
     return await device_action(device_id, actions.BATH_RESTART, {}, DEVICE_ACTION_TIMEOUT_S)
 
 

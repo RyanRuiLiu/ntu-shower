@@ -54,8 +54,8 @@ APP_RESTART = "app.restart"
 # 强停与冷启动由 root shell 完成，即时执行。过程会中断进行中的会话，网页端有确认。
 
 BATH_RESTART = "bath.restart"
-"""重启浴室 App（com.datalook.bath）：先强停再冷启动。开机时间校正后让它重读
-每日定时开关机计划；它状态异常时排障用。"""
+"""重启浴室 App（com.datalook.bath）：先强停再冷启动。排障用——延长服务流程已改用
+power.schedule 直写 MCU，不再依赖重启来重读计划。"""
 
 CLOCK_SET = "clock.set"
 """设置设备系统时钟。params.datetime 为设备本地墙钟时间（YYYY-MM-DD HH:MM:SS）。
