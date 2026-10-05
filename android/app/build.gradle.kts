@@ -38,8 +38,8 @@ android {
         applicationId = "com.ryanliu.ntushower"
         minSdk = 19          // 设备 ROM 固定 Android 4.4，运行时下限不可动
         targetSdk = 19       // 目标设备冻结在 4.4，无升级路径
-        versionCode = 68
-        versionName = "0.4.24"
+        versionCode = 69
+        versionName = "0.4.25"
         buildConfigField("String", "SERVER_DOMAIN", "\"${providers.gradleProperty("serverDomain").get()}\"")
         buildConfigField("String", "APP_VERSION", "\"$versionName\"")
         buildConfigField("int", "VERSION_CODE", "$versionCode")
@@ -153,6 +153,10 @@ val frameworkBoundClasses = listOf(
     "**/features/selfmanage/TimeSync*",
     // 浴室 App 进程级重启：依赖真实 root shell（拉起与否的决策由 BathAppGuardTest 覆盖）
     "**/features/automation/BathAppRestart*",
+    // MCU 直写：依赖真机 .so（libposix 的 JNI 绑定由类名决定，JVM 单测无法加载）。
+    // 延时换算是纯逻辑（delayMinutes / parseMinuteOfDay），由 McuPowerScheduleTest 覆盖
+    "**/features/selfmanage/McuPowerSchedule*",
+    "**/com/xboot/stdcall/*",
     // 纯数据载体：仅编译器生成的 equals/hashCode/toString/copy/values/组件 N，
     // 无手写逻辑（JaCoCo 官方建议排除生成代码）。业务逻辑仍在其中方法之外。
     "**/features/automation/PageState*",

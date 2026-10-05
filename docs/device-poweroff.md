@@ -352,13 +352,91 @@ CommandList: [{"CommandLength":"4","CommandKey":"A0","CommandValue":"00002359"}]
 
 ---
 
-## 10. 尚未核实的点
+## 10. 尚未核实的点（2026-10-04 晚已全部落定，见 §11）
 
-- **§4.4 那次关机的前因**：09:35:47 改钟之后、09:41:01 断线之前，是哪一次调用触发了
-  `settings()`。设备侧可查的两处证据（`/sdcard/datalook/log/Params_*.txt` 里 App 启动
-  写的那一行、`databases/user` 的 mtime）都要等设备恢复后才能读，届时才能定论。
-- **`CommandList` 的实际消费者**：它不在浴室 App 源码里，也不在 `SmdtService` 里，
-  尚未定位到谁读它。
-- **框架侧实现**：`ISmdtManager` 的 Stub 本体在 framework（`services.jar` 1.4 MB /
-  `framework.jar` 3.7 MB，均在 `/system/framework/`），未拉取核对。已知的观测事实是
-  §4.2 那条：调 AIDL 会引出 `com.smdt.spot.autoboot` 广播。
+- ~~**§4.4 那次关机的前因**~~ → 已定论：**没有任何一次 `settings()` 被触发**。拨钟
+  本身就是触发器，见 §11。
+- ~~**`CommandList` 的实际消费者**~~ → 排除了 `smdt_mydownload`（全包无
+  McuCom/CommandList/poweronoff 痕迹）与框架 `SmdtService`（见 §11）。剩下唯一可能
+  是"V8 平台下发了但本部署无人消费"：观测到的关机跟随 SmdtService 的 23:58，而不是
+  CommandList 的 23:59。
+- ~~**框架侧实现**~~ → 已拉取 `services.jar` 并反编译：`com.android.server.SmdtService`
+  只做两件事——把 AIDL 调用转成 `com.smdt.spot.autoboot` 广播（extras: `smdt_settime`
+  / `smdt` / `start` / `stop`），以及 `shutdown()`（发
+  `ACTION_REQUEST_SHUTDOWN`）。**没有时间变化监听、没有直写 `/dev/McuCom`、没有
+  CommandList 消费**。产物在 `ntu-bathapp-reverse` 工作区外本机
+  `/tmp/ntu-probe/incident/services_src/`（未入库）。
+
+---
+
+## 11. 2026-10-04 事故定论：拨钟为什么直接杀死设备
+
+上午 09:41（北京）设备断电，14:20 才人工恢复（`booted_at = 06:19:13Z`，APP 14:20:03
+重启并重新拉参）。链路事件：`01:41:01.201Z offline → 06:20:02.913Z online`，死了
+4h39m。§4.4 已记录表面时序，本节是机制定论。
+
+**机制（2026-10-05 凌晨受控实验最终定论，修正"对跳钟免疫"的中间结论；
+工具：`/data/local/tmp/mcu.jar`，dalvikvm 直调 libposix 的 JNI，绕开 SmdtService
+与浴室 App）**：
+
+`posix.poweronoff(on_h, on_m, off_h, off_m, enable, fd)` = `ioctl(/dev/McuCom, 0xA1,
+5 字节)`。5 字节是**相对延时**：`[开机延时 h, m, 关机延时 h, m, enable]`——开机延时
+**从断电时刻起算**。MCU 收到后按真实时间倒计时：到关机延时断电，再过开机延时上电。
+接口全表（本驱动实测）：`0xA1` poweronoff、`0xA4` getfwver（实测 0xB1）、`0xA6`
+mcugetcmdvalue（本驱动未实现，全部 -1）、`0xA8` mcusetcmd；`enable` 的 `3`=关机+开机
+都使能，`0`=全不使能。
+
+关键行为（各至少两次独立验证）：
+
+- **截止时刻随钟走**：钟被拨到越过已布防的截止时刻 → **立即断电**（23:27 实验：
+  布防 3 分钟、拨钟 +3.5 分越过截止 → 拨钟瞬间断电）；钟回拨 → 断电**等量推迟**
+  （01:59 事故：`clock.set` -2h + `bath.restart` 布防 67 分 → 断电落在真实
+  01:58:40，与预测一致）。"钟到 23:58 就关"的实质是"钟到达布防时算出的那个时刻
+  就关"。
+- **相对延时本身不依赖钟**：布防时长按真实时间流逝，钟在布防后的跳变只会平移
+  "钟面截止"，不存在"跳变让倒计时凭空消失"或"凭空提前"以外的第三种效应。
+- **布防路径可靠性差异**：SmdtService 冷启动会**静默丢布防**（AMS "Waited long
+  enough"，SQLite 不更新；运行时 APP 重启触发的重布走这条冷路，实测丢过）；
+  开机 `BOOT_COMPLETED` 的重布可靠（9 月整月节奏实证）。**dalvikvm 直调路径每次
+  open/ioctl/close、无进程状态，最可靠**。
+- MCU 无可用读回（0xA6 未实现），验证只能靠行为：断/上电时刻，服务端链路事件
+  滞后 0–90 秒。
+
+**日常节律的实证**（生产库按天首末帧，2026-09-20 起的常规日）：
+
+```
+每天首帧  02:56–03:00Z  = 北京 10:56–11:00   ← autoOpenTime 10:55，MCU 自动上电
+每天末帧  15:03–15:58Z  = 北京 23:03–23:58   ← autoCloseTime 23:58，MCU 断主电
+```
+
+**早上事故的序列（最终版）**：09:23/09:30 两次实验布防把"关机延时"写到
+约 14.5 小时后（钟面截止 23:58 附近）→ 09:35:47 拨钟到 23:53:40，钟面截止被拖到
+**眼前**（剩 5 分钟）→ 09:41 断电。拨钟本身不改倒计时的"存在"，改的是它相对钟面
+的剩余量。
+
+**延长服务的更好方法（替代"重启浴室 App"）**：现有 extend_hours 里 APP 重启的唯一
+作用是让它重读计划重写 MCU。直接重布即可，**不拨钟、不重启 APP、不碰会话时间轴**：
+
+```bash
+# device.exec（维护通道）在设备上执行；延时按"距现在"换算
+LD_LIBRARY_PATH=/system/lib dalvikvm -cp /data/local/tmp/mcu.jar mcu.Main on <onH> <onM> <offH> <offM> 3
+# 例：23:50 延长 70 分钟 → mcu.Main on 10 55 1 10 3   （关机延时 1h10m → 01:00 断电）
+# 写回：按"距现在的 23:58"换算重新布防；23:58 已过则布到次日同一时刻
+```
+
+前提只有两个：设备在线（agent 维护通道可达）、当前钟大致正确（换算"距 23:58 还有多
+久"要用它——**一旦布防，倒计时不再受钟影响**，除非钟被再次拨动）。
+
+### 运维结论
+
+- **危险动作 = 钟不对时布防**：布防按当时钟面换算"距 23:58 还有多久"，钟落在
+  `[当前, 23:58)` 窗口内时算出的是贴脸延时（今早 09:41 事故）。拨钟后要先拨回
+  真实时间再布防。
+- **拨过已布防的截止时刻 = 立即断电**；回拨 = 等量推迟。两者都是钟面判定。
+- 紧急停用定时：`service call smdt 6 s16 "23:58" s16 "10:55" s16 "0"`（enable=0）；
+  恢复第三参给 `"1"`。注意 AIDL 与 `am startservice` 都覆盖 SmdtService 的 SQLite，
+  且冷启动可能静默丢失——发完查 SQLite 与 logcat 确认。
+- `configure.xml` 里的 `AutoOpenTime=08:20/AutoCloseTime=17:35` **不生效**：运行时
+  以 V8 下载参数（10:55/23:58）为准，`SmdtService` 库里落的也是后者。
+- V8 平台真实地址：configure.xml `serverIP = http://210.29.68.22` + `serverPort=80`，
+  基路径 `/openplartform/business/`——验证查询、扣款、阀事件、流水上报、心跳全走它。

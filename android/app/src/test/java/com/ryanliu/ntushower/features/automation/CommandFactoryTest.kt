@@ -130,6 +130,7 @@ class CommandFactoryTest {
             SupportedActions.APP_RESTART,
             SupportedActions.BATH_RESTART,
             SupportedActions.CLOCK_SET,
+            SupportedActions.POWER_SCHEDULE,
             SupportedActions.FREELIST_READ,
             SupportedActions.FREELIST_WRITE,
             SupportedActions.BRIDGE_OPEN,
@@ -151,6 +152,7 @@ class CommandFactoryTest {
             SupportedActions.APP_RESTART,
             SupportedActions.BATH_RESTART,
             SupportedActions.CLOCK_SET,
+            SupportedActions.POWER_SCHEDULE,
             SupportedActions.FREELIST_READ,
             SupportedActions.FREELIST_WRITE,
         )

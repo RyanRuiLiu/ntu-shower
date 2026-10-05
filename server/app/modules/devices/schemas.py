@@ -98,6 +98,17 @@ class DeviceClockSetRequest(BaseModel):
     datetime: str = Field(pattern=r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
 
 
+class DevicePowerScheduleRequest(BaseModel):
+    """重布设备定时开关机。两个时刻都是设备表盘上的 HH:MM（设备端换算成相对延时）。
+
+    off_at 是断电时刻，on_at 是断电之后到上电的时刻。小时与分钟的范围也在边界拦
+    （25:00 这类"形状对但不存在"的时刻不发给设备）。
+    """
+
+    off_at: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    on_at: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+
+
 class DeviceUiTouchRequest(BaseModel):
     """触摸：按屏幕坐标点击或滑动。
 

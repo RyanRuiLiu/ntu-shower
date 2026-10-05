@@ -4,41 +4,34 @@
 
 浴室 App 每天按 `autoCloseTime`（实测 23:58）关机，并在关机前五分钟放掉所有喷头
 （`ARCHITECTURE.md` 那四个释放条件里的"关机前 5 分钟"）。对名单里的人来说那一下是
-提前收场。这里在更早的某一刻（`extend_hours_at`，默认 23:49）把设备钟往后拨一小时、
-然后重启浴室 App，于是：
+提前收场。这里在更早的某一刻（`extend_hours_at`，默认 23:49）：
 
-- "关机前五分钟"落到**次日**的同一时刻上，当晚不再放人；
-- 重启让 App 重新装载每日开关机计划，MCU 里那条关机延时跟着推到次日
-  （`docs/device-poweroff.md`）；
-- 而 App 的释放条件全用绝对值（`|openTime − now|`），钟一跳它们统统越界——**设备上
-  所有喷头被清空**，不只是名单里的那几个。
+- 把设备钟往后拨一小时，浴室 App 的释放条件全用绝对值（`|openTime − now|`），钟一跳
+  它们统统越界——**设备上所有喷头被清空**，不只是名单里的那几个；
+- 拨钟**之前**先重布一次 MCU（`power.schedule`，保护性布防）：钟被拨到越过旧布防的
+  截止即当场断电（`docs/device-poweroff.md` §11），所以截止必须先推到延长结束之后；
+- 拨完之后等门清空，再替名单里的人把喷头分配回去；
+- 分配完成后**再次重布 MCU**，把断电点放到常规的次日 `power_off_at`——这一步替代了
+  旧流程里的"重启浴室 App"（重启的唯一作用就是让 App 重读计划重写 MCU）。
 
-所以拨完之后要等门清空，再替名单里的人把喷头分配回去。
-
-## 三个动作，顺序不能变
+## 四步，顺序不能变
 
 ```
-① 拨钟      clock.set(+1h)     —— 浴室 App 还在跑，它下一轮扫描就会清空喷头
-② 重新分配  session.assign     —— 趁 App 还在前台，把名单里的人放回原喷头
-③ 重启      bath.restart       —— 让它带着新钟重读开关机计划，MCU 的延时才跟着走
+① 重布（保护）  power.schedule   —— 把关机截止推过整个延长窗口，拨快才不会当场断电
+② 拨钟          clock.set(+1h)   —— 浴室 App 还在跑，它下一轮扫描就会清空喷头
+③ 重新分配      session.assign   —— 趁 App 还在前台，把名单里的人放回原喷头
+④ 重布（常规）  power.schedule   —— 截止放到次日 power_off_at，替代旧的 bath.restart
 ```
 
-**②必须在③之前**：重启的第一条 shell 就是 `am force-stop`，而分配是驱动 App 界面的
-自动化——顺序反了或挨着发，分配连开始都开始不了。而**③又必须在①之后**：App 在启动那一刻
-读系统时钟装载计划，先重启的话它读到的还是旧时刻。
-
-中间那一步要等：拨钟到清空之间隔着浴室 App 的一轮扫描（≤1 秒），而"清空完成"只有它的
-写库能告诉我们。等不到就放弃那几个人（`ASSIGN_WINDOW_S`），**但不能因此不重启**——重启
-关系到 MCU，比"把人放回去"更要紧。
+**①必须在②之前**：拨快让钟越过旧截止，MCU 当场断电（实测）。**④替代③之后的
+重启**：旧流程的重启只为让 MCU 跟着新钟走，直写 MCU 之后这一步不再需要；
+`bath.restart` 动作本身保留（时钟校正与排障仍用），只是延长流程不再调用它。
 
 ## 什么时候收场
 
-拨钟**成功**那一刻起算，满 `extend_hours_hold_s` 就把钟调回，并再重启一次浴室 App
-让它按真实时刻重算计划。**到期时还挂着的会话会被浴室端清掉**：它判
-`|开阀时刻 − 此刻|` 用的是绝对值，钟往回一跳那个差值就跳过去了。借来的一小时要还，
-这是这个功能自身的终点，不是缺陷。
-
-收尾这两件可以连做，与拨进不同：那时不需要把谁分配回去，所以中间没有"等分配结束"。
+拨钟**成功**那一刻起算，满 `extend_hours_hold_s` 就把钟调回。调回之后**不再重布**：
+第④步布下的截止记在钟面上（次日 `power_off_at`），钟调回后那个时刻恰好落回真实
+时刻——当晚的断电与次日的上电都由它承担，节奏与未延长的夜晚完全一致。
 
 ## 两个入口，各管一段
 
@@ -90,13 +83,17 @@ SHIFT_S = 3600
 #: 默认 23:49，放人线 23:53）。
 TICK_INTERVAL_S = 30.0
 
-#: 拨钟之后留给"重新分配"的窗口。过了就不再试、直接重启。
+#: 拨钟之后留给"重新分配"的窗口。过了就不再试、直接进下一步。
 #:
-#: 它一次封三件事：分配不会无限试、重启不会无限等、MCU 能在死线前拿到新延时。死线是
-#: **真实 23:58**——MCU 存的是相对延时、从上次写入起算，而拨钟不改它。60 秒的余量按实测
-#: 算：一次 `session.assign` 的 p90 是 4.1 秒（生产 `command_audit`），设备 7 个喷头即名单
+#: 它一次封两件事：分配不会无限试、重布不会无限等。60 秒的余量按实测算：一次
+#: `session.assign` 的 p90 是 4.1 秒（生产 `command_audit`），设备 7 个喷头即名单
 #: 最多 7 人，29 秒是上限，窗口是它的两倍。
 ASSIGN_WINDOW_S = 60.0
+
+#: 保护性重布的富余量。拨快会把钟面推近一小时，保护布防的截止要落在"拨回之后"
+#: （`SHIFT_S + extend_hours_hold_s`）再加这段富余——重布失败时它就是延长结束之后的那个断电点，
+#: 落在延长结束之后几分钟，而不是延长中途。
+PROTECT_MARGIN_S = 600.0
 
 _task: asyncio.Task[None] | None = None
 
@@ -111,11 +108,11 @@ _reassign_failed: set[tuple[str, str]] = set()
 
 @dataclass(frozen=True)
 class Shift:
-    """一次拨钟：哪台设备、什么时候拨成功、**有没有重启过**、拨之前谁在哪个喷头。"""
+    """一次拨钟：哪台设备、什么时候拨成功、**有没有重布过常规计划**、拨之前谁在哪个喷头。"""
 
     device_id: str
     shifted_at: str
-    restarted_at: str
+    rearmed_at: str
     assignments: tuple[tuple[int, str], ...]
 
 
@@ -169,7 +166,7 @@ def _as_shift(row: Row) -> Shift:
     return Shift(
         device_id=str(row["device_id"]),
         shifted_at=str(row["shifted_at"]),
-        restarted_at=str(row["restarted_at"] or ""),
+        rearmed_at=str(row["rearmed_at"] or ""),
         assignments=assignments,
     )
 
@@ -212,27 +209,62 @@ async def _set_clock(device_id: str, seconds: float, zone_offset_minutes: int) -
     return True
 
 
-async def _restart_bath_app(device_id: str) -> bool:
-    """重启浴室 App，让它带着当前时钟重读每日开关机计划；返回是否成功。
+async def _schedule_power(device_id: str, config: ConfigValues, protective: bool) -> bool:
+    """重布 MCU 定时开关机（`power.schedule`）；返回是否成功。
 
-    **它必须晚于写时钟**：App 在启动那一刻读系统时钟装载计划（`WelcomeActivity` →
-    `smdtSetTimingSwitchMachine`），先重启再拨钟的话它读到的还是旧时刻，MCU 里那条延时
-    也就没跟着走——整件事白做。
+    目标时刻都是设备**表盘上**的 `HH:MM`，由设备端用自己的钟换算成相对延时——与
+    `clock.set` 下发表盘时刻是同一个模式。两个目标的取法：
 
-    **它也必须晚于重新分配**：`force-stop` 会杀掉 App，而重新分配是驱动 App 界面的自动化。
-    实测（生产 `command_audit`）`clock.set` 的 p50 只有 0.6 秒，而重启命令的第一条就是
-    `am force-stop`——两件挨着发的话，分配连开始都开始不了。
+    - **保护性**（拨钟之前）：断电目标 = 表盘此刻 + 拨走的一小时 + 保持时长 + 富余量。
+      拨快会让钟越过旧截止即当场断电（实测），所以截止必须先推过整个延长窗口；
+      富余量保证即使第④步失败，失败路径的断电也落在拨回之后、钟已归位的帧里。
+    - **常规**（重新分配完成之后）：断电目标 = `power_off_at`、上电目标 =
+      `power_on_at`。此刻钟已拨快，这两个钟面时刻在拨回之后恰好落回真实时刻——
+      当晚的断电与次日的上电都由它承担。
+
+    上电目标总在断电目标之后：设备端按"断电时刻之后第一个 `on_at`"换算开机延时
+    （浴室 App 自己的 `DataforHandle` 也是这么算的，逐字移植）。
     """
-    restarted = await sessions_service.send_command_and_wait(device_id, actions.BATH_RESTART, {})
-    if restarted["status"] != outcomes.OK.value:
+    if protective:
+        hold_s = as_int(config["extend_hours_hold_s"])
+        local_now = _local_now(device_id, as_int(config["extend_hours_zone_offset_minutes"]))
+        if local_now is None:
+            log_event("WARNING", "extend-hours.no-skew", "还没有这台设备的钟偏差记录，不动它", device_id=device_id)
+            return False
+        # 目标只取表盘上的 HH:MM（power.schedule 的参数形状）；秒由 MCU 的分钟粒度截断
+        off_at = wall_clock_text(shift_rfc3339(local_now, SHIFT_S + hold_s + PROTECT_MARGIN_S))
+        off_at = off_at[11:16] if off_at is not None else None
+    else:
+        off_at = str(config["power_off_at"])
+    on_at = str(config["power_on_at"])
+    if off_at is None:
+        log_event("WARNING", "extend-hours.power-bad-target", "算不出断电目标时刻，不动它", device_id=device_id)
+        return False
+
+    result = await sessions_service.send_command_and_wait(
+        device_id, actions.POWER_SCHEDULE, {"off_at": off_at, "on_at": on_at}
+    )
+    if result["status"] != outcomes.OK.value:
         log_event(
             "WARNING",
-            "extend-hours.restart-failed",
-            "浴室 App 重启失败，开关机计划没跟着新钟重算",
+            "extend-hours.power-failed",
+            "重布 MCU 定时开关机失败",
             device_id=device_id,
-            reason_code=restarted["reason_code"] or "-",
+            protective=protective,
+            off_at=off_at,
+            on_at=on_at,
+            reason_code=result["reason_code"] or "-",
         )
         return False
+    log_event(
+        "INFO",
+        "extend-hours.power-scheduled",
+        "已重布 MCU 定时开关机",
+        device_id=device_id,
+        protective=protective,
+        off_at=off_at,
+        on_at=on_at,
+    )
     return True
 
 
@@ -247,14 +279,14 @@ def on_frame(device_id: str) -> None:
     后台任务里，这里只做"要不要做"的判断（查一行表、查一次会话，都是本地读）。
 
     四种情形直接返回：**不在延长中**（表里没行）、**没什么可分配的**、**名单是空的**、
-    **已经重启过了**（分配阶段结束，往后轮到调回）。还有一种：**已经有一轮在跑**——帧与
+    **已经重布过了**（分配阶段结束，往后轮到调回）。还有一种：**已经有一轮在跑**——帧与
     定时任务都会推这一步，两边同时动手会给同一个人下发两条命令。
     """
     row = repository.get(device_id)
     if row is None:
         return
     shift = _as_shift(row)
-    if shift.restarted_at or not shift.assignments:
+    if shift.rearmed_at or not shift.assignments:
         return
     if _window_passed(shift):
         return
@@ -308,7 +340,7 @@ async def _reassign(device_id: str, assignments: tuple[tuple[int, str], ...], st
             )
             continue
         # 命令本身失败时领域层**不抛**，只把结果返回来（它只在前置检查上抛）。不看这一句
-        # 就会记下一条"已分配回去"的假日志，而那个门其实空着——重启之后再没有帧可等，
+        # 就会记下一条"已分配回去"的假日志，而那个门其实空着——重布之后再没有帧可等，
         # 也没人会来纠正它。
         if result.get("status") != outcomes.OK.value:
             _reassign_failed.add((device_id, cert_no))
@@ -354,19 +386,19 @@ async def tick_once() -> None:
 
 
 async def _advance(shift: Shift) -> None:
-    """推进一台正在延长的设备：还没重启就继续分配，重启过就等调回。
+    """推进一台正在延长的设备：还没重布常规计划就继续分配，重布过就等调回。
 
-    这两个阶段不能并起来：分配要求 App 正在前台跑，而重启会 `force-stop` 它。
+    这两个阶段仍分开走：分配只在延长开始后的窗口里推，重布是它的收尾。
     """
     config = config_store.effective(shift.device_id)
-    if not shift.restarted_at:
+    if not shift.rearmed_at:
         await _reassign_stage(shift, config)
         return
     await _maybe_restore(shift, config)
 
 
 async def _reassign_stage(shift: Shift, config: ConfigValues) -> None:
-    """拨钟之后、重启之前：把名单里的人分配回原喷头，齐了就重启。
+    """拨钟之后、重布之前：把名单里的人分配回原喷头，齐了就重布。
 
     **两样推动它**：帧到达时 `on_frame` 立刻试一次（快），而每一轮 tick 也试一次（帧是
     事件驱动的，平均四分钟一份，而重排不能只等它）。两边调的是同一个 `_reassign`，它幂等。
@@ -376,11 +408,11 @@ async def _reassign_stage(shift: Shift, config: ConfigValues) -> None:
         await _reassign(shift.device_id, shift.assignments, students)
     if not _reassign_done(shift, students):
         return
-    if not await _restart_bath_app(shift.device_id):
-        # 下一轮再试：重启让 App 重读开关机计划，而计划决定 MCU 什么时候断电
+    if not await _schedule_power(shift.device_id, config, protective=False):
+        # 下一轮再试：这一步把断电点放到次日的 power_off_at，关系当晚会不会断电
         return
-    repository.mark_restarted(shift.device_id, now_rfc3339())
-    log_event("INFO", "extend-hours.restarted", "浴室 App 已重启，开关机计划已重读", device_id=shift.device_id)
+    repository.mark_rearmed(shift.device_id, now_rfc3339())
+    log_event("INFO", "extend-hours.rearmed", "MCU 已重布为常规计划", device_id=shift.device_id)
 
 
 def _window_passed(shift: Shift) -> bool:
@@ -389,7 +421,7 @@ def _window_passed(shift: Shift) -> bool:
 
 
 def _reassign_done(shift: Shift, students: dict[str, str]) -> bool:
-    """可不可以重启了：名单里的人要么已分配回去，要么已经管不着。
+    """可不可以重布了：名单里的人要么已分配回去，要么已经管不着。
 
     "管不着"有两种：他不在名单里了（配置改了），或者窗口过了（不能再等）。三种之外的
     情形一律继续等——**这个函数只回答"齐了没有"，不下发**。
@@ -403,7 +435,7 @@ def _reassign_done(shift: Shift, students: dict[str, str]) -> bool:
 
 
 async def _maybe_shift(device_id: str) -> None:
-    """到点且名单里还有人占着，就拨一次。**只拨钟，不重启**——重启要等分配结束。"""
+    """到点且名单里还有人占着，就拨一次。**只拨钟**——常规重布要等分配结束。"""
     config = config_store.effective(device_id)
     if not config["extend_hours_enabled"]:
         return
@@ -425,6 +457,11 @@ async def _maybe_shift(device_id: str) -> None:
     # 再拨一次。命令失败时清掉它，于是下一轮照常重试。
     assignments = [{"door_no": door_no, "cert_no": cert_no} for door_no, cert_no in present]
     repository.record(device_id, now_rfc3339(), assignments)
+    # 保护性重布必须先于拨钟：拨快让钟越过旧截止即当场断电（实测，见模块注释里的①）
+    if not await _schedule_power(device_id, config, protective=True):
+        repository.clear(device_id)
+        log_event("WARNING", "extend-hours.shift-failed", "保护性重布没成功，下一轮再试", device_id=device_id)
+        return
     if not await _set_clock(device_id, SHIFT_S, as_int(config["extend_hours_zone_offset_minutes"])):
         repository.clear(device_id)
         log_event("WARNING", "extend-hours.shift-failed", "拨钟没成功，下一轮再试", device_id=device_id)
@@ -436,10 +473,11 @@ async def _maybe_shift(device_id: str) -> None:
 
 
 async def _maybe_restore(shift: Shift, config: ConfigValues) -> None:
-    """保持时长满了就把钟调回，并再重启一次让计划按真实时刻重算。
+    """保持时长满了就把钟调回。调回之后**不再重布**。
 
-    这两件可以同一轮连做，与拨进不同：延长的收尾不需要把谁分配回去，所以中间没有
-    "等分配结束"那一段。
+    第④步布下的截止记在钟面上（次日的 `power_off_at`），钟调回之后那个时刻恰好落回
+    真实时刻——当晚的断电与次日的上电都由它承担。旧流程在这里还要再重启一次浴室 App，
+    直写 MCU 之后那一步只剩"让 App 重读计划"一个用途，而计划已经由第④步直接写进 MCU。
     """
     hold_s = as_int(config["extend_hours_hold_s"])
     if seconds_between(shift.shifted_at, now_rfc3339()) < hold_s:
@@ -448,9 +486,6 @@ async def _maybe_restore(shift: Shift, config: ConfigValues) -> None:
     if not await _set_clock(shift.device_id, -SHIFT_S, zone_offset_minutes):
         log_event("WARNING", "extend-hours.restore-failed", "调回没成功，下一轮再试", device_id=shift.device_id)
         return
-    # 钟已经回去了；重启失败也不能再把行留着——留着会被当成"还偏着"，下一轮又调一次
-    if not await _restart_bath_app(shift.device_id):
-        log_event("WARNING", "extend-hours.restore-restart-failed", "钟已调回但计划没重读", device_id=shift.device_id)
     repository.clear(shift.device_id)
     _forget_failures(shift.device_id)
     log_event("INFO", "extend-hours.restored", "设备钟已调回", device_id=shift.device_id)
