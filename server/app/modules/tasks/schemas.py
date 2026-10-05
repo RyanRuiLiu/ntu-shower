@@ -72,7 +72,7 @@ class ExtendingDevice(BaseModel):
     reassigned_count: int
     pending: list[DoorAssignment]
     mcu_off_at: str
-    tick_interval_s: int
+    rearm_interval_s: int
     idle: bool
     past_midnight: bool
 

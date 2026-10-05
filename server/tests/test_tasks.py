@@ -435,7 +435,7 @@ def test_status_includes_the_extending_device(client: TestClient, admin_headers:
     assert row["reassigned_count"] == 0
     assert row["pending"] == [{"door_no": 3, "cert_no": CERT_NO}]
     assert row["mcu_off_at"] == ""  # 没经过滚动：尚无武装的截止
-    assert row["tick_interval_s"] == 30
+    assert row["rearm_interval_s"] == 120
     assert row["idle"] is True
     assert row["reassigned_count"] == 0
 
