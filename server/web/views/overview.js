@@ -344,8 +344,6 @@ function renderTaskBoard(data) {
           ? '<div class="task-hint">当前没有设备在延长中</div>'
           : data.extending
               .map((shift) => {
-                const total = shift.assignments.length
-                const people = shift.assignments.map((item) => `#${item.door_no} ${item.cert_no}`).join('  ')
                 const flags = [
                   { ok: shift.past_midnight, yes: '午夜已过', no: '未过午夜' },
                   { ok: shift.idle, yes: '喷头空闲', no: '仍有会话' },
@@ -353,19 +351,25 @@ function renderTaskBoard(data) {
                   .map(({ ok, yes, no }) => `<span class="task-flag ${ok ? 'ok' : 'no'}">${ok ? '✓' : '✗'} ${ok ? yes : no}</span>`)
                   .join('')
                   + (shift.past_midnight && shift.idle ? '<span class="task-flag ok">即将拨回</span>' : '')
+                const pending =
+                  shift.pending.length === 0
+                    ? ''
+                    : `<div class="task-sub">待分配 ${shift.pending.length} 人：${shift.pending
+                        .map((item) => `#${item.door_no} ${item.cert_no}`)
+                        .join('  ')}</div>`
                 return `
                 <div class="task-entry">
                   <div class="task-line">
                     ${deviceCell(shift.device_id)}
+                    <span class="muted">钟已拨快 ${shift.shift_minutes} 分钟（${esc(fmtDateTime(shift.shifted_at))}）</span>
                     <span class="task-next">滚动续写每 ${shift.tick_interval_s} 秒</span>
                   </div>
                   <div class="task-sub">
-                    <span>钟已拨快 ${shift.shift_minutes} 分钟</span>
-                    <span>于 ${esc(fmtDateTime(shift.shifted_at))}</span>
                     <span>MCU 截止 <span class="mono">${esc(shift.mcu_off_at || '—')}</span></span>
-                    <span>已放回 ${shift.reassigned_count}/${total}</span>
+                    <span>已放回 ${shift.reassigned_count}/${shift.total}</span>
+                    ${flags}
                   </div>
-                  <div class="task-sub">${flags}<span class="muted">待分配：${esc(people || '无')}</span></div>
+                  ${pending}
                 </div>`
               })
               .join('')
@@ -388,14 +392,13 @@ function renderTaskBoard(data) {
                   ${deviceCell(row.device_id)}
                   <span>#${esc(row.door_no)}</span>
                   <span class="mono">${esc(row.cert_no || PLACEHOLDER)}</span>
-                  <span class="task-countdown" data-at="${esc(row.at)}">${esc(countdownText(row.at))}</span>
+                  <span class="task-at">到点 ${esc(fmtDateTime(row.at))}</span>
                 </div>
                 <div class="task-sub">
                   <span>会话 #${esc(row.session_id)}</span>
                   <span>${esc(row.state)}</span>
                   <span>起算 ${esc(fmtDateTime(row.started_at))}</span>
                   <span>阈值 ${fmtDuration(row.threshold_s)}</span>
-                  <span>到点 ${esc(fmtDateTime(row.at))}</span>
                   ${chain}
                 </div>
               </div>`

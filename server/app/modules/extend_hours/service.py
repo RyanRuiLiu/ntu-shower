@@ -201,7 +201,8 @@ def current_shifts() -> list[dict[str, object]]:
 
     只读的运维可见性（概览页的后台任务卡）：表里一行就是"这台设备钟是拨快着的"。
     恢复条件两项（真实时间过午夜、喷头全部空闲）逐项给出——面板能直接回答
-    "什么时候拨回"：两项齐了之后的一轮 tick（30 秒内）就会动手。
+    "什么时候拨回"：两项齐了之后的一轮 tick（30 秒内）就会动手。`pending` 是
+    尚未放回的人：浴室端收回谁，谁就是走了，不再重新预约。
     """
     rows: list[dict[str, object]] = []
     for row in repository.list_shifted():
@@ -212,17 +213,23 @@ def current_shifts() -> list[dict[str, object]]:
         now_local = to_local(now_rfc3339(), zone)
         past_midnight = shift_local is not None and now_local is not None and now_local.date() > shift_local.date()
         idle = not doors_service.open_sessions(shift.device_id)
+        pending = [
+            {"door_no": door_no, "cert_no": cert_no}
+            for door_no, cert_no in shift.assignments
+            if (shift.device_id, cert_no) not in _reassigned
+        ]
         rows.append(
             {
                 "device_id": shift.device_id,
                 "shift_minutes": as_int(config["extend_shift_minutes"]),
                 "shifted_at": shift.shifted_at,
-                "assignments": [{"door_no": door_no, "cert_no": cert_no} for door_no, cert_no in shift.assignments],
+                "total": len(shift.assignments),
+                "reassigned_count": len(shift.assignments) - len(pending),
+                "pending": pending,
                 "mcu_off_at": _last_roll.get(shift.device_id, ""),
                 "tick_interval_s": int(TICK_INTERVAL_S),
                 "idle": idle,
                 "past_midnight": past_midnight,
-                "reassigned_count": sum(1 for item in _reassigned if item[0] == shift.device_id),
             }
         )
     return rows
