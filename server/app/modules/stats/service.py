@@ -33,6 +33,16 @@
    占用类（热力图、高峰时段、等待时长）**不过滤**：占着喷头就算占用，
    有没有出水是另一回事。
 
+8. **热力图的分母剔除设备离线的时段**（[_cell_seconds]）。离线期间没有帧，占用
+   分子天然是空的；分母若按墙钟照算，每次掉线之后整张图都系统性偏低。分子同时
+   **截到窗口末端**（[_heat]）：会话按 `assigned_at` 入窗，结束可能越过窗口末端，
+   溢出的秒数会落进分母不存在的格上，把那一格顶过"全忙"。
+
+9. **热力图的标题、副标、图例、逐格说明与说明行初始内容全部由服务端下发**
+   （`spec.HEAT_TITLE` 等）。它们是描述文案与口径的表述，收在服务端一处——改字、
+   改措辞不要求客户端发版，也不存在两份文案各自漂移的可能。客户端不为任何一句
+   热力图文字持有底稿。
+
 ## 一次请求里只查一遍
 
 会话表与段表各查一次，其余维度都从这两份结果推。今日（[today]）是窗口的子集，本地
@@ -51,6 +61,7 @@ from sqlite3 import Row
 from app.core.clock import format_rfc3339, now_rfc3339, rfc3339_ago, seconds_between, to_local
 from app.core.db import get_conn, read_one
 from app.modules.devices import repository as devices
+from app.modules.devices.schemas import LINK_OFFLINE
 from app.modules.doors.schemas import DoorState, state_label
 from app.modules.doors.service import SESSION_MAX_S
 
@@ -182,8 +193,54 @@ def _bucket_index(value: int, buckets: tuple[spec.HistogramBucket, ...]) -> int:
     return len(buckets) - 1
 
 
-def _cell_seconds(since: str, until: str, offset_minutes: int) -> dict[tuple[int, int], float]:
+def _add_span(seconds: dict[tuple[int, int], float], start: datetime, end: datetime) -> None:
+    """把 [start, end) 的秒数按 (星期, 小时) 格累加，跨格自动切开。
+
+    一场从 21:40 到 22:10 的会话，两格各占一部分；整场归给起点那一格会使后一格
+    少算。会话占用与设备离线共用这条路径，切法才一致。
+    """
+    cursor = start
+    while cursor < end:
+        edge = min(cursor.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1), end)
+        column = cursor.hour - spec.HOUR_START
+        if 0 <= column < spec.HOUR_COUNT:
+            seconds[(cursor.weekday(), column)] += (edge - cursor).total_seconds()
+        cursor = edge
+
+
+def _offline_seconds(device_id: str, since: str, until: str, offset_minutes: int) -> dict[tuple[int, int], float]:
+    """窗口内设备离线的秒数，按 (星期, 小时) 格累计。
+
+    状态从窗口之前最近的一条事件起步（`devices.link_events` 取 `until` 前全部事件）：
+    设备在窗口开始前就已掉线、直到窗口内才上线，那段同样是离线。
+    """
+    seconds: dict[tuple[int, int], float] = defaultdict(float)
+    start = to_local(since, offset_minutes)
+    end = to_local(until, offset_minutes)
+    if start is None or end is None:
+        return seconds
+    offline_at: datetime | None = None
+    for row in devices.link_events(device_id, before=until):
+        moment = to_local(str(row["occurred_at"]), offset_minutes)
+        if moment is None:
+            continue
+        if str(row["event"]) == LINK_OFFLINE:
+            if offline_at is None:
+                offline_at = moment
+            continue
+        if offline_at is not None:
+            _add_span(seconds, max(offline_at, start), min(moment, end))
+            offline_at = None
+    if offline_at is not None:
+        _add_span(seconds, max(offline_at, start), end)
+    return seconds
+
+
+def _cell_seconds(since: str, until: str, offset_minutes: int, device_id: str) -> dict[tuple[int, int], float]:
     """窗口内每个 (星期, 小时) 格**实际经过**的秒数——热力图的分母。
+
+    墙钟累计再剔掉设备离线的那部分（口径 8）：离线期间没有帧，占用分子是空的，
+    分母若照算，每次掉线之后整张图都系统性偏低。
 
     不用"该星期几出现过几天 × 3600"：窗口两端通常落在半天中间，那种算法会把首尾
     两天各自的不足一天都当成整天。实测 09-27 16:11 到 10-04 00:00 那个窗口，周日
@@ -194,20 +251,16 @@ def _cell_seconds(since: str, until: str, offset_minutes: int) -> dict[tuple[int
     end = to_local(until, offset_minutes)
     if start is None or end is None:
         return seconds
-    cursor = start
-    while cursor < end:
-        edge = min(cursor.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1), end)
-        column = cursor.hour - spec.HOUR_START
-        if 0 <= column < spec.HOUR_COUNT:
-            seconds[(cursor.weekday(), column)] += (edge - cursor).total_seconds()
-        cursor = edge
+    _add_span(seconds, start, end)
+    for key, offline in _offline_seconds(device_id, since, until, offset_minutes).items():
+        seconds[key] = max(0.0, seconds[key] - offline)
     return seconds
 
 
 # ── 分桶 ─────────────────────────────────────────────
 
 
-def _heat(rows: list[Row], since: str, until: str, offset_minutes: int) -> list[list[float]]:
+def _heat(rows: list[Row], since: str, until: str, offset_minutes: int, device_id: str) -> list[list[float]]:
     """`[星期][小时]` 的平均占用喷头数。
 
     按会话的占用区间与每个小时格求重叠秒数，再除以那一格在窗口内实际经过的秒数。
@@ -215,10 +268,14 @@ def _heat(rows: list[Row], since: str, until: str, offset_minutes: int) -> list[
     **逐格累加而不是整场算进起点那一格**：一场从 21:40 到 22:10 的会话，两格各占
     一部分；整场归给 21 点会使 22 点那一格少算。
 
+    **会话的结束截到窗口末端**：按 `assigned_at` 入窗的会话可能结束在 `until`／
+    `settled` 之后，溢出的秒数会落进分母不存在的格上，把那一格顶过"全忙"。
+
     取值是**小数**：一小时内的占用喷头数随时在变，"平均占用"本来就带小数。**不要取整**
     ——0.38 抹成 0 之后，那一格看起来像"一直没人"，而它其实一直有人。
     """
     seconds: dict[tuple[int, int], float] = defaultdict(float)
+    limit = to_local(until, offset_minutes)
     for row in rows:
         if not _usable_for_occupancy(row):
             continue
@@ -226,15 +283,12 @@ def _heat(rows: list[Row], since: str, until: str, offset_minutes: int) -> list[
         end = to_local(row["ended_at"], offset_minutes)
         if start is None or end is None or end <= start:
             continue
-        cursor = start
-        while cursor < end:
-            edge = min(cursor.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1), end)
-            column = cursor.hour - spec.HOUR_START
-            if 0 <= column < spec.HOUR_COUNT:
-                seconds[(cursor.weekday(), column)] += (edge - cursor).total_seconds()
-            cursor = edge
+        # 截断后不会倒挂：start < limit 由查询的 assigned_at < until 保证。
+        if limit is not None:
+            end = min(end, limit)
+        _add_span(seconds, start, end)
 
-    elapsed = _cell_seconds(since, until, offset_minutes)
+    elapsed = _cell_seconds(since, until, offset_minutes, device_id)
     return [
         [
             round(seconds[(weekday, column)] / elapsed[(weekday, column)], 2) if elapsed[(weekday, column)] else 0.0
@@ -277,6 +331,65 @@ def _heat_levels(heat: list[list[float]]) -> list[list[int]]:
     if peak <= 0:
         return [[0] * len(row) for row in heat]
     return [[_heat_level(value / peak) for value in row] for row in heat]
+
+
+def _format_busy(value: float) -> str:
+    """0.38 → "0.4"，1.0 → "1"：一位小数，去掉无意义的尾零。"""
+    text = f"{value:.1f}".rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def _heat_cell_text(busy: float, weekday: int, column: int, door_count: int) -> str:
+    """一格怎么说，逐格说明与说明行的"现在"共用这一条成文路径。"""
+    at = f"{spec.WEEKDAY_LABELS[weekday]} {spec.HOUR_START + column} 时"
+    if busy <= 0:
+        return f"{at} · 没有人"
+    share = round(busy / door_count * 100) if door_count > 0 else 0
+    return f"{at} · 平均占用 {_format_busy(busy)}/{door_count}（{share}%）"
+
+
+def _heat_texts(heat: list[list[float]], door_count: int) -> list[list[str]]:
+    """每个格子的说明文字，**由服务端成文**，与 `heat` 同形。
+
+    时刻、绝对占用、占容量的比例——一格怎么念是这一格的口径，与档名、榜注解同类；
+    留在客户端就成了第二份，改一处另一处不跟着动，而两处都不会报错。
+
+    **占用留一位小数、并给出占容量的比例**：格值多在 0.x–1.x 之间，取整会把 0.4
+    念成 0，而颜色正是按那个 0.4 分档的——两个数出自同一个值却对不上。整格为 0
+    时直接说"没有人"：那是平均口径下唯一做得到的绝对判断。
+    """
+    return [
+        [_heat_cell_text(busy, weekday, column, door_count) for column, busy in enumerate(row)]
+        for weekday, row in enumerate(heat)
+    ]
+
+
+def _heat_now_text(heat: list[list[float]], until: str, offset_minutes: int, door_count: int) -> str:
+    """说明行的初始内容：**"现在"那一格**，整句由服务端成文。
+
+    请求时刻落在服务时段内，就给"现在"那格的说明；之外没有"现在"可指，给整句
+    引导。哪一刻算"现在"由请求时刻回答（客户端的展示基准与服务端同源），客户端
+    不持有这两句话的任何一份。
+
+    打开页面后时间继续走，这句话不会自己更新——它与本响应里每个数字一样，是
+    拉取那一刻的读数；刷新即重取。
+    """
+    moment = to_local(until, offset_minutes)
+    if moment is not None:
+        column = moment.hour - spec.HOUR_START
+        if 0 <= column < spec.HOUR_COUNT:
+            weekday = moment.weekday()
+            return f"{spec.HEAT_NOW_PREFIX}{_heat_cell_text(heat[weekday][column], weekday, column, door_count)}"
+    return spec.HEAT_HINT
+
+
+def _copy(days: int) -> dict[str, str]:
+    """下发 `spec.STATS_COPY` 整表。
+
+    `{days}` 在这里填——窗口天数是请求参数，服务端知道；其余占位符是运行时值，
+    留给客户端用 shower-utils 的格式化结果填入。
+    """
+    return {key: text.replace("{days}", str(days)) for key, text in spec.STATS_COPY.items()}
 
 
 def _totals(flowed: list[Row]) -> StatsTotals:
@@ -605,7 +718,7 @@ def _compare_rows(current: CompareRow, since: str, until: str, settled: str, off
         sessions = _sessions(device_id, since, until)
         flowed = _flowed(sessions)
         usable = [row for row in sessions if _usable_for_occupancy(row)]
-        low, high = _peak_hours(_heat(usable, since, settled, offset_minutes))
+        low, high = _peak_hours(_heat(usable, since, settled, offset_minutes, device_id))
         # 只查一次喷头数：行里要用、等待算法也要用，两次 COUNT 是白走一趟库。
         door_count = _door_count(device_id)
         rows.append(
@@ -648,7 +761,7 @@ def device_stats(device_id: str, days: int, tz_offset_minutes: int) -> StatsView
     # 所在那一列按"零占用"参与平均——窗口越短偏得越狠（近 7 天时今天占分母的七分之一）。
     # 今天的数据由 TodaySummary 单独回答。
     settled = _day_start(until, tz_offset_minutes)
-    heat = _heat(usable, since, settled, tz_offset_minutes)
+    heat = _heat(usable, since, settled, tz_offset_minutes, device_id)
     low, high = _peak_hours(heat)
     return {
         "device_id": device_id,
@@ -664,6 +777,12 @@ def device_stats(device_id: str, days: int, tz_offset_minutes: int) -> StatsView
         "today": _today_summary(device_id, flowed, tz_offset_minutes),
         "heat": heat,
         "heat_levels": _heat_levels(heat),
+        "heat_title": spec.HEAT_TITLE,
+        "heat_note": spec.HEAT_NOTE.format(days=days),
+        "heat_legend": [LabeledOption(key=str(index), label=label) for index, label in enumerate(spec.HEAT_LEGEND)],
+        "heat_texts": _heat_texts(heat, door_count),
+        "heat_now_text": _heat_now_text(heat, until, tz_offset_minutes, door_count),
+        "copy": _copy(days),
         "histograms": _histograms(flowed, segments),
         "doors": _door_rows(flowed),
         "leaderboards": _leaderboards(rows, tz_offset_minutes),

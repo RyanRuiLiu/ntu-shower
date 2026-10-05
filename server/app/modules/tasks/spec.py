@@ -39,7 +39,6 @@ from dataclasses import dataclass
 from app.core.protocol import JsonObject, as_int
 from app.modules.config.spec import GROUPS
 from app.modules.doors.service import NO_WATER_RELEASE_S, SESSION_MAX_S
-from app.modules.extend_hours.service import SHIFT_S
 from app.modules.sessions.decision import FEATURES
 
 #: 任务 key → 中文名。取自配置页的分组标题——同一个概念只许一个中文说法。
@@ -85,8 +84,8 @@ _TEMPLATES: dict[str, str] = {
     ),
     "extend_hours": (
         "浴室 App 每天到点会自动关机，并在关机前释放全部喷头。你登记后，系统会在{at}把设备"
-        "时钟前移{shift}并重启浴室 App，使当天那次关机顺延到第二天；这时如果你还在使用，"
-        "可以继续下去。该状态持续{hold}后，设备时钟恢复原值。"
+        "时钟前移一小时并清空喷头，再把名单里的人分配回去；当晚 {off} 的断电顺延到第二天。"
+        "喷头全部空闲后设备时钟即恢复原值。"
     ),
 }
 
@@ -112,8 +111,7 @@ def _auto_settle_values(config: JsonObject) -> dict[str, str]:
 def _extend_hours_values(config: JsonObject) -> dict[str, str]:
     return {
         "at": str(config["extend_hours_at"]),
-        "shift": format_duration(SHIFT_S),
-        "hold": format_duration(as_int(config["extend_hours_hold_s"])),
+        "off": str(config["power_off_at"]),
     }
 
 

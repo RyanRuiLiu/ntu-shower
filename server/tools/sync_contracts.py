@@ -35,7 +35,7 @@ from app.core.actions import ALL_ACTIONS
 from app.core.events import DEVICE_UPDATE, DOOR_UPDATE
 from app.core.outcomes import ALL as OUTCOME_STATUSES
 from app.core.reason_codes import REGISTRY as REASON_CODES
-from app.modules.config.spec import BOOL, CONFIG_SPECS, DEVICE, INT, TEXT, ConfigKind, ConfigSpec
+from app.modules.config.spec import BOOL, CONFIG_SPECS, DEVICE, INT, TEXT, TIME, ConfigKind, ConfigSpec
 from app.modules.doors.schemas import DoorState
 from app.modules.ota.service import VERSION_PATTERN as OTA_VERSION_PATTERN
 
@@ -126,7 +126,7 @@ def _kotlin_config_defaults() -> str:
     `asJson()` 供 `RuntimeConfig.resetToDefaults` 复位用。**它必须生成**：手写一份
     拼装就是第三个可能与登记表漂移的地方（`ConfigCache` 的类注释警告过同一件事）。
     """
-    kotlin_type = {INT: "Long", BOOL: "Boolean", TEXT: "String"}
+    kotlin_type = {INT: "Long", BOOL: "Boolean", TEXT: "String", TIME: "String"}
     device_specs = [spec for spec in CONFIG_SPECS if spec.scope is DEVICE]
 
     lines = [
