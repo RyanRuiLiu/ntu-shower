@@ -494,6 +494,7 @@ GET      /api/v1/identities/me                       自己的身份记录
 
 GET      /api/v1/tasks?cert_no=...                   四项后台任务的状态  tasks
 PUT      /api/v1/tasks/{task}                        登记/取消登记        tasks
+GET      /api/v1/background-tasks/status             后台任务当前态（开关/延长中/已排定） admin
 
 GET      /api/v1/stats/devices/{id}?days=&tz_offset_minutes=             一台设备一个窗口的全套统计  stats
 GET      /api/v1/stats/devices/{id}/replay?day=&tz_offset_minutes=       某一天的状态变化序列        stats

@@ -50,11 +50,12 @@ settle 同属 automation 通道，所以**单条命令**不会并发。这里再
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 from typing import Protocol
 
 from app.core import actions, outcomes, problems
-from app.core.clock import now_rfc3339
+from app.core.clock import now_rfc3339, shift_rfc3339
 from app.core.logging import log_event
 from app.core.problems import ApiProblemError
 from app.modules.audit import repository as audit_repository
@@ -188,6 +189,20 @@ class _PendingAssign:
         return actions.SESSION_ASSIGN
 
 
+@dataclass
+class _Planned:
+    """一个已排定的到点：定时器句柄连同它的计划一起放，读的人才知道"在等什么"。
+
+    只存句柄的话，计划（哪个候选、哪条判据）只活在 `call_at` 的闭包里，外面读不到。
+    """
+
+    at: float
+    """到点时刻（循环的单调钟）。"""
+    candidate: Candidate
+    trigger: Trigger
+    handle: asyncio.TimerHandle
+
+
 class _DeviceWorker:
     """一台设备的串行执行者。设备只能串行，串行的边界就是设备。"""
 
@@ -196,8 +211,8 @@ class _DeviceWorker:
         self.queue: asyncio.Queue[_SettleJob | _AssignJob] = asyncio.Queue()
         #: 在途的喷头：同一喷头不排两个待办
         self.busy: set[int] = set()
-        #: door_no → 该门下一个到点
-        self.timers: dict[int, asyncio.TimerHandle] = {}
+        #: door_no → 该门下一个到点（句柄与计划同放，见 [_Planned]）
+        self.timers: dict[int, _Planned] = {}
         self.task: asyncio.Task[None] | None = None
 
 
@@ -353,16 +368,21 @@ def reschedule(device_id: str) -> None:
     loop = asyncio.get_running_loop()
     planned = _plan(device_id)
 
-    for door_no, handle in list(worker.timers.items()):
+    for door_no, existing in list(worker.timers.items()):
         if door_no not in planned:
-            handle.cancel()
+            existing.handle.cancel()
             worker.timers.pop(door_no, None)
 
     for door_no, (at, candidate, trigger) in planned.items():
-        existing = worker.timers.pop(door_no, None)
-        if existing is not None:
-            existing.cancel()
-        worker.timers[door_no] = loop.call_at(at, _fire, device_id, candidate, trigger)
+        previous = worker.timers.get(door_no)
+        if previous is not None:
+            previous.handle.cancel()
+        worker.timers[door_no] = _Planned(
+            at=at,
+            candidate=candidate,
+            trigger=trigger,
+            handle=loop.call_at(at, _fire, device_id, candidate, trigger),
+        )
 
 
 def _forget_closed_sessions(device_id: str) -> None:
@@ -374,6 +394,32 @@ def _forget_closed_sessions(device_id: str) -> None:
     open_ids = {session.session_id for session in doors_service.open_sessions(device_id)}
     for key in [item for item in _attempted if item[0] == device_id and item[1] not in open_ids]:
         _attempted.discard(key)
+
+
+def snapshot() -> list[dict[str, object]]:
+    """调度器此刻的即时计划：每个已排定的 (设备, 喷头, 学号, 功能, 到点)。
+
+    给运维可见性用（概览页的后台任务卡）：**只读**——计划由 `reschedule` 维护，这里只
+    把它报出来、不做任何判断，判据不会被第二处引用。到点是循环的单调时刻，换算成服务端
+    RFC 3339 便于直接显示；`time.monotonic()` 与 `loop.time()` 同源（asyncio 默认循环的
+    内部钟就是它），所以同步路由的线程池里也能换算。
+    """
+    now = time.monotonic()
+    entries = sorted(
+        (planned.at, device_id, door_no, planned.candidate, planned.trigger)
+        for device_id, worker in _workers.items()
+        for door_no, planned in worker.timers.items()
+    )
+    return [
+        {
+            "device_id": device_id,
+            "door_no": door_no,
+            "cert_no": candidate.cert_no,
+            "feature": trigger.feature,
+            "at": shift_rfc3339(now_rfc3339(), at - now),
+        }
+        for at, device_id, door_no, candidate, trigger in entries
+    ]
 
 
 # ── 到点与入队 ────────────────────────────────────────────────────────────
@@ -614,8 +660,8 @@ def stop() -> None:
     global _running
     _running = False
     for worker in _workers.values():
-        for handle in worker.timers.values():
-            handle.cancel()
+        for planned in worker.timers.values():
+            planned.handle.cancel()
         worker.timers.clear()
         if worker.task is not None:
             worker.task.cancel()

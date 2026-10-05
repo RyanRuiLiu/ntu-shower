@@ -36,3 +36,52 @@ class TaskMembershipRequest(BaseModel):
     cert_no: str = Field(min_length=1)
     password: str = Field(min_length=1)
     joined: bool
+
+
+# ── 当前态看板（admin，GET /background-tasks/status）──────────────────────
+
+
+class BackgroundTaskStatus(BaseModel):
+    """一个后台任务的开关与名单规模。"""
+
+    key: str
+    title: str
+    enabled: bool
+    roster: int
+
+
+class DoorAssignment(BaseModel):
+    """延长服务记下的"谁在哪个喷头"。"""
+
+    door_no: int
+    cert_no: str
+
+
+class ExtendingDevice(BaseModel):
+    """正在延长服务中的设备：拨快时刻与拨之前谁在哪个喷头。"""
+
+    device_id: str
+    shifted_at: str
+    assignments: list[DoorAssignment]
+
+
+class ScheduledAction(BaseModel):
+    """调度器已排定的下一次动作：到点替谁做哪个功能。"""
+
+    device_id: str
+    door_no: int
+    cert_no: str
+    feature: str
+    at: str
+
+
+class BackgroundTasksStatus(BaseModel):
+    """后台任务的当前态（概览页看板）。
+
+    纯只读的组合，三个部分各自来自自己的域：开关与名单是全局配置，延长中是
+    `extend_hours` 的落库状态，已排定是调度器内存里的定时器。
+    """
+
+    tasks: list[BackgroundTaskStatus]
+    extending: list[ExtendingDevice]
+    scheduled: list[ScheduledAction]

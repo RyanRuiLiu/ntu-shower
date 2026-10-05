@@ -169,8 +169,12 @@ def test_shift_rearms_power_with_precompensated_target_then_writes_the_clock(
     assert sent[0][1] == {"off_at": "00:15", "on_at": "10:55"}
     # 写进去的是"拨完之后的设备表盘时刻"：23:50 加满十五分钟
     assert sent[1][1] == {"datetime": "2026-10-06 00:05:00", "rearm": False}
-    # 同一轮 tick 的推进里滚动续写跟着跑一次（目标已切到拨快后的钟面）
-    assert sent[2][1] == {"off_at": "00:00", "on_at": "10:55"}
+    # 同一轮 tick 的推进里滚动续写跟着跑一次。拨钟后偏差记录当场跟上（不等下一次
+    # pong），所以它读到的是拨快后的表盘：00:05 + 窗口十分钟 → 00:15。此前记录滞后，
+    # 这一发会写回拨快前的表盘（00:00），把失效安全上界撑大到约 24 小时。
+    assert sent[2][1] == {"off_at": "00:15", "on_at": "10:55"}
+    # 偏差记录同步改过：设备被拨快 900 秒，偏差（服务端 − 设备）减同量
+    assert device_clock.get(DEVICE) == -900.0
 
 
 def test_shift_is_skipped_when_disabled(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:

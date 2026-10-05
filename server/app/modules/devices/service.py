@@ -71,6 +71,21 @@ def set_device_offline(device_id: str) -> None:
     repository.touch_seen(device_id)
 
 
+def shift_clock_skew(device_id: str, seconds: float) -> None:
+    """设备钟被整体平移 seconds 秒（可负）后，把偏差记录当场跟上。
+
+    偏差 = 服务端 − 设备：设备钟被拨快 seconds，偏差就减同量。拨钟由延长服务发起，
+    而记录若等下一次 pong 才自发跟上，那 30 秒里一切按表盘换算的目标（滚动续写、
+    恢复判定）都带着过时的偏差——实测把同一轮 tick 的滚动续写拨回了过去 15 分钟。
+    内存与落库同时改：跨重启也要是对的。
+    """
+    if not device_clock.has(device_id):
+        return  # 没有记录就无从改：拨钟本来就以"有记录"为前提
+    skew = device_clock.get(device_id) - seconds
+    device_clock.load(device_id, skew)
+    repository.set_clock_skew(device_id, skew)
+
+
 def record_link_event(device_id: str, event: str) -> None:
     """记一次上下线（event 取 schemas 的 LINK_ONLINE / LINK_OFFLINE）。
 
