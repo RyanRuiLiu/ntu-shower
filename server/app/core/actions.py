@@ -58,10 +58,13 @@ BATH_RESTART = "bath.restart"
 power.schedule 直写 MCU，不再依赖重启来重读计划。"""
 
 CLOCK_SET = "clock.set"
-"""设置设备系统时钟。params.datetime 为设备本地墙钟时间（YYYY-MM-DD HH:MM:SS）。
+"""设置设备系统时钟。params.datetime 为设备本地墙钟时间（YYYY-MM-DD HH:MM:SS）；
+params.rearm（默认 true）控制写钟后是否按电源计划重布 MCU——写钟与重布必须成对，
+钟一动 MCU 里的截止就在真实时间里跟着漂（docs/device-poweroff.md §11），只有
+延长服务流程传 false（它自己管理滚动重布）。
 
-浴室 App 按系统时钟装载每日定时开关机计划，而设备无 NTP：开机自动校正
-（设备端 TimeSync）与网页端手动设置共用本动作。
+触发者有三个：网页端手动（设备页「校正时间」）、服务端自动校时（`time_sync_enabled`）、
+延长服务流程的拨快与拨回。设备端执行见 TimeSync.setWallClock。
 """
 
 POWER_SCHEDULE = "power.schedule"
