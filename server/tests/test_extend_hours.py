@@ -768,3 +768,79 @@ def test_maybe_shift_warns_without_skew_record(fresh_db: str, monkeypatch: pytes
     asyncio.run(extend_hours.tick_once())
 
     assert sent == []
+
+
+def test_tick_advances_each_extending_device_with_its_own_config(
+    fresh_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """每台延长中的设备用自己的有效配置推进：滚动目标里的上电时刻取自各自的电源计划。
+
+    此前 tick_once 把循环里最后一台的配置传给全部延长的设备——单台时侥幸正确，多设备下
+    A 会拿 B 的时区与电源计划续写截止。
+    """
+    helpers.register_trusted_device("dev-ext-a")
+    helpers.register_trusted_device("dev-ext-b")
+    base = {
+        "extend_hours_enabled": False,  # 不参与拨钟，只走推进
+        "extend_hours_zone_offset_minutes": 480,
+        "extend_shift_minutes": 15,
+        "extend_hours_students": {},
+        "time_sync_enabled": False,
+        "time_sync_threshold_s": 60,
+        "power_off_at": "23:58",
+    }
+    configs = {
+        "dev-ext-a": {**base, "power_on_at": "10:55"},
+        "dev-ext-b": {**base, "power_on_at": "08:00"},
+    }
+    monkeypatch.setattr(config_store, "effective", lambda device_id: configs[device_id])
+    server_now = "2026-10-05T16:50:00.000Z"  # 表盘 00:50（UTC+8）
+    monkeypatch.setattr(extend_hours, "now_rfc3339", lambda: server_now)
+    device_clock.load("dev-ext-a", 0.0)
+    device_clock.load("dev-ext-b", 0.0)
+
+    sent: list[tuple[str, str, object]] = []
+
+    async def fake_send(device_id: str, action: str, params: object, **_kw: object) -> object:
+        sent.append((device_id, action, params))
+        return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
+
+    monkeypatch.setattr(extend_hours.sessions_service, "send_command_and_wait", fake_send)
+
+    # 拨钟时刻记为"现在"：恢复条件（过午夜）不成立，推进只做滚动续写
+    repository.record("dev-ext-a", server_now, [])
+    repository.record("dev-ext-b", server_now, [])
+
+    asyncio.run(extend_hours.tick_once())
+
+    rolls = sorted((item for item in sent if item[1] == actions.POWER_SCHEDULE), key=lambda item: item[0])
+    # 表盘 00:50 + 十分钟窗口；上电目标各取各的电源计划
+    assert rolls == [
+        ("dev-ext-a", actions.POWER_SCHEDULE, {"off_at": "01:00", "on_at": "10:55"}),
+        ("dev-ext-b", actions.POWER_SCHEDULE, {"off_at": "01:00", "on_at": "08:00"}),
+    ]
+
+
+def test_tick_clears_the_shift_row_of_a_delisted_device(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """设备不在册（已从设备表除名）时清除其延长记录。
+
+    残行会让每轮 tick 白发一条命令、记一条 WARNING，而那台设备再也不会上电——
+    这一环必须自己终结。
+    """
+    events: list[str] = []
+    sent: list[tuple[str, object]] = []
+    monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
+
+    async def fake_send(_device_id: str, _action: str, _params: object, **_kw: object) -> object:
+        sent.append((_device_id, _action))
+        return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
+
+    monkeypatch.setattr(extend_hours.sessions_service, "send_command_and_wait", fake_send)
+    # 不经 _prepare：dev-gone 故意不注册进设备表
+    repository.record("dev-gone", "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2530110052"}])
+
+    asyncio.run(extend_hours.tick_once())
+
+    assert repository.get("dev-gone") is None
+    assert sent == []
+    assert "extend-hours.device-gone" in events

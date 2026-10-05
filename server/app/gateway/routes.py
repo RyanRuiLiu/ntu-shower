@@ -201,26 +201,25 @@ async def _handle_frame(
                 device_clock_text,
                 captured_at,
             )
-        # 回执与派生结果解耦：原始帧是 process_snapshot 落的第一样东西，那之后无论派生
-        # 出什么岔子，"这一帧已经收下"都成立。
+        # 回执语义：**收到 ack ⇔ 原始帧已落库**。process_snapshot 只有「原始帧没落下去」
+        # （库满、库锁超时这一类）才抛错——那一步不回执、直接返回，设备保留发件箱那一行
+        # 稍后重发，原始数据不丢。派生的失败已在 service 内部止住并照常返回：帧已经收下，
+        # 派生可以事后 `tools/rebuild_derived` 从原始层重算，回执让设备删掉那一行才是对的。
         #
-        # 所以派生异常**在这里止住**，不能让它冒泡到会话层的 `raise`——那会把一个数据问题
-        # 升级成连接问题：WS 一断，设备立刻重发同一帧，而派生是确定性的，它在同一处再失败、
-        # 再断，循环下去。断连的代价还不止这一帧：`finally` 会记 offline、推 device.update
-        # （网页上看到设备闪断），其他门正在推进的会话也被打断。
-        #
-        # 数据不会因此丢：派生失败可以事后 `tools/rebuild_derived` 从原始层重算，回执让
-        # 设备删掉发件箱里那一行才是对的。
+        # 这里的失败也不能向会话层抛：异常冒泡会断开 WS，把一个数据问题升级成连接问题——
+        # `finally` 记 offline、推 device.update（网页上看到设备闪断），其他门正在推进的
+        # 会话也被打断。
         try:
             await run_in_threadpool(doors_service.process_snapshot, device_id, payload)
-        except Exception as exc:  # noqa: BLE001 - 派生可能以任何方式失败，而这一帧已经收下了
+        except Exception as exc:  # noqa: BLE001 —— 原始帧没落下去：不回执，设备保留重发
             log_event(
                 "ERROR",
-                "doors.snapshot-derive-failed",
-                "派生失败，原始帧已落库",
+                "doors.snapshot-not-stored",
+                "原始帧未落库，不回执",
                 device_id=device_id,
                 error=str(exc),
             )
+            return
         # 帧是后台任务的心跳：门刚被占用、刚被释放，都只能从帧看出来。调度器据此重算这台
         # 设备每个喷头的"下一个到点"，并把待补的那次分配接上——**不轮询**。
         sessions_scheduler.on_frame(device_id)

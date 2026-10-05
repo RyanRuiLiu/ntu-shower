@@ -18,6 +18,14 @@ mkdir -p "$BACKUP_DIR"
 stamp="$(date +%Y%m%d-%H%M%S)"
 target="$BACKUP_DIR/ntu-shower-$stamp.db"
 
+# 磁盘水位：备份与库本身都在这块盘上，写满的那天没有任何功能会替我们说话。
+# 阈值留给人工处置（清理或扩容），脚本只负责把话说出来——它每天跑一次，
+# journalctl 里看得见。
+usage="$(df --output=pcent "$SERVER_DIR" | tail -1 | tr -dc '0-9')"
+if [ -n "$usage" ] && [ "$usage" -ge 85 ]; then
+    echo "WARNING: 磁盘使用率已达 ${usage}%（阈值 85%），请尽快清理或扩容" >&2
+fi
+
 "$PYTHON" - "$DB_PATH" "$target" <<'PY'
 import sqlite3
 import sys
@@ -26,6 +34,16 @@ source, target = sys.argv[1], sys.argv[2]
 connection = sqlite3.connect(source)
 connection.execute("VACUUM INTO ?", (target,))
 connection.close()
+
+# 校验备份完整：备份的意义在于恢复，恢复不了的备份只是占地方的文件。
+# 校验花在刚产出的备份上（几十 MB 秒级），换来的是"每份备份都被证明可恢复"。
+check = sqlite3.connect(target)
+try:
+    result = check.execute("PRAGMA integrity_check").fetchone()[0]
+finally:
+    check.close()
+if result != "ok":
+    raise SystemExit(f"备份完整性校验未通过：{result}")
 PY
 
 # 滚动保留：只留最近 KEEP 份

@@ -501,14 +501,27 @@ async def tick_once() -> None:
     两类设备分开取：**该拨的**在任何设备上都可能发生（所以遍历全部设备，由 `_maybe_shift`
     自己判"这台是不是已经在延长中"），**正在延长的**只在 `clock_shift` 里有行的那些上面。
     离线设备不需要预先筛掉——它上面不会有新会话，"名单里有人占用"自然为假；命令失败时
-    也会如实回报。
+    也会如实回报。每台延长的设备用**自己的**有效配置推进——时区、拨快幅度、电源计划都是
+    设备级的，借用别台的值会把滚动目标拨到另一块表盘上。
     """
     for record in devices_service.list_devices():
         await _maybe_shift(record["device_id"])
         config = config_store.effective(record["device_id"])
         await _maybe_correct_clock(record["device_id"], config)
     for row in repository.list_shifted():
-        await _advance(_as_shift(row), config)
+        shift = _as_shift(row)
+        # 不在册的设备（已从设备表除名）：它不会再上电，残行只会让每轮 tick 白发一条
+        # 命令、记一条 WARNING，永无尽头。清掉，日志留一句，这一环到此为止。
+        if devices_service.get_device(shift.device_id) is None:
+            repository.clear(shift.device_id)
+            log_event(
+                "WARNING",
+                "extend-hours.device-gone",
+                "设备已不在册，延长记录清除",
+                device_id=shift.device_id,
+            )
+            continue
+        await _advance(shift, config_store.effective(shift.device_id))
 
 
 async def _advance(shift: Shift, config: ConfigValues) -> None:

@@ -530,3 +530,45 @@ def test_occupant_falls_back_to_acc_no_when_cert_no_is_blank(fresh_db: str) -> N
     session = repository.get_open_session(device_id, 1)
     assert session is not None
     assert session["cert_no"] == "1010209501"
+
+
+def test_derivation_failure_returns_ok_and_keeps_the_raw_frame(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """派生失败在 service 内部止住：返回 ok、原始帧在库。
+
+    这是回执语义的上半句：帧已经收下，派生可以事后从原始层重算，回执让设备删掉
+    发件箱那一行才是对的。
+    """
+
+    failure = RuntimeError("boom")
+
+    def boom(_door: object) -> object:
+        raise failure
+
+    monkeypatch.setattr(service, "derive_state", boom)
+
+    result = service.process_snapshot("dev-derive-fail", _snapshot([_door(1)]))
+
+    assert result == {"status": "ok", "processed": 0}
+    row = db.read_one("SELECT COUNT(*) AS n FROM door_snapshot WHERE device_id = ?", ("dev-derive-fail",))
+    assert row is not None
+    assert row["n"] == 1
+
+
+def test_raw_insert_failure_propagates_for_the_gateway_to_withhold_the_ack(
+    fresh_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """原始帧落不下去就抛错：网关据此扣下回执，设备保留那一行稍后重发。
+
+    这是回执语义的下半句——ack 与「原始帧已落库」严格等价，磁盘满、库锁超时
+    都不会让一帧事实从世界上消失。
+    """
+
+    failure = RuntimeError("disk full")
+
+    def boom(*_args: object, **_kwargs: object) -> object:
+        raise failure
+
+    monkeypatch.setattr(repository, "insert_snapshot", boom)
+
+    with pytest.raises(RuntimeError, match="disk full"):
+        service.process_snapshot("dev-raw-fail", _snapshot([_door(1)]))

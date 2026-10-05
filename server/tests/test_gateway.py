@@ -15,6 +15,7 @@ from app.core import db, events
 from app.core.clock import now_rfc3339, rfc3339_ago
 from app.modules.devices import repository as devices_repository
 from app.modules.devices.schemas import LINK_OFFLINE, LINK_ONLINE
+from app.modules.doors import service as doors_service
 from app.modules.ota import repository as ota_repository
 
 
@@ -456,3 +457,32 @@ def test_reconnect_does_not_record_a_false_offline(client: TestClient, fresh_db:
     assert events.count(LINK_ONLINE) == 2
     # 两条连接都收尾了，但设备全程在线——只有最后真正断开那一次才算
     assert events.count(LINK_OFFLINE) == 1
+
+
+def test_snapshot_that_cannot_be_stored_gets_no_ack(
+    client: TestClient, admin_headers: dict[str, str], fresh_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """原始帧落库失败：不回执——设备保留发件箱那一行，稍后重发。
+
+    回执与「原始帧已落库」严格等价。若在这种时刻照发 ack，设备会删掉那一行，
+    而它承载的是这条事实的仅存载体。
+    """
+
+    failure = RuntimeError("disk full")
+
+    def boom(*_args: object, **_kwargs: object) -> object:
+        raise failure
+
+    monkeypatch.setattr(doors_service.repository, "insert_snapshot", boom)
+
+    with helpers.trusted_online(client, "dev-snap-not-stored", admin_headers) as ws:
+        ws.send_text(helpers.frame("door.snapshot", {"snapshot_id": "not-stored-1", "doors": [{"door_no": 1}]}))
+        # 下一条非 ping 的帧必须是 pong（链路还活着、ack 被扣下）；ack 先到即失败
+        ws.send_text(helpers.frame("link.ping", {"sender_time": now_rfc3339()}))
+        while True:
+            msg = json.loads(ws.receive_text())
+            if msg["type"] == "link.ping":
+                ws.send_text(helpers.frame("link.pong", {}))
+                continue
+            assert msg["type"] == "link.pong", f"先到的帧是 {msg['type']}，ack 未被扣下"
+            break
