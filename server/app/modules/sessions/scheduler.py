@@ -58,6 +58,7 @@ from app.core import actions, outcomes, problems
 from app.core.clock import now_rfc3339, shift_rfc3339
 from app.core.logging import log_event
 from app.core.problems import ApiProblemError
+from app.core.protocol import as_int
 from app.modules.audit import repository as audit_repository
 from app.modules.config import store as config_store
 from app.modules.doors import service as doors_service
@@ -415,6 +416,10 @@ def snapshot() -> list[dict[str, object]]:
     for at, device_id, door_no, candidate, trigger in entries:
         spec = FEATURES_BY_KEY[trigger.feature]
         started = candidate.assigned_at if spec.start == "assigned_at" else candidate.paused_at
+        # 本轮链的用量上限随功能而定（预约续期有、其余没有）；连同起算时刻一起给，
+        # 面板才能回答"这一轮什么时候到头"。
+        config = config_store.effective(device_id)
+        max_duration = as_int(config[spec.max_duration_key]) if spec.max_duration_key is not None else None
         rows.append(
             {
                 "device_id": device_id,
@@ -426,6 +431,8 @@ def snapshot() -> list[dict[str, object]]:
                 "session_id": candidate.session_id,
                 "started_at": started or "",
                 "threshold_s": trigger.threshold_s,
+                "run_started_at": candidate.run_started_at,
+                "max_duration_s": max_duration,
             }
         )
     return rows

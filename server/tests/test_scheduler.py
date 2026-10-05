@@ -917,6 +917,8 @@ def test_snapshot_reports_scheduled_timers(fresh_db: str) -> None:
                 "session_id": 1,
                 "started_at": "2026-10-05T12:00:00.000Z",
                 "threshold_s": 1140,
+                "run_started_at": "2026-10-05T12:00:00.000Z",
+                "max_duration_s": None,
             }
         ]
         assert parse_rfc3339(str(rows[0]["at"])) is not None
