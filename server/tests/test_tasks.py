@@ -428,6 +428,7 @@ def test_status_includes_the_extending_device(client: TestClient, admin_headers:
     assert data["extending"] == [
         {
             "device_id": "dev-status-ext",
+            "shift_minutes": 15,
             "shifted_at": "2026-10-05T15:49:30.000Z",
             "assignments": [{"door_no": 3, "cert_no": CERT_NO}],
         }

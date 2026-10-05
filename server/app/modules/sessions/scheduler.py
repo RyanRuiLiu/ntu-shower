@@ -397,12 +397,13 @@ def _forget_closed_sessions(device_id: str) -> None:
 
 
 def snapshot() -> list[dict[str, object]]:
-    """调度器此刻的即时计划：每个已排定的 (设备, 喷头, 学号, 功能, 到点)。
+    """调度器此刻的即时计划：每个已排定的到点，连同"为什么是这一刻"的细节。
 
     给运维可见性用（概览页的后台任务卡）：**只读**——计划由 `reschedule` 维护，这里只
-    把它报出来、不做任何判断，判据不会被第二处引用。到点是循环的单调时刻，换算成服务端
-    RFC 3339 便于直接显示；`time.monotonic()` 与 `loop.time()` 同源（asyncio 默认循环的
-    内部钟就是它），所以同步路由的线程池里也能换算。
+    把它报出来、不做任何判断，判据不会被第二处引用。每行带上门现态、会话号、判据的
+    起算时刻与阈值，面板能直接回答"在等谁、等到什么时候、为什么"；到点是循环的单调
+    时刻，换算成服务端 RFC 3339 便于直接显示；`time.monotonic()` 与 `loop.time()` 同源
+    （asyncio 默认循环的内部钟就是它），所以同步路由的线程池里也能换算。
     """
     now = time.monotonic()
     entries = sorted(
@@ -410,16 +411,24 @@ def snapshot() -> list[dict[str, object]]:
         for device_id, worker in _workers.items()
         for door_no, planned in worker.timers.items()
     )
-    return [
-        {
-            "device_id": device_id,
-            "door_no": door_no,
-            "cert_no": candidate.cert_no,
-            "feature": trigger.feature,
-            "at": shift_rfc3339(now_rfc3339(), at - now),
-        }
-        for at, device_id, door_no, candidate, trigger in entries
-    ]
+    rows: list[dict[str, object]] = []
+    for at, device_id, door_no, candidate, trigger in entries:
+        spec = FEATURES_BY_KEY[trigger.feature]
+        started = candidate.assigned_at if spec.start == "assigned_at" else candidate.paused_at
+        rows.append(
+            {
+                "device_id": device_id,
+                "door_no": door_no,
+                "cert_no": candidate.cert_no,
+                "feature": trigger.feature,
+                "at": shift_rfc3339(now_rfc3339(), at - now),
+                "state": candidate.state.value,
+                "session_id": candidate.session_id,
+                "started_at": started or "",
+                "threshold_s": trigger.threshold_s,
+            }
+        )
+    return rows
 
 
 # ── 到点与入队 ────────────────────────────────────────────────────────────
