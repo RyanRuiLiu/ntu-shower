@@ -301,3 +301,42 @@
   border-radius: var(--radius-sm);
 }
 
+
+/* ── 后台任务卡：开关行、延长中的设备、调度器排定的动作 ─────────────────────── */
+
+.task-board .task-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: baseline;
+  padding: 2px 0;
+  font-size: 14px;
+}
+
+.task-board .task-name {
+  min-width: 7em;
+}
+
+.task-board .task-state.on {
+  color: var(--green);
+}
+
+.task-board .task-state.off {
+  color: var(--muted);
+}
+
+.task-board .task-section {
+  margin-bottom: 6px;
+}
+
+.task-board .task-section-title {
+  margin: 10px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.task-board .task-hint {
+  font-size: 13px;
+}

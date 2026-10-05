@@ -136,4 +136,8 @@ export const api = {
   // ── 审计 ──（admin）
   /** 审计三类共用这一条：`kind` 取 `calls` / `commands` / `background-task-runs`。 */
   audit: (kind, params) => send(`${API_V1}/audit/${kind}${query(params)}`),
+
+  // ── 后台任务 ──（admin）
+  /** 当前态：四任务的开关与名单、延长中的设备、调度器的即时计划。只读组合。 */
+  backgroundTasksStatus: () => send(`${API_V1}/background-tasks/status`),
 }

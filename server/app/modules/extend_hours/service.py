@@ -184,6 +184,23 @@ def _hhmm_minutes(text: str) -> int | None:
     return moment.hour * 60 + moment.minute
 
 
+def current_shifts() -> list[dict[str, object]]:
+    """正在延长中的设备：拨快时刻与记下的"谁在哪个喷头"。
+
+    只读的运维可见性（概览页的后台任务卡）：表里一行就是"这台设备钟是拨快着的"，
+    派生自它的现态与要分配回去的人。
+    """
+    return [
+        {
+            "device_id": shift.device_id,
+            "shifted_at": shift.shifted_at,
+            "assignments": [{"door_no": door_no, "cert_no": cert_no} for door_no, cert_no in shift.assignments],
+        }
+        for row in repository.list_shifted()
+        for shift in [_as_shift(row)]
+    ]
+
+
 # ── 动作 ──────────────────────────────────────────────────────────────────
 
 
@@ -222,6 +239,9 @@ async def _set_clock(device_id: str, seconds: float, zone_offset_minutes: int) -
     log_event(
         "INFO", "extend-hours.clock-moved", "设备钟已平移", device_id=device_id, seconds=int(seconds), target=text
     )
+    # 钟是我们拨的，偏差记录当场跟上：等服务端自发发现要等下一次 pong，那 30 秒里按
+    # 表盘换算的目标（同轮的滚动续写）都带着过时的偏差。
+    devices_service.shift_clock_skew(device_id, seconds)
     return True
 
 

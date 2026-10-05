@@ -292,6 +292,86 @@ async function doPhoto() {
   }
 }
 
+// ── 后台任务看板 ──────────────────────────────────────────────────────────
+
+/**
+ * 四任务开关、延长中的设备、调度器此刻排定的动作。
+ *
+ * 只报告状态、不做判断：判据在服务端只有一处出处，这里把它显示出来。延长中与已排定
+ * 是全 fleet 的（任务与名单是全局的，卡上带设备列）；每 30 秒刷新一次——调度器的计划
+ * 随帧变，逐帧推送不值得，这个节奏跟得上"看见异常"。
+ */
+function renderTaskBoard(data) {
+  const featureTitles = new Map(data.tasks.map((task) => [task.key, task.title]))
+  const taskRows = data.tasks
+    .map(
+      (task) => `
+      <div class="task-row">
+        <span class="task-name">${esc(task.title)}</span>
+        <span class="task-state ${task.enabled ? 'on' : 'off'}">${task.enabled ? '启用' : '停用'}</span>
+        <span class="muted">名单 ${task.roster} 人</span>
+      </div>`,
+    )
+    .join('')
+  const extending =
+    data.extending.length === 0
+      ? '<div class="muted task-hint">没有设备在延长服务中</div>'
+      : data.extending
+          .map((shift) => {
+            const people = shift.assignments.map((item) => `#${item.door_no} ${item.cert_no}`).join('、')
+            return `
+            <div class="task-row">
+              <span class="task-name mono">${esc(shift.device_id)}</span>
+              <span class="muted">${esc(fmtDateTime(shift.shifted_at))} 拨快 · 待分配 ${esc(people || '无')}</span>
+            </div>`
+          })
+          .join('')
+  const scheduled =
+    data.scheduled.length === 0
+      ? '<div class="muted task-hint">没有排定的动作——喷头空闲时调度器无事可做</div>'
+      : data.scheduled
+          .map(
+            (row) => `
+            <div class="task-row">
+              <span class="task-name mono">${esc(row.device_id)}</span>
+              <span>#${esc(row.door_no)}</span>
+              <span class="mono">${esc(row.cert_no || PLACEHOLDER)}</span>
+              <span>${esc(featureTitles.get(row.feature) || row.feature)}</span>
+              <span class="time">${esc(fmtDateTime(row.at))}</span>
+            </div>`,
+          )
+          .join('')
+  return `
+    <div class="task-section">${taskRows}</div>
+    <div class="task-section-title">延长服务中</div>${extending}
+    <div class="task-section-title">已排定的动作</div>${scheduled}`
+}
+
+async function refreshTaskBoard() {
+  try {
+    const data = await api.backgroundTasksStatus()
+    $('taskBoard').innerHTML = renderTaskBoard(data)
+  } catch (error) {
+    $('taskBoard').innerHTML = `<div class="empty">${esc(problemText(error))}</div>`
+  }
+}
+
+let taskBoardTimer = null
+
+function startTaskBoard() {
+  if (taskBoardTimer === null) {
+    refreshTaskBoard()
+    taskBoardTimer = setInterval(refreshTaskBoard, 30_000)
+  }
+}
+
+function stopTaskBoard() {
+  if (taskBoardTimer !== null) {
+    clearInterval(taskBoardTimer)
+    taskBoardTimer = null
+  }
+}
+
 let dispose = disposer()
 
 export const overviewView = {
@@ -335,10 +415,17 @@ export const overviewView = {
           </div>
           <div class="result" id="resAction"></div>
         </div>
+      </div>
+
+      <div class="act-card task-board">
+        <div class="act-title">后台任务</div>
+        <div id="taskBoard"><div class="empty">正在加载…</div></div>
       </div>`
 
     dispose = disposer()
-    dispose.add(subscribe('doors', paint))
+    // 帧到即重绘喷头并刷新看板：调度器的计划随帧变，跟随帧的节奏就是实时；
+    // 30 秒轮询兜住"状态不变就没有帧"的空窗
+    dispose.add(subscribe('doors', () => { paint(); refreshTaskBoard() }))
     dispose.add(subscribe('view', (id) => { if (id !== 'overview') dispose.dispose() }))
 
     dispose.add(listen($('btnPhoto'), 'click', doPhoto))
@@ -348,10 +435,12 @@ export const overviewView = {
     previousStates = new Map()
     paint()
     startTicking()
+    startTaskBoard()
   },
 
   unmount() {
     stopTicking()
+    stopTaskBoard()
     dispose.dispose()
   },
 }
