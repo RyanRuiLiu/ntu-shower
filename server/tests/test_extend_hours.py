@@ -35,8 +35,8 @@ CONFIG: dict[str, object] = {
     "extend_hours_students": {"99990052": "000000", "99990057": "111111"},
     "power_off_at": "23:58",
     "power_on_at": "10:55",
-    "boot_time_sync_enabled": True,
-    "boot_time_sync_threshold_s": 60,
+    "time_sync_enabled": True,
+    "time_sync_threshold_s": 60,
 }
 
 #: 设备钟快 15 分钟（延长拨快后的状态）：偏差 = 服务端 − 设备 = -900 秒。
@@ -637,7 +637,7 @@ def test_runtime_correction_skipped_during_extension(fresh_db: str, monkeypatch:
 
 
 def test_runtime_correction_skipped_below_threshold(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """偏差在阈值内：不动（秒级噪声不值得一次校钟）。"""
+    """偏差在阈值内：不动（秒级噪声不值得一次校钟）。恰好到阈值即算超（`>=`）。"""
     sent: list[tuple[str, object]] = []
     _prepare(monkeypatch, "2026-10-06T00:45:00.000Z", sent, skew_s=-30.0)
 
@@ -645,15 +645,37 @@ def test_runtime_correction_skipped_below_threshold(fresh_db: str, monkeypatch: 
 
     assert sent == []
 
+    sent.clear()
+    _prepare(monkeypatch, "2026-10-06T00:45:00.000Z", sent, skew_s=-60.0)
+
+    asyncio.run(extend_hours.tick_once())
+
+    assert sent == [(actions.CLOCK_SET, {"datetime": "2026-10-06 00:45:00", "rearm": True})]
+
 
 def test_runtime_correction_skipped_when_disabled(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
     sent: list[tuple[str, object]] = []
     _prepare(monkeypatch, "2026-10-06T00:45:00.000Z", sent, skew_s=SKEW_FAST_S)
-    monkeypatch.setitem(CONFIG, "boot_time_sync_enabled", False)
+    monkeypatch.setitem(CONFIG, "time_sync_enabled", False)
 
     asyncio.run(extend_hours.tick_once())
 
     assert sent == []
+
+
+def test_runtime_correction_skipped_while_someone_is_occupying(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """有人在占用就不校：校钟的跳变与拨回一样会清掉会话（判据与 `_restore_due` 同源）。
+
+    名单里的人还占着喷头（真实当地 00:45，表盘读 01:00）：校正让位，等他走。
+    """
+    sent: list[tuple[str, object]] = []
+    _prepare(monkeypatch, "2026-10-06T00:45:00.000Z", sent, skew_s=SKEW_FAST_S)
+    _with_session("2026-10-06T00:40:00.000Z")
+
+    asyncio.run(extend_hours.tick_once())
+
+    assert sent == []
+    assert repository.get(DEVICE) is None
 
 
 # ── 运行时钟校正的失败路径 ────────────────────────────────────────────────

@@ -142,12 +142,6 @@ object RuntimeConfig {
     @Volatile var bathExitCooldownMs = ConfigDefaults.BATH_APP_EXIT_COOLDOWN_MS
         private set
 
-    @Volatile var bootTimeSyncEnabled = ConfigDefaults.BOOT_TIME_SYNC_ENABLED
-        private set
-
-    @Volatile var bootTimeSyncThresholdS = ConfigDefaults.BOOT_TIME_SYNC_THRESHOLD_S
-        private set
-
     // ── 电源计划 ──
     @Volatile var powerOffAt = ConfigDefaults.POWER_OFF_AT
         private set
@@ -230,10 +224,6 @@ object RuntimeConfig {
             { c, key -> bathExitMaxCount = atLeastOne(c.optInt(key, bathExitMaxCount)) },
         "bath_app_exit_cooldown_ms" to
             { c, key -> bathExitCooldownMs = atLeastOne(c.optLong(key, bathExitCooldownMs)) },
-        "boot_time_sync_enabled" to
-            { c, key -> bootTimeSyncEnabled = c.optBoolean(key, bootTimeSyncEnabled) },
-        "boot_time_sync_threshold_s" to
-            { c, key -> bootTimeSyncThresholdS = atLeastOne(c.optLong(key, bootTimeSyncThresholdS)) },
         "power_off_at" to
             { c, key -> powerOffAt = c.optString(key, powerOffAt) },
         "power_on_at" to

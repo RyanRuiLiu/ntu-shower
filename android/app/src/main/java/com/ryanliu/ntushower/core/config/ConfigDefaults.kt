@@ -92,12 +92,6 @@ object ConfigDefaults {
     /** 异常后的冷却时长 */
     const val BATH_APP_EXIT_COOLDOWN_MS = 600000L
 
-    /** 开机自动校时 */
-    const val BOOT_TIME_SYNC_ENABLED = false
-
-    /** 开机校时触发阈值 */
-    const val BOOT_TIME_SYNC_THRESHOLD_S = 60L
-
     /** 每日断电时刻 */
     const val POWER_OFF_AT = "23:58"
 
@@ -132,8 +126,6 @@ object ConfigDefaults {
         .put("bath_app_exit_window_ms", BATH_APP_EXIT_WINDOW_MS)
         .put("bath_app_exit_max_count", BATH_APP_EXIT_MAX_COUNT)
         .put("bath_app_exit_cooldown_ms", BATH_APP_EXIT_COOLDOWN_MS)
-        .put("boot_time_sync_enabled", BOOT_TIME_SYNC_ENABLED)
-        .put("boot_time_sync_threshold_s", BOOT_TIME_SYNC_THRESHOLD_S)
         .put("power_off_at", POWER_OFF_AT)
         .put("power_on_at", POWER_ON_AT)
 }
