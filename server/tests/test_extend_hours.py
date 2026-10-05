@@ -1,8 +1,11 @@
-"""延长服务时间：到点拨钟、等门清空后重新分配、保持时长到了调回。
+"""延长服务时间：到点拨钟、滚动续写截止、无人占用且跳过断电时刻后拨回。
 
 夹具要三样：一台**有偏差记录**的设备（否则算不出"设备表盘上现在几点"，而整个判定都
 落在那个轴上）、一份名单、以及可替换的桩——命令下发与分配都换成桩，这一层测的是判定
 与状态机，不是界面流程本身（那是 test_background_tasks_real_data 的活）。
+
+滚动重布的时间参数在用例里以"表盘时刻"断言：拨快前的那一次预补偿一小时（表盘 23:50
+→ 目标 01:00），拨快之后的滚动续写不再补偿（表盘 00:50 → 目标 01:00）。
 """
 
 import asyncio
@@ -26,7 +29,6 @@ DEVICE = "dev-extend"
 CONFIG: dict[str, object] = {
     "extend_hours_enabled": True,
     "extend_hours_at": "23:49",
-    "extend_hours_hold_s": 3600,
     "extend_hours_zone_offset_minutes": 480,
     "extend_hours_students": {"99990052": "000000", "99990057": "111111"},
     "power_off_at": "23:58",
@@ -138,29 +140,40 @@ def test_local_now_adds_the_zone_offset(fresh_db: str) -> None:
     assert beijing > utc
 
 
-# ── 拨钟 ──────────────────────────────────────────────────────────────────
+def test_skip_gap_is_clock_face_distance_between_the_two_moments() -> None:
+    """被跳过的断电时刻距拨钟时刻的间隔 = 两个配置时刻的钟面差，跨日取模。"""
+    assert extend_hours._skip_gap_s(CONFIG) == 9 * 60
+
+    crossed = dict(CONFIG, extend_hours_at="23:49", power_off_at="00:20")
+    # 23:49 拨快，跨过日界之后的 00:20 才是被跳过的断电时刻
+    assert extend_hours._skip_gap_s(crossed) == 31 * 60
 
 
-def test_shift_rearms_power_then_writes_the_clock(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """两件事成对且有序：先重布 MCU 再写钟——拨快会让旧截止立刻越界即当场断电。"""
+# ── 拨钟：预补偿重布 + 拨快 ──────────────────────────────────────────────
+
+
+def test_shift_rearms_power_with_precompensated_target_then_writes_the_clock(
+    fresh_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """两件事成对且有序：先重布（目标预补偿拨走的一小时）再写钟——拨快会让旧截止
+    立刻越界即当场断电（实测）。"""
     sent: list[tuple[str, object]] = []
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", sent)
     _with_session("2026-10-05T23:40:00.000Z")
 
     asyncio.run(extend_hours.tick_once())
 
-    # 名单里的人从未离场（App 还没来得及清空），重布随即完成——一个 tick 走完①②③④
     assert [action for action, _params in sent] == [
         actions.POWER_SCHEDULE,
         actions.CLOCK_SET,
         actions.POWER_SCHEDULE,
     ]
-    # 保护性重布的断电目标：表盘 23:50 + 拨走的一小时 + 保持一小时 + 富余十分钟
-    assert sent[0][1] == {"off_at": "02:00", "on_at": "10:55"}
+    # 预补偿：表盘 23:50 + 拨走的一小时 + 滚动窗口十分钟 → 次日 01:00
+    assert sent[0][1] == {"off_at": "01:00", "on_at": "10:55"}
     # 写进去的是"拨完之后的设备表盘时刻"：23:50 加满一小时
     assert sent[1][1] == {"datetime": "2026-10-06 00:50:00"}
-    # 常规重布的目标就是配置里的那一对钟面时刻
-    assert sent[2][1] == {"off_at": "23:58", "on_at": "10:55"}
+    # 同一轮 tick 的推进里滚动续写跟着跑一次（目标已切到拨快后的钟面）
+    assert sent[2][1] == {"off_at": "00:00", "on_at": "10:55"}
 
 
 def test_shift_is_skipped_when_disabled(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -187,7 +200,7 @@ def test_shift_is_skipped_when_nobody_is_using_it(fresh_db: str, monkeypatch: py
 
 
 def test_failed_shift_leaves_no_row_so_the_next_tick_retries(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """拨失败要清掉那一行：它是"正在延长中"的锁，留着就永远不再试了。"""
+    """任一步失败要清掉那一行：它是"正在延长中"的锁，留着就永远不再试了。"""
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z")
     _with_session("2026-10-05T23:40:00.000Z")
 
@@ -213,47 +226,69 @@ def test_the_row_keeps_who_was_where(fresh_db: str, monkeypatch: pytest.MonkeyPa
     assert repository.parse_assignments(row) == [{"door_no": 5, "cert_no": "99990052"}]
 
 
-# ── 调回 ──────────────────────────────────────────────────────────────────
+# ── 滚动续写与恢复条件 ────────────────────────────────────────────────────
 
 
-def test_restore_waits_for_the_hold_duration(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_extension_rolls_the_deadline_every_tick(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """延长期间每轮 tick 都把截止续写一个窗口，且不再预补偿（钟已经拨快）。"""
     sent: list[tuple[str, object]] = []
     server_now = _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", sent)
-    repository.record(DEVICE, server_now, [])
-    repository.mark_rearmed(DEVICE, server_now)
+    repository.record(DEVICE, server_now, [{"door_no": 3, "cert_no": "99990052"}])
 
     asyncio.run(extend_hours.tick_once())
 
-    assert sent == []
+    # 滚动目标不再预补偿：表盘此刻 + 十分钟 → 00:00
+    assert sent == [(actions.POWER_SCHEDULE, {"off_at": "00:00", "on_at": "10:55"})]
     assert repository.get(DEVICE) is not None
 
 
-def test_restore_moves_the_clock_back_and_clears_the_row(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_restore_waits_for_the_skipped_moment(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """被跳过的断电时刻（拨钟 + 9 分钟）还没走到，不拨回——延长还在服务窗口里。"""
     sent: list[tuple[str, object]] = []
-    server_now = _prepare(monkeypatch, "2026-10-06T00:50:00.000Z", sent)
-    # 一小时前拨的：已经满了保持时长。重启早就做过了，所以现在轮到调回
-    repository.record(DEVICE, shift_rfc3339(server_now, -3600) or "", [])
-    repository.mark_rearmed(DEVICE, shift_rfc3339(server_now, -3590) or "")
+    server_now = _prepare(monkeypatch, "2026-10-05T23:55:00.000Z", sent)
+    # 拨钟在 8 分钟前：距被跳过的 23:58 还差 1 分钟
+    repository.record(DEVICE, shift_rfc3339(server_now, -480) or "", [{"door_no": 3, "cert_no": "99990052"}])
 
     asyncio.run(extend_hours.tick_once())
 
-    # 调回之后不再重布：第④步的截止记在钟面上，调回后恰好落回真实时刻
-    assert [action for action, _params in sent] == [actions.CLOCK_SET]
+    assert sent == [(actions.POWER_SCHEDULE, {"off_at": "00:05", "on_at": "10:55"})]
+    assert repository.get(DEVICE) is not None
+
+
+def test_restore_happens_once_skipped_moment_passed_and_nobody_is_occupying(
+    fresh_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """被跳过的时刻已过、设备上无人占用：拨回 + 新框架重布，节奏恢复。"""
+    sent: list[tuple[str, object]] = []
+    server_now = _prepare(monkeypatch, "2026-10-05T23:58:30.000Z", sent)
+    # 拨钟在 10 分钟前：被跳过的 23:58 已经走过去了，且设备上无人占用
+    repository.record(DEVICE, shift_rfc3339(server_now, -600) or "", [{"door_no": 3, "cert_no": "99990052"}])
+
+    asyncio.run(extend_hours.tick_once())
+
+    # 同一轮 tick：先滚动续写一次，恢复条件齐了 → 拨回 + 新框架重布
+    # （断电 = power_off_at，上电 = power_on_at）
+    assert [action for action, _params in sent] == [
+        actions.POWER_SCHEDULE,
+        actions.CLOCK_SET,
+        actions.POWER_SCHEDULE,
+    ]
+    assert sent[0][1] == {"off_at": "00:08", "on_at": "10:55"}
+    assert sent[2][1] == {"off_at": "23:58", "on_at": "10:55"}
     assert repository.get(DEVICE) is None
 
 
-def test_failed_restore_keeps_the_row(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """调回失败不能放弃：钟偏着会让之后所有数据的时刻都错一小时。"""
-    _prepare(monkeypatch, "2026-10-06T00:50:00.000Z")
-    repository.record(DEVICE, "2026-10-05T23:50:00.000Z", [])
-
-    async def failing(_device_id: str, _action: str, _params: object, **_kw: object) -> object:
-        return {"status": "timeout", "reason_code": "server.deadline-exceeded", "terminal_message": "", "data": None}
-
-    monkeypatch.setattr(extend_hours.sessions_service, "send_command_and_wait", failing)
+def test_restore_holds_while_someone_is_still_occupying(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """被跳过的时刻过了但有人还占着（有会话未结束）：不拨回——拨回的钟跳会清掉这些会话。"""
+    sent: list[tuple[str, object]] = []
+    server_now = _prepare(monkeypatch, "2026-10-05T23:59:30.000Z", sent)
+    repository.record(DEVICE, shift_rfc3339(server_now, -600) or "", [{"door_no": 3, "cert_no": "99990052"}])
+    _with_session("2026-10-05T23:59:00.000Z")
 
     asyncio.run(extend_hours.tick_once())
 
+    # 滚动续写照常（保住占用中的会话），拨回不发生
+    assert [action for action, _params in sent] == [actions.POWER_SCHEDULE]
     assert repository.get(DEVICE) is not None
 
 
@@ -368,20 +403,19 @@ def test_helpers_are_available(fresh_db: str) -> None:
     assert record["trusted"]
 
 
-# ── 半成功与早退 ──────────────────────────────────────────────────────────
+# ── 半成功与失败路径 ──────────────────────────────────────────────────────
 
 
-def test_power_schedule_failure_is_reported_separately(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """钟拨走了而 MCU 没重布：断电点还停在旧截止上，当晚照样断。
+def test_power_failure_after_shift_keeps_the_row_and_retries(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """拨快之后滚动重布失败：行保留，下一轮续写再试。
 
-    它要单独记一句，而不是并进"拨钟失败"——那会让人以为钟也没动。重布失败**不清行**，
-    下一轮还会再试。
+    它要单独记一句，而不是并进"拨钟失败"——那会让人以为钟也没动。设备上还挂着上一轮
+    的截止，滚动续写断了的话最迟一个窗口后断电，所以失败必须尽快被看见。
     """
     events: list[str] = []
     sent: list[tuple[str, object]] = []
     server_now = _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", sent)
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
-    # 拨钟在一分钟前：分配的窗口已经过了，于是不必等人齐就该重布
     repository.record(DEVICE, shift_rfc3339(server_now, -120) or "", [{"door_no": 3, "cert_no": "99990052"}])
 
     async def half(_device_id: str, action: str, _params: object, **_kw: object) -> object:
@@ -396,7 +430,31 @@ def test_power_schedule_failure_is_reported_separately(fresh_db: str, monkeypatc
     assert "extend-hours.power-failed" in events
     row = repository.get(DEVICE)
     assert row is not None
-    assert str(row["rearmed_at"] or "") == ""
+
+
+def test_restore_rearm_failure_keeps_the_row_for_retry(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """拨回成功而新框架重布失败：行保留，下一轮滚动续写 + 重试重布。
+
+    钟已经归位，这一步失败不影响"谁不会被清"——但当晚的断电点还没立起来，必须重试。
+    """
+    events: list[str] = []
+    sent: list[tuple[str, object]] = []
+    server_now = _prepare(monkeypatch, "2026-10-05T23:59:30.000Z", sent)
+    monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
+    repository.record(DEVICE, shift_rfc3339(server_now, -600) or "", [{"door_no": 3, "cert_no": "99990052"}])
+
+    async def half(_device_id: str, action: str, params: object, **_kw: object) -> object:
+        if action == actions.POWER_SCHEDULE and params.get("off_at") == "23:58":
+            return {"status": "failed", "reason_code": "device.offline", "terminal_message": "", "data": None}
+        return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
+
+    monkeypatch.setattr(extend_hours.sessions_service, "send_command_and_wait", half)
+
+    asyncio.run(extend_hours.tick_once())
+
+    assert "extend-hours.restore-rearm-failed" in events
+    row = repository.get(DEVICE)
+    assert row is not None
 
 
 def test_shift_is_skipped_without_a_skew_record(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -434,7 +492,7 @@ def test_on_frame_needs_a_roster(fresh_db: str, monkeypatch: pytest.MonkeyPatch)
 def test_reassign_reports_a_failed_command(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """命令本身失败时，领域层**不抛**、只把结果返回来。
 
-    不看那一句的结果就是记下一条"已分配回去"的假日志，而那个门其实空着。重启之后再没有
+    不看那一句的结果就是记下一条"已分配回去"的假日志，而那个门其实空着。重布之后再没有
     帧可等，也没人会来纠正它——所以这一条断言的是"没有那句假成功"。
     """
     events: list[str] = []
@@ -506,75 +564,11 @@ def test_a_failed_command_is_not_tried_again(fresh_db: str, monkeypatch: pytest.
 
 def test_the_failure_memory_is_cleared_when_the_extension_ends(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """调回之后记忆要清：不然下一次延长里那个人会被永久跳过。"""
-    server_now = _prepare(monkeypatch, "2026-10-06T00:50:00.000Z")
-    repository.record(DEVICE, shift_rfc3339(server_now, -3600) or "", [])
-    repository.mark_rearmed(DEVICE, shift_rfc3339(server_now, -3590) or "")
+    server_now = _prepare(monkeypatch, "2026-10-05T23:59:30.000Z")
+    repository.record(DEVICE, shift_rfc3339(server_now, -600) or "", [])
     extend_hours._reassign_failed.add((DEVICE, "99990052"))
 
     asyncio.run(extend_hours.tick_once())
 
     assert repository.get(DEVICE) is None
     assert extend_hours._reassign_failed == set()
-
-
-def test_restart_waits_until_everyone_is_back(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """人还没齐就不重启——重启会 force-stop，把正在跑的分配打断。
-
-    这里名单里那位还没进占用态，而窗口没到，所以这一轮只做分配、不重启。
-    """
-    sent: list[tuple[str, object]] = []
-    server_now = _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", sent)
-    repository.record(DEVICE, shift_rfc3339(server_now, -10) or "", [{"door_no": 3, "cert_no": "99990052"}])
-
-    async def fake_assign(_device_id: str, _req: AssignRequest) -> object:
-        return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
-
-    monkeypatch.setattr(extend_hours.sessions_routes, "perform_assign", fake_assign)
-
-    asyncio.run(extend_hours.tick_once())
-
-    # 试过分配，但没有重布——他还没真的进占用态，而窗口还有 50 秒
-    assert actions.POWER_SCHEDULE not in [action for action, _params in sent]
-    row = repository.get(DEVICE)
-    assert row is not None
-    assert str(row["rearmed_at"] or "") == ""
-
-
-def test_an_emptied_roster_still_rearms(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """名单被清空时没人可分配，但那不等于"不用重布"——重布关系到 MCU。"""
-    sent: list[tuple[str, object]] = []
-    server_now = _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", sent)
-    monkeypatch.setitem(CONFIG, "extend_hours_students", {})
-    repository.record(DEVICE, shift_rfc3339(server_now, -10) or "", [{"door_no": 3, "cert_no": "99990052"}])
-
-    asyncio.run(extend_hours.tick_once())
-
-    assert [action for action, _params in sent] == [actions.POWER_SCHEDULE]
-    # 常规重布的目标就是配置里的那一对钟面时刻
-    assert sent[0][1] == {"off_at": "23:58", "on_at": "10:55"}
-    row = repository.get(DEVICE)
-    assert row is not None
-    assert str(row["rearmed_at"] or "") != ""
-
-
-def test_reassign_reports_when_the_domain_layer_refuses(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """领域层拒了只是"现在还不该做"：记一句、下一帧再来，不丢待办。"""
-    events: list[str] = []
-    _prepare(monkeypatch, "2026-10-05T23:50:00.000Z")
-    monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
-    repository.record(DEVICE, "2026-10-05T23:50:00.000Z", [{"door_no": 3, "cert_no": "99990052"}])
-
-    async def refusing(_device_id: str, _req: object) -> object:
-        raise ApiProblemError(DOOR_NOT_FREE, "喷头 3 当前状态：bathing")
-
-    monkeypatch.setattr(extend_hours.sessions_routes, "perform_assign", refusing)
-
-    async def body() -> None:
-        extend_hours.on_frame(DEVICE)
-        await asyncio.gather(*extend_hours._reassign_tasks)
-
-    asyncio.run(body())
-
-    assert "extend-hours.reassign-waiting" in events
-    # 那一行仍在：延长还没结束
-    assert repository.get(DEVICE) is not None

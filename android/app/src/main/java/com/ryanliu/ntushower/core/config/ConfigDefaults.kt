@@ -98,6 +98,12 @@ object ConfigDefaults {
     /** 开机校时触发阈值 */
     const val BOOT_TIME_SYNC_THRESHOLD_S = 60L
 
+    /** 每日断电时刻 */
+    const val POWER_OFF_AT = "23:58"
+
+    /** 每日上电时刻 */
+    const val POWER_ON_AT = "10:55"
+
     /** 全部默认值拼成一个对象，供 `RuntimeConfig.resetToDefaults` 复位用。 */
     fun asJson(): JSONObject = JSONObject()
         .put("heartbeat_interval_s", HEARTBEAT_INTERVAL_S)
@@ -128,4 +134,6 @@ object ConfigDefaults {
         .put("bath_app_exit_cooldown_ms", BATH_APP_EXIT_COOLDOWN_MS)
         .put("boot_time_sync_enabled", BOOT_TIME_SYNC_ENABLED)
         .put("boot_time_sync_threshold_s", BOOT_TIME_SYNC_THRESHOLD_S)
+        .put("power_off_at", POWER_OFF_AT)
+        .put("power_on_at", POWER_ON_AT)
 }

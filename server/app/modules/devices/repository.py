@@ -69,6 +69,24 @@ def insert_link_event(device_id: str, event: str, occurred_at: str) -> None:
     )
 
 
+def link_events(device_id: str, before: str) -> list[Row]:
+    """这台设备 `before` 之前的全部上下线事件，按时间升序。
+
+    统计用它在窗口内重建离线区间。**必须能给到窗口之前的事件**：设备在窗口开始前
+    就已掉线、直到窗口内才上线的那段同样是离线，只看窗口内的事件会把这段当成在线
+    ——而那恰是最常见的掉线形态（夜间关门断电，早上开门才连回来）。
+    """
+    return (
+        get_conn()
+        .execute(
+            "SELECT occurred_at, event FROM device_link_event"
+            " WHERE device_id = ? AND occurred_at < ? ORDER BY occurred_at",
+            (device_id, before),
+        )
+        .fetchall()
+    )
+
+
 def get(device_id: str) -> DeviceRecord | None:
     row = read_one(f"SELECT {_DEVICE_COLUMNS} FROM device WHERE device_id = ?", (device_id,))
     return _as_device(row) if row is not None else None

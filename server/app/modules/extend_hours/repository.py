@@ -12,11 +12,6 @@
 `shifted_at` 是**拨钟成功那一刻**，不是"决定要拨那一刻"。写成后者的话，拨钟失败重试
 到成功时保持时长可能早就过了，会立刻调回，等于没拨。
 
-`rearmed_at` 是**第二次重布 MCU（常规计划）成功那一刻**，为空表示还没重布。它与
-`shifted_at` 分开，是因为中间夹着一段必须等的事：拨钟会把喷头清空，而清空之后要把
-名单里的人分配回去——而分配要求 App 正在前台跑着。所以两件事之间隔着"等分配结束"，
-这个列就是那个等待的进度。
-
 `assignments` 是拨钟前"谁在哪个喷头"，JSON 数组。拨钟会让浴室 App 清空所有喷头，
 事后再也查不到他原来在哪——拨之前那一刻是唯一能记下它的时机。
 
@@ -39,8 +34,6 @@ def init_tables() -> None:
             device_id    TEXT PRIMARY KEY,
             -- 拨钟命令成功那一刻（服务端轴）。保持时长从它起算。
             shifted_at   TEXT NOT NULL,
-            -- 第二次重布 MCU（常规计划）成功那一刻；空 = 还没重布（见模块注释里的"等待"）
-            rearmed_at   TEXT,
             -- 拨钟前那一刻谁在哪个喷头：[{"door_no": 3, "cert_no": "..."}]。
             -- 只给重新分配用，不按它查询，所以存 JSON 而不是另开一张关联表。
             assignments  TEXT NOT NULL
@@ -50,20 +43,11 @@ def init_tables() -> None:
 
 
 def record(device_id: str, shifted_at: str, assignments: list[dict[str, object]]) -> None:
-    """记下一次拨钟。覆盖式写入：一台设备同时只可能偏着一次。
-
-    `rearmed_at` 一并归空——它只在这个阶段被调（那时本来就该是空的）。拨钟与重布
-    是两个阶段，各自有各自的写入函数。
-    """
+    """记下一次拨钟。覆盖式写入：一台设备同时只可能偏着一次。"""
     write(
-        "INSERT OR REPLACE INTO clock_shift (device_id, shifted_at, rearmed_at, assignments) VALUES (?,?,NULL,?)",
+        "INSERT OR REPLACE INTO clock_shift (device_id, shifted_at, assignments) VALUES (?,?,?)",
         (device_id, shifted_at, json.dumps(assignments, ensure_ascii=False)),
     )
-
-
-def mark_rearmed(device_id: str, rearmed_at: str) -> None:
-    """记下"常规计划已经重布过了"。"""
-    write("UPDATE clock_shift SET rearmed_at = ? WHERE device_id = ?", (rearmed_at, device_id))
 
 
 def get(device_id: str) -> Row | None:
