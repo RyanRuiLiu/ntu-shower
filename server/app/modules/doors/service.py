@@ -101,6 +101,7 @@ from sqlite3 import Row
 
 from app.core import device_clock, events
 from app.core.clock import now_rfc3339, parse_rfc3339, seconds_between, shift_rfc3339
+from app.core.logging import exc_info_text, log_event
 from app.core.protocol import JsonObject, as_int, text_of
 from app.modules.doors import repository
 from app.modules.doors.schemas import ASSIGNABLE_STATES, OCCUPIED_STATES, DoorState, DoorView
@@ -446,6 +447,13 @@ def _apply_snapshot(device_id: str, payload: JsonObject) -> JsonObject:
     与重发影响；设备尚未建立锚点时退回本机接收时刻。**这是本系统唯一的时间来源**：
     设备的三个原始时间字段逐字保留供溯源；它们的**值**只在推导时刻时经偏差平移使用。
 
+    ## 回执语义：收到 ack ⇔ 原始帧已落库
+
+    本函数只有「原始帧没有落下去」（库满、库锁超时这一类）才会抛错——网关据此**扣下
+    回执**，设备保留发件箱那一行稍后重发，原始数据不丢。派生的任何失败在此止住并照常
+    返回：帧已经收下，派生可以事后 `tools/rebuild_derived` 从原始层重算，回执让设备删掉
+    发件箱那一行才是对的。
+
     空的一帧不是错误：设备读库失败时会照送一条空的（见 DoorSnapshotSender），那本身
     就是一条事实。落库留痕、派生跳过即可——回错误会让设备端不删发件箱那一行，把整个
     队列堵死。
@@ -467,10 +475,24 @@ def _apply_snapshot(device_id: str, payload: JsonObject) -> JsonObject:
         received_at,
         raw_doors,
     )
+    try:
+        return _derive_snapshot(device_id, text_of(payload, "source"), raw_doors, occurred_at)
+    except Exception:  # noqa: BLE001 —— 派生可以以任何方式失败，而这一帧已经收下了
+        log_event(
+            "ERROR",
+            "doors.snapshot-derive-failed",
+            "派生失败，原始帧已落库",
+            device_id=device_id,
+            error=exc_info_text(),
+        )
+        return {"status": "ok", "processed": 0}
 
+
+def _derive_snapshot(device_id: str, source: str, raw_doors: list[JsonObject], occurred_at: str) -> JsonObject:
+    """派生半场：diff 记事件、维护会话、刷新现态、发布推送。原始帧已在此前落库。"""
     prev_live = repository.get_all_live(device_id)
     # 全貌帧只刷新现态，不派生（判据与理由见 SOURCE_STARTUP）。
-    snapshot_only = text_of(payload, "source") == SOURCE_STARTUP
+    snapshot_only = source == SOURCE_STARTUP
 
     # 先收敛、再按门号去重：同一帧里重复的门号取最后一条——设备按门号整行读取，重复
     # 只可能来自拼装错误，取后者与"后来者覆盖"的直觉一致。收敛发生在派生之前，所以
