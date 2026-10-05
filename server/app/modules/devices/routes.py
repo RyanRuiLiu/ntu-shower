@@ -37,6 +37,7 @@ from .schemas import (
     DeviceExecRequest,
     DeviceListItem,
     DevicePatchRequest,
+    DevicePowerScheduleRequest,
     DeviceRecord,
     DeviceUiKeyRequest,
     DeviceUiScrollRequest,
@@ -137,6 +138,17 @@ async def restart_app(device_id: str) -> CommandOutcome:
 async def set_clock(device_id: str, req: DeviceClockSetRequest) -> CommandOutcome:
     """设置设备系统时钟（datetime 为设备本地墙钟时间）。浴室 App 的每日开关机计划依赖它。"""
     return await device_action(device_id, actions.CLOCK_SET, {"datetime": req.datetime}, DEVICE_ACTION_TIMEOUT_S)
+
+
+@admin_router.post("/{device_id}/power/schedule")
+async def schedule_power(device_id: str, req: DevicePowerScheduleRequest) -> CommandOutcome:
+    """重布设备定时开关机（off_at 断电、on_at 上电，设备表盘 HH:MM）。见 docs/device-poweroff.md。"""
+    return await device_action(
+        device_id,
+        actions.POWER_SCHEDULE,
+        {"off_at": req.off_at, "on_at": req.on_at},
+        DEVICE_ACTION_TIMEOUT_S,
+    )
 
 
 @admin_router.post("/{device_id}/bath/restart")

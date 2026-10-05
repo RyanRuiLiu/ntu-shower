@@ -26,6 +26,7 @@ class SupportedActionsTest {
             "app.restart",
             "bath.restart",
             "clock.set",
+            "power.schedule",
             "freelist.read",
             "freelist.write",
             "bridge.open",

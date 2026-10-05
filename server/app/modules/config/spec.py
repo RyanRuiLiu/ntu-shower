@@ -755,6 +755,25 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "四份名单各自完整，配一份就读得懂一份",
         group="extend_hours",
     ),
+    ConfigSpec(
+        "power_off_at",
+        TIME,
+        SERVER,
+        "23:58",
+        "每日断电时刻",
+        "设备 MCU 每日定时断电的时刻（浴室 App 从 V8 平台拿到的是同一个值）。"
+        "延长服务流程用它换算重布 MCU 时的目标时刻；改它要与浴室平台那侧保持一致",
+        group="extend_hours",
+    ),
+    ConfigSpec(
+        "power_on_at",
+        TIME,
+        SERVER,
+        "10:55",
+        "每日上电时刻",
+        "设备 MCU 每日定时上电的时刻。重布 MCU 时与「每日断电时刻」成对使用：开机延时从断电时刻起算，到这个时刻上电",
+        group="extend_hours",
+    ),
 )
 
 #: 键 → 规格，供 O(1) 查询。

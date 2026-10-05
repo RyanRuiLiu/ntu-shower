@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from tests import helpers
 
 from app.core import device_clock, outcomes
-from app.core.clock import seconds_between
+from app.core.clock import now_rfc3339, seconds_between
 from app.core.db import get_conn, write
 from app.modules.doors import repository as doors_repository
 from app.modules.doors import service as doors_service
@@ -31,24 +31,6 @@ from app.modules.sessions.decision import (
     decide,
 )
 from test_scheduler import _frame, _let_the_loop_run
-
-#: 判据要看的两个学号都在名单里——真实行里就是两个人（一台设备、两间浴室间）。名单外的
-#: 一概不碰，所以这里必须与下面的真实 `cert_no` 对上。
-#:
-#: 时长上限放得极大：下面那些真实行的 `assigned_at` 动辄在几小时前，撞上真实默认值
-#: （900 秒）的话判据会先停手，测到的是"没动手"。上限本身由 test_decision.py 盯。
-CONFIG: dict[str, object] = {
-    "renew_wait_enabled": True,
-    "renew_wait_students": {"2530110052": "000000", "2217110057": "111111"},
-    "renew_wait_threshold_s": 270,
-    "renew_wait_max_duration_s": 86_400,
-    "renew_session_enabled": True,
-    "renew_session_students": {"2530110052": "000000", "2217110057": "111111"},
-    "renew_session_threshold_s": 1140,
-    "auto_settle_enabled": True,
-    "auto_settle_students": {"2530110052": "000000", "2217110057": "111111"},
-    "auto_settle_pause_threshold_s": 60,
-}
 
 #: 生产库 `usage_session` 的真实行（列序与 [_seed] 的 INSERT 一致）：
 #: door_no, cert_no, assigned_at, assigned_source, observed_span, ended_at, last_seen_at,
@@ -156,6 +138,33 @@ REAL_SESSIONS: tuple[tuple[object, ...], ...] = (
         0,
     ),
 )
+
+#: 最老一场分配的时刻：时长上限以它为基准（见下）。
+_OLDEST_ASSIGNED_AT = min(row[2] for row in REAL_SESSIONS)
+
+#: 判据要看的两个学号都在名单里——真实行里就是两个人（一台设备、两间浴室间）。名单外的
+#: 一概不碰，所以这里必须与下面的真实 `cert_no` 对上。
+#:
+#: 时长上限跟着真实行的年龄走：真实行的日子是写死的，随真实日期漂移只会越来越老，
+#: 固定的上限迟早被"现在"追上（2026-10-05 就追上过一次：行的年龄跨过了当时的
+#: 86400 秒上限，判据停手、测到的是"没动手"）。上限取"最老一场分配到此刻"的距离
+#: 再加一小时余量，每次导入重算——行龄以天计，余量以小时计，永远够用。
+#: 上限本身由 test_decision.py 盯。
+_RUN_AGE_S = seconds_between(_OLDEST_ASSIGNED_AT, now_rfc3339()) + 3600
+CONFIG: dict[str, object] = {
+    "renew_wait_enabled": True,
+    "renew_wait_students": {"2530110052": "000000", "2217110057": "111111"},
+    "renew_wait_threshold_s": 270,
+    "renew_wait_max_duration_s": _RUN_AGE_S,
+    "renew_session_enabled": True,
+    "renew_session_students": {"2530110052": "000000", "2217110057": "111111"},
+    "renew_session_threshold_s": 1140,
+    "auto_settle_enabled": True,
+    "auto_settle_students": {"2530110052": "000000", "2217110057": "111111"},
+    "auto_settle_pause_threshold_s": 60,
+}
+
+#: 最老一场分配到此刻的距离（秒），加一小时余量后作为 renew_wait 的时长上限。
 
 #: 生产库 `usage_segment` 的真实行：所属会话的 door_no + cert_no、opened_at、closed_at、
 #: flow_s、source、opened_raw、closed_raw
