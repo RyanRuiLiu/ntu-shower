@@ -104,6 +104,14 @@ ROLL_WINDOW_MIN = 10
 
 _task: asyncio.Task[None] | None = None
 
+#: (设备, 学号) → 这次延长里我们已经替他放回过、或确认他自己已经有会话。
+#:
+#: 放回是**一次性**的（见 `_reassign` 的注释）：这一次结束之后，浴室端的 300 秒无水
+#: 门槛收回他就是"他走了"的信号，不再重新预约——否则拨回条件（喷头全部空闲）永远
+#: 不成立，延长永远不结束。记忆在内存里，与 `_attempted` 同类：服务端重启就重来
+#: 一轮，代价只是可能多放回一次，而窗口由库里的 `shifted_at` 算，不受它影响。
+_reassigned: set[tuple[str, str]] = set()
+
 #: (设备, 学号) → 这次延长里我们已经替他分配过、而命令失败了。
 #:
 #: 它与"前置拒"分得开：前置拒（门还占着）的命令**根本没下发**，下次还要试；命令真发出去
@@ -446,11 +454,15 @@ def on_frame(device_id: str) -> None:
 
 
 async def _reassign(device_id: str, assignments: tuple[tuple[int, str], ...], students: dict[str, str]) -> None:
-    """把名单里的人分配回他们原来那个喷头。
+    """把名单里的人分配回他们原来那个喷头——**每人一次**。
 
-    三种情形分得开，这是这一层唯一要紧的判断：
+    四种情形分得开，这是这一层唯一要紧的判断：
 
-    - **已经在占用态** → 跳过。靠"查现状"决定做不做，所以重复调用无害，也不必另记状态。
+    - **已经放回过**（本次延长里他重新有了会话，无论这条流程办的还是他自己）→ 跳过。
+      放回是**一次性**的：拨钟清场之后把人放回原位，仅此而已。浴室端之后按自己的
+      300 秒无水门槛收回他，那是**他走了**的信号——不放回，拨回条件（喷头全部空闲）
+      才有成立的一天。放回若做成循环，人走了也会被反复重新预约，延长永远不结束，
+      滚动重布通宵跑（2026-10-06 深夜实测复现：收回后 1 秒就被重新分配，整夜循环）。
     - **前置拒**（门还被别人占着、他刚有了别的会话）→ 跳过这个人，下次再来。这时命令
       **根本没下发**，所以"下次再来"不是重试。
     - **命令失败**（超时、离线、被浴室端拒而报了 ok 之后仍不占用）→ 记一笔，**这个人不再试**。
@@ -463,9 +475,11 @@ async def _reassign(device_id: str, assignments: tuple[tuple[int, str], ...], st
                 "INFO", "extend-hours.roster-changed", "他不在名单里了，不分配", device_id=device_id, cert_no=cert_no
             )
             continue
-        if (device_id, cert_no) in _reassign_failed:
+        if (device_id, cert_no) in _reassigned or (device_id, cert_no) in _reassign_failed:
             continue
         if doors_service.open_session_door(device_id, cert_no) is not None:
+            # 他已经有会话了：放回这件事已经成立，从此这次延长里不再管他
+            _reassigned.add((device_id, cert_no))
             continue
         try:
             result = await sessions_routes.perform_assign(
@@ -498,6 +512,7 @@ async def _reassign(device_id: str, assignments: tuple[tuple[int, str], ...], st
                 reason_code=result.get("reason_code") or "-",
             )
             continue
+        _reassigned.add((device_id, cert_no))
         log_event(
             "INFO",
             "extend-hours.reassigned",
@@ -607,9 +622,11 @@ async def _restore(shift: Shift, config: ConfigValues) -> bool:
 
 
 def _forget_failures(device_id: str) -> None:
-    """这台设备的延长结束了，把"替他试过而失败了"的记忆清掉。"""
+    """这台设备的延长结束了，把放回与失败的记忆都清掉——下一次延长从零开始。"""
     for key in [item for item in _reassign_failed if item[0] == device_id]:
         _reassign_failed.discard(key)
+    for key in [item for item in _reassigned if item[0] == device_id]:
+        _reassigned.discard(key)
 
 
 def _reached(local_now: str | None, at: str) -> bool:
