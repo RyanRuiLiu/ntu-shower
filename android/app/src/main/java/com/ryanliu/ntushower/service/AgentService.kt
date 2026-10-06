@@ -25,6 +25,7 @@ import com.ryanliu.ntushower.features.doors.DoorSnapshotSender
 import com.ryanliu.ntushower.features.remote.AdbBridge
 import com.ryanliu.ntushower.features.selfmanage.A11yGuard
 import com.ryanliu.ntushower.features.selfmanage.BathDbArchiver
+import com.ryanliu.ntushower.features.selfmanage.LogShipper
 import com.ryanliu.ntushower.features.selfmanage.OtaUpdater
 import com.ryanliu.ntushower.receiver.WatchdogReceiver
 import com.ryanliu.ntushower.transport.Envelope
@@ -139,6 +140,8 @@ class AgentService : Service() {
             ConfigCache.save(this@AgentService, config)
             syncConfigDependents()
             if (trusted) {
+                // 日志上送（见 LogShipper）：离线期间的故障现场随回连自动到服务端
+                worker.execute { LogShipper.ship(client) }
                 worker.execute {
                     // 服务端的喷头现态可能已经被清空重建（开发期"删了重建"是常规操作），
                     // 而设备侧状态可能一直没变。先忘掉指纹，这次采集才会无条件入队，

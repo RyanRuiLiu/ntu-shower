@@ -99,14 +99,27 @@ def shift_clock_skew(device_id: str, seconds: float) -> None:
     repository.set_clock_skew(device_id, skew)
 
 
-def record_link_event(device_id: str, event: str) -> None:
+def record_link_event(device_id: str, event: str, reason: str = "") -> None:
     """记一次上下线（event 取 schemas 的 LINK_ONLINE / LINK_OFFLINE）。
 
     与 [set_device_offline] 分工不同：那个刷新档案上的"最后见到"一列，只记得住最后一次；
     这个留下一串历史，回答"这台设备什么时候在线过"——它是设备利用率的分母，也是
-    "这段时间为什么没有数据"唯一能给出的答案。
+    "这段时间为什么没有数据"唯一能给出的答案。[reason] 见 repository.insert_link_event。
     """
-    repository.insert_link_event(device_id, event, now_rfc3339())
+    repository.insert_link_event(device_id, event, now_rfc3339(), reason)
+
+
+def record_log_upload(device_id: str, kind: str, content: str) -> None:
+    """落一份设备日志上送（见 repository.append_device_log 的保留规则）。"""
+    repository.append_device_log(device_id, kind, content, now_rfc3339())
+
+
+def latest_device_log(device_id: str, kind: str) -> dict[str, str] | None:
+    """最新的日志上送（设备页查看器）；没有则 None。"""
+    row = repository.latest_device_log(device_id, kind)
+    if row is None:
+        return None
+    return {"content": str(row["content"]), "uploaded_at": str(row["uploaded_at"])}
 
 
 def load_clock_skew(device_id: str) -> None:

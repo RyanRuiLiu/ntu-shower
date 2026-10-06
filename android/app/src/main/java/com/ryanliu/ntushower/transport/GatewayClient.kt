@@ -94,6 +94,27 @@ class GatewayClient(context: Context, private val callback: Callback) {
      */
     @Volatile private var stopped = false
 
+    /**
+     * 上一次链路断开的原因（结构化分类）与时刻（服务端轴）。随下一次 hello 回报给
+     * 服务端——「设备为什么掉线」在服务端就有结构化答案，不必现场读日志。
+     *
+     * 分类判据来自 OkHttp 抛出的异常类型：UnknownHostException = DNS 解析不了
+     * （有线网里多半是网线/交换机/ DHCP），SSLException = TLS 层失败，ConnectException
+     * 与 SocketTimeoutException = TCP 连不通或超时（路由/防火墙），onClosed = 服务端
+     * 主动关闭（正常语义）。服务端轴时刻取自 [ServerClock]——它锚在服务端时间上，
+     * 拿这个值做离线时段推断不会带本机钟的偏差。
+     */
+    @Volatile private var lastOfflineReason: String = ""
+
+    @Volatile private var lastOfflineAt: String = ""
+
+    private fun classifyFailure(t: Throwable): String = when (t) {
+        is java.net.UnknownHostException -> "dns"
+        is javax.net.ssl.SSLException -> "tls"
+        is java.net.ConnectException, is java.net.SocketTimeoutException -> "tcp"
+        else -> "error:${t.javaClass.simpleName}"
+    }
+
     fun connect() {
         stopped = false
         if (connected) return
@@ -144,6 +165,8 @@ class GatewayClient(context: Context, private val callback: Callback) {
                 // 自开机以来的秒数。服务端拿它反推开机时刻——本机没有 NTP，墙上时钟的
                 // 绝对值不可信；而这是个单调量，不受那个偏差影响。
                 .put("uptime_s", Uptime.nowMs() / 1000)
+                .put("last_offline_reason", lastOfflineReason)
+                .put("last_offline_at", lastOfflineAt)
             webSocket.send(MessageCodec.encode(MessageTypes.LINK_HELLO, hello))
             scheduleHandshakeTimeout()
         }
@@ -203,6 +226,8 @@ class GatewayClient(context: Context, private val callback: Callback) {
             Log.e(TAG, "failure: ${t.message}")
             connected = false
             authenticated = false
+            lastOfflineReason = classifyFailure(t)
+            lastOfflineAt = ServerClock.nowRfc3339() ?: Clock.wallClockRfc3339()
             handler.post { callback.onDisconnected(t.message ?: "failure") }
             scheduleReconnect()
         }
@@ -210,6 +235,8 @@ class GatewayClient(context: Context, private val callback: Callback) {
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
             connected = false
             authenticated = false
+            lastOfflineReason = "closed:$code"
+            lastOfflineAt = ServerClock.nowRfc3339() ?: Clock.wallClockRfc3339()
             handler.post { callback.onDisconnected("closed: $reason") }
             scheduleReconnect()
         }

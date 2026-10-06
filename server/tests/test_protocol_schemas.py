@@ -36,6 +36,7 @@ KNOWN_TYPES = [
     "ota.progress",
     "bridge.open",
     "bridge.close",
+    "device.log_upload",
 ]
 
 SAMPLES: dict[str, dict[str, Any]] = {
@@ -83,6 +84,7 @@ SAMPLES: dict[str, dict[str, Any]] = {
     },
     "ota.progress": {"payload": {"version": "0.2.4", "stage": "downloading", "detail": ""}},
     "bridge.open": {"payload": {"device_id": "<device-id>", "nonce": "8f14e45fceea167a"}},
+    "device.log_upload": {"payload": {"kind": "device", "content": "line1\nline2\n"}},
     "bridge.close": {"payload": {}},
 }
 

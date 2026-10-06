@@ -6,7 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 from tests import helpers
 
-from app.core import actions
+from app.core import actions, db
+from app.core.clock import now_rfc3339
 from app.core.connections import manager
 from app.modules.sessions import service as sessions_service
 
@@ -517,3 +518,38 @@ def test_device_order_rejects_unknown_devices(client: TestClient, admin_headers:
     assert resp.status_code == 404
     body = client.get("/api/v1/devices", headers=admin_headers).json()
     assert [item["device_id"] for item in body] == ["dev-order-a"]
+
+
+def test_link_events_record_the_reasons(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:
+    """链路事件带原因：online 行记设备回报的上次断开原因，offline 行记服务端自己断的原因。
+
+    hello 的 last_offline_reason / last_offline_at 是 0.4.35 起的新字段；没有它们的老
+    设备照常接入（reason 为空串），字段是可选的。
+    """
+    device_id = "dev-link-reason"
+    with helpers.trusted_online(client, device_id, admin_headers):
+        # 老设备（hello 不带 last_offline_*）→ reason 空；夹具的信任踢会产生多轮事件，
+        # 只看最后一条 online
+        rows = (
+            db.get_conn()
+            .execute("SELECT event, reason FROM device_link_event WHERE device_id = ? ORDER BY id", (device_id,))
+            .fetchall()
+        )
+        assert rows is not None
+        assert rows[-1]["event"] == "online"
+        assert rows[-1]["reason"] == ""
+
+    # 重连，hello 带上一次断开的原因（dns = 网线/交换机/DHCP 一类）：服务端把它记进
+    # 这次 online 事件
+    with client.websocket_connect("/gateway/device") as ws:
+        ws.send_text(helpers.hello_frame(device_id, last_offline_reason="dns", last_offline_at=now_rfc3339()))
+        helpers.recv_until(ws, "link.hello_ack")
+
+        rows = (
+            db.get_conn()
+            .execute("SELECT event, reason FROM device_link_event WHERE device_id = ? ORDER BY id", (device_id,))
+            .fetchall()
+        )
+        assert rows is not None
+        assert rows[-1]["event"] == "online"
+        assert rows[-1]["reason"] == "dns"
