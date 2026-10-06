@@ -31,12 +31,13 @@ from app.modules.access.schemas import IdentityRecord
 from app.modules.config import store as config_store
 from app.modules.sessions.schemas import CommandOutcome
 
-from . import service
+from . import schemas, service
 from .dependencies import DEVICE_ACTION_TIMEOUT_S, device_action
 from .schemas import (
     DeviceClockSetRequest,
     DeviceExecRequest,
     DeviceListItem,
+    DeviceOrderRequest,
     DevicePatchRequest,
     DevicePowerScheduleRequest,
     DeviceRecord,
@@ -92,6 +93,16 @@ def list_runtime() -> list[DeviceRecord]:
 
 
 # ── 档案 ──
+
+
+@admin_router.put("/order", response_model=schemas.DeviceOrderResponse)
+def put_device_order(req: DeviceOrderRequest) -> schemas.DeviceOrderResponse:
+    """按给定顺序重排设备：设备下拉、管理台设备表、统计接口全部照此排列。
+
+    清单必须完整（漏掉的设备保持原位），出现未知设备整体拒绝。
+    """
+    service.set_order(req.order)
+    return schemas.DeviceOrderResponse(order=[str(record["device_id"]) for record in service.list_devices()])
 
 
 @admin_router.patch("/{device_id}")

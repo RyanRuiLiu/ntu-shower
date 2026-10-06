@@ -6,6 +6,7 @@ service 在返回记录时把那个答案合并进记录。档案表里不存在
 """
 
 import json
+import re
 from sqlite3 import Row
 
 from app.core.clock import now_rfc3339
@@ -16,7 +17,7 @@ from .schemas import DeviceRecord
 #: 读模型的列清单。列名只在此处出现一次，避免多条查询各写一遍后分叉。
 _DEVICE_COLUMNS = (
     "device_id, name, trusted, app_version, version_code, os_version, capabilities,"
-    " last_seen_at, last_ip, booted_at, clock_skew_s"
+    " last_seen_at, last_ip, booted_at, clock_skew_s, sort_order"
 )
 
 
@@ -39,7 +40,10 @@ def init_tables() -> None:
             -- 持久化是必须的：只留内存的话，服务重启后回到 0 等于这段时间不平移，而
             -- "我们刚接手、那边还被占着"恰恰最常发生在设备上线到首次 pong 之间。
             -- 见 core/device_clock。
-            clock_skew_s REAL NOT NULL DEFAULT 0
+            clock_skew_s REAL NOT NULL DEFAULT 0,
+            -- 展示顺序：管理员手动调整（设备页 ↑/↓），全部设备清单按它排，数字段
+            -- 之外的同序回落到名字的自然排序。新设备排在末尾。
+            sort_order INTEGER NOT NULL DEFAULT 0
         );
 
         -- 设备上下线。帧是**事件驱动**的（状态变化才上报），空闲时不上报，所以
@@ -58,6 +62,12 @@ def init_tables() -> None:
             ON device_link_event(device_id, occurred_at);
         """
     )
+    # sort_order 是后加的列：CREATE TABLE IF NOT EXISTS 对已存在的表不生效，存量库
+    # （带不可重建的运营数据）在这里一次性补上。重跑无害。
+    columns = [row[1] for row in get_conn().execute("PRAGMA table_info(device)")]
+    if "sort_order" not in columns:
+        get_conn().execute("ALTER TABLE device ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+        get_conn().commit()
 
 
 def insert_link_event(device_id: str, event: str, occurred_at: str) -> None:
@@ -92,9 +102,38 @@ def get(device_id: str) -> DeviceRecord | None:
     return _as_device(row) if row is not None else None
 
 
+def _natural_name_key(name: str) -> list[tuple[int, object]]:
+    """名字的自然排序键：数字段按数值比（1F < 2F < 10F），其余按字面。
+
+    段前标类型再比较——纯 int 与 str 在同位置比较会炸。
+    """
+    return [(0, int(part)) if part.isdigit() else (1, part) for part in re.split(r"(\d+)", name)]
+
+
 def list_all() -> list[DeviceRecord]:
-    rows = get_conn().execute(f"SELECT {_DEVICE_COLUMNS} FROM device ORDER BY last_seen_at DESC").fetchall()
-    return [_as_device(row) for row in rows]
+    """全部设备，按管理员手动的展示顺序（`sort_order`）；同序回落到名字的自然排序。
+
+    展示顺序是所有设备清单（公开下拉、管理台设备表、统计接口）的唯一顺序来源：
+    改一次，处处一致。库级只按 sort_order 排，自然序在这里补——SQLite 表达不了它。
+    """
+    rows = get_conn().execute(f"SELECT {_DEVICE_COLUMNS} FROM device ORDER BY sort_order ASC").fetchall()
+    records = [_as_device(row) for row in rows]
+    # 手动顺序优先；自然序只作同序回落（存量行与新行撞序时保持可预期的字母序），
+    # 单独按名字重排会把管理员刚调好的顺序整个抹掉。
+    records.sort(key=lambda record: (int(record["sort_order"]), _natural_name_key(str(record["name"]))))
+    return records
+
+
+def set_order(device_ids: list[str]) -> None:
+    """按给定顺序重排设备（一个事务内逐台写位置，序号即列表下标）。"""
+    conn = get_conn()
+    try:
+        for position, device_id in enumerate(device_ids):
+            conn.execute("UPDATE device SET sort_order = ? WHERE device_id = ?", (position, device_id))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def register(
@@ -106,12 +145,16 @@ def register(
     ip: str,
     booted_at: str,
 ) -> None:
-    """上线登记：只覆盖版本、能力、时刻与开机时间，不改 name 与 trusted。"""
+    """上线登记：只覆盖版本、能力、时刻与开机时间，不改 name、trusted 与 sort_order。
+
+    新设备排到末尾（MAX+1）；已登记的设备 ON CONFLICT 更新不带 sort_order，位置不动。
+    """
+    next_order = read_one("SELECT COALESCE(MAX(sort_order) + 1, 0) AS next FROM device")
     write(
         """
         INSERT INTO device (device_id, app_version, version_code, os_version,
-            capabilities, last_seen_at, last_ip, booted_at)
-        VALUES (?,?,?,?,?,?,?,?)
+            capabilities, last_seen_at, last_ip, booted_at, sort_order)
+        VALUES (?,?,?,?,?,?,?,?,?)
         ON CONFLICT(device_id) DO UPDATE SET
             app_version  = excluded.app_version,
             version_code = excluded.version_code,
@@ -130,6 +173,7 @@ def register(
             now_rfc3339(),
             ip,
             booted_at,
+            int(next_order["next"]) if next_order is not None else 0,
         ),
     )
 
@@ -186,6 +230,7 @@ def _as_device(row: Row) -> DeviceRecord:
         "last_ip": row["last_ip"],
         "booted_at": row["booted_at"],
         "clock_skew_s": float(row["clock_skew_s"]),
+        "sort_order": int(row["sort_order"]),
     }
     return device
 
