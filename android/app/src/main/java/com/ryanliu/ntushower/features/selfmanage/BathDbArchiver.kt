@@ -24,11 +24,11 @@ import java.io.File
  * 感知；新库要等 App 下次打开原路径才出现（夜里断电重启必然发生）。journal 没有
  * 常驻 fd，先移 journal 再移 db——任何中间态都不会出现"旧日志配新库"的损坏。
  *
- * ## 归档保留最近 [BathDbArchivePolicy.ARCHIVE_KEEP] 份
+ * ## 归档永久保留
  *
- * 归档是把膨胀换个地方，不设上限就是下一个膨胀点。超过保留数删最旧的。
- * 判定逻辑（阈值/命名/清理选择）在 [BathDbArchivePolicy] 并进覆盖率；本类只做
- * shell 与文件系统编排，与 RootShell 同例不进赦免清单。
+ * 归档文件是浴室 App 的完整运营历史，删了回不来——**不设任何自动清理**。判定逻辑
+ * （阈值/命名）在 [BathDbArchivePolicy] 并进覆盖率；本类只做 shell 与文件系统编排，
+ * 与 RootShell 同例不进赦免清单。
  */
 object BathDbArchiver {
 
@@ -45,9 +45,8 @@ object BathDbArchiver {
         archive(size)
     }
 
-    /** 执行归档：journal 先移、db 后移（中间态安全，见类注释），随后裁掉超量的旧档。 */
+    /** 执行归档：journal 先移、db 后移（中间态安全，见类注释）。归档永久保留。 */
     private fun archive(sizeBytes: Long) {
-        val dir = File(AppConfig.BATH_DB_DIR)
         val suffix = BathDbArchivePolicy.ARCHIVE_SUFFIX + BathDbArchivePolicy.archiveStamp()
         val script = buildString {
             append("cd ").append(AppConfig.BATH_DB_DIR)
@@ -69,16 +68,5 @@ object BathDbArchiver {
         }
         deviceLog.lifecycle("bath-db.archived", "size=$sizeBytes suffix=$suffix")
         Log.i(TAG, "archived ${sizeBytes / 1024}KB as *$suffix")
-        prune(dir, suffix)
-    }
-
-    /** 删掉保留数之外的旧归档（本次刚生成的最新，从列表末尾数）。 */
-    private fun prune(dir: File, newestSuffix: String) {
-        val names = dir.listFiles { file -> file.name.contains(BathDbArchivePolicy.ARCHIVE_SUFFIX) }
-            ?.map { it.name } ?: return
-        for (name in BathDbArchivePolicy.archivesToPrune(names, BathDbArchivePolicy.ARCHIVE_KEEP, newestSuffix)) {
-            val removed = RootShell.control.exec("rm -f ${dir.absolutePath}/$name")
-            if (removed.exitCode == 0) Log.i(TAG, "pruned old archive $name")
-        }
     }
 }

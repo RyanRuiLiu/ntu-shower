@@ -96,7 +96,7 @@ object ConfigDefaults {
     const val BATH_DB_ARCHIVE_ENABLED = false
 
     /** 归档触发阈值 */
-    const val BATH_DB_ARCHIVE_THRESHOLD_MB = 20L
+    const val BATH_DB_ARCHIVE_THRESHOLD_MB = 10L
 
     /** 每日断电时刻 */
     const val POWER_OFF_AT = "23:58"

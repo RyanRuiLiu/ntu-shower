@@ -27,25 +27,6 @@ class BathDbArchiverTest {
     }
 
     @Test
-    fun `prune keeps the newest keep entries and never the freshly created one`() {
-        val names = listOf(
-            "bath.db.arc-20261005-1055",
-            "bath.db.arc-20261006-1055",
-            "bath.db.arc-20261007-0037",
-            "bath.db.arc-20261007-1055",
-        )
-
-        val toPrune = BathDbArchivePolicy.archivesToPrune(
-            names,
-            keep = BathDbArchivePolicy.ARCHIVE_KEEP,
-            newestSuffix = "20261007-1055",
-        )
-
-        // 只删最旧的一份；刚生成的（keep 窗口内）永不在列
-        assert(toPrune == listOf("bath.db.arc-20261005-1055"))
-    }
-
-    @Test
     fun `archive stamp is minute grained and sortable`() {
         // 设备本地时区（操作员对照的是设备墙钟）；分钟粒度——归档最勤也是一天一次
         val calendar = Calendar.getInstance()
