@@ -8,11 +8,10 @@ device.update 的 payload 是精简档案（DeviceSummary）：版本、来源 I
 一处，网关生命周期与档案修改共用。
 """
 
-import re
-
 from app.core import device_clock, events
 from app.core.clock import now_rfc3339
 from app.core.connections import manager
+from app.core.problems import DEVICE_NOT_FOUND, ApiProblemError
 from app.core.protocol import as_int
 from app.modules.config import store as config_store
 
@@ -28,21 +27,23 @@ def get_device(device_id: str) -> DeviceRecord | None:
     return record
 
 
-def _natural_name_key(name: str) -> list[tuple[int, object]]:
-    """设备名的自然排序键：数字段按数值比（1F < 2F < 10F），其余按字面。
-
-    按库里的 last_seen 排会让设备在下拉里随心跳跳动；按字面排会让 10F 排到 2F 前面。
-    数字段转数值、段前标类型，混合比较才不会炸。
-    """
-    return [(0, int(part)) if part.isdigit() else (1, part) for part in re.split(r"(\d+)", name)]
-
-
 def list_devices() -> list[DeviceRecord]:
     records = repository.list_all()
     for record in records:
         record["online"] = manager.is_online(record["device_id"])
-    records.sort(key=lambda record: _natural_name_key(str(record["name"])))
     return records
+
+
+def set_order(device_ids: list[str]) -> None:
+    """按给定顺序重排设备（管理员手动调整，全部设备清单的唯一顺序来源）。
+
+    清单里出现未知设备（已拆除的、拼错的）整体拒绝：半排序比不排序更难看。
+    """
+    known = {str(record["device_id"]) for record in repository.list_all()}
+    unknown = [item for item in device_ids if item not in known]
+    if unknown:
+        raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {unknown[0]}")
+    repository.set_order(device_ids)
 
 
 def to_summary(record: DeviceRecord) -> DeviceSummary:

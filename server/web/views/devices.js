@@ -28,7 +28,7 @@ function renderTable() {
   }
   const rows = store.runtime
     .map(
-      (device) => `
+      (device, index) => `
       <tr data-id="${esc(device.device_id)}">
         <td>
           <div>${esc(device.name || PLACEHOLDER)}</div>
@@ -43,6 +43,8 @@ function renderTable() {
         )}</td>
         <td>
           <div class="btn-row">
+            <button type="button" class="btn btn-ghost btn-sm" data-act="up" title="上移" ${index === 0 ? 'disabled' : ''}>↑</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-act="down" title="下移" ${index === store.runtime.length - 1 ? 'disabled' : ''}>↓</button>
             <button type="button" class="btn btn-ghost btn-sm" data-act="rename">重命名</button>
             <button type="button" class="btn btn-ghost btn-sm" data-act="trust">${device.trusted ? '撤销信任' : '授予信任'}</button>
           </div>
@@ -51,7 +53,7 @@ function renderTable() {
     )
     .join('')
   $('deviceTable').innerHTML = `<table class="table"><thead><tr>
-      <th>设备</th><th>应用版本</th><th>系统版本</th><th>状态</th><th>信任</th><th>能力位</th><th>操作</th>
+      <th>设备</th><th>应用版本</th><th>系统版本</th><th>状态</th><th>信任</th><th>能力位</th><th>顺序</th><th>操作</th>
     </tr></thead><tbody>${rows}</tbody></table>`
 }
 
@@ -107,6 +109,26 @@ async function toggleTrust(deviceId) {
     toast(device?.trusted ? '已撤销信任' : '已授予信任')
   } catch (error) {
     report('maintResult', problemText(error), 'err')
+  }
+}
+
+/**
+ * 上移/下移一台设备并保存整个顺序。
+ *
+ * 顺序只有一份（设备下拉、设备表、统计接口都按它排），所以每次调整都是"本地换位 +
+ * 整单保存"：不保存半份，也不做拖拽——楼层的数量级（个位数）配不上那个复杂度。
+ */
+async function moveDevice(deviceId, direction) {
+  const ids = store.runtime.map((item) => item.device_id)
+  const from = ids.indexOf(deviceId)
+  const to = direction === 'up' ? from - 1 : from + 1
+  if (from === -1 || to < 0 || to >= ids.length) return
+  ;[ids[from], ids[to]] = [ids[to], ids[from]]
+  try {
+    await api.saveDeviceOrder(ids)
+    await refreshRuntime()
+  } catch (error) {
+    toast(problemText(error))
   }
 }
 
@@ -460,6 +482,7 @@ export const devicesView = {
         if (!button) return
         const deviceId = button.closest('tr').dataset.id
         if (button.dataset.act === 'rename') rename(deviceId)
+        else if (button.dataset.act === 'up' || button.dataset.act === 'down') moveDevice(deviceId, button.dataset.act)
         else toggleTrust(deviceId)
       }),
     )

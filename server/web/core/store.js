@@ -14,6 +14,14 @@
  */
 import { api } from './api.js'
 
+/** 上次选择的设备存 localStorage：页面刷新与下次打开都回到同一台。 */
+const DEVICE_KEY = 'ntu-shower.device'
+
+function rememberDevice(deviceId) {
+  if (deviceId) localStorage.setItem(DEVICE_KEY, deviceId)
+  else localStorage.removeItem(DEVICE_KEY)
+}
+
 export const store = {
   /** 设备精简档案（公开）。 */
   devices: [],
@@ -30,14 +38,6 @@ export const store = {
 }
 
 const listeners = new Map()
-
-/** 上次选择的设备存 localStorage：页面刷新与下次打开都回到同一台。 */
-const DEVICE_KEY = 'ntu-shower.device'
-
-function rememberDevice(deviceId) {
-  if (deviceId) localStorage.setItem(DEVICE_KEY, deviceId)
-  else localStorage.removeItem(DEVICE_KEY)
-}
 
 /** 订阅一个应用事件；返回解绑函数。 */
 export function subscribe(event, fn) {
