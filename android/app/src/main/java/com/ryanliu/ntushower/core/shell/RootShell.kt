@@ -86,6 +86,18 @@ object RootShell {
         }, "detached-shell-drain").apply { isDaemon = true }.start()
     }
 
+    /**
+     * 清扫被异常打断的命令留下的 pid 文件（见 [ShellChannel.wrap]：正常路径由包裹
+     * 脚本自删，进程被杀、断电那种时刻没人替它收尾）。
+     *
+     * 只在服务启动时调：此刻没有任何命令在跑，/data/local/tmp 里属于本程序的 pid
+     * 文件全部是死的。文件归 root 所有，走 control 通道删——这套命名是 shell 通道
+     * 自己的约定，清扫也归它。首次拉起时 control 通道顺带完成 su 授权。
+     */
+    fun cleanupAbandonedPidFiles() {
+        control.exec("rm -f /data/local/tmp/ntushower-*.pid")
+    }
+
     /** 销毁三条常驻通道。下次使用时各自重新拉起。 */
     fun destroy() {
         data.destroy()
