@@ -86,6 +86,8 @@ export const api = {
   // devices: 精简清单（含本身份的 actions）；runtime: 运维档案（admin）
   devices: () => send(`${API_V1}/devices`),
   deviceRuntime: () => send(`${API_V1}/devices/runtime`),
+  /** 设备最近一次上送的日志：kind 取 device / crash。 */
+  deviceLogs: (id, kind) => send(devicePath(id, `/logs?kind=${encodeURIComponent(kind)}`)),
   /** 设备展示顺序：全部设备清单（下拉、设备表、统计）照此排列。 */
   saveDeviceOrder: (order) => send(`${API_V1}/devices/order`, put({ order })),
   patchDevice: (id, value) => send(devicePath(id), patch(value)),

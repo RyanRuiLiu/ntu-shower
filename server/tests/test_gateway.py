@@ -513,3 +513,69 @@ def test_marking_trusted_kicks_the_live_connection(
 
         with pytest.raises(WebSocketDisconnect):
             _read_until_closed()
+
+
+def test_device_log_upload_is_stored_and_queryable(
+    client: TestClient, admin_headers: dict[str, str], fresh_db: str
+) -> None:
+    """设备日志上送：握手后设备把日志尾部送来，服务端按（设备，种类）保留。
+
+    这是「设备离线期间发生了什么」的排障通道：证据在回连那一刻自动到位，
+    现场不再需要读文件。
+    """
+    with helpers.trusted_online(client, "dev-log-upload", admin_headers) as ws:
+        ws.send_text(helpers.frame("device.log_upload", {"kind": "device", "content": "line1\nline2\n"}))
+        ws.send_text(helpers.frame("device.log_upload", {"kind": "crash", "content": "boom\n"}))
+        ws.send_text(helpers.frame("link.ping", {"sender_time": now_rfc3339()}))
+        helpers.recv_until(ws, "link.pong")
+
+    device = "dev-log-upload"
+    r = client.get(f"/api/v1/devices/{device}/logs?kind=device", headers=admin_headers)
+    assert r.status_code == 200
+    assert r.json()["content"] == "line1\nline2\n"
+    assert r.json()["uploaded_at"]
+
+    r = client.get(f"/api/v1/devices/{device}/logs?kind=crash", headers=admin_headers)
+    assert r.status_code == 200
+    assert r.json()["content"] == "boom\n"
+
+
+def test_device_log_upload_requires_trusted_and_valid_kind(
+    client: TestClient, admin_headers: dict[str, str], fresh_db: str
+) -> None:
+    """未信任设备的日志上送被静默忽略；坏种类回 link.error 保持协议反馈。"""
+    with client.websocket_connect("/gateway/device") as ws:
+        ws.send_text(helpers.hello_frame("dev-log-untrusted"))
+        helpers.recv_until(ws, "link.hello_ack")
+        ws.send_text(helpers.frame("device.log_upload", {"kind": "device", "content": "x"}))
+        ws.send_text(helpers.frame("link.ping", {"sender_time": now_rfc3339()}))
+        assert helpers.recv_until(ws, "link.pong")["reply_to"]
+
+    with helpers.trusted_online(client, "dev-log-badkind", admin_headers) as ws:
+        ws.send_text(helpers.frame("device.log_upload", {"kind": "nope", "content": "x"}))
+        err = helpers.recv_until(ws, "link.error")
+        assert err["payload"]["code"] == "proto.bad_json"
+
+    r = client.get("/api/v1/devices/dev-log-untrusted/logs?kind=device", headers=admin_headers)
+    assert r.status_code == 404
+
+
+def test_device_log_upload_keeps_only_recent_per_kind(
+    client: TestClient, admin_headers: dict[str, str], fresh_db: str
+) -> None:
+    """同一（设备，种类）只留最近几份：上送是现态读数，不是无限队列。"""
+    with helpers.trusted_online(client, "dev-log-trim", admin_headers) as ws:
+        for round_no in range(7):
+            ws.send_text(helpers.frame("device.log_upload", {"kind": "device", "content": f"round-{round_no}"}))
+        ws.send_text(helpers.frame("link.ping", {"sender_time": now_rfc3339()}))
+        helpers.recv_until(ws, "link.pong")
+
+    body = client.get("/api/v1/devices/dev-log-trim/logs?kind=device", headers=admin_headers).json()
+    assert body["content"] == "round-6"
+    rows = (
+        db.get_conn()
+        .execute("SELECT COUNT(*) AS n FROM device_log WHERE device_id = 'dev-log-trim' AND kind = 'device'")
+        .fetchone()
+    )
+    assert rows is not None
+    assert rows["n"] == 5

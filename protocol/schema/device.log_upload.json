@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://<public-domain>/schema/device.log_upload.json",
+  "title": "Device log upload (device to server)",
+  "allOf": [
+    {
+      "$ref": "https://<public-domain>/schema/envelope.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "device.log_upload"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "kind",
+            "content"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "device",
+                "crash"
+              ],
+              "description": "日志种类：device=device.log（运行事件），crash=crash.log（未捕获异常现场）。"
+            },
+            "content": {
+              "type": "string",
+              "description": "日志尾部原文（JSONL 文本，最多 64KB）。设备每次握手成功后上送一次；服务端按（设备，种类）保留最近几份，供「设备离线期间发生了什么」的排障——证据在回连那一刻自动到位，不依赖现场读文件。"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
