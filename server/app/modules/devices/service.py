@@ -8,6 +8,8 @@ device.update 的 payload 是精简档案（DeviceSummary）：版本、来源 I
 一处，网关生命周期与档案修改共用。
 """
 
+import re
+
 from app.core import device_clock, events
 from app.core.clock import now_rfc3339
 from app.core.connections import manager
@@ -26,10 +28,20 @@ def get_device(device_id: str) -> DeviceRecord | None:
     return record
 
 
+def _natural_name_key(name: str) -> list[tuple[int, object]]:
+    """设备名的自然排序键：数字段按数值比（1F < 2F < 10F），其余按字面。
+
+    按库里的 last_seen 排会让设备在下拉里随心跳跳动；按字面排会让 10F 排到 2F 前面。
+    数字段转数值、段前标类型，混合比较才不会炸。
+    """
+    return [(0, int(part)) if part.isdigit() else (1, part) for part in re.split(r"(\d+)", name)]
+
+
 def list_devices() -> list[DeviceRecord]:
     records = repository.list_all()
     for record in records:
         record["online"] = manager.is_online(record["device_id"])
+    records.sort(key=lambda record: _natural_name_key(str(record["name"])))
     return records
 
 

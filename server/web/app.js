@@ -283,6 +283,9 @@ function bindTopbar() {
 
   subscribe('device', (id) => {
     $('devicePicker').value = id
+    // 切换设备立刻重拉喷头：store.doors 是"当前设备"的现态，不重拉的话看到的是
+    // 上一台的数据（多设备下切换后必然张冠李戴）
+    refreshDoors()
     if (!$('deviceInfo').hidden) renderDeviceInfo()
   })
 
@@ -430,8 +433,11 @@ async function refreshRuntimeSafely() {
 }
 
 async function refreshDoors() {
+  const id = store.deviceId
   try {
-    setDoors(await api.doors(store.deviceId))
+    const doors = await api.doors(id)
+    // 等待期间用户可能已切到别的设备：慢响应不能把别的设备的数据盖到当前选择上
+    if (store.deviceId === id) setDoors(doors)
   } catch (error) {
     // 401 由 handleAuthError 引导补身份标识；其余错误直接弹出来，不留一个无声的空列表
     if (!handleAuthError(error)) toast(`获取喷头状态 · ${problemText(error)}`)

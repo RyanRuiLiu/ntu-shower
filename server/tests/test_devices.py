@@ -440,3 +440,20 @@ def test_input_requires_channel(
     assert r.status_code == 200
     assert ready["action"] == actions.UI_INPUT
     assert ready["params"] == {"text": "hello", "channel": "keys"}
+
+
+def test_devices_are_sorted_naturally_by_name(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:
+    """设备清单按名字自然排序：数字段按数值比（1F < 2F < 10F），且与心跳无关。
+
+    按库里的 last_seen 排会让设备在下拉里随心跳跳动；按字面排会让 10F 排到 2F 前面。
+    """
+    for name in ("10F浴室", "2F浴室", "1F浴室"):
+        device_id = f"dev-{name}"
+        helpers.register_trusted_device(device_id)
+        from app.modules.devices import repository as devices_repository
+
+        devices_repository.set_name(device_id, name)
+
+    body = client.get("/api/v1/devices", headers=admin_headers).json()
+
+    assert [item["name"] for item in body] == ["1F浴室", "2F浴室", "10F浴室"]
