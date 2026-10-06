@@ -57,6 +57,21 @@ class ConnectionManager:
             return False
         return True
 
+    async def disconnect(self, device_id: str) -> bool:
+        """主动掐断设备的活动连接（设备会按重连退避自己回来）。
+
+        用于信任位等**只在握手时生效**的状态变更之后：让设备重新 hello，新状态才能
+        被它带上。连接不存在返回 False，不抛异常。
+        """
+        ws = self._connections.get(device_id)
+        if ws is None:
+            return False
+        try:
+            await ws.close(code=1000)
+        except (WebSocketDisconnect, RuntimeError):
+            return False
+        return True
+
 
 # 模块级单例。注意：消费方应使用 `from app.core.connections import manager`
 # （取得实例），而非 `from app.core import connections`（那会拿到子模块对象）。
