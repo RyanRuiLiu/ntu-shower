@@ -74,6 +74,22 @@ class DeviceRecord(TypedDict):
     以内，而 20 分钟里的漂移只有 0.03 秒，窗口内偏差是常量。
     """
 
+    sort_order: int
+    """展示顺序：设备下拉、管理台设备表、统计接口全部按它排。管理员在设备页调整，
+    新设备排到末尾；同序回落到名字的自然排序（见 repository.list_all）。"""
+
+
+class DeviceOrderRequest(BaseModel):
+    """设备展示顺序：按列表顺序写 `sort_order`，全部设备清单照此排列。"""
+
+    order: list[str] = Field(min_length=1)
+
+
+class DeviceOrderResponse(BaseModel):
+    """重排后的完整设备顺序（device_id 列表，含未出现在请求里的设备）。"""
+
+    order: list[str]
+
 
 class DevicePatchRequest(BaseModel):
     """改设备档案。字段都可选，只改传了的那些；改名与信任共用一个端点。"""
