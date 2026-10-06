@@ -120,6 +120,7 @@ GROUPS: tuple[GroupSpec, ...] = (
     GroupSpec("doors", "喷头状态采集", "device"),
     GroupSpec("ui", "界面操作", "device"),
     GroupSpec("automation", "自动化流程", "device"),
+    GroupSpec("bath_db", "浴室 App 数据库", "device"),
     GroupSpec("gateway", "链路与心跳", "device"),
     GroupSpec("guard", "崩溃守护", "device"),
     GroupSpec("ota", "自更新", "device"),
@@ -515,6 +516,34 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         maximum=3600000,
         unit="毫秒",
         group="guard",
+    ),
+    # ── 浴室 App 数据库 ──
+    ConfigSpec(
+        "bath_db_archive_enabled",
+        BOOL,
+        DEVICE,
+        False,
+        "启用数据库归档",
+        "浴室 App 的 bath.db 随会话只增不减，涨大后 App 明显卡顿。开启后，本程序每次"
+        "启动时检查库大小，攒到阈值即把它改名归档（保留最近 3 份，更旧的自动清理），"
+        "浴室 App 下次打开原路径时自动建一个全新的空库。改名对运行中的 App 无害"
+        "（它持有的文件句柄跟着走，实测无感知）；每晚断电重启，归档后第二天一定是新库。"
+        "默认关闭",
+        group="bath_db",
+    ),
+    ConfigSpec(
+        "bath_db_archive_threshold_mb",
+        INT,
+        DEVICE,
+        20,
+        "归档触发阈值",
+        "bath.db 攒到这个大小，本程序启动时就把它归档。设得小归档勤（新库更频繁，"
+        "历史库文件多），设得大归档懒（App 长期跑在一个大库上）。实测 8MB 约为三个月"
+        "的会话量",
+        minimum=5,
+        maximum=1024,
+        unit="MB",
+        group="bath_db",
     ),
     # ── 调试通道 ──
     ConfigSpec(

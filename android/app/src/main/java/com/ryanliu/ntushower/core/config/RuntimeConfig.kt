@@ -142,6 +142,13 @@ object RuntimeConfig {
     @Volatile var bathExitCooldownMs = ConfigDefaults.BATH_APP_EXIT_COOLDOWN_MS
         private set
 
+    // ── 浴室 App 数据库 ──
+    @Volatile var bathDbArchiveEnabled = ConfigDefaults.BATH_DB_ARCHIVE_ENABLED
+        private set
+
+    @Volatile var bathDbArchiveThresholdMb = ConfigDefaults.BATH_DB_ARCHIVE_THRESHOLD_MB
+        private set
+
     // ── 电源计划 ──
     @Volatile var powerOffAt = ConfigDefaults.POWER_OFF_AT
         private set
@@ -224,6 +231,10 @@ object RuntimeConfig {
             { c, key -> bathExitMaxCount = atLeastOne(c.optInt(key, bathExitMaxCount)) },
         "bath_app_exit_cooldown_ms" to
             { c, key -> bathExitCooldownMs = atLeastOne(c.optLong(key, bathExitCooldownMs)) },
+        "bath_db_archive_enabled" to
+            { c, key -> bathDbArchiveEnabled = c.optBoolean(key, bathDbArchiveEnabled) },
+        "bath_db_archive_threshold_mb" to
+            { c, key -> bathDbArchiveThresholdMb = atLeastOne(c.optLong(key, bathDbArchiveThresholdMb)) },
         "power_off_at" to
             { c, key -> powerOffAt = c.optString(key, powerOffAt) },
         "power_on_at" to
