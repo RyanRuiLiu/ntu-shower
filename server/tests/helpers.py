@@ -10,21 +10,36 @@ from fastapi.testclient import TestClient
 from starlette.testclient import WebSocketTestSession
 
 
-def hello_frame(device_id: str, *, version_code: int = 6, capabilities: list[str] | None = None) -> str:
-    """构造 link.hello 帧；capabilities 为 None 时空声明。"""
+def hello_frame(
+    device_id: str,
+    *,
+    version_code: int = 6,
+    capabilities: list[str] | None = None,
+    last_offline_reason: str | None = None,
+    last_offline_at: str | None = None,
+) -> str:
+    """构造 link.hello 帧；capabilities 为 None 时空声明。
+
+    last_offline_* 是 0.4.35 起的断开原因回报；不给就与老设备一致（帧里不带）。
+    """
+    payload = {
+        "device_id": device_id,
+        "app_version": "0.4.13",
+        "version_code": version_code,
+        "os_version": "4.4.4",
+        "capabilities": capabilities if capabilities is not None else [],
+    }
+    if last_offline_reason is not None:
+        payload["last_offline_reason"] = last_offline_reason
+    if last_offline_at is not None:
+        payload["last_offline_at"] = last_offline_at
     return json.dumps(
         {
             "v": 1,
             "type": "link.hello",
             "id": str(uuid.uuid4()),
             "ts": "2026-09-30T12:00:00.000Z",
-            "payload": {
-                "device_id": device_id,
-                "app_version": "0.4.13",
-                "version_code": version_code,
-                "os_version": "4.4.4",
-                "capabilities": capabilities if capabilities is not None else [],
-            },
+            "payload": payload,
         }
     )
 

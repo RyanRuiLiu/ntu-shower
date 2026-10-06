@@ -118,6 +118,8 @@ val frameworkBoundClasses = listOf(
     // 数据库归档的 shell/文件系统编排（mv/rm 经 root 通道、/sdcard 实盘）；判定逻辑
     // 已抽为 BathDbArchivePolicy 并纳入覆盖
     "**/features/selfmanage/BathDbArchiver*",
+    // 日志上送的文件系统/网络编排（读 /sdcard 实盘、经 GatewayClient 发送）
+    "**/features/selfmanage/LogShipper*",
     // 无障碍节点操作：依赖 android.view.accessibility 节点树与窗口管理器
     // （CommandScheduler 只剩线程编排，其串行决策已抽为 SerialCommandQueue 并纳入覆盖）
     "**/features/automation/AutomationFlow*",
