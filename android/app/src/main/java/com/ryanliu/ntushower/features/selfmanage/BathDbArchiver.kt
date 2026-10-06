@@ -28,7 +28,7 @@ import java.io.File
  *
  * 归档是把膨胀换个地方，不设上限就是下一个膨胀点。超过保留数删最旧的。
  * 判定逻辑（阈值/命名/清理选择）在 [BathDbArchivePolicy] 并进覆盖率；本类只做
- * shell 与文件系统编排，与 RootShell 同例不进门禁。
+ * shell 与文件系统编排，与 RootShell 同例不进赦免清单。
  */
 object BathDbArchiver {
 
