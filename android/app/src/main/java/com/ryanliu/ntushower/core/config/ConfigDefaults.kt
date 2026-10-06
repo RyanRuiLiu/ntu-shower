@@ -92,6 +92,12 @@ object ConfigDefaults {
     /** 异常后的冷却时长 */
     const val BATH_APP_EXIT_COOLDOWN_MS = 600000L
 
+    /** 启用数据库归档 */
+    const val BATH_DB_ARCHIVE_ENABLED = false
+
+    /** 归档触发阈值 */
+    const val BATH_DB_ARCHIVE_THRESHOLD_MB = 20L
+
     /** 每日断电时刻 */
     const val POWER_OFF_AT = "23:58"
 
@@ -126,6 +132,8 @@ object ConfigDefaults {
         .put("bath_app_exit_window_ms", BATH_APP_EXIT_WINDOW_MS)
         .put("bath_app_exit_max_count", BATH_APP_EXIT_MAX_COUNT)
         .put("bath_app_exit_cooldown_ms", BATH_APP_EXIT_COOLDOWN_MS)
+        .put("bath_db_archive_enabled", BATH_DB_ARCHIVE_ENABLED)
+        .put("bath_db_archive_threshold_mb", BATH_DB_ARCHIVE_THRESHOLD_MB)
         .put("power_off_at", POWER_OFF_AT)
         .put("power_on_at", POWER_ON_AT)
 }
