@@ -4,7 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.ryanliu.ntushower.BuildConfig
 import com.ryanliu.ntushower.core.a11y.A11yRuntime
-import com.ryanliu.ntushower.core.clock.Uptime
+import com.ryanliu.ntushower.core.clock.Clock
 import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.identity.DeviceIdentity
 import com.ryanliu.ntushower.core.log.DeviceLog
@@ -39,9 +39,6 @@ class OtaUpdater(
     /** OTA 的步骤落设备统一日志（device.log）：安装是脱手的，事后只有这里能查。 */
     private val deviceLog = DeviceLog(File(AppConfig.WORK_DIR))
 
-    /** 上一次尝试安装的版本号与时刻：同一版本退避期内不再重复下载安装。 */
-    private var lastAttempt: Pair<Int, Long>? = null
-
     /**
      * 轮询/推送共用的检查入口。
      * force 发布无视版本号（调试期反复推送同一版本）；
@@ -49,6 +46,10 @@ class OtaUpdater(
      * 同一版本刚尝试过安装则按 [RETRY_BACKOFF_MS] 退避——安装是尽力而为的脱手
      * 操作，失败无从确认（脚本不回传），靠"隔一段时间再试"收敛，避免把下载、
      * 安装、重启的循环压到秒级。
+     *
+     * 退避状态在**磁盘上**（[attemptLock] 的 mtime），不在内存：安装脚本会杀死本
+     * 进程，内存里的记忆随之清零——2026-10-07 4F 实测，安装失败 + 进程重启的循环
+     * 把重试压到了每 20 秒一次。跨重启的退避才能真收敛。
      */
     fun checkAndInstall(): Boolean {
         if (A11yRuntime.automationInProgress) {
@@ -62,14 +63,14 @@ class OtaUpdater(
             val force = manifest.optBoolean("force", false)
             val newer = code > BuildConfig.VERSION_CODE
             if (!force && !newer) return false
-            lastAttempt?.let { (attemptedCode, at) ->
-                if (code == attemptedCode && Uptime.nowMs() - at < RETRY_BACKOFF_MS) {
-                    Log.i(TAG, "same version attempted recently, backing off")
-                    return false
-                }
+            val lock = attemptLock(code)
+            if (lock.exists() && System.currentTimeMillis() - lock.lastModified() < RETRY_BACKOFF_MS) {
+                Log.i(TAG, "same version attempted recently, backing off")
+                return false
             }
-            lastAttempt = code to Uptime.nowMs()
-            applyUpdate(manifest)
+            // 锁先落盘再动手：安装脚本杀死本进程后，下一次启动看到它才知道"刚试过"
+            lock.writeText(versionStamp(manifest))
+            applyUpdate(manifest, lock)
             true
         } catch (e: Exception) {
             Log.e(TAG, "ota check failed: ${e.message}")
@@ -78,6 +79,12 @@ class OtaUpdater(
             false
         }
     }
+
+    /** 安装尝试锁：一个版本一个文件，mtime 即上次尝试时刻。脚本收尾时删掉它。 */
+    private fun attemptLock(code: Int): File = File(AppConfig.WORK_DIR, "ota-attempt-$code.lock")
+
+    private fun versionStamp(manifest: JSONObject): String =
+        "${manifest.optString("version")} at ${Clock.wallClockRfc3339()}"
 
     private fun fetchManifest(): JSONObject? {
         val url = "https://${BuildConfig.SERVER_DOMAIN}/ota/manifest" +
@@ -94,7 +101,7 @@ class OtaUpdater(
         }
     }
 
-    private fun applyUpdate(manifest: JSONObject) {
+    private fun applyUpdate(manifest: JSONObject, lock: File) {
         val version = manifest.getString("version")
         if (!Regex(OtaContract.VERSION_PATTERN).matches(version)) {
             // 版本号参与文件名构造，所以这里先按允许的形状校验一遍：设备这一侧自己成立，
@@ -118,20 +125,23 @@ class OtaUpdater(
         }
 
         onProgress(version, "installing", "")
-        installDetached(target, version)
+        installDetached(target, version, lock)
     }
 
     /**
-     * 脱手安装：停进程 → 安装 → 拉起服务，日志只落命令的原始输出。
+     * 脱手安装：杀进程 → 安装 → 拉起服务，日志只落命令的原始输出。
      *
      * 不能用常驻通道，也不能用一次性进程：`pm install -r` 会为了替换 APK 而杀掉本
      * 进程，而那条进程是本进程的子进程，会跟着一起死——脚本跑到一半就断，结果也
      * 永远读不回来。独立进程会成为孤儿被 init 收养，把脚本跑完。
      *
-     * **安装前必须先 `am force-stop`**（真机 2026-10-02 实测）：本 ROM 在应用进程
-     * 存活时替换 APK，`pm install` 返回 Success 但替换未生效——旧版本继续跑，
-     * `pm` 的退出码与日志都是"成功"，无从分辨。先把进程停下来再装，替换就不再有
-     * 这条歧义路径。
+     * **pm install 必须在进程确认死亡之后执行**：本 ROM 在应用进程存活时替换 APK，
+     * `pm install` 返回 Success 但替换未生效——旧版本继续跑（2026-10-02 首次实测；
+     * 2026-10-07 4F 再证，force-stop 之后进程也可能仍活着，当天 0.4.32 的安装全部
+     * 空转、设备陷入每 20 秒一轮的安装循环）。所以这里不用任何"停一下"的猜测：
+     * agent 把**自己的 PID** 写进脚本，`am force-stop` 之后紧跟 `kill -9 <自己>`——
+     * SIGKILL 即时生效，pm 运行那一刻进程必然已死。不依赖 ps/grep/awk（本 ROM 的
+     * toolbox 缺前两者之外的后者，且 ps 过滤会误匹配脚本自身的命令行）。
      *
      * ## 安装结论只有一个来源：`pm install` 的原始输出
      *
@@ -144,24 +154,27 @@ class OtaUpdater(
      * `version_code`，服务端标记安装（`ota_release_install`）——它发生在全链路
      * 终点，不存在时机问题；真未生效时发布保持待装，按调用侧退避重装收敛。
      *
-     * 末尾把 APK 删掉：它是下载产物，装完就没有用了。失败也没关系，重试本来就要重下。
+     * 末尾把 APK 与尝试锁删掉：前者是下载产物，后者的使命（跨重启退避）到 pm 收尾
+     * 为止。失败也没关系，重试本来就要重下。
      */
-    private fun installDetached(apk: File, version: String) {
+    private fun installDetached(apk: File, version: String, lock: File) {
         val log = File(AppConfig.WORK_DIR, INSTALL_LOG_NAME).absolutePath
         val pkg = BuildConfig.APPLICATION_ID
+        val myPid = android.os.Process.myPid()
         // 步骤事实同步进 device.log（脱手脚本自身无法回调，这里记"已发起"）；
         // 安装的原始输出在 ota-install.log——那是脚本唯一可写的通道，也是安装
         // 结论的唯一落点（pm 的 Success/Failure [...] 原文，不二次推断）
         deviceLog.lifecycle("ota.install-started", "version=$version")
         RootShell.execDetached(
             "echo OTA_START > $log; " +
-                // 先停进程再装：进程存活时的替换在本 ROM 上会被静默丢弃
                 "am force-stop $pkg >> $log 2>&1; " +
-                "sleep 1; " +
+                // 自己杀自己：SIGKILL 即时生效，pm 运行时进程必然已死。kill 之后本
+                // 进程已不存在，脚本是孤儿、由 init 收养继续跑完余下的命令
+                "kill -9 $myPid >> $log 2>&1; " +
                 // 这条输出就是安装结论，原文落盘
                 "pm install -r ${apk.absolutePath} >> $log 2>&1; " +
                 "am startservice -n $pkg/com.ryanliu.ntushower.service.AgentService >> $log 2>&1; " +
-                "echo OTA_END >> $log; rm -f ${apk.absolutePath}",
+                "echo OTA_END >> $log; rm -f ${apk.absolutePath}; rm -f ${lock.absolutePath}",
         )
     }
 
