@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends
 
 from app.core import actions
 from app.core.connections import manager
-from app.core.problems import DEVICE_NOT_FOUND, ApiProblemError
+from app.core.problems import DEVICE_NOT_FOUND, VALIDATION_FAILED, ApiProblemError
 from app.core.protocol import as_int
 from app.modules.access.capabilities import user_actions
 from app.modules.access.dependencies import optional_identity, require_admin
@@ -84,6 +84,22 @@ def list_devices(caller: IdentityRecord | None = Depends(optional_identity)) -> 
             }
         )
     return items
+
+
+@admin_router.get("/{device_id}/logs")
+def get_device_logs(device_id: str, kind: str = "device") -> schemas.DeviceLogView:
+    """该设备最近一次上送的日志（kind=device / crash）。
+
+    设备每次握手成功自动上送日志尾部；这份内容回答"设备离线期间发生了什么"，
+    现场不用再读文件。设备从未上送过（0.4.35 之前、或该类日志为空）时 404。
+    """
+    if kind not in ("device", "crash"):
+        raise ApiProblemError(VALIDATION_FAILED, f"日志种类 {kind}（应为 device 或 crash）")
+    _require_device(device_id)
+    latest = service.latest_device_log(device_id, kind)
+    if latest is None:
+        raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {device_id} 尚无 {kind} 日志上送")
+    return schemas.DeviceLogView.model_validate(latest)
 
 
 @admin_router.get("/runtime")

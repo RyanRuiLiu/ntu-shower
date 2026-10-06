@@ -47,6 +47,14 @@
               "type": "integer",
               "minimum": 0,
               "description": "设备**自开机以来**的秒数（含深睡）。服务端拿收到它的时刻减去它，得到开机时刻；设备自己的墙上时钟准不准都不影响这件事——设备没有 NTP。"
+            },
+            "last_offline_reason": {
+              "type": "string",
+              "description": "上一次链路断开的原因（设备侧分类：dns / tls / tcp / closed:<码> / error:<异常名>）。空串表示没有记录（首次连接）。服务端把它记进链路事件——「设备为什么掉线」自此有结构化答案，不再只靠现场读日志。"
+            },
+            "last_offline_at": {
+              "type": "string",
+              "description": "上一次断开的时刻（服务端轴 RFC 3339，锚自 ServerClock）。与 last_offline_reason 成对出现。"
             }
           }
         }

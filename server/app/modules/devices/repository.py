@@ -50,32 +50,55 @@ def init_tables() -> None:
         -- "没消息"既可能是"没人用"也可能是"设备离线"——两者在数据里长得一模一样、
         -- 事后无法区分。这张表把它分开，同时给出设备利用率的分母。
         --
-        -- 只记"连接建立/断开"这个事实：为什么断（网络、重启、被踢）不在其中，
-        -- 那要结合断线前的日志看。
+        -- reason 记断开的原因：设备侧分类随 hello 带回（dns/tls/tcp/closed:<码>），
+        -- 服务端自己的断开也记（pong-timeout）。空串 = 没有结构化原因（0.4.35 之前
+        -- 的历史行、或服务端未分类的断开）。
         CREATE TABLE IF NOT EXISTS device_link_event (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             device_id   TEXT NOT NULL,
             occurred_at TEXT NOT NULL,
-            event       TEXT NOT NULL
+            event       TEXT NOT NULL,
+            reason      TEXT NOT NULL DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS idx_device_link_event
             ON device_link_event(device_id, occurred_at);
+
+        -- 设备日志上送：设备每次握手成功后把 device.log / crash.log 的尾部送到这里。
+        -- 回答"设备离线期间发生了什么"——证据在回连那一刻自动到位，不依赖现场读文件。
+        -- 有界：每个（设备，种类）只留最近 LOG_KEEP 份，插入时裁剪。
+        CREATE TABLE IF NOT EXISTS device_log (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            device_id   TEXT NOT NULL,
+            kind        TEXT NOT NULL,
+            content     TEXT NOT NULL,
+            uploaded_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_device_log
+            ON device_log(device_id, kind, id);
         """
     )
-    # sort_order 是后加的列：CREATE TABLE IF NOT EXISTS 对已存在的表不生效，存量库
-    # （带不可重建的运营数据）在这里一次性补上。重跑无害。
+    # 存量库的补列：CREATE TABLE IF NOT EXISTS 对已存在的表不生效，一次性 ALTER 补上。
+    # 重跑无害。
     columns = [row[1] for row in get_conn().execute("PRAGMA table_info(device)")]
     if "sort_order" not in columns:
         get_conn().execute("ALTER TABLE device ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
-        get_conn().commit()
+    link_columns = [row[1] for row in get_conn().execute("PRAGMA table_info(device_link_event)")]
+    if "reason" not in link_columns:
+        get_conn().execute("ALTER TABLE device_link_event ADD COLUMN reason TEXT NOT NULL DEFAULT ''")
+    get_conn().commit()
 
 
-def insert_link_event(device_id: str, event: str, occurred_at: str) -> None:
+def insert_link_event(device_id: str, event: str, occurred_at: str, reason: str = "") -> None:
     """记一次链路事件。重复的 online/offline 不去重——那是如实记录，
-    统计侧自己去重（"同一秒连着断三次"本身是网络质量的信号）。"""
+    统计侧自己去重（"同一秒连着断三次"本身是网络质量的信号）。
+
+    [reason] 是这次事件的原因：online 行带的是"上一次为什么断"（设备随 hello 回报），
+    offline 行带的是服务端自己发起断开的原因（pong 超时等）；设备/网络侧的断开服务端
+    无从得知，给空串——那要靠设备侧日志（device_log）回答。
+    """
     write(
-        "INSERT INTO device_link_event (device_id, occurred_at, event) VALUES (?,?,?)",
-        (device_id, occurred_at, event),
+        "INSERT INTO device_link_event (device_id, occurred_at, event, reason) VALUES (?,?,?,?)",
+        (device_id, occurred_at, event, reason),
     )
 
 
@@ -94,6 +117,38 @@ def link_events(device_id: str, before: str) -> list[Row]:
             (device_id, before),
         )
         .fetchall()
+    )
+
+
+#: 设备日志上送的保留份数：每个（设备，种类）留最近 LOG_KEEP 份。一份至多 64KB，
+#: 5 份 × 2 类 × 设备数，几 MB 量级——排障历史够翻，又不会无限堆积。
+LOG_KEEP = 5
+
+
+def append_device_log(device_id: str, kind: str, content: str, uploaded_at: str) -> None:
+    """落一份日志上送，并把该（设备，种类）超量的旧份裁掉。"""
+    conn = get_conn()
+    try:
+        conn.execute(
+            "INSERT INTO device_log (device_id, kind, content, uploaded_at) VALUES (?,?,?,?)",
+            (device_id, kind, content, uploaded_at),
+        )
+        conn.execute(
+            "DELETE FROM device_log WHERE device_id = ? AND kind = ? AND id NOT IN"
+            " (SELECT id FROM device_log WHERE device_id = ? AND kind = ? ORDER BY id DESC LIMIT ?)",
+            (device_id, kind, device_id, kind, LOG_KEEP),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def latest_device_log(device_id: str, kind: str) -> Row | None:
+    """该（设备，种类）最新的一份日志上送；没有则 None。"""
+    return read_one(
+        "SELECT content, uploaded_at FROM device_log WHERE device_id = ? AND kind = ? ORDER BY id DESC LIMIT 1",
+        (device_id, kind),
     )
 
 

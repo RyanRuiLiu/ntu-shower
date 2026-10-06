@@ -42,6 +42,8 @@ async def device_gateway(ws: WebSocket) -> None:
     #: 每次收到设备 pong 由 `_handle_frame` 置位；`_server_ping_loop` 用它判断链路是否还活着。
     pong_seen = asyncio.Event()
     trusted = False
+    #: 服务端自己发起断开的原因（pong 超时）；设备/网络侧断开服务端无从得知，留空。
+    offline_reason: list[str] = []
     try:
         hello = protocol.parse(await ws.receive_text())
         if hello is None or hello.get("type") != "link.hello":
@@ -74,11 +76,14 @@ async def device_gateway(ws: WebSocket) -> None:
         # 必须早于 latest_for，否则本次 hello 仍会推送刚装过的版本，force 发布会形成
         # 「下发→下载→安装→重启→再下发」的无限重装循环。
         await run_in_threadpool(ota_repository.mark_installed_upto, device_id, version_code)
+        # 设备随 hello 带回的上一次断开原因（0.4.35+）：记进 online 事件的 reason——
+        # 「设备为什么掉线」自此有结构化答案，不再只靠现场读日志
+        last_offline_reason = text_of(hello_payload, "last_offline_reason")
         manager.register(device_id, ws)
         # 载入上次记下的钟偏差。从上线到首次 pong 之间有一小段窗口，不载入的话那段时间
         # 读到的是 0（等于不平移）——而"我们刚接手、那边还被占着"恰恰最常落在窗口里。
         await run_in_threadpool(devices_service.load_clock_skew, device_id)
-        await run_in_threadpool(devices_service.record_link_event, device_id, LINK_ONLINE)
+        await run_in_threadpool(devices_service.record_link_event, device_id, LINK_ONLINE, last_offline_reason)
         await run_in_threadpool(audit.record_gateway, device_id, "connect", ip)
         log_event(
             "INFO",
@@ -111,7 +116,7 @@ async def device_gateway(ws: WebSocket) -> None:
         await ws.send_text(protocol.envelope("link.ping", {"sender_time": now_rfc3339()}))
 
         devices_service.publish_device_update(device_id)
-        ping_task = asyncio.create_task(_server_ping_loop(ws, device_id, pong_seen))
+        ping_task = asyncio.create_task(_server_ping_loop(ws, device_id, pong_seen, offline_reason))
 
         while True:
             msg = protocol.parse(await ws.receive_text())
@@ -141,7 +146,8 @@ async def device_gateway(ws: WebSocket) -> None:
             # 被顶替的那条随后走这里收尾——那一刻设备仍在线，不该记 offline。实测这台
             # 设备一天重连两百次上下，假 offline 会占掉绝大多数。
             if manager.unregister(device_id, ws):
-                await run_in_threadpool(devices_service.record_link_event, device_id, LINK_OFFLINE)
+                reason = offline_reason[0] if offline_reason else ""
+                await run_in_threadpool(devices_service.record_link_event, device_id, LINK_OFFLINE, reason)
             await run_in_threadpool(devices_service.set_device_offline, device_id)
             await run_in_threadpool(audit.record_gateway, device_id, "disconnect", ip)
             log_event("INFO", "gateway.device-disconnected", "设备断开", device_id=device_id)
@@ -242,11 +248,23 @@ async def _handle_frame(
             await ws.send_text(
                 protocol.error(reason_codes.UNKNOWN_COMMAND_ID.code, "没有与该结果对应的待办命令", reply_to=frame_id)
             )
+    elif mtype == "device.log_upload":
+        if not trusted:
+            return
+        kind = text_of(payload, "kind")
+        content = payload.get("content")
+        if kind not in ("device", "crash") or not isinstance(content, str):
+            await ws.send_text(protocol.error(reason_codes.BAD_JSON.code, "日志上送形状不对", reply_to=frame_id))
+            return
+        # 落库即回执（无需回帧）：失败回执反而让设备重发同一份大内容；真失败时下一轮
+        # 握手会重新上送，日志是幂等的现态读数，不是队列
+        await run_in_threadpool(devices_service.record_log_upload, device_id, kind, content)
+        log_event("INFO", "gateway.log-uploaded", "设备日志已上送", device_id=device_id, kind=kind)
     else:
         await ws.send_text(protocol.error(reason_codes.UNKNOWN_TYPE.code, f"不认识的消息类型：{mtype}"))
 
 
-async def _server_ping_loop(ws: WebSocket, device_id: str, pong_seen: asyncio.Event) -> None:
+async def _server_ping_loop(ws: WebSocket, device_id: str, pong_seen: asyncio.Event, offline_reason: list[str]) -> None:
     """按设备有效配置的间隔向设备发服务器 ping：判活，并给设备刷新时间锚点。
 
     两个职责共用同一条报文：ping 里带着服务端此刻的时刻，设备收到就更新自己的时间
@@ -286,6 +304,7 @@ async def _server_ping_loop(ws: WebSocket, device_id: str, pong_seen: asyncio.Ev
                 device_id=device_id,
                 interval_s=int(interval),
             )
+            offline_reason.append("pong-timeout")
             with contextlib.suppress(RuntimeError):
                 await ws.close(code=CLOSE_GOING_AWAY)
             return

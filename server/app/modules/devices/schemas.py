@@ -85,6 +85,13 @@ class DeviceOrderRequest(BaseModel):
     order: list[str] = Field(min_length=1)
 
 
+class DeviceLogView(BaseModel):
+    """设备最近一次上送的日志：尾部原文与上送时刻。"""
+
+    content: str
+    uploaded_at: str
+
+
 class DeviceOrderResponse(BaseModel):
     """重排后的完整设备顺序（device_id 列表，含未出现在请求里的设备）。"""
 

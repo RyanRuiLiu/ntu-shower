@@ -37,6 +37,9 @@ object MessageTypes {
     const val OTA_UPGRADE_AVAILABLE = "ota.upgrade_available"
     const val OTA_PROGRESS = "ota.progress"
 
+    // ── 设备自报（device.*） ──
+    const val DEVICE_LOG_UPLOAD = "device.log_upload"
+
     /** 全部消息类型。 */
     val ALL: Set<String> = setOf(
         LINK_HELLO,
@@ -54,5 +57,6 @@ object MessageTypes {
         BRIDGE_CLOSE,
         OTA_UPGRADE_AVAILABLE,
         OTA_PROGRESS,
+        DEVICE_LOG_UPLOAD,
     )
 }

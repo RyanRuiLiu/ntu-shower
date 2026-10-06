@@ -142,6 +142,20 @@ function recallHistory(step) {
   $('inCommand').value = historyIndex < 0 ? '' : execHistory[execHistory.length - 1 - historyIndex]
 }
 
+/** 拉取设备最近一次上送的日志（种类取选择框）。404 = 该类日志还没有上送过。 */
+async function loadDeviceLog() {
+  const kind = $('inLogKind').value
+  report('logResult', '正在读取…', 'info')
+  try {
+    const result = await api.deviceLogs(store.deviceId, kind)
+    $('deviceLogView').textContent = result.content || '(空)'
+    report('logResult', `上送于 ${result.uploaded_at}`, 'info')
+  } catch (error) {
+    $('deviceLogView').textContent = ''
+    report('logResult', problemText(error), 'err')
+  }
+}
+
 async function runExec() {
   const command = $('inCommand').value.trim()
   if (!command) {
@@ -340,6 +354,24 @@ export const devicesView = {
         <div class="panel-body flush" id="deviceTable"></div>
       </section>
 
+      <section class="panel">
+        <div class="panel-head">
+          <span class="panel-title">设备日志</span>
+          <span class="panel-note">设备每次上线自动上送尾部；离线期间的故障现场在这里看</span>
+          <div class="panel-tools">
+            <select id="inLogKind" class="input-sm">
+              <option value="device">device.log</option>
+              <option value="crash">crash.log</option>
+            </select>
+            <button type="button" class="btn btn-ghost btn-sm" id="btnLoadLog">加载</button>
+          </div>
+        </div>
+        <div class="panel-body flush">
+          <pre class="code" id="deviceLogView" style="max-height:420px;overflow:auto"></pre>
+          <div class="result" id="logResult" style="padding:0 4px"></div>
+        </div>
+      </section>
+
       <div class="grid grid-2">
         <section class="panel">
           <div class="panel-head">
@@ -440,6 +472,8 @@ export const devicesView = {
           .catch((error) => toast(problemText(error)))
       }),
     )
+    dispose.add(listen($('btnLoadLog'), 'click', loadDeviceLog))
+    dispose.add(listen($('inLogKind'), 'change', loadDeviceLog))
     dispose.add(listen($('btnExec'), 'click', runExec))
     dispose.add(listen($('btnClockSet'), 'click', () => promptClockSet(store.deviceId, sayMaint)))
     dispose.add(listen($('btnFreelist'), 'click', openFreelist))
