@@ -1,0 +1,106 @@
+package com.ryanliu.ntushower.features.selfmanage
+
+import android.util.Log
+import com.ryanliu.ntushower.core.config.AppConfig
+import com.ryanliu.ntushower.core.config.RuntimeConfig
+import com.ryanliu.ntushower.core.log.DeviceLog
+import com.ryanliu.ntushower.core.shell.RootShell
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+/**
+ * 浴室 App 数据库归档：bath.db 随会话只增不减（7 个常驻 fd 的 SQLite 长连接 +
+ * 回滚日志），涨到几十 MB 后 App 明显卡顿。归档即把它移开——浴室 App 下次打开
+ * 原路径时自动建一个全新的空库，节奏回到零。
+ *
+ * ## 时机：本进程每次启动时评估一次
+ *
+ * 每晚 23:58 断电、次日 10:55 上电，App 与本程序都随之重启——开机是唯一确定
+ * "没有会话在进行"的窗口（刚上电，学生还没来得及分配）。阈值判断按当前库大小，
+ * 攒够了才动手，平时一次 `stat` 的开销。
+ *
+ * ## 改名对运行中的 App 无害（2026-10-07 4F 实测）
+ *
+ * App 对 bath.db 持有 7 个常驻 fd：改名后 fd 跟随 inode，App 照常写，它自己毫无
+ * 感知；新库要等 App 下次打开原路径才出现（夜里断电重启必然发生）。journal 没有
+ * 常驻 fd，先移 journal 再移 db——任何中间态都不会出现"旧日志配新库"的损坏。
+ *
+ * ## 归档保留最近 [ARCHIVE_KEEP] 份
+ *
+ * 归档是把膨胀换个地方，不设上限就是下一个膨胀点。超过保留数删最旧的。
+ */
+object BathDbArchiver {
+
+    private const val TAG = "BathDbArchiver"
+
+    /** 归档名后缀前缀：`bath.db.arc-20261007-0037`。 */
+    private const val ARCHIVE_SUFFIX = ".arc-"
+
+    private const val ARCHIVE_SUFFIX_FORMAT = "yyyyMMdd-HHmm"
+
+    /** 归档保留份数：超出删最旧的。8MB 一份，3 份封顶。 */
+    const val ARCHIVE_KEEP = 3
+
+    private val deviceLog = DeviceLog(File(AppConfig.WORK_DIR))
+
+    /** 本进程启动时调一次：攒够就归档，没攒够只是一次文件大小查询。 */
+    fun runIfNeeded() {
+        if (!RuntimeConfig.bathDbArchiveEnabled) return
+        val db = File(AppConfig.BATH_DB_PATH)
+        val size = if (db.exists()) db.length() else 0L
+        if (!shouldArchive(size, RuntimeConfig.bathDbArchiveThresholdMb)) return
+        archive(size)
+    }
+
+    /** 阈值判定（纯逻辑，单测锁定语义）：大小到线即归档（恰好到线算数）。 */
+    internal fun shouldArchive(sizeBytes: Long, thresholdMb: Long): Boolean = sizeBytes >= thresholdMb * 1024 * 1024
+
+    /**
+     * 执行归档：journal 先移、db 后移，文件名带时刻；随后裁掉超量的旧归档。
+     *
+     * 经 control 通道（短命令、低频）；/sdcard 上的文件不需要 root，但通道的
+     * 常驻进程已经是现成的执行路径。
+     */
+    private fun archive(sizeBytes: Long) {
+        val dir = File(AppConfig.BATH_DB_DIR)
+        val suffix = ARCHIVE_SUFFIX + archiveStamp()
+        val script = buildString {
+            append("cd ").append(AppConfig.BATH_DB_DIR)
+            // journal 先移：journal 在而 db 不在的中间态不存在；db 在而 journal 不在
+            // 只会丢回滚能力（归档库可接受），绝不会让旧日志配新库
+            for (name in listOf(AppConfig.BATH_DB_FILE + "-journal", AppConfig.BATH_DB_FILE)) {
+                append(" && [ -f ").append(name).append(" ] && mv ")
+                    .append(name).append(' ').append(name).append(suffix)
+            }
+            append("; ls ")
+            append(AppConfig.BATH_DB_FILE).append(ARCHIVE_SUFFIX).append('*')
+            append(" 2>/dev/null")
+        }
+        val result = RootShell.control.exec(script)
+        if (result.exitCode != 0 || !result.output.contains(AppConfig.BATH_DB_FILE)) {
+            deviceLog.error("bath-db.archive-failed", "exit=${result.exitCode}")
+            Log.e(TAG, "archive failed: exit=${result.exitCode}")
+            return
+        }
+        deviceLog.lifecycle("bath-db.archived", "size=$sizeBytes suffix=$suffix")
+        Log.i(TAG, "archived ${sizeBytes / 1024}KB as *$suffix")
+        prune(dir, suffix)
+    }
+
+    /** 删掉保留数之外的旧归档（本次刚生成的最新，从列表末尾数）。 */
+    private fun prune(dir: File, newestSuffix: String) {
+        val archives = dir.listFiles { file -> file.name.contains(ARCHIVE_SUFFIX) } ?: return
+        val ordered = archives.sortedBy { it.name } // 后缀含时刻，字典序即时间序
+        for (file in ordered.dropLast(ARCHIVE_KEEP)) {
+            if (file.name.endsWith(newestSuffix)) continue
+            val removed = RootShell.control.exec("rm -f ${file.absolutePath}")
+            if (removed.exitCode == 0) Log.i(TAG, "pruned old archive ${file.name}")
+        }
+    }
+
+    /** 归档名的时间戳：分钟粒度足够——归档最勤也是一天一次。 */
+    internal fun archiveStamp(now: Date = Date()): String =
+        SimpleDateFormat(ARCHIVE_SUFFIX_FORMAT, Locale.US).format(now)
+}
