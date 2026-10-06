@@ -21,7 +21,7 @@ from fastapi.testclient import TestClient
 from tests import helpers
 
 from app.core import device_clock, outcomes, problems
-from app.core.clock import now_rfc3339, parse_rfc3339, shift_rfc3339
+from app.core.clock import now_rfc3339, parse_rfc3339, rfc3339_ago, shift_rfc3339
 from app.core.db import get_conn
 from app.core.problems import ApiProblemError, Problem
 from app.core.protocol import JsonObject
@@ -56,15 +56,21 @@ CONFIG: dict[str, object] = {
     "auto_settle_pause_threshold_s": 60,
 }
 
+# 候选的时刻用「相对导入时刻」构造，**不写死绝对值**：预约续期的链上限（夹具 CONFIG
+# 里的 24 小时）按真实时钟比较，写死的时刻跨过一天就会让上限判据把触发判没
+# （2026-10-06 深夜实测：午夜后整批用例随钟点挂）。十分钟前 = 早已过点、必然排上，
+# 又远在链上限之内。
+_WAITING_AT = rfc3339_ago(600)
+
 WAITING = Candidate(
     session_id=7,
     device_id="dev-1",
     door_no=3,
     cert_no="2530110052",
     state=DoorState.WAITING,
-    assigned_at="2026-10-05T11:00:00.000Z",  # 早已过点：必然排上
+    assigned_at=_WAITING_AT,
     paused_at="",
-    run_started_at="2026-10-05T11:00:00.000Z",
+    run_started_at=_WAITING_AT,
 )
 
 
