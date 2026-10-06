@@ -6,13 +6,10 @@ import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.log.DeviceLog
 import com.ryanliu.ntushower.core.shell.RootShell
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
- * 浴室 App 数据库归档：bath.db 随会话只增不减（7 个常驻 fd 的 SQLite 长连接 +
- * 回滚日志），涨到几十 MB 后 App 明显卡顿。归档即把它移开——浴室 App 下次打开
+ * 浴室 App 数据库归档的执行者：bath.db 随会话只增不减（7 个常驻 fd 的 SQLite 长连接
+ * + 回滚日志），涨到几十 MB 后 App 明显卡顿。归档即把它移开——浴室 App 下次打开
  * 原路径时自动建一个全新的空库，节奏回到零。
  *
  * ## 时机：本进程每次启动时评估一次
@@ -27,21 +24,15 @@ import java.util.Locale
  * 感知；新库要等 App 下次打开原路径才出现（夜里断电重启必然发生）。journal 没有
  * 常驻 fd，先移 journal 再移 db——任何中间态都不会出现"旧日志配新库"的损坏。
  *
- * ## 归档保留最近 [ARCHIVE_KEEP] 份
+ * ## 归档保留最近 [BathDbArchivePolicy.ARCHIVE_KEEP] 份
  *
  * 归档是把膨胀换个地方，不设上限就是下一个膨胀点。超过保留数删最旧的。
+ * 判定逻辑（阈值/命名/清理选择）在 [BathDbArchivePolicy] 并进覆盖率；本类只做
+ * shell 与文件系统编排，与 RootShell 同例不进门禁。
  */
 object BathDbArchiver {
 
     private const val TAG = "BathDbArchiver"
-
-    /** 归档名后缀前缀：`bath.db.arc-20261007-0037`。 */
-    private const val ARCHIVE_SUFFIX = ".arc-"
-
-    private const val ARCHIVE_SUFFIX_FORMAT = "yyyyMMdd-HHmm"
-
-    /** 归档保留份数：超出删最旧的。8MB 一份，3 份封顶。 */
-    const val ARCHIVE_KEEP = 3
 
     private val deviceLog = DeviceLog(File(AppConfig.WORK_DIR))
 
@@ -50,22 +41,14 @@ object BathDbArchiver {
         if (!RuntimeConfig.bathDbArchiveEnabled) return
         val db = File(AppConfig.BATH_DB_PATH)
         val size = if (db.exists()) db.length() else 0L
-        if (!shouldArchive(size, RuntimeConfig.bathDbArchiveThresholdMb)) return
+        if (!BathDbArchivePolicy.shouldArchive(size, RuntimeConfig.bathDbArchiveThresholdMb)) return
         archive(size)
     }
 
-    /** 阈值判定（纯逻辑，单测锁定语义）：大小到线即归档（恰好到线算数）。 */
-    internal fun shouldArchive(sizeBytes: Long, thresholdMb: Long): Boolean = sizeBytes >= thresholdMb * 1024 * 1024
-
-    /**
-     * 执行归档：journal 先移、db 后移，文件名带时刻；随后裁掉超量的旧归档。
-     *
-     * 经 control 通道（短命令、低频）；/sdcard 上的文件不需要 root，但通道的
-     * 常驻进程已经是现成的执行路径。
-     */
+    /** 执行归档：journal 先移、db 后移（中间态安全，见类注释），随后裁掉超量的旧档。 */
     private fun archive(sizeBytes: Long) {
         val dir = File(AppConfig.BATH_DB_DIR)
-        val suffix = ARCHIVE_SUFFIX + archiveStamp()
+        val suffix = BathDbArchivePolicy.ARCHIVE_SUFFIX + BathDbArchivePolicy.archiveStamp()
         val script = buildString {
             append("cd ").append(AppConfig.BATH_DB_DIR)
             // journal 先移：journal 在而 db 不在的中间态不存在；db 在而 journal 不在
@@ -75,7 +58,7 @@ object BathDbArchiver {
                     .append(name).append(' ').append(name).append(suffix)
             }
             append("; ls ")
-            append(AppConfig.BATH_DB_FILE).append(ARCHIVE_SUFFIX).append('*')
+            append(AppConfig.BATH_DB_FILE).append(BathDbArchivePolicy.ARCHIVE_SUFFIX).append('*')
             append(" 2>/dev/null")
         }
         val result = RootShell.control.exec(script)
@@ -91,16 +74,11 @@ object BathDbArchiver {
 
     /** 删掉保留数之外的旧归档（本次刚生成的最新，从列表末尾数）。 */
     private fun prune(dir: File, newestSuffix: String) {
-        val archives = dir.listFiles { file -> file.name.contains(ARCHIVE_SUFFIX) } ?: return
-        val ordered = archives.sortedBy { it.name } // 后缀含时刻，字典序即时间序
-        for (file in ordered.dropLast(ARCHIVE_KEEP)) {
-            if (file.name.endsWith(newestSuffix)) continue
-            val removed = RootShell.control.exec("rm -f ${file.absolutePath}")
-            if (removed.exitCode == 0) Log.i(TAG, "pruned old archive ${file.name}")
+        val names = dir.listFiles { file -> file.name.contains(BathDbArchivePolicy.ARCHIVE_SUFFIX) }
+            ?.map { it.name } ?: return
+        for (name in BathDbArchivePolicy.archivesToPrune(names, BathDbArchivePolicy.ARCHIVE_KEEP, newestSuffix)) {
+            val removed = RootShell.control.exec("rm -f ${dir.absolutePath}/$name")
+            if (removed.exitCode == 0) Log.i(TAG, "pruned old archive $name")
         }
     }
-
-    /** 归档名的时间戳：分钟粒度足够——归档最勤也是一天一次。 */
-    internal fun archiveStamp(now: Date = Date()): String =
-        SimpleDateFormat(ARCHIVE_SUFFIX_FORMAT, Locale.US).format(now)
 }

@@ -97,6 +97,16 @@ class RuntimeConfigTest {
     }
 
     @Test
+    fun apply_readsBathDbArchiveKeys() {
+        RuntimeConfig.apply(
+            JSONObject().put("bath_db_archive_enabled", true).put("bath_db_archive_threshold_mb", 50),
+        )
+
+        assertEquals(true, RuntimeConfig.bathDbArchiveEnabled)
+        assertEquals(50L, RuntimeConfig.bathDbArchiveThresholdMb)
+    }
+
+    @Test
     fun apply_clampsZeroDurationToAvoidRunawayTimers() {
         // 0 秒心跳会让 postDelayed 立即重发，形成心跳风暴；
         // 服务端已按 spec 拦下越界值，这一层防的是配置经其它路径进来
