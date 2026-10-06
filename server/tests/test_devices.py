@@ -108,6 +108,7 @@ def test_runtime_returns_full_record(client: TestClient, admin_headers: dict[str
         "last_seen_at",
         "last_ip",
         "clock_skew_s",
+        "sort_order",
         "booted_at",
     }
     assert record["trusted"] is True
@@ -442,18 +443,77 @@ def test_input_requires_channel(
     assert ready["params"] == {"text": "hello", "channel": "keys"}
 
 
-def test_devices_are_sorted_naturally_by_name(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:
-    """设备清单按名字自然排序：数字段按数值比（1F < 2F < 10F），且与心跳无关。
+def test_devices_fall_back_to_natural_name_order_when_sort_orders_tie(
+    client: TestClient, admin_headers: dict[str, str], fresh_db: str
+) -> None:
+    """同序设备回落到名字的自然排序：数字段按数值比（1F < 2F < 10F）。
 
-    按库里的 last_seen 排会让设备在下拉里随心跳跳动；按字面排会让 10F 排到 2F 前面。
+    存量库升级后所有行的 sort_order 都是 0——那一刻的顺序就是名字自然序，与心跳无关
+    （按 last_seen 排会让设备在下拉里随心跳跳动，按字面排会让 10F 排到 2F 前面）。
     """
+    from app.core.db import write
+
     for name in ("10F浴室", "2F浴室", "1F浴室"):
         device_id = f"dev-{name}"
         helpers.register_trusted_device(device_id)
         from app.modules.devices import repository as devices_repository
 
         devices_repository.set_name(device_id, name)
+        write("UPDATE device SET sort_order = 0 WHERE device_id = ?", (device_id,))
 
     body = client.get("/api/v1/devices", headers=admin_headers).json()
 
     assert [item["name"] for item in body] == ["1F浴室", "2F浴室", "10F浴室"]
+
+
+def test_newly_registered_device_appends_after_the_manual_order(
+    client: TestClient, admin_headers: dict[str, str], fresh_db: str
+) -> None:
+    """新设备排到末尾：手动调好的顺序不被后来的登记顶掉。"""
+    helpers.register_trusted_device("dev-a")
+    helpers.register_trusted_device("dev-b")
+    client.put("/api/v1/devices/order", json={"order": ["dev-b", "dev-a"]}, headers=admin_headers)
+
+    helpers.register_trusted_device("dev-c")
+
+    body = client.get("/api/v1/devices", headers=admin_headers).json()
+    assert [item["device_id"] for item in body] == ["dev-b", "dev-a", "dev-c"]
+
+
+def test_device_order_is_manual_and_covers_every_listing(
+    client: TestClient, admin_headers: dict[str, str], fresh_db: str
+) -> None:
+    """展示顺序由管理员手动调整：设备下拉、设备表、统计接口全部照此排列。
+
+    同 sort_order 回落到名字的自然排序（新设备都在 0 时就是字母序），调整后以
+    管理员的顺序为准。
+    """
+    for name in ("1F浴室", "2F浴室", "3F浴室"):
+        device_id = f"dev-{name}"
+        helpers.register_trusted_device(device_id)
+        from app.modules.devices import repository as devices_repository
+
+        devices_repository.set_name(device_id, name)
+
+    # 未调整时回落自然序
+    body = client.get("/api/v1/devices", headers=admin_headers).json()
+    assert [item["name"] for item in body] == ["1F浴室", "2F浴室", "3F浴室"]
+
+    # 管理员把 3F 排到最前
+    ids = [item["device_id"] for item in body]
+    resp = client.put("/api/v1/devices/order", json={"order": list(reversed(ids))}, headers=admin_headers)
+    assert resp.status_code == 200, resp.json()
+    assert resp.json()["order"] == list(reversed(ids)), "PUT 的响应应已是新顺序"
+    body = client.get("/api/v1/devices", headers=admin_headers).json()
+    assert [item["name"] for item in body] == ["3F浴室", "2F浴室", "1F浴室"]
+
+
+def test_device_order_rejects_unknown_devices(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:
+    """顺序清单里出现未知设备整体拒绝：半排序比不排序更难看。"""
+    helpers.register_trusted_device("dev-order-a")
+
+    resp = client.put("/api/v1/devices/order", json={"order": ["dev-order-a", "dev-not-exist"]}, headers=admin_headers)
+
+    assert resp.status_code == 404
+    body = client.get("/api/v1/devices", headers=admin_headers).json()
+    assert [item["device_id"] for item in body] == ["dev-order-a"]
