@@ -19,8 +19,8 @@ export const store = {
   devices: [],
   /** 设备运维档案（admin）；未持有管理身份时为空数组。 */
   runtime: [],
-  /** 当前选中设备的 id；空串表示尚未选中。 */
-  deviceId: '',
+  /** 当前选中设备的 id；空串表示尚未选中。上次的选择存在 localStorage。 */
+  deviceId: localStorage.getItem(DEVICE_KEY) || '',
   /** 当前设备的喷头现态。 */
   doors: [],
   /** 当前设备的网关是否在线。 */
@@ -30,6 +30,14 @@ export const store = {
 }
 
 const listeners = new Map()
+
+/** 上次选择的设备存 localStorage：页面刷新与下次打开都回到同一台。 */
+const DEVICE_KEY = 'ntu-shower.device'
+
+function rememberDevice(deviceId) {
+  if (deviceId) localStorage.setItem(DEVICE_KEY, deviceId)
+  else localStorage.removeItem(DEVICE_KEY)
+}
 
 /** 订阅一个应用事件；返回解绑函数。 */
 export function subscribe(event, fn) {
@@ -69,6 +77,7 @@ export async function refreshDevices() {
   store.devices = devices
   const known = devices.some((item) => item.device_id === previous)
   store.deviceId = known ? previous : devices[0]?.device_id || ''
+  if (store.deviceId !== previous) rememberDevice(store.deviceId)
   emit('devices', devices)
   if (store.deviceId !== previous) emit('device', store.deviceId)
   return devices
@@ -96,6 +105,7 @@ export async function refreshRuntime() {
 export function selectDevice(deviceId) {
   if (store.deviceId === deviceId) return
   store.deviceId = deviceId
+  rememberDevice(deviceId)
   emit('device', deviceId)
 }
 
