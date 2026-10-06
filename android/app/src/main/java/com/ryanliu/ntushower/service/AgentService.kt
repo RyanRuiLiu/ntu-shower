@@ -91,6 +91,10 @@ class AgentService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // 新装设备上这个目录不存在，而 device.log / OTA 下载 / 崩溃现场都落在这里——
+        // 没有它，全部落盘静默失败，设备成了排障瞎子（2026-10-06 首批新设备实测）。
+        File(AppConfig.WORK_DIR).mkdirs()
+
         // 每次拉起都核对无障碍链路：看门狗周期（watchdog_interval_s，默认 60 秒）就是
         // 巡检周期。总开关被系统置 0 时本服务会失去无障碍这个自举锚点，看门狗的拉起
         // 是它仅剩的恢复机会——只在首次初始化时核对，这种情况下一次都不会执行。
