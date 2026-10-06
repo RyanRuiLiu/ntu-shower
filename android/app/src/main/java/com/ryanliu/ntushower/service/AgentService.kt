@@ -24,6 +24,7 @@ import com.ryanliu.ntushower.features.doors.DoorMonitor
 import com.ryanliu.ntushower.features.doors.DoorSnapshotSender
 import com.ryanliu.ntushower.features.remote.AdbBridge
 import com.ryanliu.ntushower.features.selfmanage.A11yGuard
+import com.ryanliu.ntushower.features.selfmanage.BathDbArchiver
 import com.ryanliu.ntushower.features.selfmanage.OtaUpdater
 import com.ryanliu.ntushower.receiver.WatchdogReceiver
 import com.ryanliu.ntushower.transport.Envelope
@@ -104,6 +105,10 @@ class AgentService : Service() {
         worker.execute { RootShell.cleanupAbandonedPidFiles() }
 
         if (!::client.isInitialized) {
+            // 浴室 App 数据库攒到阈值就归档（见 BathDbArchiver）：开机是唯一确定没有
+            // 会话进行的窗口，每晚断电重启给了它一天一次的机会
+            worker.execute { BathDbArchiver.runIfNeeded() }
+
             // 先用上次落盘的那份配置：设备重启后要过 DNS、TLS 与首帧往返才拿得到新配置，
             // 中间那几秒（网络不通时则是一直）该用上次的值，而不是编译进 APK 的默认值。
             // 没有缓存（首次安装、或读不出来）时保持默认值，随后被 hello_ack 覆盖。
