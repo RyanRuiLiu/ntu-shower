@@ -91,21 +91,17 @@ class AgentService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // 新装设备上这个目录不存在，而 device.log / OTA 下载 / 崩溃现场都落在这里——
-        // 没有它，全部落盘静默失败，设备成了排障瞎子（2026-10-06 首批新设备实测）。
-        File(AppConfig.WORK_DIR).mkdirs()
+        // 每次拉起都核对无障碍链路：看门狗周期（watchdog_interval_s，默认 60 秒）就是
+        // 巡检周期。总开关被系统置 0 时本服务会失去无障碍这个自举锚点，看门狗的拉起
+        // 是它仅剩的恢复机会——只在首次初始化时核对，这种情况下一次都不会执行。
+        worker.execute { A11yGuard.ensureAvailable() }
 
         // 清掉上一世残留的命令 pid 文件。正常路径由 shell 包裹脚本自己删（见
         // ShellChannel.wrap），只有命令被异常打断（进程被杀、断电）才会留下——
         // 那种时刻没有任何人能替它收尾。启动时清扫是安全的：此刻没有任何命令在跑，
         // /data/local/tmp 里属于本程序的 pid 文件全部是死的。文件归 root 所有，
         // 走 root 通道删；不影响任何别的程序的同名空间。
-        worker.execute { RootShell.control.exec("rm -f /data/local/tmp/ntushower-*.pid") }
-
-        // 每次拉起都核对无障碍链路：看门狗周期（watchdog_interval_s，默认 60 秒）就是
-        // 巡检周期。总开关被系统置 0 时本服务会失去无障碍这个自举锚点，看门狗的拉起
-        // 是它仅剩的恢复机会——只在首次初始化时核对，这种情况下一次都不会执行。
-        worker.execute { A11yGuard.ensureAvailable() }
+        worker.execute { RootShell.cleanupAbandonedPidFiles() }
 
         if (!::client.isInitialized) {
             // 先用上次落盘的那份配置：设备重启后要过 DNS、TLS 与首帧往返才拿得到新配置，
