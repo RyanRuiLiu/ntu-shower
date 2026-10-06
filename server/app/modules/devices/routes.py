@@ -22,6 +22,7 @@ admin 端点统一挂 require_admin；下发命令的端点额外要求设备已
 from fastapi import APIRouter, Depends
 
 from app.core import actions
+from app.core.connections import manager
 from app.core.problems import DEVICE_NOT_FOUND, ApiProblemError
 from app.core.protocol import as_int
 from app.modules.access.capabilities import user_actions
@@ -94,16 +95,22 @@ def list_runtime() -> list[DeviceRecord]:
 
 
 @admin_router.patch("/{device_id}")
-def patch_device(device_id: str, req: DevicePatchRequest) -> DeviceRecord:
+async def patch_device(device_id: str, req: DevicePatchRequest) -> DeviceRecord:
     """改设备档案：改名、改信任位，只改传了的字段。
 
     改完推一条 `device.update`（精简载荷）：其它打开的页面要靠它更新设备名与
     在线标记，不推就要等轮询。
+
+    **改信任位必须掐断现有连接**：信任只在 hello 握手时判定一次，在线设备的旧连接
+    不会自动带上新信任——它的业务帧与命令结果会被静默丢弃，表现是「设备在线、功能
+    全坏」。掐掉之后设备按重连退避几秒内回来，带着新信任重新握手，startup 全貌帧
+    随之补上。
     """
     if req.name is not None:
         service.rename_device(device_id, req.name)
     if req.trusted is not None:
         service.set_trusted(device_id, req.trusted)
+        await manager.disconnect(device_id)
     record = _require_device(device_id)
     service.publish_device_update(device_id)
     return record

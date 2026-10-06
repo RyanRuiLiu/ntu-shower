@@ -9,6 +9,7 @@ from typing import Any, cast
 import pytest
 from fastapi.testclient import TestClient
 from starlette.testclient import WebSocketTestSession
+from starlette.websockets import WebSocketDisconnect
 from tests import helpers
 
 from app.core import db, events
@@ -486,3 +487,29 @@ def test_snapshot_that_cannot_be_stored_gets_no_ack(
                 continue
             assert msg["type"] == "link.pong", f"先到的帧是 {msg['type']}，ack 未被扣下"
             break
+
+
+def test_marking_trusted_kicks_the_live_connection(
+    client: TestClient, admin_headers: dict[str, str], fresh_db: str
+) -> None:
+    """改信任位必须掐断现有连接，否则设备带着旧信任聋到底。
+
+    信任只在 hello 握手时判定一次：先连接、后标记信任的设备，业务帧与命令结果会被
+    当作未信任静默丢弃——首台新设备入网实测「设备在线、功能全坏」。掐断后设备按
+    重连退避几秒内带着新信任回来。
+    """
+    device_id = "dev-kick-on-trust"
+    with client.websocket_connect("/gateway/device") as ws:
+        ws.send_text(helpers.hello_frame(device_id))
+        ack = helpers.recv_until(ws, "link.hello_ack")
+        assert ack["payload"]["trusted"] is False
+
+        resp = client.patch(f"/api/v1/devices/{device_id}", json={"trusted": True}, headers=admin_headers)
+        assert resp.status_code == 200
+
+        def _read_until_closed() -> None:
+            while True:
+                ws.receive_text()
+
+        with pytest.raises(WebSocketDisconnect):
+            _read_until_closed()
