@@ -32,6 +32,13 @@ import java.io.File
 class DeviceLog(dir: File, private val maxBytes: Long = CappedLogFile.DEFAULT_MAX_BYTES) {
     private val file = File(dir, FILE_NAME)
 
+    init {
+        // 自己的落点自己建：新装设备上这个目录不存在（2026-10-06 首批新设备实测，
+        // device.log 整个缺失）。写失败虽被吞掉，但"没日志"这件事不该等某次启动
+        // 流程顺路补——谁写谁建，与其他落盘者（OTA 下载、崩溃处理器）同一规矩。
+        dir.mkdirs()
+    }
+
     /** 命令被受理（重复接收记 [duplicate]，见 AgentService 的幂等接收）。 */
     fun received(commandId: String, action: String, duplicate: Boolean = false) {
         write(
