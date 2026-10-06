@@ -121,6 +121,13 @@ def rename_device(device_id: str, name: str) -> bool:
 
 
 def set_trusted(device_id: str, trusted: bool) -> bool:
+    """改信任位（只落库）。
+
+    **信任只在那条连接的 hello 握手时判定一次**：库里这个位变了，已经建立的连接不会
+    跟着变——新标记的设备若恰好在线，它的业务帧与命令结果会被当作未信任设备静默丢弃，
+    表现是「设备在线、功能全坏」（2026-10-06 首台新设备入网实测）。所以调用方（信任
+    路由）改完必须**掐断现有连接**让设备重新握手，见 `routes.patch_device`。
+    """
     return repository.set_trusted(device_id, trusted)
 
 
