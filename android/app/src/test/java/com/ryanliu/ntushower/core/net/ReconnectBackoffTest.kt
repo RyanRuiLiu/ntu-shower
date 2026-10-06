@@ -36,6 +36,14 @@ class ReconnectBackoffTest {
     }
 
     @Test
+    fun `default overload produces in range delay without injecting a random`() {
+        // GatewayClient 的调用形态：不注随机源，内部用全局 Random
+        val delay = ReconnectBackoff.delayMs(3, 5_000L, 60_000L)
+
+        assertTrue(delay in 10_000L..20_000L)
+    }
+
+    @Test
     fun `huge attempt count does not overflow the shift`() {
         // 移位位数不封顶会在 Int 上溢出成负数，退避就退化成"立即重连"
         val delay = ReconnectBackoff.delayMs(Int.MAX_VALUE, base, max, Random(42))
