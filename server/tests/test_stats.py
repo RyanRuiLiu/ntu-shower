@@ -656,6 +656,26 @@ def test_stats_copy_is_served_with_days_filled(client: TestClient, seeded: dict[
     assert "{pct}" in copy["mine_faster_fast"]
 
 
+def test_compare_rows_follow_the_device_display_order(client: TestClient, seeded: dict[str, str]) -> None:
+    """楼层对比按设备登记的展示顺序排，选中的那一台不跳到最前面。
+
+    本设备那一行是主流程算好传进来的——顺手放头部会让这张表的顺序跟着"选了谁"
+    走，而它是各楼层的基准读数，顺序该与设备下拉同源（`devices.list_all`）。让另一台
+    设备登记在前面、请求的却是后面那台，顺序才试得出来。
+    """
+    write(
+        "INSERT INTO device (device_id, name, trusted, sort_order) VALUES (?,?,?,?)", ("dev-stats-b1", "B1 浴室", 1, 0)
+    )
+    write("UPDATE device SET sort_order = 1 WHERE device_id = ?", (DEVICE,))
+
+    body = client.get(f"/api/v1/stats/devices/{DEVICE}?days=30", headers=seeded).json()
+
+    assert [row["device_id"] for row in body["compare"]] == ["dev-stats-b1", DEVICE]
+    # 本设备那一行的数值仍是主流程传进来的那一份，位置调整不会让它丢数。
+    floor = next(item for item in body["compare"] if item["device_id"] == DEVICE)
+    assert floor["sessions_flowed"] > 0
+
+
 @pytest.mark.usefixtures("client")
 def test_heat_denominator_excludes_offline_time() -> None:
     """热力图分母剔除设备离线的时段（口径 8）。
