@@ -703,17 +703,22 @@ def _peak_hours(heat: list[list[float]]) -> tuple[int, int]:
 def _compare_rows(current: CompareRow, since: str, until: str, settled: str, offset_minutes: int) -> list[CompareRow]:
     """各设备的轻量汇总，供楼层对比。
 
-    **本设备那一行由调用方传进来**（它已在主流程里算过）。不传的话这里要把它重算一遍
-    ——会话表、段表、热力矩阵各再来一次，而热力矩阵是整套统计里最贵的一项。
+    **顺序就是设备登记的展示顺序**（`devices.list_all`，与管理台、设备下拉同一来源）
+    ——切了设备去看对比，行不该因为"是你选的这一台"就跳到最前面。
+
+    **本设备那一行由调用方传进来**（它已在主流程里算过），在这里放回它登记顺序上的
+    自然位置。不传的话这里要把它重算一遍——会话表、段表、热力矩阵各再来一次，而
+    热力矩阵是整套统计里最贵的一项。
 
     两个右端点各有用途，不要合成一个：`until` 用于计数（含今天已发生的那些），
     `settled`（今天的 0 点）用于高峰——那个只能从已完整过去的日子推，
     与主视图的热力图同一口径，否则"高峰 20–22 时"会和页面上那张图对不上。
     """
-    rows: list[CompareRow] = [current]
+    rows: list[CompareRow] = []
     for record in devices.list_all():
         device_id = str(record["device_id"])
         if device_id == current["device_id"]:
+            rows.append(current)
             continue
         sessions = _sessions(device_id, since, until)
         flowed = _flowed(sessions)
