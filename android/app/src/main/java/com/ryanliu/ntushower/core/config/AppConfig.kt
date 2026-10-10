@@ -7,10 +7,13 @@ object AppConfig {
     /**
      * 浴室 App 的主界面（`BathMainActivity`）。
      *
-     * 与 [BATH_APP_PACKAGE] 同样是对端 manifest 定下的事实，不由我们决定。写在这里是因为
-     * 「把浴室 App 拉到前台」必须**显式指名它**：走 `getLaunchIntentForPackage` 只能拿到
-     * LAUNCHER 入口 `WelcomeActivity`，而那个会先联网下载参数——设备解析不了域名，几次
-     * 2 秒超时叠起来，真机实测 10 秒以上才进得去。主界面不做网络初始化，1~3 秒就位。
+     * 与 [BATH_APP_PACKAGE] 同样是对端 manifest 定下的事实，不由我们决定。
+     *
+     * **它没有 intent-filter，所以 `exported=false`——普通应用起不来它。** 真机日志是
+     * `Permission Denial: ... cmp=com.datalook.bath/.BathMainActivity ... not exported from
+     * uid 10053`。拉起它只能经 root shell（shell 持有 `START_ANY_ACTIVITY`），见
+     * `A11yService.launchBathMainActivity`。LAUNCHER 入口 `WelcomeActivity` 带 intent-filter、
+     * 隐式导出，普通应用起得来，但它要联网下载参数，10 秒以上才进得去浴室页。
      */
     const val BATH_MAIN_ACTIVITY = "com.datalook.bath.BathMainActivity"
 
