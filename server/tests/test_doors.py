@@ -260,6 +260,79 @@ def test_doors_api_exposes_last_used(fresh_db: str) -> None:
     assert doors[2]["last_used_s"] == 0
 
 
+def test_paused_keeps_this_segments_open_time(fresh_db: str) -> None:
+    """已暂停时 `in_time` 仍给出**本段**的开阀时刻——不是空串，也不是别的段。
+
+    设备在关阀那一刻清空了 `inTime`（`bathTime` 的累加与它同一条 SQL），帧里于是没有开阀
+    时刻。但这一段是什么时候开的，是服务端记下过的事实（段表的 `opened_at`）：`in_time`
+    的含义本来就是"当前这一段的开阀时刻"，与阀此刻开着还是关着无关——"此刻在不在出水"
+    由 `state` 回答。它一空，管理台与小程序那一格就都跟着空。
+
+    **分两段是有意的**：只验一段的话，"拿 `close_time − bath_time_s` 反推"与"取成第一
+    段"这两种错法都看不出来。`bath_time_s` 是多段之和，反推出来会落在两段之间。
+    """
+    device_id = "dev-paused-open-time"
+    t0 = "2026-09-30T12:00:00.000Z"  # 分配并开阀
+    t1 = "2026-09-30T12:01:30.000Z"  # 第一段关阀（90 秒）
+    t1b = "2026-09-30T12:03:00.000Z"  # 仍在同一段暂停里：关阀之后又来了一帧上报
+    t2 = "2026-09-30T12:05:00.000Z"  # 第二段开阀
+    t3 = "2026-09-30T12:07:30.000Z"  # 第二段关阀；bath_time_s 已累到 240
+    device_clock.load(device_id, 0.0)
+
+    service.process_snapshot(device_id, _snapshot([_door(1, acc_no="A001", open_time=t0, in_time=t0)], t0))
+    service.process_snapshot(
+        device_id, _snapshot([_door(1, acc_no="A001", open_time=t0, close_time=t1, bath_time_s=90)], t1)
+    )
+    live = repository.get_door_live(device_id, 1)
+    assert live["state"] == "paused"
+    assert live["in_time"] == t0, "第一段：这一段的开阀时刻"
+
+    # 暂停会一直持续到结算，关阀之后每一帧都还要答得出（真机上这一段是几分钟到几十分钟）。
+    # 只验关阀那一帧的话，"答案只活一帧"这种错法看不出来——而那正是运维实际看到的帧。
+    service.process_snapshot(
+        device_id, _snapshot([_door(1, acc_no="A001", open_time=t0, close_time=t1, bath_time_s=90)], t1b)
+    )
+    assert repository.get_door_live(device_id, 1)["in_time"] == t0, "同一段暂停的后续帧，答案不变"
+
+    service.process_snapshot(
+        device_id, _snapshot([_door(1, acc_no="A001", open_time=t0, in_time=t2, bath_time_s=90)], t2)
+    )
+    service.process_snapshot(
+        device_id, _snapshot([_door(1, acc_no="A001", open_time=t0, close_time=t3, bath_time_s=240)], t3)
+    )
+    live = repository.get_door_live(device_id, 1)
+    assert live["state"] == "paused"
+    assert live["in_time"] == t2, "第二段：本段的开阀时刻，不是第一段的，也不是反推出来的"
+    assert repository.list_doors(device_id)[0]["in_time"] == t2, "接口上给的是同一个值"
+
+
+def test_waiting_still_has_no_open_time(fresh_db: str) -> None:
+    """等待开阀时 `in_time` 仍为空：本会话还没有过任何一段，这个时刻不存在。
+
+    与上一条成对。它挡住的是把"当前这一段"实现成"这扇门最近的一段"——上一场用过、
+    本场还没开阀时，那种写法会把**上一场**的开阀时刻填进来。
+    """
+    device_id = "dev-waiting-open-time"
+    t0 = "2026-09-30T12:00:00.000Z"
+    t1 = "2026-09-30T12:02:00.000Z"
+    device_clock.load(device_id, 0.0)
+
+    # 先完整用一场：开阀 → 释放
+    service.process_snapshot(device_id, _snapshot([_door(1, acc_no="A001", open_time=t0, in_time=t0)], t0))
+    service.process_snapshot(device_id, _snapshot([_door(1, acc_no="A001", open_time=t0, in_time=t0)], t1))
+    service.process_snapshot(device_id, _snapshot([_door(1)], "2026-09-30T12:03:00.000Z"))
+    assert repository.list_doors(device_id)[0]["state"] == "free"
+
+    # 再分配：新的一场，还没开阀
+    service.process_snapshot(
+        device_id,
+        _snapshot([_door(1, acc_no="B002", open_time="2026-09-30T12:10:00.000Z")], "2026-09-30T12:10:00.000Z"),
+    )
+    view = repository.list_doors(device_id)[0]
+    assert view["state"] == "waiting"
+    assert view["in_time"] == "", "上一场开过阀，与本场无关"
+
+
 def test_doors_api_is_public_empty_and_filtered(client: TestClient, fresh_db: str) -> None:
     """GET /doors 公开可查，支持按设备过滤；行只含门域字段（设备事实在设备资源）。"""
     assert client.get("/api/v1/doors").json() == []
