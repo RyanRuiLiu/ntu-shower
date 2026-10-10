@@ -532,6 +532,14 @@ def _derive_snapshot(device_id: str, source: str, raw_doors: list[JsonObject], o
         view = dict(door)
         for key in ("open_time", "in_time", "close_time"):
             view[key] = _to_server_or_empty(door.get(key), device_id)
+        # 已暂停：设备在关阀那一刻把 `inTime` 清空了（`bathTime` 的累加与清空 `inTime`
+        # 是同一条 SQL），帧里于是没有开阀时刻，上面那一轮平移只能得到空串。但暂停会一直
+        # 持续到结算，关阀之后每一帧都还要答得出这一段是什么时候开的——`in_time` 的含义
+        # 就是"当前这一段的开阀时刻"，与阀此刻开着还是关着无关（"此刻在不在出水"由
+        # `state` 回答）。那一段我们记过，段表里就有它：上面那几行先跑的就是
+        # `_maintain_session`，本帧的段到这会儿已经维护好了。
+        if state == DoorState.PAUSED:
+            view["in_time"] = repository.latest_segment_opened_at(device_id, door_no)
         repository.upsert_door_live(device_id, door_no, state.value, view, occurred_at)
         processed += 1
 
