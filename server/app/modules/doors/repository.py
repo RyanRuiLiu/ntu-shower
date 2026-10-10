@@ -415,6 +415,25 @@ def get_open_segment(device_id: str, door_no: int) -> Row | None:
     )
 
 
+def latest_segment_opened_at(device_id: str, door_no: int) -> str:
+    """该喷头**当前这场未结束会话**里最近一段的开阀时刻（服务端轴）；没有段时给空串。
+
+    已暂停时要靠它回答 `door_live.in_time`：设备在关阀那一刻清空了 `inTime`，而暂停会
+    一直持续到结算——关阀之后每来一帧都还要答得出这一段是什么时候开的（见 service 的
+    `_apply_snapshot`）。
+
+    **限定在未结束的会话里**：只按门取最近一段会把上一场捞进来，那是另一个人的账。
+    """
+    row = read_one(
+        "SELECT g.opened_at FROM usage_segment g"
+        " JOIN usage_session s ON s.id = g.session_id"
+        " WHERE s.device_id = ? AND g.door_no = ? AND s.ended_at IS NULL"
+        " ORDER BY g.opened_at DESC, g.id DESC LIMIT 1",
+        (device_id, door_no),
+    )
+    return "" if row is None else str(row["opened_at"])
+
+
 def open_segment(session_id: int, device_id: str, door_no: int, opened_at: str, opened_raw: str) -> int:
     """开一段出水，返回段 id。
 
