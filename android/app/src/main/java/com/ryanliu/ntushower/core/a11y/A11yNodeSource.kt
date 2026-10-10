@@ -35,7 +35,17 @@ interface A11yNodeSource {
     /** 输入完成后清空剪贴板，防止账密残留（异步）。 */
     fun clearClipboard()
 
-    /** 热切换浴室 App 到前台（REORDER_TO_FRONT，不触发生命周期重建）。 */
+    /**
+     * 把浴室 App 拉到前台。
+     *
+     * 走的是它的**主界面**而不是 LAUNCHER 入口：入口会下载参数，而设备解析不了域名，真机
+     * 实测要 10 秒以上才进得去浴室页；主界面不做网络初始化，1~3 秒就位。这条路顺带重建
+     * Activity，新实例的 `onCreate` 会把导航栏那组 `SYSTEM_UI_FLAG_*` 重设一遍——浴室 App
+     * 只在 `onCreate` 设它，所以重建正是恢复"导航栏隐藏"的唯一通路。
+     *
+     * **唯一的例外是免费名单有改动待生效**：名单只在浴室 App 启动时读一次，那种情况必须走
+     * 完整通路。由实现按 `A11yRuntime.bathFullLaunchPending` 自行选择，调用方不必知道。
+     */
     fun launchBathApp(): Boolean
 
     /** 发送广播（ensureForeground 关闭系统面板用）。 */

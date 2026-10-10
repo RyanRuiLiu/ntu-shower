@@ -12,7 +12,8 @@ import java.util.concurrent.atomic.AtomicLong
  * 与等待。
  *
  * [bathAppInForeground] 只由 A11yService 的窗口状态事件维护；[automationInProgress] 只由
- * 自动化调度置位、由 A11yService.onDestroy 复位。其余模块只读。
+ * 自动化调度置位、由 A11yService.onDestroy 复位。其余模块只读；[bathFullLaunchPending]
+ * 是唯一另有写入方的标志，它的置位与清除见它自己的注释。
  */
 object A11yRuntime {
 
@@ -28,6 +29,22 @@ object A11yRuntime {
     /** 自动化流程执行中标志（崩溃守护在此期间不拉起）。 */
     @Volatile
     var automationInProgress = false
+
+    /**
+     * 免费名单有改动，下一次拉起浴室 App 必须走**完整启动**（LAUNCHER 入口那条通路）。
+     *
+     * 名单只在浴室 App 启动时被读一次（`WelcomeActivity.getsetting()`），而"把界面拉回
+     * 前台"的常规通路走的是主界面、不做初始化。没有这个标志的话，名单写完就只能等设备
+     * 重启、或者浴室 App 崩溃后自动拉起才生效——设备连续运转几周都不会有那种时机。
+     *
+     * **不在这里立刻拉起**：服务端的约定是"名单在下次启动时生效，不急在那几十秒"
+     * （见 `freelist/routes.py` 的 `write_freelist`），而写完名单就拉起会把正在操作的学生
+     * 切走、掐断进行中的会话。所以只记下来，等下一次自然的拉起时机走完整通路。
+     *
+     * 由 DeviceMaintenance 写完名单后置位；由 A11yService 选通路时在完整启动成功之后清除。
+     */
+    @Volatile
+    var bathFullLaunchPending = false
 
     /** 服务绑定时注册（A11yService.onServiceConnected 调用）。 */
     fun bind(service: A11yNodeSource) {
