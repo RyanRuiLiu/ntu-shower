@@ -3,6 +3,33 @@ package com.ryanliu.ntushower.core.config
 /** 设备环境锚点：目标设备上的固定事实（浴室 App、它的数据库与名单文件、本应用工作目录）。 */
 object AppConfig {
     const val BATH_APP_PACKAGE = "com.datalook.bath"
+
+    /**
+     * 浴室 App 的主界面（`BathMainActivity`）。
+     *
+     * 与 [BATH_APP_PACKAGE] 同样是对端 manifest 定下的事实，不由我们决定。写在这里是因为
+     * 「把浴室 App 拉到前台」必须**显式指名它**：走 `getLaunchIntentForPackage` 只能拿到
+     * LAUNCHER 入口 `WelcomeActivity`，而那个会先联网下载参数——设备解析不了域名，几次
+     * 2 秒超时叠起来，真机实测 10 秒以上才进得去。主界面不做网络初始化，1~3 秒就位。
+     */
+    const val BATH_MAIN_ACTIVITY = "com.datalook.bath.BathMainActivity"
+
+    /**
+     * 设备上算「桌面」的包：浴室 App 退出后落到它们之一，才算真的有人离开了浴室界面。
+     *
+     * 这台设备的桌面是**新开普的集中控制端**（它注册了 `CATEGORY_HOME`，真机实测按 HOME
+     * 落到它），系统自带的 `com.android.launcher` 一并列出。
+     *
+     * **为什么需要这个判据**：「退到桌面」与「退到别的包」在退出事件上同形，只能由去向区分，
+     * 而两者该有相反的处理——退到桌面是有人想离开，要立刻拉回来；退到输入法设置之类的包是
+     * 现场人员走调试通道（设备断网时远程失效、又插不了线，这条通道是刻意留的），拉回来
+     * 等于把它废掉。
+     */
+    val BATH_DESKTOP_PACKAGES = setOf(
+        "com.newcapec.control.update",
+        "com.android.launcher",
+    )
+
     const val BATH_DB_DIR = "/sdcard/datalook/db"
     const val BATH_DB_FILE = "bath.db"
     const val BATH_DB_PATH = "$BATH_DB_DIR/$BATH_DB_FILE"
