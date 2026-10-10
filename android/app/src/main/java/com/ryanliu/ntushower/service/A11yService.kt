@@ -19,6 +19,7 @@ import com.ryanliu.ntushower.core.a11y.A11yRuntime
 import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.config.RuntimeConfig
+import com.ryanliu.ntushower.core.shell.RootShell
 import com.ryanliu.ntushower.core.threading.MainThread
 import com.ryanliu.ntushower.features.automation.BathAppGuard
 import com.ryanliu.ntushower.features.automation.BathAppPage
@@ -208,14 +209,9 @@ class A11yService :
     /**
      * 把浴室 App 拉到前台。
      *
-     * 默认走**主界面**（快通路）：显式指名 `BathMainActivity`，不走
-     * `getLaunchIntentForPackage`——后者只给 LAUNCHER 入口 `WelcomeActivity`，而它会先联网
-     * 下载参数，设备解析不了域名，真机实测 10 秒以上才进得去浴室页。主界面不做网络初始化，
-     * 1~3 秒就位；而且它重建 Activity，导航栏那组 `SYSTEM_UI_FLAG_*` 随之被重设。
-     *
-     * flags 只给 `NEW_TASK`：主界面是默认 `standard` 模式，实测这就足以复用已存在的浴室
-     * task（task 数量不增长）。`REORDER_TO_FRONT` 对它没有额外效果——`BootBReceriver` 用的
-     * 正是那个组合，实测每次拉起都新建一个 task。
+     * 默认走**主界面**（快通路）：它不做网络初始化，真机 1~3 秒就位，而且重建 Activity 会
+     * 把导航栏那组 `SYSTEM_UI_FLAG_*` 重设一遍。为什么不直接 `startActivity`、为什么要经
+     * root shell，见 [launchBathMainActivity]。
      *
      * 免费名单有改动待生效时改走完整通路：名单只在启动时读一次，走主界面不做初始化，
      * 名单就白等了（见 [A11yRuntime.bathFullLaunchPending]）。
@@ -245,16 +241,26 @@ class A11yService :
         false
     }
 
-    /** 启动浴室 App 的主界面；失败只记日志，由调用方按"界面是否回来"判断结果。 */
-    private fun launchBathMainActivity(): Boolean = try {
-        val intent = Intent()
-            .setClassName(AppConfig.BATH_APP_PACKAGE, AppConfig.BATH_MAIN_ACTIVITY)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        startActivity(intent)
-        true
-    } catch (e: Exception) {
-        Log.e(TAG, "launch bath main activity failed: ${e.message}")
-        false
+    /**
+     * 拉起到浴室 App 的主界面。
+     *
+     * **必须经 root shell**：主界面在浴室 App 的 manifest 里没有 intent-filter，因此
+     * `exported=false`，本进程（普通应用）`startActivity` 会被系统拒绝，真机日志是
+     * `Permission Denial: starting Intent { ... cmp=com.datalook.bath/.BathMainActivity }
+     * from ProcessRecord{... ntushower/u0a52} not exported from uid 10053`。LAUNCHER 入口
+     * `WelcomeActivity` 因为带 intent-filter 而隐式导出，普通应用起得来，但它要联网下载
+     * 参数、10 秒以上才进得去浴室页。
+     *
+     * shell 持有 `START_ANY_ACTIVITY`，能启动未导出的组件，所以这条路走 `am start`——与
+     * [BathAppRestart] 依赖同一个 root 前提。`-f 0x10000000` 是 `NEW_TASK`：实测只有它时
+     * 会复用已存在的浴室 task（task 数量不增长），不带则落点不确定。
+     */
+    private fun launchBathMainActivity(): Boolean {
+        val component = "${AppConfig.BATH_APP_PACKAGE}/${AppConfig.BATH_MAIN_ACTIVITY}"
+        val result = RootShell.control.exec("am start -f 0x10000000 -n $component")
+        if (result.exitCode == 0) return true
+        Log.e(TAG, "launch bath main activity failed: ${result.output}")
+        return false
     }
 
     /**
