@@ -2,6 +2,7 @@ package com.ryanliu.ntushower.service
 
 import android.util.Log
 import com.ryanliu.ntushower.BuildConfig
+import com.ryanliu.ntushower.core.a11y.A11yRuntime
 import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.shell.RootShell
 import com.ryanliu.ntushower.features.automation.BathAppRestart
@@ -306,6 +307,10 @@ object DeviceMaintenance {
         }
         return try {
             File(AppConfig.BATH_FREELIST_PATH).writeText(params.optString("content"))
+            // 名单只在浴室 App 启动时被读一次，所以记一笔"下次拉起走完整通路"。
+            // 不在这里接着拉起：那会把正在操作的学生切走——服务端的约定正是"名单在下次
+            // 启动时生效，不急在那几十秒"（见 A11yRuntime.bathFullLaunchPending）。
+            A11yRuntime.bathFullLaunchPending = true
             CommandOutcome(commandId, OutcomeStatus.OK, "", "")
         } catch (e: Throwable) {
             Log.e(TAG, "写免费名单失败：${e.message}", e)
