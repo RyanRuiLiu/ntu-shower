@@ -447,7 +447,7 @@ def _fire(device_id: str, candidate: Candidate, trigger: Trigger) -> None:
     config = config_store.effective(device_id)
     fresh = {item.session_id: item for item in _snapshots(device_id)}.get(candidate.session_id)
 
-    reason = recheck(fresh, expected=candidate, trigger=trigger, config=config)
+    reason = recheck(fresh, expected=candidate, trigger=trigger, config=config, now=now_rfc3339())
     if reason is not None:
         _record(
             "skipped",

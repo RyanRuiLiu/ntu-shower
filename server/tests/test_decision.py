@@ -128,10 +128,18 @@ def test_renew_wait_only_applies_while_waiting() -> None:
 # ── 会话续期 ──
 
 
-def test_renew_session_applies_to_both_occupied_states() -> None:
-    for state in (DoorState.BATHING, DoorState.PAUSED):
-        trigger = decide(candidate(state=state, assigned_at="2026-10-05T11:41:30.000Z"), BASE_CONFIG, NOW)
-        assert trigger == Trigger(FEATURE_RENEW_SESSION, delay_s=30.0, threshold_s=1140)
+def test_renew_session_applies_only_while_bathing() -> None:
+    """只在水还在流时续——关了阀之后的事，归自动结算。
+
+    这里把另外两个功能关掉，好让"没有触发"确实等于"会话续期不适用"，而不是被别的判据顶掉。
+    """
+    only_renew_session = {**BASE_CONFIG, "renew_wait_enabled": False, "auto_settle_enabled": False}
+
+    for state in (DoorState.PAUSED, DoorState.WAITING, DoorState.FREE, DoorState.SELECTED):
+        assert decide(candidate(state=state), only_renew_session, NOW) is None
+
+    trigger = decide(candidate(state=DoorState.BATHING, assigned_at="2026-10-05T11:41:30.000Z"), BASE_CONFIG, NOW)
+    assert trigger == Trigger(FEATURE_RENEW_SESSION, delay_s=30.0, threshold_s=1140)
 
 
 def test_renew_session_has_no_duration_cap() -> None:
@@ -183,29 +191,32 @@ def test_earliest_trigger_wins() -> None:
     assert trigger == Trigger(FEATURE_RENEW_SESSION, delay_s=840.0, threshold_s=1140)
 
 
-def test_paused_is_claimed_by_two_features_and_renewal_wins() -> None:
-    """「已暂停」同时落进会话续期与自动结算，起算点不同，取最早的那条。
+def test_paused_belongs_to_auto_settle_alone() -> None:
+    """「已暂停」只有一个主人：自动结算。
 
-    这里关阀在 11:59（60 秒后到点＝0），而会话已走了 5 分钟（续期还早）——所以
-    自动结算先动手。反过来的那一半（会话快满 20 分钟才关阀、续期先动手）由
-    [test_renewal_beats_settle_when_the_session_is_nearly_full] 钉住。
+    关阀之后再开阀本来就要重新分配，所以这一刻的处置只能是"等够阈值就结算"，不能是
+    "再续一场"。
     """
     trigger = decide(candidate(state=DoorState.PAUSED, paused_at="2026-10-05T11:59:00.000Z"), BASE_CONFIG, NOW)
 
     assert trigger == Trigger(FEATURE_AUTO_SETTLE, delay_s=0.0, threshold_s=60)
 
 
-def test_renewal_beats_settle_when_the_session_is_nearly_full() -> None:
-    """会话快满 20 分钟时才关阀：续期先动手，保住他这一场比结束它更保守。"""
-    nearly_full = candidate(
+def test_a_session_nearly_full_that_just_closed_the_valve_still_settles() -> None:
+    """真机上的那一例：会话快满 20 分钟时关阀，处置仍然是结算，不是续期。
+
+    修复前这里是"续期先动手"——续期的到点正在此刻、结算还要 50 秒，两条判据都认领
+    `PAUSED` 而取最早的那条。于是洗完关阀的会话被续成下一场：喷头不释放，延长服务时间也
+    因为"还有未结束的会话"迟迟不拨回（真机是拖到 00:33 才拨回）。钉住它，是为了这条边界
+    不再被"续期优先"改回去。
+    """
+    just_closed = candidate(
         state=DoorState.PAUSED,
-        assigned_at="2026-10-05T11:41:00.000Z",  # 1140 秒在 12:00:00 到点
+        assigned_at="2026-10-05T11:41:00.000Z",  # 续期的到点正在此刻
         paused_at="2026-10-05T11:59:50.000Z",  # 结算还要 50 秒
     )
 
-    trigger = decide(nearly_full, BASE_CONFIG, NOW)
-
-    assert trigger == Trigger(FEATURE_RENEW_SESSION, delay_s=0.0, threshold_s=1140)
+    assert decide(just_closed, BASE_CONFIG, NOW) == Trigger(FEATURE_AUTO_SETTLE, delay_s=50.0, threshold_s=60)
 
 
 # ── 到点复查 ──
@@ -213,21 +224,38 @@ def test_renewal_beats_settle_when_the_session_is_nearly_full() -> None:
 
 def test_recheck_passes_when_nothing_moved() -> None:
     expected = candidate()
-    assert recheck(expected, expected, Trigger(FEATURE_RENEW_WAIT, delay_s=0.0, threshold_s=270), BASE_CONFIG) is None
+    trigger = Trigger(FEATURE_RENEW_WAIT, delay_s=0.0, threshold_s=270)
+
+    assert recheck(expected, expected, trigger, BASE_CONFIG, NOW) is None
+
+
+def test_recheck_refuses_when_the_duration_cap_ran_out_while_the_timer_waited() -> None:
+    """挂表时还没到上限、到点已经超了——必须放弃这一次。
+
+    真机上发生过：`renew_wait` 的表在会话跑了 19 分钟时挂上（上限 20 分钟），50 秒后到点
+    执行，此时已 23 分钟，却照样结算并分配了一次。只比对"现态变没变"看不见"上限用尽"
+    （它不在现态的字段里），所以到点要把适用性整条重算。
+    """
+    armed = candidate(run_started_at="2026-10-05T11:41:00.000Z")  # 12:01:00 才到 1200 秒
+    trigger = Trigger(FEATURE_RENEW_WAIT, delay_s=60.0, threshold_s=270)
+    fired_late = "2026-10-05T12:05:00.000Z"  # 到点了，而这一串已经跑了 24 分钟
+
+    assert recheck(armed, armed, trigger, BASE_CONFIG, NOW) is None
+    assert recheck(armed, armed, trigger, BASE_CONFIG, fired_late) == "判据已不适用（起算点为空或时长上限用尽）"
 
 
 def test_recheck_reports_every_kind_of_change() -> None:
     expected = candidate()
     trigger = Trigger(FEATURE_RENEW_WAIT, delay_s=0.0, threshold_s=270)
 
-    assert recheck(None, expected, trigger, BASE_CONFIG) == "会话已结束"
-    assert recheck(candidate(session_id=8), expected, trigger, BASE_CONFIG) == "换了会话"
-    assert recheck(candidate(cert_no="99990053"), expected, trigger, BASE_CONFIG) == "换了人"
-    assert recheck(candidate(state=DoorState.BATHING), expected, trigger, BASE_CONFIG) == (
+    assert recheck(None, expected, trigger, BASE_CONFIG, NOW) == "会话已结束"
+    assert recheck(candidate(session_id=8), expected, trigger, BASE_CONFIG, NOW) == "换了会话"
+    assert recheck(candidate(cert_no="99990053"), expected, trigger, BASE_CONFIG, NOW) == "换了人"
+    assert recheck(candidate(state=DoorState.BATHING), expected, trigger, BASE_CONFIG, NOW) == (
         "状态已变（waiting → bathing）"
     )
-    assert recheck(expected, expected, trigger, {**BASE_CONFIG, "renew_wait_enabled": False}) == "功能已关"
-    assert recheck(expected, expected, trigger, {**BASE_CONFIG, "renew_wait_students": {}}) == "不在名单里"
+    assert recheck(expected, expected, trigger, {**BASE_CONFIG, "renew_wait_enabled": False}, NOW) == "功能已关"
+    assert recheck(expected, expected, trigger, {**BASE_CONFIG, "renew_wait_students": {}}, NOW) == "不在名单里"
 
 
 def test_still_allowed_is_the_same_question_asked_before_sending() -> None:
