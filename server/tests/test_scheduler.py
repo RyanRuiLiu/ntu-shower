@@ -156,7 +156,7 @@ def test_hooks_do_nothing_before_start() -> None:
 
 
 def test_each_door_gets_exactly_one_timer(monkeypatch: pytest.MonkeyPatch) -> None:
-    """一个喷头只留一个定时器；同一喷头两条判据时留最早的那条。"""
+    """一个喷头只留一个定时器；已暂停的喷头由自动结算认领。"""
 
     async def body() -> None:
         scheduler.start()
@@ -175,7 +175,7 @@ def test_each_door_gets_exactly_one_timer(monkeypatch: pytest.MonkeyPatch) -> No
         handles = scheduler._workers["dev-1"].timers
 
         assert list(handles) == [3]
-        # 同一喷头两条判据都已过点，留最早的那条：关阀比分配晚得多，自动结算先到点
+        # 三个功能的状态互不相交，所以"已暂停"只有自动结算会认领
         assert next(iter(scheduler._plan("dev-1").values()))[2].feature == FEATURE_AUTO_SETTLE
 
     asyncio.run(body())
@@ -823,8 +823,8 @@ def test_auto_settle_only_settles_and_never_reassigns(
 ) -> None:
     """自动结算只做前半步：结完就完了，不补分配。
 
-    会话才走了 5 分钟（会话续期还早），而关阀已经 2 分钟（超过 60 秒的阈值）——所以
-    动手的是自动结算。暂停时刻取自 `door_live.close_time`，所以这台设备要有偏差记录。
+    会话续期只在淋浴中适用，而这一场已经关了阀两分钟（超过 60 秒的阈值）——所以动手的是
+    自动结算。暂停时刻取自 `door_live.close_time`，所以这台设备要有偏差记录。
     """
     calls: list[tuple[str, JsonObject]] = []
 

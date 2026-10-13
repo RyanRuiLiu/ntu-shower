@@ -3,11 +3,16 @@
 **纯函数，不做任何 IO**，所以判据可以逐条单测——这里出错的代价是"在错的时候下了一条
 改数据的命令"，比机制出错严重得多。
 
-三个功能各管一种状态，只有**已暂停**同时落进两条判据（会话续期与自动结算）。两者由
-**起算点**分开：自动结算从关阀那一刻算（默认 60 秒），会话续期从分配时刻算（默认 1140
-秒）。所以只有"会话快满 20 分钟时才关阀"这一种情形会撞上，而那时**续期优先**——保住
-他这一场会话，比结束它更保守。`decide` 取最早的那条，同刻时按 [FEATURES] 的登记顺序取，
-也就是会话续期在前。
+三个功能各认领**一个互不相交的状态**：等待中的预约、正在淋浴的会话、关了阀的暂停。一个
+状态只有一个主人，所以同一个喷头上不会出现两条判据互相矛盾的动作——`decide` 仍取最早的
+那条，但"最早"只在同一个状态内部才有意义。
+
+**这条边界是刻意划的，不是巧合**。先前 `renew_session` 也认领 `PAUSED`，于是它与
+`auto_settle` 抢同一个状态，靠"续期在前"的静态优先级分胜负。结果是"关阀后释放喷头"对
+名单里的人永远走不通：洗完关阀的会话被当成"还在淋浴"续下去，喷头不释放，延长服务时间
+也因为"还有未结束的会话"迟迟不拨回。关阀之后该发生什么，由 `auto_settle` 独断；续期只管
+"水还在流、会话逼近浴室 App 的强制释放点"。这也正是 `renew_session_enabled` 配置说明写的
+"会话处于淋浴中"。
 
 时刻一律用服务端轴的 RFC 3339 字符串；判据不碰设备轴（理由见 `core/device_clock`）。
 """
@@ -50,8 +55,8 @@ class FeatureSpec:
     """续期是两步（先结算、等门空的那一帧再分配回同一个喷头）；自动结算只做前半步。"""
 
 
-#: 登记顺序即**同刻撞车时的优先级**：已暂停会同时落进会话续期与自动结算两条判据，那时
-#: 续期在前——保住他这一场会话比结束它更保守。
+#: 三个功能的状态互不相交，所以登记顺序不决定任何胜负；保留这个顺序只是为了让"读这份表
+#: 就看得见有哪几个功能"。
 FEATURES: tuple[FeatureSpec, ...] = (
     FeatureSpec(
         key=FEATURE_RENEW_WAIT,
@@ -68,7 +73,7 @@ FEATURES: tuple[FeatureSpec, ...] = (
         enabled_key="renew_session_enabled",
         students_key="renew_session_students",
         threshold_key="renew_session_threshold_s",
-        states=(DoorState.BATHING, DoorState.PAUSED),
+        states=(DoorState.BATHING,),
         start="assigned_at",
         max_duration_key=None,
         two_step=True,
@@ -196,12 +201,17 @@ def _started_at(candidate: Candidate, spec: FeatureSpec, config: JsonObject, now
     return started or None
 
 
-def recheck(fresh: Candidate | None, expected: Candidate, trigger: Trigger, config: JsonObject) -> str | None:
+def recheck(fresh: Candidate | None, expected: Candidate, trigger: Trigger, config: JsonObject, now: str) -> str | None:
     """到点之后再确认一遍它是不是还成立。返回不通过的理由，通过则 None。
 
     定时器是**到点提醒**，不是到时执行——到点那一刻现态可能早就变了（人走了、门被别人
     占了、名单刚被改）。逐条对下来，任一条不成立就放弃这一次，**不告警**：那是正常的
     "到时候情况变了"。
+
+    **适用性要整条重算，不能只比对"变没变"**：`max_duration` 这类上限正是"挂表时还没到、
+    到点已经过了"的量，而逐条比对永远看不见它——触发时合格，于是表挂上；到点执行时早已
+    超限，却照样动手。这里调 [_started_at] 复算一次，所以以后往它里面再加条件，这条复查
+    自动跟上，不必在另一处补一个特例。
     """
     if fresh is None:
         return "会话已结束"
@@ -211,6 +221,8 @@ def recheck(fresh: Candidate | None, expected: Candidate, trigger: Trigger, conf
         return "换了人"
     if fresh.state is not expected.state:
         return f"状态已变（{expected.state.value} → {fresh.state.value}）"
+    if _started_at(fresh, FEATURES_BY_KEY[trigger.feature], config, now) is None:
+        return "判据已不适用（起算点为空或时长上限用尽）"
     return still_allowed(fresh.cert_no, trigger.feature, config)
 
 
