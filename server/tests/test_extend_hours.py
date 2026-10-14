@@ -21,6 +21,7 @@ from app.modules.config import store as config_store
 from app.modules.doors import service as doors_service
 from app.modules.extend_hours import repository
 from app.modules.extend_hours import service as extend_hours
+from app.modules.sessions.decision import roster
 from app.modules.sessions.schemas import AssignRequest
 from test_scheduler import _frame
 
@@ -88,6 +89,16 @@ def _with_session(open_time: str, cert_no: str = "2530110052", door_no: int = 3)
             captured_at=open_time, card_no=0, cert_no=cert_no, acc_no="1010209501", open_time=open_time, door_no=door_no
         ),
     )
+
+
+def _clear_door(captured_at: str, door_no: int = 3) -> None:
+    """浴室端清场：门变空的那一帧（挂着的会话随之关闭）。"""
+    doors_service.process_snapshot(DEVICE, _frame(captured_at=captured_at, card_no=0, cert_no="", door_no=door_no))
+
+
+def _shift(shifted_at: str, assignments: tuple[tuple[int, str], ...] = ((3, "2530110052"),)) -> "extend_hours.Shift":
+    """一次拨钟的载体：`_reassign` 靠 `shifted_at` 分辨"拨钟前的残留会话"与"已经放回的"。"""
+    return extend_hours.Shift(device_id=DEVICE, shifted_at=shifted_at, assignments=assignments)
 
 
 # ── 表 ────────────────────────────────────────────────────────────────────
@@ -369,7 +380,11 @@ def test_on_frame_assigns_back_who_is_missing(fresh_db: str, monkeypatch: pytest
 
 
 def test_reassign_skips_someone_already_occupying(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """他已经在占用态就跳过：这一步靠"查现状"决定做不做，不必另记状态。"""
+    """他拨钟之后自己重新开了会话就跳过：放回已成立，不再动。
+
+    "已经成立"的判据是**会话建立于拨钟之后**——只有这样才能与"拨钟前的残留会话"分开
+    （见 test_reassign_waits_for_a_leftover_session_from_before_the_shift）。
+    """
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z")
     _with_session("2026-10-05T23:55:00.000Z")
     assigned: list[object] = []
@@ -379,15 +394,43 @@ def test_reassign_skips_someone_already_occupying(fresh_db: str, monkeypatch: py
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
 
     monkeypatch.setattr(extend_hours.sessions_routes, "perform_assign", fake_assign)
-    repository.record(DEVICE, "2026-10-05T23:50:00.000Z", [{"door_no": 3, "cert_no": "2530110052"}])
 
-    async def body() -> None:
-        extend_hours.on_frame(DEVICE)
-        await asyncio.gather(*extend_hours._reassign_tasks)
-
-    asyncio.run(body())
+    asyncio.run(extend_hours._reassign(_shift("2026-10-05T23:50:00.000Z"), roster(CONFIG, "extend_hours_students")))
 
     assert assigned == []
+    assert (DEVICE, "2530110052") in extend_hours._reassigned
+
+
+def test_reassign_waits_for_a_leftover_session_from_before_the_shift(
+    fresh_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """拨钟刚完成时还看得见的旧会话 ≠ "放回已成立"：等浴室端清场，清场后放回。
+
+    2026-10-14 真机序列（门 7）：拨钟成功于 23:48:58.37，而用户会话要到 23:48:59.28
+    才被浴室端清掉。`_reassign` 在那 0.9 秒的窗口里被同轮 tick 立即触发——旧代码把仍然
+    可见的旧会话当成"他已经有会话 → 放回已成立"永久跳过（静默分支），人整晚没被放回。
+    """
+    _prepare(monkeypatch, "2026-10-05T23:50:00.000Z")
+    _with_session("2026-10-05T23:40:00.000Z")  # 建立于拨钟之前：拨钟那一刻他还占着
+    assigned: list[object] = []
+
+    async def fake_assign(_device_id: str, req: AssignRequest) -> object:
+        assigned.append((req.door_no, req.cert_no))
+        return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
+
+    monkeypatch.setattr(extend_hours.sessions_routes, "perform_assign", fake_assign)
+    shift = _shift("2026-10-05T23:50:00.000Z")
+
+    # 拨钟后第一次（门还占着）：不分配，且**不标记**——下一次还要再来
+    asyncio.run(extend_hours._reassign(shift, roster(CONFIG, "extend_hours_students")))
+    assert assigned == []
+    assert (DEVICE, "2530110052") not in extend_hours._reassigned
+
+    # 浴室端清场之后：放回原喷头，并把这一次记成"已成立"
+    _clear_door("2026-10-05T23:50:01.000Z")
+    asyncio.run(extend_hours._reassign(shift, roster(CONFIG, "extend_hours_students")))
+    assert assigned == [(3, "2530110052")]
+    assert (DEVICE, "2530110052") in extend_hours._reassigned
 
 
 # ── 生命周期 ──────────────────────────────────────────────────────────────
@@ -859,6 +902,7 @@ def test_reassign_is_one_shot_per_extension(fresh_db: str, monkeypatch: pytest.M
     又被分配），会话永不空闲、拨回条件永远不成立、滚动重布通宵跑、设备通宵不断电。
     """
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z")
+    students = roster(CONFIG, "extend_hours_students")
     attempts: list[AssignRequest] = []
 
     async def fake_assign(_device_id: str, req: AssignRequest) -> object:
@@ -866,19 +910,20 @@ def test_reassign_is_one_shot_per_extension(fresh_db: str, monkeypatch: pytest.M
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
 
     monkeypatch.setattr(extend_hours.sessions_routes, "perform_assign", fake_assign)
+    shift = _shift("2026-10-05T23:50:00.000Z")
 
     # 第一次：他不在占用态，放回
-    asyncio.run(extend_hours._reassign(DEVICE, ((3, "2530110052"),), CONFIG["extend_hours_students"]))
+    asyncio.run(extend_hours._reassign(shift, students))
     assert len(attempts) == 1
 
     # 已经放回过，不再动
-    asyncio.run(extend_hours._reassign(DEVICE, ((3, "2530110052"),), CONFIG["extend_hours_students"]))
+    asyncio.run(extend_hours._reassign(shift, students))
     assert len(attempts) == 1
 
-    # 观察到他占着同样算"已成立"：之后哪怕会话结束（他走了），也不再重新预约
+    # 他拨钟之后自己重新开了会话，同样算"已成立"：之后哪怕会话结束（他走了），也不再重新预约
     extend_hours._reassigned.discard((DEVICE, "2530110052"))
     _with_session("2026-10-05T23:55:00.000Z")
-    asyncio.run(extend_hours._reassign(DEVICE, ((3, "2530110052"),), CONFIG["extend_hours_students"]))
+    asyncio.run(extend_hours._reassign(shift, students))
     assert len(attempts) == 1
     assert (DEVICE, "2530110052") in extend_hours._reassigned
 
