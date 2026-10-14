@@ -117,7 +117,7 @@ _task: asyncio.Task[None] | None = None
 _last_roll_at: dict[str, float] = {}
 _last_roll: dict[str, str] = {}
 
-#: (设备, 学号) → 这次延长里我们已经替他放回过、或确认他自己已经有会话。
+#: (设备, 学号) → 这次延长里我们已经替他放回过、或确认他在拨钟之后自己有了会话。
 #:
 #: 放回是**一次性**的（见 `_reassign` 的注释）：这一次结束之后，浴室端的 300 秒无水
 #: 门槛收回他就是"他走了"的信号，不再重新预约——否则拨回条件（喷头全部空闲）永远
@@ -487,28 +487,38 @@ def on_frame(device_id: str) -> None:
     students = roster(config_store.effective(device_id), "extend_hours_students")
     if not students:
         return
-    task = asyncio.create_task(_reassign(shift.device_id, shift.assignments, students))
+    task = asyncio.create_task(_reassign(shift, students))
     # 持有引用是必须的：asyncio 只保留弱引用，一个被丢弃的 Task 可能在跑完之前就被回收
     _reassign_tasks.add(task)
     task.add_done_callback(_reassign_tasks.discard)
 
 
-async def _reassign(device_id: str, assignments: tuple[tuple[int, str], ...], students: dict[str, str]) -> None:
+async def _reassign(shift: Shift, students: dict[str, str]) -> None:
     """把名单里的人分配回他们原来那个喷头——**每人一次**。
 
-    四种情形分得开，这是这一层唯一要紧的判断：
+    五种情形分得开，这是这一层唯一要紧的判断：
 
-    - **已经放回过**（本次延长里他重新有了会话，无论这条流程办的还是他自己）→ 跳过。
-      放回是**一次性**的：拨钟清场之后把人放回原位，仅此而已。浴室端之后按自己的
-      300 秒无水门槛收回他，那是**他走了**的信号——不放回，拨回条件（喷头全部空闲）
-      才有成立的一天。放回若做成循环，人走了也会被反复重新预约，延长永远不结束，
-      滚动重布通宵跑（2026-10-06 深夜实测复现：收回后 1 秒就被重新分配，整夜循环）。
+    - **拨钟前的会话还挂着**（浴室端还没清场，拨钟刚完成的那一瞬间）→ **等**，不标记。
+      拨钟与清场之间隔着"浴室 App 下一轮扫描 + 帧往返"（2026-10-14 实测 0.9 秒），而
+      本函数会被同一轮 tick 紧跟着触发——此刻看到的会话是**马上要被清掉的残留**，把它
+      当成"放回已成立"就是那晚的真 bug：他整晚没被放回，直到自己去设备前重开。
+      "等"以会话的**建立时刻**为据（`assigned_at` 与 `shifted_at` 同轴）：拨钟前的
+      会话是被清的对象，拨钟后的才是"已成立"——后者覆盖两种人：**已经放回过**的
+      （本次延长里他重新有了会话，无论这条流程办的还是他自己），以及**他自己
+      重新开了一个**。放回是**一次性**的：拨钟清场之后把人放回原位，仅此而已。
+      浴室端之后按自己的 300 秒无水门槛收回他，那是**他走了**的信号——不放回，
+      拨回条件（喷头全部空闲）才有成立的一天。放回若做成循环，人走了也会被反复
+      重新预约，延长永远不结束，滚动重布通宵跑（2026-10-06 深夜实测复现：收回后
+      1 秒就被重新分配，整夜循环）。
     - **前置拒**（门还被别人占着、他刚有了别的会话）→ 跳过这个人，下次再来。这时命令
       **根本没下发**，所以"下次再来"不是重试。
     - **命令失败**（超时、离线、被浴室端拒而报了 ok 之后仍不占用）→ 记一笔，**这个人不再试**。
       命令真发出去而没成就是失败；每轮再发一遍同样的命令不会有不同的结果。
     """
-    for door_no, cert_no in assignments:
+    device_id = shift.device_id
+    # 按学号索引现占：判"已成立"要看会话的**建立时刻**，而 `open_session_door` 只给门号。
+    occupying = {session.cert_no: session for session in doors_service.open_sessions(device_id)}
+    for door_no, cert_no in shift.assignments:
         password = students.get(cert_no)
         if password is None:
             log_event(
@@ -517,9 +527,13 @@ async def _reassign(device_id: str, assignments: tuple[tuple[int, str], ...], st
             continue
         if (device_id, cert_no) in _reassigned or (device_id, cert_no) in _reassign_failed:
             continue
-        if doors_service.open_session_door(device_id, cert_no) is not None:
-            # 他已经有会话了：放回这件事已经成立，从此这次延长里不再管他
+        session = occupying.get(cert_no)
+        if session is not None and session.assigned_at >= shift.shifted_at:
+            # 拨钟之后才建立的会话：他自己重新开了（或我们已经放过），放回已成立
             _reassigned.add((device_id, cert_no))
+            continue
+        if session is not None:
+            # 拨钟之前就有的会话还没被清场（拨钟刚完成的那一瞬间）：等，不标记
             continue
         try:
             result = await sessions_routes.perform_assign(
@@ -612,7 +626,7 @@ async def _advance(shift: Shift, config: ConfigValues) -> None:
         await _roll_power(shift.device_id, config, pre_shift=False)
     students = roster(config, "extend_hours_students")
     if students:
-        await _reassign(shift.device_id, shift.assignments, students)
+        await _reassign(shift, students)
     if _restore_due(shift, config):
         await _restore(shift, config)
 
