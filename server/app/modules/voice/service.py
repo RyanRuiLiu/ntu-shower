@@ -628,6 +628,75 @@ async def _dispatch_event(event: DoorEvent, max_age: int) -> None:
     )
 
 
+async def push_to_device(rule_id: int, device_id: str) -> schemas.VoicePushView:
+    """把一条规则的播报立即推到指定设备真播一遍（试听的真机版）。
+
+    渲染、合成、下发参数与真实事件走同一条路径：同模板、同样例值、同音色、同音量、
+    同播放超时。与真实事件只差两处：不等 delay_ms（那是给浴室 App 语音让路的，
+    手动验证不需要）；投递记录以 manual:* 事件键落一条，现场在「最近播报」对照。
+    """
+    row = repository.get_rule(rule_id)
+    if row is None:
+        raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
+    if devices_service.get_device(device_id) is None:
+        raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {device_id} 不在档案里")
+    event_kind = DoorEventKind(str(row["event"]))
+    cert_no = str(row["cert_no"]) if str(row["cert_no"]) != schemas.WILDCARD else "示例学号"
+    values = render.sample_values(schemas.event_spec(event_kind).label, door_no=1, cert_no=cert_no)
+    try:
+        segments = render.render_segments(str(row["text"]), values)
+    except render.TemplateError as exc:
+        _reject(str(exc))
+    _require_known_voice(str(row["voice"]))
+    plan, rendered_text = _plan_of(segments), render.render_text(segments)
+    clip, _clip_ms = await run_in_threadpool(_ensure_clip, plan, str(row["voice"]))
+
+    now = now_rfc3339()
+    event = DoorEvent(
+        kind=event_kind,
+        device_id=device_id,
+        door_no=1,
+        cert_no=cert_no,
+        session_id=0,
+        occurred_at=now,
+        event_key=f"manual:{rule_id}:{uuid.uuid4().hex[:12]}",
+    )
+    repository.claim_delivery(event, row, rendered_text, clip.clip_id, now, trace_id_var.get(), now)
+    outcome = await sessions_service.send_command_and_wait(
+        device_id,
+        actions.VOICE_PLAY,
+        _clip_params(clip, int(row["volume"])),
+        timeout_s=_play_timeout_s(clip.duration_ms),
+    )
+    downloaded = _downloaded(outcome)
+    repository.finish_delivery(
+        event.event_key,
+        now_rfc3339(),
+        str(outcome["status"]),
+        "手动推送：" + _detail(outcome),
+        now_rfc3339(),
+        downloaded,
+    )
+    log_event(
+        "INFO",
+        "voice.push-finished",
+        "手动推送播放已收尾",
+        device_id=device_id,
+        rule_id=rule_id,
+        status=str(outcome["status"]),
+        reason_code=str(outcome["reason_code"] or "-"),
+        downloaded=downloaded,
+    )
+    return schemas.VoicePushView(
+        device_id=device_id,
+        rendered_text=rendered_text,
+        status=str(outcome["status"]),
+        reason_code=str(outcome["reason_code"] or ""),
+        detail=_detail(outcome),
+        duration_ms=clip.duration_ms,
+    )
+
+
 def _event_segments(event: DoorEvent, template: str) -> tuple[tts.Plan, str] | None:
     """真实事件值渲染模板 → 合成计划与展示文本；渲染失败返回 None。
 
@@ -703,13 +772,17 @@ def list_effects() -> list[schemas.VoiceEffectView]:
     return [_effect_view(row) for row in repository.list_effects()]
 
 
-def create_effect(name: str, data: bytes) -> schemas.VoiceEffectView:
+def create_effect(name: str, data: bytes, upload_filename: str = "") -> schemas.VoiceEffectView:
     """收一段音频：归一化成标准 WAV、算内容身份、登记入库。
 
     内容身份按归一化后的字节算：同一段声音换个容器再传不会变成两个音效，
-    只会更新名字。
+    只会更新名字。名称留空时取上传文件名（去扩展名）。
     """
     name = " ".join(name.split())
+    if not name:
+        # 名称留空时用上传文件名去扩展名顶上（路由已保证非空文件）
+        stem = upload_filename.rsplit(".", 1)[0] if "." in upload_filename else upload_filename
+        name = " ".join(stem.split())
     if not name:
         raise ApiProblemError(INVALID_VOICE_EFFECT, "音效名称不能为空")
     if len(name) > 40:
@@ -740,6 +813,11 @@ def create_effect(name: str, data: bytes) -> schemas.VoiceEffectView:
                 f"音效超过 {tts.MAX_EFFECT_DURATION_MS // 1000} 秒上限（收到 {duration_ms / 1000:.1f} 秒）",
             )
         effect_id = tts.sha256_of(normalized)
+        # 名字唯一是 {fx:名} 能唯一解析的前提：与库内其他音效重名直接拒绝。
+        # 同内容同名重传在这里天然放行（effect_id 相同，走的是改名/补登记）。
+        squatter = repository.get_effect_by_name(name)
+        if squatter is not None and str(squatter["effect_id"]) != effect_id:
+            raise ApiProblemError(INVALID_VOICE_EFFECT, f"名称「{name}」已被其他音效占用")
         target = tts.effect_path(effect_id)
         normalized.replace(target)
     finally:
@@ -747,17 +825,58 @@ def create_effect(name: str, data: bytes) -> schemas.VoiceEffectView:
         normalized.unlink(missing_ok=True)
     existing = repository.get_effect(effect_id)
     if existing is not None and str(existing["name"]) != name:
-        used = repository.count_rules_referencing_fx(str(existing["name"]))
-        if used > 0:
-            raise ApiProblemError(
-                VOICE_EFFECT_IN_USE,
-                f"有 {used} 条规则的模板写着 {{fx:{existing['name']}}}，这个名字不能改",
+        # 同内容换新名 = 改名：旧名被规则模板引用时级联改写（{fx:旧} → {fx:新}），
+        # 与改名端点同一语义——规则不因改名而失效
+        rewritten = repository.rewrite_rule_fx_references(str(existing["name"]), name, now_rfc3339())
+        if rewritten:
+            log_event(
+                "INFO",
+                "voice.effect-renamed",
+                "音效已改名，引用它的规则模板一并改写",
+                effect_id=effect_id,
+                old=str(existing["name"]),
+                new=name,
+                rules_rewritten=rewritten,
             )
     repository.upsert_effect(effect_id, name, target.stat().st_size, duration_ms, now_rfc3339())
     row = repository.get_effect(effect_id)
     if row is None:
         raise ApiProblemError(VOICE_EFFECT_NOT_FOUND, effect_id)
     return _effect_view(row)
+
+
+def rename_effect(effect_id: str, name: str) -> schemas.VoiceEffectView:
+    """音效改名。旧名被规则模板引用时级联改写（{fx:旧} → {fx:新}），规则不失效；
+    新名与库内其他音效重名则拒绝——模板按名字解析音效，重名会指不出是哪一个。"""
+    row = repository.get_effect(effect_id)
+    if row is None:
+        raise ApiProblemError(VOICE_EFFECT_NOT_FOUND, effect_id)
+    old_name = str(row["name"])
+    new_name = " ".join(name.split())
+    if not new_name:
+        raise ApiProblemError(INVALID_VOICE_EFFECT, "音效名称不能为空")
+    if len(new_name) > 40:
+        raise ApiProblemError(INVALID_VOICE_EFFECT, "音效名称最多 40 个字符")
+    if new_name == old_name:
+        return _effect_view(row)
+    other = repository.get_effect_by_name(new_name)
+    if other is not None and str(other["effect_id"]) != effect_id:
+        raise ApiProblemError(INVALID_VOICE_EFFECT, f"名称「{new_name}」已被其他音效占用")
+    rewritten = repository.rewrite_rule_fx_references(old_name, new_name, now_rfc3339())
+    repository.rename_effect(effect_id, new_name)
+    log_event(
+        "INFO",
+        "voice.effect-renamed",
+        "音效已改名，引用它的规则模板一并改写",
+        effect_id=effect_id,
+        old=old_name,
+        new=new_name,
+        rules_rewritten=rewritten,
+    )
+    updated = repository.get_effect(effect_id)
+    if updated is None:
+        raise ApiProblemError(VOICE_EFFECT_NOT_FOUND, effect_id)
+    return _effect_view(updated)
 
 
 def delete_effect(effect_id: str) -> None:

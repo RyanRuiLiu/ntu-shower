@@ -274,6 +274,23 @@ def get_effect_by_name(name: str) -> Row | None:
     return read_one("SELECT * FROM voice_effect WHERE name=?", (name,))
 
 
+def rename_effect(effect_id: str, name: str) -> None:
+    write("UPDATE voice_effect SET name=? WHERE effect_id=?", (name, effect_id))
+
+
+def rewrite_rule_fx_references(old: str, new: str, now: str) -> int:
+    """把规则模板里的 {fx:旧名} 整体替换为 {fx:new}；返回改写的规则条数。
+
+    占位符是封闭的 {fx:名} 形式，replace 按完整 token 匹配，不会误伤别的名字。
+    """
+    old_token = "{fx:" + old + "}"
+    new_token = "{fx:" + new + "}"
+    return write(
+        "UPDATE voice_rule SET text = replace(text, ?, ?), updated_at=? WHERE instr(text, ?) > 0",
+        (old_token, new_token, now, old_token),
+    ).rowcount
+
+
 def delete_effect(effect_id: str) -> int:
     return write("DELETE FROM voice_effect WHERE effect_id=?", (effect_id,)).rowcount
 

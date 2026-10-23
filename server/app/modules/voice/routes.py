@@ -72,6 +72,12 @@ async def patch_rule(rule_id: int, req: schemas.VoiceRuleEnabledPatch) -> schema
     return view
 
 
+@admin_router.post("/voice/rules/{rule_id}/push")
+async def push_rule(rule_id: int, req: schemas.VoicePushRequest) -> schemas.VoicePushView:
+    """手动把一条规则的播报推到指定设备真播一遍；参数与真实事件触发一致。"""
+    return await service.push_to_device(rule_id, req.device_id)
+
+
 @admin_router.delete("/voice/rules/{rule_id}", status_code=204)
 def delete_rule(rule_id: int) -> None:
     service.delete_rule(rule_id)
@@ -80,7 +86,9 @@ def delete_rule(rule_id: int) -> None:
 @admin_router.post("/voice/preview")
 async def preview(req: schemas.VoicePreviewRequest) -> schemas.VoicePreviewView:
     try:
-        return await run_in_threadpool(service.preview, req)
+        return await run_in_threadpool(
+            service.preview, req.model_copy(update={"voice": req.voice or tts.DEFAULT_VOICE})
+        )
     except service.InvalidVoiceRuleError as exc:
         raise ApiProblemError(INVALID_VOICE_RULE, str(exc)) from exc
 
@@ -97,12 +105,21 @@ def list_effects() -> list[schemas.VoiceEffectView]:
 
 @admin_router.post("/voice/effects")
 async def create_effect(
-    name: Annotated[str, Form()],
     file: Annotated[UploadFile, File()],
+    name: Annotated[str, Form()] = "",
 ) -> schemas.VoiceEffectView:
-    """上传一段提示音：任意常见格式，服务端归一化为标准 WAV 并测时长。"""
+    """上传一段提示音：任意常见格式，服务端归一化为标准 WAV 并测时长。
+
+    名称留空时取上传文件名（去扩展名）作为音效名。
+    """
     data = await file.read()
-    return await run_in_threadpool(service.create_effect, name, data)
+    return await run_in_threadpool(service.create_effect, name, data, file.filename or "未命名")
+
+
+@admin_router.put("/voice/effects/{effect_id}")
+async def rename_effect(effect_id: str, req: schemas.VoiceEffectRename) -> schemas.VoiceEffectView:
+    """音效改名。被规则模板引用的旧名会级联改写（{fx:旧} → {fx:新}），规则不失效。"""
+    return await run_in_threadpool(service.rename_effect, effect_id, req.name)
 
 
 @admin_router.delete("/voice/effects/{effect_id}", status_code=204)

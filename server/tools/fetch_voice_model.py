@@ -1,6 +1,6 @@
 """下载语音模型（音色目录 `tts.VOICES` 的全部资产）到 `settings.voice_dir/` 并校验。
 
-部署时手动执行一次（Melo 与 Kokoro 各一个压缩包，共约 300MB；解包后按
+部署时手动执行一次（Melo 压缩包约 163MB；解包后按
 `tts.VOICES` 的逐文件 SHA-256 精确校验，压缩包本身按字节数预检）：
 
     cd server
@@ -26,12 +26,6 @@ ARCHIVES: tuple[tuple[str, str, int, str], ...] = (
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-melo-tts-zh_en.tar.bz2",
         167_006_755,
         "melo",
-    ),
-    (
-        "kokoro",
-        "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_1.tar.bz2",
-        147_031_220,
-        "kokoro",
     ),
 )
 

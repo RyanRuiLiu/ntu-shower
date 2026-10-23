@@ -228,7 +228,7 @@ _engine_lock = threading.Lock()
 _engines: dict[str, "_Engine"] = {}
 
 
-def _melo_engine() -> "_Engine":
+def _melo_engine() -> "_Engine":  # pragma: no cover —— 真实引擎装载，CI 无 sherpa-onnx 包
     import sherpa_onnx
 
     base = voice_root() / "melo"
@@ -247,7 +247,7 @@ def _melo_engine() -> "_Engine":
     return engine
 
 
-def _engine_of(spec: VoiceSpec) -> "_Engine":
+def _engine_of(spec: VoiceSpec) -> "_Engine":  # pragma: no cover —— 同上：引擎装载与常驻缓存
     with _engine_lock:
         engine = _engines.get(spec.engine)
         if engine is None:
@@ -259,13 +259,15 @@ def _engine_of(spec: VoiceSpec) -> "_Engine":
         return engine
 
 
-def _say(text: str, wav_path: Path, voice: str) -> None:
+def _say(text: str, wav_path: Path, voice: str) -> None:  # pragma: no cover —— 同上：真实引擎合成
     spec = VOICES[voice]
     engine = _engine_of(spec)
-    # 两个引擎的中文词典都直接丢阿拉伯数字（实测 OOV skipped），进引擎前统一归一
-    say_text = normalize_numerals(text)
+    # Melo 的词典不认阿拉伯数字（实测直接丢字），进引擎前统一归一成中文读法
+    # 首尾各补一个停顿标点：裸文本的首字能量会瞬间冲顶（爆音，设备上听感是首字
+    # 发闷），标点让引擎给出平缓的起收势——官方分句合成同样靠标点产生停顿
+    say_text = f"，{normalize_numerals(text)}。"
     try:
-        audio = engine.generate(say_text, sid=spec.sid, speed=1.0)
+        audio = engine.generate(say_text, sid=0, speed=1.0)
     except Exception as exc:  # noqa: BLE001 —— 引擎报错原样带上
         _fail_from(f"{spec.engine} 合成失败：{exc}", exc)
     import array
@@ -369,8 +371,6 @@ def synthesize(plan: Plan, clip_id: str, voice: str) -> ClipFile:
         if rate is None:
             _fail("拼装计划为空")
 
-        # 首尾各垫静音：起播瞬间的首字吞音与收播截尾都在这里统一消掉
-        frames.insert(0, b"\x00" * (int(rate * 0.12) * channels * width))
         frames.append(b"\x00" * (int(rate * 0.25) * channels * width))
         with wave.open(str(final_wav), "wb") as target:
             target.setnchannels(channels)
@@ -460,11 +460,9 @@ def _run_ffmpeg(wav_path: Path, mp3_path: Path) -> None:
             "-codec:a",
             "libmp3lame",
             "-b:a",
-            "64k",
+            "128k",
             "-ac",
             "1",
-            "-ar",
-            "22050",
             str(mp3_path),
         ],
         FFMPEG_TIMEOUT_S,
