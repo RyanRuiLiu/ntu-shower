@@ -150,12 +150,11 @@ def test_parse_weekdays_normalizes_and_rejects() -> None:
         assert parse_weekdays(bad) is None, bad
 
 
-def test_text_choices_reject_unknown_value() -> None:
-    """声明了封闭取值集的文本键（如音色）只收表内的值。"""
-    from app.modules.config import store as config_store
-    from app.modules.config.spec import SPECS_BY_KEY
+def test_text_choices_machinery_rejects_unknown_value() -> None:
+    """文本键的封闭取值集校验机制（当前无使用方，机制留给下一个枚举键）。"""
+    from app.modules.config.spec import ConfigKind
+    from app.modules.config.store import _check_value
 
-    assert SPECS_BY_KEY["voice_model"].choices == ("huayan-medium", "huayan-x-low")
-    config_store.validate({"voice_model": "huayan-x-low"})
+    assert _check_value("k", ConfigKind.TEXT, None, None, ("a", "b"), "a") == "a"
     with pytest.raises(ValueError, match="只允许"):
-        config_store.validate({"voice_model": "some-other-voice"})
+        _check_value("k", ConfigKind.TEXT, None, None, ("a", "b"), "c")

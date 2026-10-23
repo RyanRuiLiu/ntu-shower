@@ -103,10 +103,12 @@ class OtaUpdater(
 
     private fun attemptCountFile(code: Int): File = File(AppConfig.WORK_DIR, "ota-attempts-$code")
 
-    private fun attemptCount(code: Int): Int =
-        // 文件不存在是常态（该版本从未试过）：readText 直接抛 ENOENT，整个 OTA 检查
-        // 随之中断——0.4.41 实测因此把所有设备的后续升级全部锁死
-        attemptCountFile(code).takeIf { it.exists() }?.readText()?.trim()?.toIntOrNull() ?: 0
+    // 文件不存在是常态（该版本从未试过）：readText 直接抛 ENOENT，整个 OTA 检查
+    // 随之中断——0.4.41 实测因此把所有设备的后续升级全部锁死
+    private fun attemptCount(code: Int): Int {
+        val file = attemptCountFile(code).takeIf { it.exists() } ?: return 0
+        return file.readText().trim().toIntOrNull() ?: 0
+    }
 
     private fun writeAttemptCount(code: Int, count: Int) {
         attemptCountFile(code).writeText(count.toString())

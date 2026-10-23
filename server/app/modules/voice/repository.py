@@ -44,6 +44,7 @@ def init_tables() -> None:
             volume      INTEGER NOT NULL,
             enabled     INTEGER NOT NULL DEFAULT 1,
             exempt      TEXT    NOT NULL DEFAULT '[]',
+            voice       TEXT    NOT NULL,
             created_at  TEXT    NOT NULL,
             updated_at  TEXT    NOT NULL
         );
@@ -96,15 +97,16 @@ def insert_rule(
     volume: int,
     enabled: bool,
     exempt: str,
+    voice: str,
     now: str,
 ) -> int | None:
     """插入一条规则；该目标已有规则时跳过并返回 None（唯一约束的正面表达）。"""
     cursor = write(
         "INSERT INTO voice_rule"
-        " (device_id, cert_no, event, text, delay_ms, volume, enabled, exempt, created_at, updated_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?)"
+        " (device_id, cert_no, event, text, delay_ms, volume, enabled, exempt, voice, created_at, updated_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?)"
         " ON CONFLICT (device_id, cert_no, event) DO NOTHING",
-        (device_id, cert_no, event, text, delay_ms, volume, int(enabled), exempt, now, now),
+        (device_id, cert_no, event, text, delay_ms, volume, int(enabled), exempt, voice, now, now),
     )
     if cursor.rowcount != 1:
         return None
@@ -121,12 +123,13 @@ def update_rule(
     volume: int,
     enabled: bool,
     exempt: str,
+    voice: str,
     now: str,
 ) -> int:
     cursor = write(
         "UPDATE voice_rule SET device_id=?, cert_no=?, event=?, text=?, delay_ms=?,"
-        " volume=?, enabled=?, exempt=?, updated_at=? WHERE id=?",
-        (device_id, cert_no, event, text, delay_ms, volume, int(enabled), exempt, now, rule_id),
+        " volume=?, enabled=?, exempt=?, voice=?, updated_at=? WHERE id=?",
+        (device_id, cert_no, event, text, delay_ms, volume, int(enabled), exempt, voice, now, rule_id),
     )
     return cursor.rowcount
 
@@ -168,7 +171,7 @@ def match_rule(device_id: str, cert_no: str, event: str) -> Row | None:
     rows: list[Row] = (
         get_conn()
         .execute(
-            "SELECT id, device_id, cert_no, event, text, delay_ms, volume, exempt"
+            "SELECT id, device_id, cert_no, event, text, delay_ms, volume, exempt, voice"
             " FROM voice_rule"
             " WHERE event=? AND enabled=1"
             "   AND device_id IN (?, '*') AND cert_no IN (?, '*')"
