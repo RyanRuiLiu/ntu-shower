@@ -1,6 +1,6 @@
 [project]
 name = "ntu-shower-server"
-version = "0.4.43"
+version = "0.4.44"
 description = "NTU 浴室系统服务端：设备网关 / 用户 API / 管理面 / OTA（FastAPI 模块化单体）"
 requires-python = ">=3.10"
 # 抽象依赖（兼容范围）。精确锁定版本见 requirements.txt——PyPA 标准分工：
