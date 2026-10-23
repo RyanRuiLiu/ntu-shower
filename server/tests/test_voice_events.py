@@ -1,0 +1,181 @@
+"""门域播报事件：五类迁移、首帧/全貌/重放/盲区/换人的排除。
+
+这些用例只验证 `doors` 产出的事件；事件到语音规则的匹配在 voice 的测试里。
+"""
+
+import uuid
+from typing import Any
+
+from app.modules.doors import service
+from app.modules.doors.events import DoorEvent, DoorEventKind
+
+
+def _door(door_no: int, **overrides: object) -> dict[str, Any]:
+    door: dict[str, Any] = {
+        "door_no": door_no,
+        "card_no": 0,
+        "cert_no": "",
+        "acc_no": "",
+        "open_time": None,
+        "in_time": None,
+        "close_time": None,
+        "bath_time_s": 0,
+        "status_raw": 0,
+    }
+    door.update(overrides)
+    return door
+
+
+def _snapshot(
+    doors: list[dict[str, Any]],
+    captured_at: str | None = None,
+    source: str = service.SOURCE_DB_WATCH,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"snapshot_id": str(uuid.uuid4()), "source": source, "doors": doors}
+    if captured_at is not None:
+        payload["captured_at"] = captured_at
+    return payload
+
+
+def _process(
+    device_id: str,
+    doors: list[dict[str, Any]],
+    at: str,
+    source: str = service.SOURCE_DB_WATCH,
+) -> tuple[DoorEvent, ...]:
+    return service.process_snapshot(device_id, _snapshot(doors, at, source)).events
+
+
+def _occupied(cert_no: str = "C1", **overrides: object) -> dict[str, Any]:
+    return _door(1, card_no=1001, cert_no=cert_no, **overrides)
+
+
+def _bathing(cert_no: str = "C1") -> dict[str, Any]:
+    return _occupied(cert_no, open_time="2026-09-30T12:00:00.000Z", in_time="2026-09-30T12:00:30.000Z")
+
+
+def _paused(cert_no: str = "C1") -> dict[str, Any]:
+    return _occupied(
+        cert_no,
+        open_time="2026-09-30T12:00:00.000Z",
+        close_time="2026-09-30T12:01:00.000Z",
+        bath_time_s=30,
+    )
+
+
+T0 = "2026-09-30T12:00:00.000Z"
+T1 = "2026-09-30T12:01:00.000Z"
+T2 = "2026-09-30T12:02:00.000Z"
+T3 = "2026-09-30T12:03:00.000Z"
+
+
+def test_free_to_waiting_emits_assigned(fresh_db: str) -> None:
+    device_id = "voice-event-assigned"
+    _process(device_id, [_door(1)], T0)
+    events = _process(device_id, [_occupied()], T1)
+
+    assert [event.kind for event in events] == [DoorEventKind.ASSIGNED]
+    assert events[0].cert_no == "C1"
+    assert events[0].door_no == 1
+    assert events[0].event_key == f"session:{events[0].session_id}:assigned"
+
+
+def test_first_observed_occupancy_emits_nothing(fresh_db: str) -> None:
+    device_id = "voice-event-first"
+    assert _process(device_id, [_occupied()], T0) == ()
+
+
+def test_waiting_to_bathing_emits_shower_started(fresh_db: str) -> None:
+    device_id = "voice-event-start"
+    _process(device_id, [_door(1)], T0)
+    _process(device_id, [_occupied()], T1)
+    events = _process(device_id, [_bathing()], T2)
+
+    assert [event.kind for event in events] == [DoorEventKind.SHOWER_STARTED]
+    assert events[0].cert_no == "C1"
+    assert events[0].event_key.startswith("door_event:")
+
+
+def test_bathing_to_paused_emits_paused(fresh_db: str) -> None:
+    device_id = "voice-event-pause"
+    _process(device_id, [_door(1)], T0)
+    _process(device_id, [_occupied()], T1)
+    _process(device_id, [_bathing()], T2)
+    events = _process(device_id, [_paused()], T3)
+
+    assert [event.kind for event in events] == [DoorEventKind.PAUSED]
+
+
+def test_paused_to_bathing_emits_resumed(fresh_db: str) -> None:
+    device_id = "voice-event-resume"
+    _process(device_id, [_door(1)], T0)
+    _process(device_id, [_occupied()], T1)
+    _process(device_id, [_bathing()], T2)
+    _process(device_id, [_paused()], T3)
+    events = _process(device_id, [_bathing()], "2026-09-30T12:04:00.000Z")
+
+    assert [event.kind for event in events] == [DoorEventKind.RESUMED]
+
+
+def test_occupied_to_free_emits_released_with_session_cert(fresh_db: str) -> None:
+    device_id = "voice-event-release"
+    _process(device_id, [_door(1)], T0)
+    _process(device_id, [_occupied()], T1)
+    events = _process(device_id, [_door(1)], T2)
+
+    assert [event.kind for event in events] == [DoorEventKind.RELEASED]
+    assert events[0].cert_no == "C1"
+    assert events[0].event_key.endswith(":released")
+
+
+def test_free_to_bathing_emits_only_assigned(fresh_db: str) -> None:
+    device_id = "voice-event-direct-bathing"
+    _process(device_id, [_door(1)], T0)
+    events = _process(device_id, [_bathing()], T1)
+
+    assert [event.kind for event in events] == [DoorEventKind.ASSIGNED]
+
+
+def test_waiting_to_paused_emits_nothing(fresh_db: str) -> None:
+    device_id = "voice-event-waiting-paused"
+    _process(device_id, [_door(1)], T0)
+    _process(device_id, [_occupied()], T1)
+    assert _process(device_id, [_paused()], T2) == ()
+
+
+def test_occupant_change_announces_new_only(fresh_db: str) -> None:
+    device_id = "voice-event-change"
+    _process(device_id, [_door(1)], T0)
+    _process(device_id, [_occupied("C1")], T1)
+    events = _process(device_id, [_occupied("C2")], T2)
+
+    assert [event.kind for event in events] == [DoorEventKind.ASSIGNED]
+    assert events[0].cert_no == "C2"
+
+
+def test_startup_and_import_emit_nothing(fresh_db: str) -> None:
+    device_id = "voice-event-source"
+    _process(device_id, [_door(1)], T0)
+    assert _process(device_id, [_occupied()], T1, source=service.SOURCE_STARTUP) == ()
+    assert _process(device_id, [_occupied()], T2, source=service.SOURCE_IMPORT) == ()
+
+
+def test_gap_suppresses_release_and_new_assignment(fresh_db: str) -> None:
+    device_id = "voice-event-gap"
+    _process(device_id, [_door(1)], T0)
+    _process(device_id, [_occupied()], T1)
+    # 跨过一次占用的物理上限：旧的会话按盲区收尾，新会话另起，但都不播。
+    events = _process(device_id, [_occupied()], "2026-09-30T12:21:00.000Z")
+    assert events == ()
+
+
+def test_event_keys_are_stable_across_duplicate_frames(fresh_db: str) -> None:
+    device_id = "voice-event-stable"
+    _process(device_id, [_door(1)], T0)
+    _process(device_id, [_occupied()], T1)
+    first = _process(device_id, [_bathing()], T2)
+    second = _process(device_id, [_bathing()], T3)
+
+    assert len(first) == 1
+    assert second == ()  # 现态已经是淋浴中，重复帧不再产出迁移
+    assert first[0].event_key.startswith("door_event:")

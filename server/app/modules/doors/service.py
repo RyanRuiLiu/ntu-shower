@@ -104,6 +104,7 @@ from app.core.clock import now_rfc3339, parse_rfc3339, seconds_between, shift_rf
 from app.core.logging import exc_info_text, log_event
 from app.core.protocol import JsonObject, as_int, text_of
 from app.modules.doors import repository
+from app.modules.doors.events import DoorEvent, DoorEventKind, SnapshotResult
 from app.modules.doors.schemas import ASSIGNABLE_STATES, OCCUPIED_STATES, DoorState, DoorView
 
 # t_doorlist.status 的原始值（设备上报的 int，仅作辅助判据）
@@ -211,6 +212,18 @@ class LiveDoor:
     close_time: str
 
 
+@dataclass(frozen=True)
+class SessionDurations:
+    """一场会话的两个时长来源：分配起点/结束与已累计的淋浴秒数。
+
+    `ended_at` 为空表示会话仍在进行；`flow_s` 是段之和，已包含在途那一段。
+    """
+
+    assigned_at: str
+    ended_at: str
+    flow_s: int
+
+
 def live_doors(device_id: str) -> dict[int, LiveDoor]:
     """这台设备每个喷头此刻的现态（门号 → 现态）。
 
@@ -234,6 +247,21 @@ def open_sessions(device_id: str) -> list[OpenSession]:
         )
         for row in repository.list_open_sessions_of(device_id)
     ]
+
+
+def session_durations(session_id: int) -> SessionDurations | None:
+    """按会话 id 取播报需要的两个时长来源；会话不存在时给 None。
+
+    别的领域不直接读本域的表：这里只交出答案，不把 `sqlite3.Row` 漏出去。
+    """
+    row = repository.get_session(session_id)
+    if row is None:
+        return None
+    return SessionDurations(
+        assigned_at=str(row["assigned_at"] or ""),
+        ended_at=str(row["ended_at"] or ""),
+        flow_s=as_int(row["flow_s"]),
+    )
 
 
 def run_started_at(device_id: str, door_no: int, cert_no: str) -> str:
@@ -431,7 +459,7 @@ def _device_lock(device_id: str) -> threading.Lock:
         return lock
 
 
-def process_snapshot(device_id: str, payload: JsonObject) -> JsonObject:
+def process_snapshot(device_id: str, payload: JsonObject) -> SnapshotResult:
     """处理一帧；同一设备的帧串行（理由见 [_device_lock]）。
 
     锁覆盖整段：派生读的是刚写下的现态，把读放到锁外会读到别的帧的写入。
@@ -440,7 +468,7 @@ def process_snapshot(device_id: str, payload: JsonObject) -> JsonObject:
         return _apply_snapshot(device_id, payload)
 
 
-def _apply_snapshot(device_id: str, payload: JsonObject) -> JsonObject:
+def _apply_snapshot(device_id: str, payload: JsonObject) -> SnapshotResult:
     """一帧的完整处理：先落原始帧，再派生状态、diff 记事件、更新现态、维护会话。
 
     帧时刻取设备锚定的采集时刻（`captured_at`）——它在库变化那一刻就定了，不受积压
@@ -485,14 +513,17 @@ def _apply_snapshot(device_id: str, payload: JsonObject) -> JsonObject:
             device_id=device_id,
             error=exc_info_text(),
         )
-        return {"status": "ok", "processed": 0}
+        return SnapshotResult(0, ())
 
 
-def _derive_snapshot(device_id: str, source: str, raw_doors: list[JsonObject], occurred_at: str) -> JsonObject:
+def _derive_snapshot(device_id: str, source: str, raw_doors: list[JsonObject], occurred_at: str) -> SnapshotResult:
     """派生半场：diff 记事件、维护会话、刷新现态、发布推送。原始帧已在此前落库。"""
     prev_live = repository.get_all_live(device_id)
     # 全貌帧只刷新现态，不派生（判据与理由见 SOURCE_STARTUP）。
     snapshot_only = source == SOURCE_STARTUP
+    # 只有实时 db_watch 帧才产出播报事件；全貌帧与历史重放不补播。
+    voice_eligible = source == SOURCE_DB_WATCH
+    collected: list[DoorEvent] = []
 
     # 先收敛、再按门号去重：同一帧里重复的门号取最后一条——设备按门号整行读取，重复
     # 只可能来自拼装错误，取后者与"后来者覆盖"的直觉一致。收敛发生在派生之前，所以
@@ -510,8 +541,9 @@ def _derive_snapshot(device_id: str, source: str, raw_doors: list[JsonObject], o
         old_state: str = str(old["state"]) if old is not None else ""
         card_no, cert_no = _occupant(door)
 
+        event_id: int | None = None
         if old is not None and old_state != state and not snapshot_only:
-            repository.insert_event(
+            event_id = repository.insert_event(
                 occurred_at,
                 device_id,
                 door_no,
@@ -525,7 +557,9 @@ def _derive_snapshot(device_id: str, source: str, raw_doors: list[JsonObject], o
         # 先派生、再落现态：后台任务要读**上一帧**的状态与时刻，而 `upsert_door_live`
         # 会把它们覆盖掉。全貌帧同样要派生——它挡住的只是事件流水（见 SOURCE_STARTUP），
         # 会话跟着一起跳过就会丢掉重连时正在进行的那一场。
-        _maintain_session(device_id, door_no, state, door, occurred_at, old)
+        door_events = _maintain_session(device_id, door_no, state, door, occurred_at, old, event_id)
+        if voice_eligible:
+            collected.extend(door_events)
 
         # 现态对外的三个时间字段是**服务端轴**的：设备那口钟的读数只保留在原始帧里
         # （为什么对外不能出现设备轴，见 DECISIONS 的「两条时间轴」）。
@@ -547,7 +581,7 @@ def _derive_snapshot(device_id: str, source: str, raw_doors: list[JsonObject], o
     # WS 单连接有序投递，数据承载推送是行业标准（Supabase/Firebase 同型）：客户端
     # 收到后直接应用，请求量与事件量解耦；无变化的上报也照发，充当状态再同步。
     events.publish(events.DOOR_UPDATE, {"device_id": device_id, "at": occurred_at, "doors": list_doors(device_id)})
-    return {"status": "ok", "processed": processed}
+    return SnapshotResult(processed, tuple(collected))
 
 
 def _to_server_or_empty(value: object, device_id: str) -> str:
@@ -659,6 +693,37 @@ def _segments_complete(segments: list[Row], device_flow_s: int) -> bool:
     return sum(int(s["flow_s"]) for s in segments) == device_flow_s
 
 
+def _door_event(
+    kind: DoorEventKind,
+    device_id: str,
+    door_no: int,
+    cert_no: str,
+    session_id: int,
+    at: str,
+    event_key: str,
+) -> DoorEvent:
+    return DoorEvent(
+        kind=kind,
+        device_id=device_id,
+        door_no=door_no,
+        cert_no=cert_no,
+        session_id=session_id,
+        occurred_at=at,
+        event_key=event_key,
+    )
+
+
+def _transition_kind(old_state: str, state: DoorState) -> DoorEventKind | None:
+    """同一会话内的状态迁移 → 播报事件；三对之外一律不播。"""
+    if old_state == DoorState.WAITING.value and state is DoorState.BATHING:
+        return DoorEventKind.SHOWER_STARTED
+    if old_state == DoorState.PAUSED.value and state is DoorState.BATHING:
+        return DoorEventKind.RESUMED
+    if old_state == DoorState.BATHING.value and state is DoorState.PAUSED:
+        return DoorEventKind.PAUSED
+    return None
+
+
 def _maintain_session(
     device_id: str,
     door_no: int,
@@ -666,8 +731,9 @@ def _maintain_session(
     door: JsonObject,
     at: str,
     previous: Row | None,
-) -> None:
-    """维护会话与段：开、推进、收尾。
+    event_id: int | None,
+) -> list[DoorEvent]:
+    """维护会话与段：开、推进、收尾，并产出本帧的可播报事件。
 
     `assigned_at` 与它的来源由 [_assigned_at] 一起给出：优先把设备报的 `openTime` 加上
     钟偏差平移回真实分配时刻，拿不到偏差时退回本帧时刻并如实标明那只是观测下界。
@@ -675,9 +741,18 @@ def _maintain_session(
     **先看盲区**：相邻两帧隔得超过一次占用的物理上限（[SESSION_MAX_S]）时，盲区前后
     的状态不能当成连续。前一场在我们**最后看见它的时刻**收尾，本帧若仍占着就另起一场
     ——否则库里的陈旧占用（浴室 App 停了、人早走了）会被当成"它还被占着"，那场会话永不
-    结束、起点还落在几小时前。
+    结束、起点还落在几小时前。盲区前后都不产出播报事件：中间发生过什么没有证据。
+
+    事件的产出边界（与 voice 的事件目录一一对应）：
+    - 新会话 / 换人 → `assigned`；换人不为旧学号产出 `released`；
+    - 同一会话的 `waiting→bathing` / `paused→bathing` / `bathing→paused`
+      → `shower_started` / `resumed` / `paused`；
+    - 本帧离开占用态且上一帧仍占着 → `released`，学号取**被结束的会话行**。
     """
+    out: list[DoorEvent] = []
     gap = _gap(previous, at)
+    blind = previous is None or gap > SESSION_MAX_S
+
     if gap > SESSION_MAX_S and previous is not None:
         stale = repository.get_open_session(device_id, door_no)
         if stale is not None:
@@ -692,28 +767,86 @@ def _maintain_session(
         if previous is not None and str(previous["state"]) in OCCUPIED_STATES:
             open_session = repository.get_open_session(device_id, door_no)
             if open_session is not None:
+                session_id = int(open_session["id"])
+                session_cert = str(open_session["cert_no"])
                 _close(open_session, door, at, False)
-        return
+                if not blind and session_cert:
+                    out.append(
+                        _door_event(
+                            DoorEventKind.RELEASED,
+                            device_id,
+                            door_no,
+                            session_cert,
+                            session_id,
+                            at,
+                            f"session:{session_id}:released",
+                        )
+                    )
+        return out
 
     open_session = repository.get_open_session(device_id, door_no)
     card_no, cert_no = _occupant(door)
+    continued = open_session is not None and str(open_session["cert_no"]) == cert_no
     assigned: str
     if open_session is None:
         assigned, source = _assigned_at(door, at, device_id, previous)
         session_id = repository.open_session(device_id, door_no, card_no, cert_no, assigned, source)
-    elif str(open_session["cert_no"]) != cert_no:
+        if not blind and cert_no:
+            out.append(
+                _door_event(
+                    DoorEventKind.ASSIGNED,
+                    device_id,
+                    door_no,
+                    cert_no,
+                    session_id,
+                    at,
+                    f"session:{session_id}:assigned",
+                )
+            )
+    elif not continued:
         # 换人：先结旧账再开新账。新账的起点同样能平移（新人刚分配，`open_time` 是他
         # 写下的）。换人判据用证件号而不是卡号——这台设备无卡，实测 235270 个门帧里
         # cardno 非 0 的一个都没有，拿卡号比等于没比（那 13 次换人会全漏）。
+        #
+        # 换人不为旧学号产出 `released`：门仍被占着，播「会话结束」与屏幕事实相反。
         _close(open_session, door, at, False)
         assigned, source = _assigned_at(door, at, device_id, previous)
         session_id = repository.open_session(device_id, door_no, card_no, cert_no, assigned, source)
+        if not blind and cert_no:
+            out.append(
+                _door_event(
+                    DoorEventKind.ASSIGNED,
+                    device_id,
+                    door_no,
+                    cert_no,
+                    session_id,
+                    at,
+                    f"session:{session_id}:assigned",
+                )
+            )
     else:
         session_id = int(open_session["id"])
         assigned = str(open_session["assigned_at"])
 
+    if continued and not blind and event_id and cert_no:
+        old_state = str(previous["state"]) if previous is not None else ""
+        kind = _transition_kind(old_state, state)
+        if kind is not None:
+            out.append(
+                _door_event(
+                    kind,
+                    device_id,
+                    door_no,
+                    cert_no,
+                    session_id,
+                    at,
+                    f"door_event:{event_id}:{kind.value}",
+                )
+            )
+
     _maintain_segment(device_id, door_no, session_id, assigned, door, at)
     _advance_session(device_id, door_no, session_id, door, at, gap)
+    return out
 
 
 def _maintain_segment(

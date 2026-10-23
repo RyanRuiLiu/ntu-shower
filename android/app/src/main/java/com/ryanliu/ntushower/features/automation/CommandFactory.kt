@@ -59,6 +59,10 @@ object CommandFactory {
 
         SupportedActions.UI_SCROLL -> CommandScheduler.Command.UiScroll(commandId, params.optString("direction"))
 
+        SupportedActions.VOICE_PLAY -> CommandScheduler.Command.PlayVoice(commandId, params)
+
+        SupportedActions.VOICE_PREPARE -> CommandScheduler.Command.PrepareVoice(commandId, params)
+
         else -> null
     }
 

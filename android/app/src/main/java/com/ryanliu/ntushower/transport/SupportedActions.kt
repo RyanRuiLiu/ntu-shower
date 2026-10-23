@@ -46,6 +46,10 @@ object SupportedActions {
     const val FREELIST_READ = "freelist.read"
     const val FREELIST_WRITE = "freelist.write"
 
+    // ── voice ──
+    const val VOICE_PLAY = "voice.play"
+    const val VOICE_PREPARE = "voice.prepare"
+
     // ── 调试通道 ──
     const val BRIDGE_OPEN = "bridge.open"
     const val BRIDGE_CLOSE = "bridge.close"
@@ -71,6 +75,8 @@ object SupportedActions {
         POWER_SCHEDULE,
         FREELIST_READ,
         FREELIST_WRITE,
+        VOICE_PLAY,
+        VOICE_PREPARE,
         BRIDGE_OPEN,
         BRIDGE_CLOSE,
         UI_DUMP,

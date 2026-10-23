@@ -10,3 +10,6 @@ websockets==16.1.1
 # 显式声明：TypedDict 必须来自 typing_extensions，Python < 3.12 上 typing.TypedDict
 # 不被 pydantic 接受（服务器运行时为 3.10，已实测）
 typing-extensions==4.15.0
+# 语音播报：Piper 中文合成（模型与 espeak-ng/ffmpeg 是系统/数据目录前置，
+# 见 docs/RUNBOOK.md；本包只在规则保存/试听时以子进程调用）
+piper-tts==1.4.2

@@ -30,11 +30,12 @@ NAMESPACES: tuple[str, ...] = (
     "ui",
     "camera",
     "screen",
+    "voice",
 )
 NAMESPACE_SET = frozenset(NAMESPACES)
 
 #: 设备专属的命名空间：这些码只应由设备端产生。
-DEVICE_ONLY_NAMESPACES = frozenset({"ui", "camera", "screen"})
+DEVICE_ONLY_NAMESPACES = frozenset({"ui", "camera", "screen", "voice"})
 
 #: 原因码字面量。只认已登记命名空间，消息类型（`door.snapshot`）与动作名（`ui.dump`）
 #: 会命中，后面用消息类型清单与 ALL_ACTIONS 减掉。允许数字是为了 `a11y`。

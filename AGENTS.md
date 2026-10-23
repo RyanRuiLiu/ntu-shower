@@ -14,6 +14,8 @@
 - **后台任务的规则**（预约续期 / 会话续期 / 自动结算）→ `server/app/modules/sessions/`
 - **延长服务时间**（滚动重布 MCU、拨快、重新分配、过午夜无人占用后拨回）→ `server/app/modules/extend_hours/`
 - **免费名单**（浴室 App 启动时读的那份名单，设备页增删）→ `server/app/modules/freelist/`
+- **语音播报**（规则、模板占位符、事件匹配、Piper 合成与设备播放）→ `server/app/modules/voice/`；
+  事件派生在 `server/app/modules/doors/events.py`
 - **术语的唯一正名与弃用词**（同一个概念只许一个中文说法）→ `server/app/core/terms.py`
 - 失败原因码 → `server/app/core/reason_codes.py`
 - HTTP 问题类型 → `server/app/core/problems.py`

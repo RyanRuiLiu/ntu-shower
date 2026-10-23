@@ -124,6 +124,16 @@ export const api = {
   saveDeviceConfig: (id, config) => send(devicePath(id, '/config'), put({ config })),
   clearDeviceConfig: (id) => send(devicePath(id, '/config'), del()),
 
+  // ── 语音播报 ──（admin；规则按设备 + 学号 + 事件匹配）
+  voiceSpec: () => send(`${API_V1}/voice/spec`),
+  voiceRules: () => send(`${API_V1}/voice/rules`),
+  createVoiceRule: (value) => send(`${API_V1}/voice/rules`, post(value)),
+  updateVoiceRule: (id, value) => send(`${API_V1}/voice/rules/${id}`, put(value)),
+  deleteVoiceRule: (id) => send(`${API_V1}/voice/rules/${id}`, del()),
+  voiceStatus: () => send(`${API_V1}/voice/status`),
+  voiceDeliveries: () => send(`${API_V1}/voice/deliveries`),
+  previewVoiceRule: (value) => send(`${API_V1}/voice/preview`, post(value)),
+
   // ── 身份 ──（admin；名单响应含能力位枚举，身份页一次装载）
   identities: () => send(`${API_V1}/identities`),
   createIdentity: (value) => send(`${API_V1}/identities`, post(value)),

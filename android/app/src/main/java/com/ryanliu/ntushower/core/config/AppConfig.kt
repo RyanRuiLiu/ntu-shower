@@ -48,6 +48,9 @@ object AppConfig {
     /** 本应用在共享存储上的工作目录（OTA 下载、崩溃日志）。 */
     const val WORK_DIR = "/sdcard/ntu-shower"
 
+    /** 播报音频缓存：文件名是 clip_id（内容身份），服务端只下发 id。 */
+    const val VOICE_DIR = "$WORK_DIR/voice"
+
     /**
      * 本应用自己的数据库。
      *

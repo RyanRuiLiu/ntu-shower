@@ -103,6 +103,26 @@ FREELIST_WRITE = "freelist.write"
 才是请求本身不成立。
 """
 
+# ── 语音播报 ──
+# 服务端按「设备 + 学号 + 事件」匹配规则，合成音频后下发。设备只负责把指定的
+# 音频按指定音量播出来，并在结束后恢复原音量；不保存规则、不判断事件。
+#
+# 独立 voice 通道：播放不占用自动化队列（分配/结算），也不占用采集队列。
+
+VOICE_PLAY = "voice.play"
+"""播放一段已合成的音频。
+
+params 是 clip_id / sha256 / size_bytes / duration_ms / volume；设备按 clip_id 推出
+`/voice/clips/{clip_id}.mp3`，下载校验后播放。音频不随命令内联，设备缓存按内容复用。
+"""
+
+VOICE_PREPARE = "voice.prepare"
+"""只下载/校验一段音频，不播放。
+
+参数与 `voice.play` 相同但不含 volume。规则保存时对静态模板做一次预热；带占位符的
+规则不预热，首次事件时按最终文本生成并下载。
+"""
+
 # ── 调试通道 ──
 # 设备端启动 adbd，服务端在 443 上透传真实 ADB。开桥返回一次性 nonce 供设备
 # 认证端口归属；每次开桥递增世代号，旧 TCP 客户端被断开。
@@ -167,6 +187,8 @@ ALL_ACTIONS: tuple[str, ...] = (
     POWER_SCHEDULE,
     FREELIST_READ,
     FREELIST_WRITE,
+    VOICE_PLAY,
+    VOICE_PREPARE,
     BRIDGE_OPEN,
     BRIDGE_CLOSE,
     UI_DUMP,
@@ -177,7 +199,8 @@ ALL_ACTIONS: tuple[str, ...] = (
 )
 
 # ── 执行通道 ──
-# 设备端把命令分到三条互不阻塞的路径（自动化队列、采集执行器、维护执行器），
+# 设备端把命令分到四条互不阻塞的路径（自动化队列、采集执行器、维护执行器、
+# 语音队列），
 # 服务端按同一划分排队限流：同一通道内每台设备串行，跨通道并行。两侧划分必须
 # 一致，否则服务端会拒掉设备明明做得了的事。
 
@@ -190,6 +213,9 @@ CHANNEL_CAPTURE = "capture"
 CHANNEL_MAINTENANCE = "maintenance"
 """设备自身维护：执行命令、重启本程序、重启整机、开关调试桥、读写免费名单。设备端即时执行，不进队列。"""
 
+CHANNEL_VOICE = "voice"
+"""语音播报：下载/播放音频。设备端单线程串行，与自动化、采集、维护互不阻塞。"""
+
 #: 动作 → 执行通道。每个动作恰好属于一个通道。
 ACTION_CHANNELS: dict[str, str] = {
     SESSION_ASSIGN: CHANNEL_AUTOMATION,
@@ -201,6 +227,8 @@ ACTION_CHANNELS: dict[str, str] = {
     UI_DUMP: CHANNEL_AUTOMATION,
     CAMERA_CAPTURE: CHANNEL_CAPTURE,
     SCREEN_CAPTURE: CHANNEL_CAPTURE,
+    VOICE_PLAY: CHANNEL_VOICE,
+    VOICE_PREPARE: CHANNEL_VOICE,
     DEVICE_EXEC: CHANNEL_MAINTENANCE,
     DEVICE_REBOOT: CHANNEL_MAINTENANCE,
     APP_RESTART: CHANNEL_MAINTENANCE,
