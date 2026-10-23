@@ -378,7 +378,7 @@ function clearForm() {
   renderVoiceOptions('melo')
   $('voiceText').value = ''
   $('voiceDelay').value = spec ? String(spec.delay.default_ms / 1000) : '0'
-  $('voiceVolume').value = spec ? String(spec.volume.default) : '4'
+  $('voiceVolume').value = spec ? String(spec.volume.default) : '3'
   $('voiceEnabled').checked = true
   $('voiceSample').hidden = true
   $('voiceSampleText').textContent = ''
@@ -747,7 +747,7 @@ export const voiceView = {
           </div>
           <div class="field">
             <label for="voiceVolume" id="voiceVolumeLabel">音量</label>
-            <input id="voiceVolume" type="number" min="0" max="5" step="1" value="4">
+            <input id="voiceVolume" type="number" min="0" max="5" step="1" value="3">
             <div class="muted">0 为静音；播放结束后恢复设备原音量。</div>
           </div>
           <div class="field">
