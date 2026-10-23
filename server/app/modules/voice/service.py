@@ -103,13 +103,6 @@ def _validated_text(text: str, event: DoorEventKind) -> str:
     return normalized
 
 
-def _sample_text(text: str, event: DoorEventKind) -> str:
-    label = schemas.event_spec(event).label
-    try:
-        return render.render_template(text, render.sample_values(label))
-    except render.TemplateError:
-        return text
-
 
 def _rule_view(row: Row) -> schemas.VoiceRuleView:
     event_values = json.loads(str(row["events"]))
