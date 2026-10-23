@@ -87,21 +87,22 @@ function renderStatus() {
     $('voiceStatus').innerHTML = '<div class="empty">还没有读到语音合成状态</div>'
     return
   }
-  const parts = [
-    ['模型', status.model_present],
-    ['Piper', status.piper_available],
-    ['espeak-ng', status.espeak_available],
-    ['ffmpeg', status.ffmpeg_available],
-  ]
-  const badges = parts
+  const ffmpeg = status.ffmpeg_available
+    ? '<span class="badge badge-green">ffmpeg 已就绪</span>'
+    : '<span class="badge badge-red">ffmpeg 缺失</span>'
+  const rows = (status.voices || [])
     .map(
-      ([name, ok]) =>
-        `<span class="badge ${ok ? 'badge-green' : 'badge-red'}">${esc(name)} ${ok ? '已就绪' : '缺失'}</span>`,
+      (item) => `<tr data-voice="${esc(item.key)}">
+        <td class="mono">${esc(item.key)}</td>
+        <td>${esc(item.note)}</td>
+        <td>${item.available ? '<span class="badge badge-green">可用</span>' : '<span class="badge badge-red">缺失</span>'}</td>
+        <td><button type="button" class="btn btn-ghost btn-sm" data-act="audition" ${item.available ? '' : 'disabled'}>试听</button></td>
+      </tr>`,
     )
-    .join(' ')
-  $('voiceStatus').innerHTML = `<div class="btn-row">${badges}<span class="badge badge-blue">音色 ${esc(status.voice || '-')}</span><span class="badge badge-blue">音频 ${esc(String(status.clip_count))} 个</span></div>
-    <div class="muted" style="margin-top:8px">${status.ready ? '语音合成就绪。' : '语音合成未就绪：试听会失败；规则仍可保存，音频等合成可用后自动生成。'}
-    具体规则压过通配（先设备、后学号维度）；同一事件只播最具体的一条；延迟从事件发生时刻算起，窗口内设备并行预下载。语速在「配置」页调。</div>`
+    .join('')
+  $('voiceStatus').innerHTML = `<div class="btn-row">${ffmpeg}<span class="badge badge-blue">音频 ${esc(String(status.clip_count))} 个</span></div>
+    <table class="table" style="margin-top:8px"><thead><tr><th>音色</th><th>说明</th><th>状态</th><th></th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="muted" style="margin-top:8px">音色在每条规则上单独选；具体规则压过通配（先设备、后学号维度），延迟从事件发生时刻算起，窗口内设备并行预下载。</div>`
 }
 
 /** 边界一律来自 /voice/spec：输入范围与标签文字都由它渲染，页面不抄第二份。 */
@@ -244,6 +245,7 @@ function renderTable() {
         <td>${esc(rule.text)}</td>
         <td class="mono">${esc(fmtDelay(rule.delay_ms))}</td>
         <td class="mono">${esc(String(rule.volume))}</td>
+        <td class="mono">${esc(rule.voice)}</td>
         <td>${rule.enabled ? '<span class="badge badge-green">启用</span>' : '<span class="badge">停用</span>'}</td>
         <td>
           <div class="btn-row">
@@ -257,7 +259,7 @@ function renderTable() {
     })
     .join('')
   $('voiceTable').innerHTML = `<table class="table"><thead><tr>
-      <th>设备</th><th>学号</th><th>事件</th><th>播报内容</th><th>延迟</th><th>音量</th><th>启用</th><th></th>
+      <th>设备</th><th>学号</th><th>事件</th><th>播报内容</th><th>延迟</th><th>音量</th><th>音色</th><th>启用</th><th></th>
     </tr></thead><tbody>${rows}</tbody></table>`
 }
 
@@ -343,6 +345,7 @@ function clearForm() {
   $('voiceCert').disabled = false
   $('voiceCert').value = ''
   $('voiceEvents').innerHTML = eventChecksHtml(events[0] ? [events[0].value] : [])
+  renderVoiceOptions('melo')
   $('voiceText').value = ''
   $('voiceDelay').value = spec ? String(spec.delay.default_ms / 1000) : '0'
   $('voiceVolume').value = spec ? String(spec.volume.default) : '4'
@@ -360,6 +363,7 @@ function fillForm(rule) {
   // 勾「全部学号」时框里展示的是排除名单；不勾则是那一个学号
   $('voiceCert').value = wildcard ? (rule.exempt || []).join('\n') : rule.cert_no
   $('voiceEvents').innerHTML = eventChecksHtml([rule.event])
+  renderVoiceOptions(rule.voice)
   $('voiceText').value = rule.text
   $('voiceDelay').value = String(rule.delay_ms / 1000)
   $('voiceVolume').value = String(rule.volume)
@@ -405,6 +409,7 @@ function readForm() {
     volume: Number($('voiceVolume').value),
     enabled: $('voiceEnabled').checked,
     exempt_cert_nos: exempt,
+    voice: $('voiceVoice') ? $('voiceVoice').value : 'melo',
   }
   if (editingId !== null) {
     if (deviceIds.length > 1) return report('voiceResult', '失败 · 编辑时只能选一台设备或全部设备', 'err')
@@ -461,6 +466,7 @@ async function previewRule(rule) {
       event: rule.event,
       cert_no: rule.cert_no === WILDCARD ? '示例学号' : rule.cert_no,
       door_no: 1,
+      voice: rule.voice || 'melo',
     })
     showSample(result.rendered_text)
     playPreview(result.clip_url)
@@ -476,7 +482,7 @@ async function previewForm() {
   const cert = payload.cert_nos ? payload.cert_nos[0] : payload.cert_no
   // 创建形态是 events 数组（可勾多个），预览取第一个；编辑形态是单个 event
   const event = payload.events ? payload.events[0] : payload.event
-  await previewRule({ text: payload.text, event, cert_no: cert })
+  await previewRule({ text: payload.text, event, cert_no: cert, voice: payload.voice })
 }
 
 /** 保存后的那句话按结果状态说：一条没建成、全部跳过、建成几条，各是各的说法。 */
@@ -680,6 +686,11 @@ export const voiceView = {
             <div id="voiceEvents"></div>
           </div>
           <div class="field">
+            <label for="voiceVoice">音色</label>
+            <select id="voiceVoice"></select>
+            <div class="muted">每条规则单独选；上方「合成状态」里可逐个试听。</div>
+          </div>
+          <div class="field">
             <label for="voiceText">播报内容（模板）</label>
             <input id="voiceText" type="text" placeholder="例如：{event}，{door_no} 号喷头">
             <div id="voicePlaceholders"></div>
@@ -761,6 +772,14 @@ export const voiceView = {
       listen($('voiceFilterDevice'), 'change', (event) => {
         filterDevice = event.target.value
         loadRules()
+      }),
+    )
+    dispose.add(
+      listen($('voiceStatus'), 'click', async (event) => {
+        const button = event.target.closest('button[data-act="audition"]')
+        if (!button) return
+        const voice = button.closest('tr').dataset.voice
+        await previewRule({ text: '二五三零一一零零五七 号同学，请到 5 号喷头准备就浴', event: events[0] ? events[0].value : 'assigned', cert_no: '示例学号', voice })
       }),
     )
     dispose.add(

@@ -1,8 +1,10 @@
-"""播报模板、秒级口播格式、合成参数（音色/语速/起伏/停顿/音效）与子进程的单元测试。
+"""音色注册表、数字归一、分段拼装与内容寻址的单元测试。
 
-不加载真实模型、不启动 Piper：子进程用 CompletedProcess 替身，WAV/MP3 由测试写入。
+不加载真实引擎：语音段用替身写入，WAV/MP3 由测试生成；sherpa-onnx 包的探测用
+假 find_spec 固定结果（CI 里没有这个包）。
 """
 
+import importlib.util
 import subprocess
 import wave
 from pathlib import Path
@@ -30,71 +32,87 @@ def _write_wav(path: Path, seconds: float, rate: int = 22050) -> None:
         target.writeframes(b"\x00\x00" * int(rate * seconds))
 
 
-def _touch_models(voice: str = tts.DEFAULT_VOICE) -> None:
-    model, config = tts.model_paths(voice)
-    model.parent.mkdir(parents=True, exist_ok=True)
-    model.write_bytes(b"model")
-    config.write_bytes(b"{}")
+def _fake_say(monkeypatch: pytest.MonkeyPatch, seconds: float = 1.0) -> None:
+    monkeypatch.setattr(tts, "_say", lambda _text, wav_path, _voice: _write_wav(wav_path, seconds))
 
 
-def _params(**overrides: object) -> tts.SynthParams:
-    values: dict[str, object] = {
-        "voice": tts.DEFAULT_VOICE,
-        "speech_rate": 100,
-        "noise_scale": 67,
-        "noise_scale_w": 80,
-        "sentence_silence_ms": 0,
-    }
-    values.update(overrides)
-    return tts.SynthParams(**values)
+def _fake_ffmpeg(monkeypatch: pytest.MonkeyPatch, payload: bytes = b"ID3" + b"x" * 200) -> None:
+    monkeypatch.setattr(tts, "_run_ffmpeg", lambda _wav, mp3: mp3.write_bytes(payload))
 
 
-def test_validate_template_accepts_closed_placeholders() -> None:
-    assert render.validate_template("{event}，{door_no} 号喷头") == ("event", "door_no")
-    assert render.has_placeholders("{door_no}") is True
-    assert render.has_placeholders("固定内容") is False
+def _fake_probe_ok(monkeypatch: pytest.MonkeyPatch, voice_dir: Path) -> None:
+    """文件齐全 + 引擎包在（假 find_spec），probe 才为真。"""
+    for spec in tts.VOICES.values():
+        for name, size, _sha in spec.files:
+            target = voice_dir / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if not target.exists():
+                target.write_bytes(b"\x00" * size)
+    monkeypatch.setattr(importlib.util, "find_spec", lambda _name: object())
+
+
+# ── 注册表 ────────────────────────────────────────────────────────────────
+
+
+def test_registry_has_nine_voices_sharing_kokoro_files() -> None:
+    assert tts.DEFAULT_VOICE == "melo"
+    assert tts.VOICES["melo"].engine == "melo"
+    kokoro_keys = [key for key, spec in tts.VOICES.items() if spec.engine == "kokoro"]
+    assert len(kokoro_keys) == 8
+    # 八个 Kokoro 音色共用一份模型文件，只靠 sid 区分
+    file_sets = {id(tts.VOICES[key].files) for key in kokoro_keys}
+    assert len(file_sets) == 1
+    assert sorted(tts.VOICES[key].sid for key in kokoro_keys) == list(range(8))
+
+
+def test_recipe_and_clip_id_differ_by_voice_and_speaker() -> None:
+    plan: tts.Plan = [("say", "你好")]
+    base = tts.clip_id_for(plan, "melo")
+    assert base == tts.clip_id_for(plan, "melo")
+    assert base != tts.clip_id_for([("say", "你好。")], "melo")
+    assert base != tts.clip_id_for(plan, "kokoro-1")
+    assert tts.clip_id_for(plan, "kokoro-1") != tts.clip_id_for(plan, "kokoro-2")
+    assert len(base) == 64
+
+
+def test_probe_needs_files_and_engine_package(voice_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(importlib.util, "find_spec", lambda _name: object())
+    assert tts.probe("melo") is False
+    _fake_probe_ok(monkeypatch, voice_dir)
+    assert tts.probe("melo") is True
+    assert tts.probe("kokoro-8") is True
+    statuses = {item.key: item.available for item in tts.voice_statuses()}
+    assert statuses["melo"] is True
+
+
+# ── 数字归一 ──────────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
-    "text",
-    ["", "   ", "{name}", "{door_no", "door_no}", "{" + "x" * 120 + "}"],
+    ("value", "expected"),
+    [
+        (0, "零"),
+        (5, "五"),
+        (10, "十"),
+        (12, "十二"),
+        (20, "二十"),
+        (34, "三十四"),
+        (100, "一百"),
+        (105, "一百零五"),
+        (1122, "一千一百二十二"),
+        (25000, "二五零零零"),
+    ],
 )
-def test_validate_template_rejects_bad_shapes(text: str) -> None:
-    with pytest.raises(render.TemplateError):
-        render.validate_template(text)
+def test_int_to_zh(value: int, expected: str) -> None:
+    assert tts._int_to_zh(value) == expected
 
 
-def test_render_template_uses_values_and_limits() -> None:
-    values = render.sample_values("淋浴中", door_no=5)
-    assert render.render_template("{event}，{door_no} 号喷头", values) == "淋浴中，5 号喷头"
-    with pytest.raises(render.TemplateError):
-        render.render_template("{event} {missing}", values)
-    with pytest.raises(render.TemplateError):
-        render.render_template("长" * 200, values)
+def test_normalize_numerals_covers_template_quantities() -> None:
+    assert tts.normalize_numerals("请到 3 号喷头，12分34秒") == "请到 三 号喷头，十二分三十四秒"
+    assert tts.normalize_numerals("无数字") == "无数字"
 
 
-def test_render_rejects_missing_value() -> None:
-    with pytest.raises(render.TemplateError):
-        render.render_template("{event}", {})
-
-
-def test_render_rejects_too_long_rendered() -> None:
-    with pytest.raises(render.TemplateError):
-        render.render_template("x" * 110 + "{cert_no}", {"cert_no": "C" * 60})
-
-
-def test_render_rejects_empty_rendered() -> None:
-    with pytest.raises(render.TemplateError):
-        render.render_template("{event}", {"event": ""})
-
-
-def test_cert_no_reads_digitwise_with_truncation() -> None:
-    values = render.sample_values("等待开阀", cert_no="99990057")
-    # 学号是标识不是数量:逐位念;:N 只念末 N 位;字母按字母名念原样保留
-    assert render.render_segments("{cert_no}", values)[0].text == "二五三零一一零零五七"
-    assert render.render_segments("{cert_no:4}", values)[0].text == "零零五七"
-    mixed = render.sample_values("等待开阀", cert_no="B12a5678")
-    assert render.render_segments("{cert_no}", mixed)[0].text == "B一二a五六七八"
+# ── 分段渲染（render）─────────────────────────────────────────────────────
 
 
 def test_render_segments_splits_fx_and_pause() -> None:
@@ -106,15 +124,7 @@ def test_render_segments_splits_fx_and_pause() -> None:
         ("pause", "", "", 500),
         ("say", " 结束", "", 0),
     ]
-    # 展示文本把音效与停顿写成人能读的记号,不进 TTS
     assert render.render_text(segments) == "♪叮 请到 5 号 （停顿0.5秒） 结束"
-
-
-def test_validate_template_rejects_too_long_and_raw_braces() -> None:
-    with pytest.raises(render.TemplateError):
-        render.validate_template("长" * (render.MAX_TEMPLATE_CHARS + 1))
-    with pytest.raises(render.TemplateError):
-        render.validate_template("你好 {name}")
 
 
 def test_render_segments_rejects_bad_pause_and_shape() -> None:
@@ -127,218 +137,114 @@ def test_render_segments_rejects_bad_pause_and_shape() -> None:
         render.render_segments("{fx:} 空名", values)
     with pytest.raises(render.TemplateError):
         render.render_segments("{pause:x} 非数字", values)
-    # 只有效果没有语音也是一条合法播报(纯提示音)
     only_fx = render.render_segments("{fx:叮}", values)
     assert [seg.kind for seg in only_fx] == ["fx"]
 
 
-def test_clip_id_covers_params_and_plan() -> None:
-    plan = [("say", "你好")]
-    base = tts.clip_id_for(plan, _params())
-    assert base == tts.clip_id_for(plan, _params())
-    assert base != tts.clip_id_for([("say", "你好。")], _params())
-    # 任何一项参数变化都是新的内容身份——不存在"新参数读到旧音频"
-    changed = {
-        "speech_rate": 150,
-        "noise_scale": 30,
-        "noise_scale_w": 50,
-        "sentence_silence_ms": 400,
-        "voice": "huayan-x-low",
-    }
-    for key, value in changed.items():
-        assert base != tts.clip_id_for(plan, _params(**{key: value})), key
-    # 计划里的音效与停顿同样进内容身份
-    assert base != tts.clip_id_for([("fx", Path("e.wav")), *plan], _params())
-    assert base != tts.clip_id_for([("pause", 300), *plan], _params())
-    assert len(base) == 64
+def test_cert_no_reads_digitwise_with_truncation() -> None:
+    values = render.sample_values("等待开阀", cert_no="99990057")
+    assert render.render_segments("{cert_no}", values)[0].text == "二五三零一一零零五七"
+    assert render.render_segments("{cert_no:4}", values)[0].text == "零零五七"
+    mixed = render.sample_values("等待开阀", cert_no="B12a5678")
+    assert render.render_segments("{cert_no}", mixed)[0].text == "B一二a五六七八"
+    doors = render.sample_values("淋浴中", door_no=5)
+    assert render.render_segments("{door_no} 号", doors)[0].text == "5 号"
 
 
-def test_length_scale_maps_speech_rate() -> None:
-    assert tts.length_scale(100) == 1.0
-    assert tts.length_scale(50) == 2.0
-    assert tts.length_scale(200) == 0.5
+def test_validate_template_rejects_unknown_and_raw_braces() -> None:
+    with pytest.raises(render.TemplateError):
+        render.validate_template("你好 {name}")
+    with pytest.raises(render.TemplateError):
+        render.validate_template("长" * (render.MAX_TEMPLATE_CHARS + 1))
+    with pytest.raises(render.TemplateError):
+        render.validate_template("{door_no:3}")
 
 
-def test_speech_rate_bounds_match_config_spec() -> None:
-    from app.modules.config.spec import SPECS_BY_KEY
-
-    entry = SPECS_BY_KEY["voice_speech_rate"]
-    assert entry.minimum == tts.SPEECH_RATE_MIN
-    assert entry.maximum == tts.SPEECH_RATE_MAX
-    assert entry.default == tts.SPEECH_RATE_DEFAULT
-
-
-def test_voice_model_choices_match_registry() -> None:
-    from app.modules.config.spec import SPECS_BY_KEY
-
-    entry = SPECS_BY_KEY["voice_model"]
-    assert entry.choices == tuple(tts.VOICES.keys())
-    assert entry.default == tts.DEFAULT_VOICE
-
-
-def test_sha256_of(tmp_path: Path) -> None:
-    path = tmp_path / "x.bin"
-    path.write_bytes(b"abc")
-    assert tts.sha256_of(path) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+# ── 拼装合成 ──────────────────────────────────────────────────────────────
 
 
 def test_synthesize_writes_mp3(voice_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _touch_models()
-
-    def fake_piper(_text: str, wav_path: Path, _voice: str, _args: list[str]) -> None:
-        _write_wav(wav_path, 1.0)
-
-    def fake_ffmpeg(_wav: Path, mp3: Path) -> None:
-        mp3.write_bytes(b"ID3" + b"x" * 200)
-
-    monkeypatch.setattr(tts, "_run_piper", fake_piper)
-    monkeypatch.setattr(tts, "_run_ffmpeg", fake_ffmpeg)
+    _fake_probe_ok(monkeypatch, voice_dir)
+    _fake_say(monkeypatch, 1.0)
+    _fake_ffmpeg(monkeypatch)
 
     plan: tts.Plan = [("say", "你好")]
-    clip = tts.synthesize(plan, tts.clip_id_for(plan, _params()), _params())
+    clip = tts.synthesize(plan, tts.clip_id_for(plan, "melo"), "melo")
 
     assert clip.path.is_file()
-    assert clip.duration_ms == 1000
+    # 1.0s 语音 + 首尾静音垫（120ms + 250ms）
+    assert clip.duration_ms in (1369, 1370)
     assert clip.size_bytes == 203
     assert tts.sha256_of(clip.path) == clip.sha256
 
 
-def test_synthesize_plan_without_leading_say(voice_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _touch_models()
-    effect = tts.effect_path("f" * 64)
-    _write_wav(effect, 0.25)
-    monkeypatch.setattr(tts, "decode_effect", lambda _src, _rate, target: _write_wav(target, 0.25))
-    monkeypatch.setattr(tts, "_run_ffmpeg", lambda _wav, mp3: mp3.write_bytes(b"ID3"))
-
-    # 音效与停顿先于任何语音段:以库的采样率为基准(0.25s 音效 + 0.25s 静音)
-    plan: tts.Plan = [("fx", effect), ("pause", 250)]
-    clip = tts.synthesize(plan, tts.clip_id_for(plan, _params()), _params())
-    assert clip.duration_ms in (499, 500)
-
-    with pytest.raises(tts.VoiceSynthesisError):
-        tts.synthesize([], tts.clip_id_for([], _params()), _params())
-    bad: tts.Plan = [("bogus", "x")]  # type: ignore[list-item]
-    with pytest.raises(tts.VoiceSynthesisError):
-        tts.synthesize(bad, "0" * 64, _params())
-
-
 def test_synthesize_assembles_plan_in_order(voice_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _touch_models()
+    _fake_probe_ok(monkeypatch, voice_dir)
+    _fake_say(monkeypatch, 1.0)
+    _fake_ffmpeg(monkeypatch, payload=b"ID3")
     effect = tts.effect_path("e" * 64)
     _write_wav(effect, 0.5)
-
-    def fake_piper(_text: str, wav_path: Path, _voice: str, _args: list[str]) -> None:
-        _write_wav(wav_path, 1.0)
-
-    def fake_ffmpeg(_wav: Path, mp3: Path) -> None:
-        mp3.write_bytes(b"ID3")
-
-    monkeypatch.setattr(tts, "_run_piper", fake_piper)
-    monkeypatch.setattr(tts, "_run_ffmpeg", fake_ffmpeg)
     monkeypatch.setattr(tts, "decode_effect", lambda _src, _rate, target: _write_wav(target, 0.5))
 
     plan: tts.Plan = [("fx", effect), ("pause", 300), ("say", "你好")]
-    clip = tts.synthesize(plan, tts.clip_id_for(plan, _params()), _params())
+    clip = tts.synthesize(plan, tts.clip_id_for(plan, "kokoro-3"), "kokoro-3")
+    # 0.5s 音效 + 0.3s 停顿 + 1.0s 语音 + 首尾垫
+    assert clip.duration_ms in (2169, 2170)
 
-    # 0.5s 音效 + 0.3s 停顿 + 1.0s 语音
-    assert clip.duration_ms == 1800
+
+def test_synthesize_plan_without_leading_say(voice_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _fake_probe_ok(monkeypatch, voice_dir)
+    effect = tts.effect_path("f" * 64)
+    _write_wav(effect, 0.25)
+    monkeypatch.setattr(tts, "decode_effect", lambda _src, _rate, target: _write_wav(target, 0.25))
+    _fake_ffmpeg(monkeypatch, payload=b"ID3")
+
+    plan: tts.Plan = [("fx", effect), ("pause", 250)]
+    clip = tts.synthesize(plan, tts.clip_id_for(plan, "melo"), "melo")
+    assert clip.duration_ms in (869, 870)
+
+    with pytest.raises(tts.VoiceSynthesisError):
+        tts.synthesize([], tts.clip_id_for([], "melo"), "melo")
+    bad: tts.Plan = [("bogus", "x")]  # type: ignore[list-item]
+    with pytest.raises(tts.VoiceSynthesisError):
+        tts.synthesize(bad, "0" * 64, "melo")
 
 
 def test_synthesize_rejects_too_long(voice_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _touch_models()
-
-    def fake_piper(_text: str, wav_path: Path, _voice: str, _args: list[str]) -> None:
-        _write_wav(wav_path, 31.0)
-
-    monkeypatch.setattr(tts, "_run_piper", fake_piper)
+    _fake_probe_ok(monkeypatch, voice_dir)
+    _fake_say(monkeypatch, 31.0)
     plan: tts.Plan = [("say", "很长")]
     with pytest.raises(tts.VoiceTextTooLongError):
-        tts.synthesize(plan, tts.clip_id_for(plan, _params()), _params())
+        tts.synthesize(plan, tts.clip_id_for(plan, "melo"), "melo")
 
 
 def test_synthesize_rejects_empty_mp3(voice_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _touch_models()
-
-    def fake_piper(_text: str, wav_path: Path, _voice: str, _args: list[str]) -> None:
-        _write_wav(wav_path, 1.0)
-
-    def fake_ffmpeg(_wav: Path, mp3: Path) -> None:
-        mp3.write_bytes(b"")
-
-    monkeypatch.setattr(tts, "_run_piper", fake_piper)
-    monkeypatch.setattr(tts, "_run_ffmpeg", fake_ffmpeg)
+    _fake_probe_ok(monkeypatch, voice_dir)
+    _fake_say(monkeypatch)
+    _fake_ffmpeg(monkeypatch, payload=b"")
     plan: tts.Plan = [("say", "空")]
     with pytest.raises(tts.VoiceSynthesisError):
-        tts.synthesize(plan, tts.clip_id_for(plan, _params()), _params())
+        tts.synthesize(plan, tts.clip_id_for(plan, "melo"), "melo")
 
 
-def test_synthesize_wraps_os_error(voice_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _touch_models()
-
-    def fake_piper(_text: str, _wav_path: Path, _voice: str, _args: list[str]) -> None:
-        message = "disk"
-        raise OSError(message)
-
-    monkeypatch.setattr(tts, "_run_piper", fake_piper)
+def test_synthesize_requires_available_voice(voice_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(importlib.util, "find_spec", lambda _name: object())
     plan: tts.Plan = [("say", "你好")]
     with pytest.raises(tts.VoiceSynthesisError):
-        tts.synthesize(plan, tts.clip_id_for(plan, _params()), _params())
-
-
-def test_synthesize_requires_models(voice_dir: Path) -> None:
-    plan: tts.Plan = [("say", "你好")]
+        tts.synthesize(plan, tts.clip_id_for(plan, "melo"), "melo")
     with pytest.raises(tts.VoiceSynthesisError):
-        tts.synthesize(plan, tts.clip_id_for(plan, _params()), _params())
+        tts.synthesize(plan, "0" * 64, "不存在")
 
 
-def test_run_piper_passes_all_synth_args(voice_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _touch_models()
-    calls: list[list[str]] = []
-    inputs: list[str | None] = []
-
-    def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        calls.append(args)
-        inputs.append(kwargs.get("input") if isinstance(kwargs.get("input"), str) else None)
-        output = Path(args[args.index("--output-file") + 1])
-        _write_wav(output, 0.2)
-        return subprocess.CompletedProcess(args, 0, "", "")
-
-    monkeypatch.setattr(tts.subprocess, "run", fake_run)
-    wav = voice_dir / "tmp" / "out.wav"
-    params = _params(speech_rate=200, noise_scale=30, noise_scale_w=50, sentence_silence_ms=400)
-    tts._run_piper("你好", wav, tts.DEFAULT_VOICE, tts._piper_args(params))
-
-    args = calls[0]
-    assert args[1:3] == ["-m", "piper"]
-    assert "--model" in args
-    assert args[args.index("--length-scale") + 1] == "0.5000"
-    assert args[args.index("--noise-scale") + 1] == "0.3000"
-    assert args[args.index("--noise-w-scale") + 1] == "0.5000"
-    assert args[args.index("--sentence-silence") + 1] == "0.4000"
-    assert args[args.index("--output-file") + 1] == str(wav)
-    assert inputs == ["你好"]
+# ── 音效归一与 ffmpeg 守卫 ────────────────────────────────────────────────
 
 
-def test_run_piper_failure(voice_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _touch_models()
-
-    def fake_run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(args, 1, "", "boom")
-
-    monkeypatch.setattr(tts.subprocess, "run", fake_run)
-    with pytest.raises(tts.VoiceSynthesisError):
-        tts._run_piper("你好", voice_dir / "tmp" / "out.wav", tts.DEFAULT_VOICE, tts._piper_args(_params()))
-
-
-def test_run_piper_missing_output(voice_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _touch_models()
-
-    def fake_run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(args, 0, "", "")
-
-    monkeypatch.setattr(tts.subprocess, "run", fake_run)
-    with pytest.raises(tts.VoiceSynthesisError):
-        tts._run_piper("你好", voice_dir / "out.wav", tts.DEFAULT_VOICE, tts._piper_args(_params()))
+def test_normalize_to_wav_reports_duration(voice_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = voice_dir / "src.bin"
+    source.write_bytes(b"fake-audio")
+    target = voice_dir / "normalized.wav"
+    monkeypatch.setattr(tts, "_run_ffmpeg_raw", lambda _args, _timeout: _write_wav(target, 0.5))
+    assert tts.normalize_to_wav(source, target) == 500
 
 
 def test_run_ffmpeg_failure(voice_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -352,32 +258,7 @@ def test_run_ffmpeg_failure(voice_dir: Path, monkeypatch: pytest.MonkeyPatch) ->
         tts._run_ffmpeg(voice_dir / "a.wav", voice_dir / "a.mp3")
 
 
-def test_run_ffmpeg_missing_output(voice_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(tts.shutil, "which", lambda _name: "/usr/bin/ffmpeg")
-
-    def fake_run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(args, 0, "", "")
-
-    monkeypatch.setattr(tts.subprocess, "run", fake_run)
-    with pytest.raises(tts.VoiceSynthesisError):
-        tts._run_ffmpeg(voice_dir / "a.wav", voice_dir / "a.mp3")
-
-
-def test_run_ffmpeg_success_and_missing(voice_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(tts.shutil, "which", lambda _name: "/usr/bin/ffmpeg")
-    calls: list[list[str]] = []
-
-    def fake_run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        calls.append(args)
-        Path(args[-1]).write_bytes(b"ID3")
-        return subprocess.CompletedProcess(args, 0, "", "")
-
-    monkeypatch.setattr(tts.subprocess, "run", fake_run)
-    tts._run_ffmpeg(voice_dir / "a.wav", voice_dir / "a.mp3")
-    assert calls
-    assert calls[0][-1].endswith("a.mp3")
-    assert "libmp3lame" in calls[0]
-
+def test_run_ffmpeg_missing_executable(voice_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tts.shutil, "which", lambda _name: None)
     with pytest.raises(tts.VoiceSynthesisError):
         tts._run_ffmpeg(voice_dir / "a.wav", voice_dir / "b.mp3")
@@ -388,41 +269,3 @@ def test_wav_duration_rejects_bad_file(voice_dir: Path) -> None:
     bad.write_bytes(b"not a wav")
     with pytest.raises(tts.VoiceSynthesisError):
         tts._wav_duration_ms(bad)
-
-
-class _FakeWave:
-    def __enter__(self) -> "_FakeWave":
-        return self
-
-    def __exit__(self, *_args: object) -> bool:
-        return False
-
-    def getnframes(self) -> int:
-        return 10
-
-    def getframerate(self) -> int:
-        return 0
-
-
-def test_wav_duration_rejects_zero_rate(voice_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(tts.wave, "open", lambda *_args, **_kwargs: _FakeWave())
-    with pytest.raises(tts.VoiceSynthesisError):
-        tts._wav_duration_ms(voice_dir / "zero.wav")
-
-
-def test_probe_reads_model_presence_per_voice(voice_dir: Path) -> None:
-    assert tts.probe(tts.DEFAULT_VOICE).model_present is False
-    _touch_models()
-    assert tts.probe(tts.DEFAULT_VOICE).model_present is True
-    # 只备了默认音色的文件：另一个音色仍是缺失
-    assert tts.probe("huayan-x-low").model_present is False
-    _touch_models("huayan-x-low")
-    assert tts.probe("huayan-x-low").model_present is True
-
-
-def test_normalize_to_wav_reports_duration(voice_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    source = voice_dir / "src.bin"
-    source.write_bytes(b"fake-audio")
-    target = voice_dir / "normalized.wav"
-    monkeypatch.setattr(tts, "_run_ffmpeg_raw", lambda _args, _timeout: _write_wav(target, 0.5))
-    assert tts.normalize_to_wav(source, target) == 500

@@ -10,7 +10,6 @@ from fastapi.testclient import TestClient
 from tests import helpers
 
 from app.core.clock import now_rfc3339
-from app.modules.config import store as config_store
 from app.modules.doors import service as doors_service
 from app.modules.doors.events import DoorEvent, DoorEventKind
 from app.modules.sessions import service as sessions_service
@@ -31,12 +30,12 @@ def voice_device(fresh_db: str) -> None:
 def fake_tts(monkeypatch: pytest.MonkeyPatch) -> None:
     synthesized: list[tts.SynthParams] = []
 
-    def synthesize(plan: tts.Plan, clip_id: str, params: tts.SynthParams) -> tts.ClipFile:
-        synthesized.append(params)
+    def synthesize(plan: tts.Plan, clip_id: str, voice: str) -> tts.ClipFile:
+        synthesized.append(voice)
         path = tts.clip_path(clip_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         body = "|".join(f"{kind}:{value}" for kind, value in plan).encode()
-        data = f"MP3|rate={params.speech_rate}|".encode() + body
+        data = f"MP3|voice={voice}|".encode() + body
         path.write_bytes(data)
         return tts.ClipFile(clip_id, tts.sha256_of(path), len(data), 3000, path)
 
@@ -50,6 +49,7 @@ def _payload(**overrides: object) -> dict[str, object]:
         "cert_nos": ["C1"],
         "events": ["assigned"],
         "text": "欢迎使用，{door_no} 号喷头",
+        "voice": "melo",
         "delay_ms": 0,
         "volume": 3,
         "enabled": True,
@@ -163,20 +163,7 @@ def test_spec_uses_canonical_event_names(client: TestClient, admin_headers: dict
     assert spec["delay"] == {"minimum_ms": 0, "maximum_ms": 10_000, "default_ms": 0}
     assert spec["volume"] == {"minimum": 0, "maximum": 5, "default": 4}
     assert "priority" not in spec
-
-
-def test_status_reports_readiness(
-    client: TestClient, admin_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    body = client.get("/api/v1/voice/status", headers=admin_headers).json()
-    assert body["ready"] is False
-
-    monkeypatch.setattr(tts, "probe", lambda _voice: tts.ClipStatus(_voice, True, True, True, True))
-    ready = client.get("/api/v1/voice/status", headers=admin_headers).json()
-    assert ready["ready"] is True
-    assert ready["model_present"] is True
-    assert ready["espeak_available"] is True
-    assert ready["voice"] == "huayan-medium"
+    assert [item["key"] for item in spec["voices"]][0] == "melo"
 
 
 def test_rule_crud_preview_and_clip(
@@ -250,6 +237,7 @@ def test_rule_crud_preview_and_clip(
         {"volume": 6},
         {"events": ["bogus"]},
         {"events": []},
+        {"voice": "huayan-medium"},
     ],
 )
 def test_rule_validation(
@@ -607,7 +595,7 @@ def test_preview_and_dispatch_carry_effect(
     deliveries = client.get("/api/v1/voice/deliveries", headers=admin_headers).json()
     assert deliveries[0]["text"].startswith("♪叮")
     plain_plan: tts.Plan = [("say", "固定内容")]
-    assert calls[0][1]["clip_id"] != tts.clip_id_for(plain_plan, service._synth_params())
+    assert calls[0][1]["clip_id"] != tts.clip_id_for(plain_plan, "melo")
 
 
 def test_gateway_schedules_voice_events(
@@ -677,7 +665,7 @@ def test_preview_invalid_and_synthesis_failure(
     )
     assert invalid.status_code == 422
 
-    def boom(_plan: object, _clip_id: str, _params: object) -> tts.ClipFile:
+    def boom(_plan: object, _clip_id: str, _voice: str) -> tts.ClipFile:
         message = "boom"
         raise tts.VoiceSynthesisError(message)
 
@@ -807,7 +795,7 @@ def test_handle_events_marks_tts_failure(
     calls: list[tuple[str, dict[str, object]]] = []
     monkeypatch.setattr(sessions_service, "send_command_and_wait", _fake_send_collector(calls))
 
-    def boom(_plan: object, _clip_id: str, _params: object) -> tts.ClipFile:
+    def boom(_plan: object, _clip_id: str, _voice: str) -> tts.ClipFile:
         message = "boom"
         raise tts.VoiceSynthesisError(message)
 
@@ -895,14 +883,14 @@ def test_patch_enabled_warms_static_clip(
     assert [action for action, _params in calls] == ["voice.prepare"]
 
 
-def test_synth_params_flow_into_synthesis(
+def test_voice_flows_into_synthesis(
     fresh_db: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured: list[tts.SynthParams] = []
+    captured: list[str] = []
 
-    def capture(plan: tts.Plan, clip_id: str, params: tts.SynthParams) -> tts.ClipFile:
-        captured.append(params)
+    def capture(plan: tts.Plan, clip_id: str, voice: str) -> tts.ClipFile:
+        captured.append(voice)
         path = tts.clip_path(clip_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         data = ("MP3:" + tts.plan_identity(plan)).encode()
@@ -911,16 +899,13 @@ def test_synth_params_flow_into_synthesis(
 
     monkeypatch.setattr(tts, "synthesize", capture)
 
-    plan: tts.Plan = [("say", "参数样本")]
-    clip, _clip_ms = service._ensure_clip(plan)
-    assert captured[-1].speech_rate == tts.SPEECH_RATE_DEFAULT
-    assert captured[-1].voice == tts.DEFAULT_VOICE
-    assert clip.clip_id == tts.clip_id_for(plan, service._synth_params())
+    plan: tts.Plan = [("say", "音色样本")]
+    clip, _clip_ms = service._ensure_clip(plan, "melo")
+    assert captured[-1] == "melo"
+    assert clip.clip_id == tts.clip_id_for(plan, "melo")
 
-    config_store.put_global_overrides({"voice_speech_rate": 150, "voice_noise_scale": 30})
-    other, _clip_ms = service._ensure_clip(plan)
-    assert captured[-1].speech_rate == 150
-    assert captured[-1].noise_scale == 30
+    other, _clip_ms = service._ensure_clip(plan, "kokoro-1")
+    assert captured[-1] == "kokoro-1"
     assert other.clip_id != clip.clip_id
 
 
@@ -930,7 +915,7 @@ def test_prepare_static_failure_is_not_fatal(
     voice_device: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def boom(_plan: object, _clip_id: str, _params: object) -> tts.ClipFile:
+    def boom(_plan: object, _clip_id: str, _voice: str) -> tts.ClipFile:
         message = "boom"
         raise tts.VoiceSynthesisError(message)
 
@@ -963,10 +948,10 @@ def test_update_validation_and_preview_render_failure(
 
 def test_ensure_clip_regenerates_bad_cache(fresh_db: str, fake_tts: None) -> None:
     plan: tts.Plan = [("say", "固定内容")]
-    clip_id = tts.clip_id_for(plan, service._synth_params())
+    clip_id = tts.clip_id_for(plan, "melo")
     repository.upsert_clip(clip_id, "bad", 1, 1, now_rfc3339())
 
-    clip, _clip_ms = service._ensure_clip(plan)
+    clip, _clip_ms = service._ensure_clip(plan, "melo")
 
     assert clip.path.is_file()
     assert clip.sha256 != "bad"
