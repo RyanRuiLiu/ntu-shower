@@ -6,6 +6,8 @@ import com.ryanliu.ntushower.core.a11y.A11yRuntime
 import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.features.remote.ScreenCapture
+import com.ryanliu.ntushower.features.voice.VoiceClipSpec
+import com.ryanliu.ntushower.features.voice.VoicePlayer
 import com.ryanliu.ntushower.transport.OutcomeStatus
 import com.ryanliu.ntushower.transport.ReasonCodes
 import org.json.JSONObject
@@ -28,11 +30,14 @@ data class CommandOutcome(
  * 浴室 App 的 UI 操作必须串行，并发会让节点定位互相错位；
  * 拍照/截图资源独立，走单独执行器并行处理。
  */
+@Suppress("TooManyFunctions")
 class CommandScheduler(
     private val overlay: CoverOverlay,
+    private val voicePlayer: VoicePlayer,
     private val onOutcome: (CommandOutcome) -> Unit,
     private val automationExecutor: Executor = Executors.newSingleThreadExecutor(),
     private val captureExecutor: Executor = Executors.newSingleThreadExecutor(),
+    private val voiceExecutor: Executor = Executors.newSingleThreadExecutor(),
 ) {
 
     sealed class Command(val id: String) {
@@ -79,6 +84,12 @@ class CommandScheduler(
 
         /** 导出界面节点树。 */
         class UiDump(id: String) : Command(id)
+
+        /** 播放一段服务端合成的音频。参数在执行时解析。 */
+        class PlayVoice(id: String, val params: JSONObject) : Command(id)
+
+        /** 只下载/校验音频，不播放。 */
+        class PrepareVoice(id: String, val params: JSONObject) : Command(id)
     }
 
     private val automationQueue = SerialCommandQueue<Command>()
@@ -87,11 +98,19 @@ class CommandScheduler(
     // 服务端那边它们也是两个通道，允许并发。
     private val captureQueue = SerialCommandQueue<Command>()
 
+    // 语音独立排队：下载/播放不碰界面，也不该被分配/结算或截图堵住；同设备多条语音串行。
+    private val voiceQueue = SerialCommandQueue<Command>()
+
     fun enqueue(command: Command, expireAtMs: Long) {
         when (command) {
             // 图像采集资源独立，不占用自动化队列——否则一条慢截图会把
             // 浴室 APP 的操作序列堵住
             is Command.Photo, is Command.Screen -> dispatch(command, captureQueue, expireAtMs) { runCapture(it) }
+
+            // 语音独立执行器：与自动化、采集互不阻塞
+            is Command.PlayVoice, is Command.PrepareVoice -> dispatch(command, voiceQueue, expireAtMs) {
+                runVoice(it)
+            }
 
             // 读节点树走自动化队列：它读的就是那份 UI 节点树，与 ui.touch / ui.key
             // 并行会读到操作到一半的界面。它和截图则毫无关系——早先归在采集队列是
@@ -179,6 +198,59 @@ class CommandScheduler(
                 captureQueue.complete()?.let { runCapture(it) }
             }
         }
+    }
+
+    /** 执行一条语音命令，结束后放行语音队列中的下一条。 */
+    private fun runVoice(command: Command) {
+        voiceExecutor.execute {
+            var reported = false
+            try {
+                onOutcome(executeVoice(command))
+                reported = true
+            } catch (e: Throwable) {
+                if (reported) {
+                    Log.w(TAG, "结果已回报，语音收尾失败：${e.message}", e)
+                } else {
+                    Log.e(TAG, "voice crashed: ${e.message}", e)
+                    onOutcome(
+                        CommandOutcome(
+                            command.id,
+                            OutcomeStatus.FAILED,
+                            ReasonCodes.DEVICE_INTERNAL_ERROR,
+                            "设备端内部错误",
+                        ),
+                    )
+                }
+            } finally {
+                voiceQueue.complete()?.let { runVoice(it) }
+            }
+        }
+    }
+
+    private fun executeVoice(command: Command): CommandOutcome {
+        val spec = when (command) {
+            is Command.PlayVoice -> VoiceClipSpec.parsePlay(command.params)
+            is Command.PrepareVoice -> VoiceClipSpec.parsePrepare(command.params)
+            else -> null
+        } ?: return CommandOutcome(
+            command.id,
+            OutcomeStatus.FAILED,
+            ReasonCodes.VOICE_PARAMS_INVALID,
+            "播报参数不合法",
+        )
+        val result = when (command) {
+            is Command.PlayVoice -> voicePlayer.play(spec)
+
+            is Command.PrepareVoice -> voicePlayer.prepare(spec)
+
+            else -> return CommandOutcome(
+                command.id,
+                OutcomeStatus.FAILED,
+                ReasonCodes.VOICE_PARAMS_INVALID,
+                "播报参数不合法",
+            )
+        }
+        return CommandOutcome(command.id, result.status, result.reasonCode, result.message, result.data)
     }
 
     /**

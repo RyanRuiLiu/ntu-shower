@@ -65,6 +65,7 @@
 | doors | 喷头现态与实时推送（door.update 数据承载，直接应用） |
 | sessions | 会话操作，目标设备在路径里 |
 | config | 全局配置、登记表、单台覆盖 |
+| voice | 语音规则 / 模板预览 / 事件投递记录 / 音频下载；设备面 `/voice/clips/{id}.mp3` |
 | identities | 身份域读模型与签发/编辑/撤销 |
 | ota | 版本清单 / 下载 / 发布管理 |
 | audit | 接口调用与命令级审计，以 trace_id 关联 |
@@ -103,7 +104,7 @@
 com.ryanliu.ntushower
 ├── core/       配置（域名锚点/运行时配置）、身份、内置 DNS、TLS、HTTP 工厂、root shell、性能日志
 ├── transport/  协议编解码（MessageCodec 单一来源）、网关客户端（连接/认证/心跳/重连）
-├── features/   doors 采集上报 / automation A11y 自动化（含遮盖层）/ notice 屏幕提示 / selfmanage 自更新与无障碍启用
+├── features/   doors 采集上报 / automation A11y 自动化（含遮盖层）/ notice 屏幕提示 / voice 语音播报 / selfmanage 自更新与无障碍启用
 ├── service/    AgentService 主服务 / A11yService 无障碍实体
 ├── receiver/   覆盖安装自启（MY_PACKAGE_REPLACED）与开机广播（标准 ROM 路径）
 └── ShowerApp   崩溃捕获

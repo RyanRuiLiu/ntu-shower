@@ -123,6 +123,28 @@ ssh iseekdream.com 'sudo NT_ROLLBACK=/opt/ntu-shower/backups/server-<时间戳>.
   旧结构会让重算在第一帧就撞上"没有这一列"；
 - **核对**：`tools.audit_timeline --db data/ntu-shower.db`，**帧数必须与合并前一致**。
 
+### 语音播报前置（voice，启用时一次性）
+
+服务端只在规则保存/试听时调用 Piper；模型、`espeak-ng`、`ffmpeg` 不随代码包发布。
+首次启用语音或换模型后执行一次：
+
+```bash
+# requirements.txt 已由 deploy.sh 安装；确认生产解释器能导入 Piper
+ssh iseekdream.com '/opt/ntu-shower/server/.venv/bin/python -c "import piper; print(1)"'
+# 系统依赖：espeak-ng（Piper 的运行依赖其共享库）与 ffmpeg（MP3 编码，需带 libmp3lame）
+ssh iseekdream.com 'command -v espeak-ng || apt-get install -y espeak-ng; ffmpeg -hide_banner -encoders | grep libmp3lame'
+# 模型（约 63MB，落在 data/voice/models；按内置的字节数与 SHA-256 校验，可重复执行）
+ssh iseekdream.com 'cd /opt/ntu-shower/server && .venv/bin/python -m tools.fetch_voice_model'
+# 合成状态（admin 身份）
+ssh iseekdream.com 'curl -sS -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/voice/status'
+```
+
+`ready=true` 才是四项（模型 / Piper / espeak-ng / ffmpeg）都齐；任一缺失时规则保存与
+试听会失败。磁盘占用：模型约 63 MB，合成音频缓存按最近使用淘汰、上限 200 MB
+（`data/voice/clips/`），都在 `data/` 下、随部署保留。设备端无需任何配置，音频经
+`/voice/clips/{clip_id}.mp3` 拉取。规则保存返回 `voice-synthesis-failed` 时，先查这个
+接口与 `journalctl -u ntu-shower`，不要在页面上反复重试。
+
 ## 4. 备份与恢复
 
 ### 自动备份（数据库）
@@ -229,6 +251,20 @@ ssh iseekdream.com 'curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.
 
 注意 `online` 字段是**最后一次上报值**，与内存中的活动连接可能不一致；
 以日志中是否有该设备的 `WebSocket /gateway/device [accepted]` 为准。
+
+### 语音播报不响
+
+1. **规则是否匹配**：设备、学号、事件逐字比较；规则停用或没有规则就不会下发。看
+   `/api/v1/voice/deliveries` 有没有对应记录。
+2. **事件是否过期**：`voice_event_max_age_s` 默认 60 秒，离线积压或延迟过长会跳过；
+   投递状态为 `skipped`。
+3. **命令是否到达设备**：审计页看 `voice.play` / `voice.prepare` 的 status 与
+   reason_code；离线是 `device.offline`，旧 APK 是 `device.unsupported_action`。
+4. **音频是否就绪**：`/api/v1/voice/status`；规则保存 503 时先按上一节补 Piper/模型。
+5. **设备是否真的在播**：设备 `device.log` 看 `audio.played` / `audio.play-failed` /
+   `audio.volume-restored`；音量恢复失败会保留待恢复标记，下次启动或播放前再试。
+6. **和浴室 App 的结算提示重叠**：调该规则的 `delay_ms`（从事件时刻算起；页面按秒输入），
+   用 `voice_delivery` 的 `occurred_at` / `dispatched_at` 与设备日志对照，现场实测后定值。
 
 ### 调试通道（ADB 桥）
 

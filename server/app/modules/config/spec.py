@@ -144,6 +144,7 @@ GROUPS: tuple[GroupSpec, ...] = (
     GroupSpec("server_link", "链路维持", "server"),
     GroupSpec("server_ui", "界面操作超时", "server"),
     GroupSpec("server_bridge", "调试通道", "server"),
+    GroupSpec("server_voice", "语音播报", "server"),
     # ── 设备下发：会推到设备，支持单台覆盖 ──
     GroupSpec("power", "电源计划", "device"),
     GroupSpec("overlay", "操作遮罩", "device"),
@@ -758,6 +759,19 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "与网页自己的域名不是一回事——网页挂在 ntu-shower 子域上，而 ssh 连的是主域，"
         "所以推不出来，只能配。见 docs/RUNBOOK.md 的连接指引。",
         group="server_bridge",
+    ),
+    ConfigSpec(
+        "voice_event_max_age_s",
+        INT,
+        SERVER,
+        60,
+        "语音播报事件时效",
+        "帧的采集时刻距服务端处理时刻超过这个秒数就不播报：设备离线或链路积压后补上来的"
+        "旧事件不补播。0 表示不限制。它只影响语音，不改变帧派生、会话与统计",
+        minimum=0,
+        maximum=3600,
+        unit="秒",
+        group="server_voice",
     ),
     # ── 后台任务（服务端侧）：一个功能一块，块内按"开关 → 阈值 → 名单"排 ──
     ConfigSpec(

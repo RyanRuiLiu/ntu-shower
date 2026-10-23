@@ -315,25 +315,36 @@ def insert_event(
     card_no: int,
     cert_no: str,
     bath_time_s: int,
-) -> None:
-    """记录一次状态转换。
+) -> int:
+    """记录一次状态转换，返回行 id。
 
     它回答 `usage_session` 回答不了的问题：暂停次数（数 `bathing→paused`）、报修次数与
     停用时长（数 `→repair` 与 `repair→`）。会话表只覆盖"进入占用态到离开"那一条路，
     区间内的状态变化它看不见。
+
+    返回值给播报事件做幂等身份：同一帧里的一次迁移只有一个行 id。
     """
-    write(
+    cursor = write(
         "INSERT INTO door_state_event"
         " (occurred_at, device_id, door_no, from_state, to_state, card_no, cert_no, bath_time_s)"
         " VALUES (?,?,?,?,?,?,?,?)",
         (occurred_at, device_id, door_no, from_state, to_state, card_no, cert_no, bath_time_s),
     )
+    return int(cursor.lastrowid or 0)
 
 
 def get_open_session(device_id: str, door_no: int) -> Row | None:
     return read_one(
         "SELECT * FROM usage_session WHERE device_id = ? AND door_no = ? AND ended_at IS NULL ORDER BY id DESC LIMIT 1",
         (device_id, door_no),
+    )
+
+
+def get_session(session_id: int) -> Row | None:
+    """按会话 id 取播报需要的两个时长来源；只返回这三列。"""
+    return read_one(
+        "SELECT assigned_at, ended_at, flow_s FROM usage_session WHERE id = ?",
+        (session_id,),
     )
 
 

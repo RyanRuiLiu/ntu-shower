@@ -176,10 +176,26 @@ class CommandFactoryTest {
             assertNull("$action 不该入队", create(action))
         }
 
-        // 三条路径合起来必须覆盖全部能力，一个不漏。
+        // 入队路径（自动化/采集/语音）加维护、桥接，合起来必须覆盖全部能力，一个不漏。
         // filter 出来的是 List，要转回 Set 才能与 ALL 比内容
         val queued = SupportedActions.ALL.filter { create(it) != null }.toSet()
         assertEquals(SupportedActions.ALL, queued + maintenance + bridge)
+    }
+
+    @Test
+    fun `voice play and prepare keep their params`() {
+        val clip = "a".repeat(64)
+        val payload = """{"clip_id":"$clip","sha256":"$clip","size_bytes":100,"duration_ms":1000,"volume":3}"""
+
+        val play = create(SupportedActions.VOICE_PLAY, payload)
+        assertTrue(play is CommandScheduler.Command.PlayVoice)
+        val playParams = (play as CommandScheduler.Command.PlayVoice).params
+        assertEquals(clip, playParams.optString("clip_id"))
+        assertEquals(3, playParams.optInt("volume"))
+
+        val prepare = create(SupportedActions.VOICE_PREPARE, payload)
+        assertTrue(prepare is CommandScheduler.Command.PrepareVoice)
+        assertEquals(3, (prepare as CommandScheduler.Command.PrepareVoice).params.optInt("volume"))
     }
 
     @Test

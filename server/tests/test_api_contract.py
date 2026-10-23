@@ -99,6 +99,13 @@ def test_contract_models_exist_for_every_client_facing_row() -> None:
         "ApiCallRecord",
         "CommandAuditRecord",
         "CommandOutcome",
+        "VoiceEventView",
+        "VoicePlaceholderView",
+        "VoiceSpecView",
+        "VoiceRuleView",
+        "VoicePreviewView",
+        "VoiceStatusView",
+        "VoiceDeliveryView",
     ):
         assert expected in _COMPONENTS, f"契约模型缺失：{expected}"
 

@@ -89,6 +89,14 @@ UI_UNKNOWN_DIRECTION = Reason("ui.unknown_direction", "未知的滚动方向")
 CAMERA_CAPTURE_FAILED = Reason("camera.capture_failed", "拍照失败")
 SCREEN_CAPTURE_FAILED = Reason("screen.capture_failed", "截屏失败")
 
+# ── 语音播报 ──
+
+VOICE_PARAMS_INVALID = Reason("voice.params_invalid", "播报参数不合法")
+VOICE_CLIP_DOWNLOAD_FAILED = Reason("voice.clip_download_failed", "播报音频下载失败")
+VOICE_CLIP_INVALID = Reason("voice.clip_invalid", "播报音频校验失败")
+VOICE_PLAY_FAILED = Reason("voice.play_failed", "播报播放失败")
+VOICE_VOLUME_FAILED = Reason("voice.volume_failed", "设置播报音量失败")
+
 #: 全部原因码的清单。新增原因必须登记于此，否则对账会漏。
 REGISTRY: tuple[Reason, ...] = (
     BAD_JSON,
@@ -129,6 +137,11 @@ REGISTRY: tuple[Reason, ...] = (
     UI_UNKNOWN_DIRECTION,
     CAMERA_CAPTURE_FAILED,
     SCREEN_CAPTURE_FAILED,
+    VOICE_PARAMS_INVALID,
+    VOICE_CLIP_DOWNLOAD_FAILED,
+    VOICE_CLIP_INVALID,
+    VOICE_PLAY_FAILED,
+    VOICE_VOLUME_FAILED,
 )
 
 #: 原因码 → 中文说明，供"设备没给 terminal_message"时补齐。

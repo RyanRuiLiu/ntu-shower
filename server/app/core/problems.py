@@ -45,6 +45,12 @@ UNKNOWN_CAPABILITY = Problem("unknown-capability", 422, "未知的权限名")
 # ── 远程配置 ──
 INVALID_CONFIG = Problem("invalid-config", 422, "配置值不合法")
 
+# ── 语音播报 ──
+VOICE_RULE_NOT_FOUND = Problem("voice-rule-not-found", 404, "找不到语音规则")
+INVALID_VOICE_RULE = Problem("invalid-voice-rule", 422, "语音规则不合法")
+VOICE_SYNTHESIS_FAILED = Problem("voice-synthesis-failed", 503, "语音合成失败")
+VOICE_CLIP_NOT_FOUND = Problem("voice-clip-not-found", 404, "找不到播报音频")
+
 # ── 请求格式 ──
 VALIDATION_FAILED = Problem("validation-failed", 422, "提交的内容有误")
 
@@ -67,6 +73,10 @@ REGISTRY: tuple[Problem, ...] = (
     CAPABILITY_DENIED,
     UNKNOWN_CAPABILITY,
     INVALID_CONFIG,
+    VOICE_RULE_NOT_FOUND,
+    INVALID_VOICE_RULE,
+    VOICE_SYNTHESIS_FAILED,
+    VOICE_CLIP_NOT_FOUND,
     VALIDATION_FAILED,
 )
 
