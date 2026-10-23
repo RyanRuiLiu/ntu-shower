@@ -62,6 +62,12 @@
   gap: var(--sp-2);
 }
 
+/* 按钮行后面直接跟一个字段（如「渲染效果」区）时，按钮与字段标题贴在一起；
+   字段自身只有下边距，这里补上这一种相邻关系的上间距 */
+.panel-body .btn-row + .field {
+  margin-top: var(--sp-3);
+}
+
 /* ── 字段 ───────────────────────────────────────────────── */
 
 .field {
@@ -163,6 +169,37 @@
   color: var(--blue);
   border-color: var(--blue);
   background: var(--blue-bg);
+}
+
+/* ── 块状提示（琥珀）：一句话以上的警示/说明用它，徽标只装得下短状态词 ── */
+
+.note-amber {
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--amber);
+  border-radius: 6px;
+  background: var(--amber-bg);
+  color: var(--amber);
+  font-size: var(--fs-small);
+  line-height: 1.6;
+}
+
+/* ── 占位符插入片：长得像徽标、行为像按钮，点击插入到输入框光标处 ── */
+
+.ph-chip {
+  display: inline-block;
+  margin: 0 2px 2px 0;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--elevated);
+  font: var(--fs-chip) var(--font-mono);
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.ph-chip:hover {
+  color: var(--blue);
+  border-color: var(--blue);
 }
 
 /* ── 标签 + 值的一行 ────────────────────────────────────── */
