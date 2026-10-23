@@ -136,9 +136,11 @@ export const api = {
   voiceStatus: () => send(`${API_V1}/voice/status`),
   voiceDeliveries: () => send(`${API_V1}/voice/deliveries`),
   previewVoiceRule: (value) => send(`${API_V1}/voice/preview`, post(value)),
+  pushVoiceRule: (id, deviceId) => send(`${API_V1}/voice/rules/${id}/push`, post({ device_id: deviceId })),
   // ── 音效库 ──（admin 管理；试听文件按内容寻址公开，同 /voice/clips）
   voiceEffects: () => send(`${API_V1}/voice/effects`),
   uploadVoiceEffect: (form) => send(`${API_V1}/voice/effects`, { method: 'POST', body: form, raw: true }),
+  renameVoiceEffect: (id, name) => send(`${API_V1}/voice/effects/${id}`, put({ name })),
   deleteVoiceEffect: (id) => send(`${API_V1}/voice/effects/${id}`, del()),
 
   // ── 身份 ──（admin；名单响应含能力位枚举，身份页一次装载）

@@ -54,24 +54,18 @@ def _fake_probe_ok(monkeypatch: pytest.MonkeyPatch, voice_dir: Path) -> None:
 # ── 注册表 ────────────────────────────────────────────────────────────────
 
 
-def test_registry_has_nine_voices_sharing_kokoro_files() -> None:
+def test_registry_single_melo_voice() -> None:
     assert tts.DEFAULT_VOICE == "melo"
+    assert list(tts.VOICES) == ["melo"]
     assert tts.VOICES["melo"].engine == "melo"
-    kokoro_keys = [key for key, spec in tts.VOICES.items() if spec.engine == "kokoro"]
-    assert len(kokoro_keys) == 8
-    # 八个 Kokoro 音色共用一份模型文件，只靠 sid 区分
-    file_sets = {id(tts.VOICES[key].files) for key in kokoro_keys}
-    assert len(file_sets) == 1
-    assert sorted(tts.VOICES[key].sid for key in kokoro_keys) == list(range(8))
 
 
-def test_recipe_and_clip_id_differ_by_voice_and_speaker() -> None:
+def test_recipe_and_clip_id_are_stable_and_text_specific() -> None:
     plan: tts.Plan = [("say", "你好")]
     base = tts.clip_id_for(plan, "melo")
     assert base == tts.clip_id_for(plan, "melo")
     assert base != tts.clip_id_for([("say", "你好。")], "melo")
-    assert base != tts.clip_id_for(plan, "kokoro-1")
-    assert tts.clip_id_for(plan, "kokoro-1") != tts.clip_id_for(plan, "kokoro-2")
+    assert tts.clip_id_for([("fx", Path("e.wav")), *plan], "melo") != base
     assert len(base) == 64
 
 
@@ -80,9 +74,8 @@ def test_probe_needs_files_and_engine_package(voice_dir: Path, monkeypatch: pyte
     assert tts.probe("melo") is False
     _fake_probe_ok(monkeypatch, voice_dir)
     assert tts.probe("melo") is True
-    assert tts.probe("kokoro-8") is True
-    statuses = {item.key: item.available for item in tts.voice_statuses()}
-    assert statuses["melo"] is True
+    assert [item.key for item in tts.voice_statuses()] == ["melo"]
+    assert tts.voice_statuses()[0].available is True
 
 
 # ── 数字归一 ──────────────────────────────────────────────────────────────
@@ -151,6 +144,13 @@ def test_cert_no_reads_digitwise_with_truncation() -> None:
     assert render.render_segments("{door_no} 号", doors)[0].text == "5 号"
 
 
+def test_render_rejects_missing_value_and_empty_result() -> None:
+    with pytest.raises(render.TemplateError):
+        render.render_segments("{event}", {})
+    with pytest.raises(render.TemplateError):
+        render.render_segments("{event}", {"event": ""})
+
+
 def test_validate_template_rejects_unknown_and_raw_braces() -> None:
     with pytest.raises(render.TemplateError):
         render.validate_template("你好 {name}")
@@ -158,6 +158,10 @@ def test_validate_template_rejects_unknown_and_raw_braces() -> None:
         render.validate_template("长" * (render.MAX_TEMPLATE_CHARS + 1))
     with pytest.raises(render.TemplateError):
         render.validate_template("{door_no:3}")
+    with pytest.raises(render.TemplateError):
+        render.validate_template("{cert_no:0} 太短")
+    with pytest.raises(render.TemplateError):
+        render.validate_template("{fx:} 空名")
 
 
 # ── 拼装合成 ──────────────────────────────────────────────────────────────
@@ -172,8 +176,7 @@ def test_synthesize_writes_mp3(voice_dir: Path, monkeypatch: pytest.MonkeyPatch)
     clip = tts.synthesize(plan, tts.clip_id_for(plan, "melo"), "melo")
 
     assert clip.path.is_file()
-    # 1.0s 语音 + 首尾静音垫（120ms + 250ms）
-    assert clip.duration_ms in (1369, 1370)
+    assert clip.duration_ms == 1249
     assert clip.size_bytes == 203
     assert tts.sha256_of(clip.path) == clip.sha256
 
@@ -187,9 +190,9 @@ def test_synthesize_assembles_plan_in_order(voice_dir: Path, monkeypatch: pytest
     monkeypatch.setattr(tts, "decode_effect", lambda _src, _rate, target: _write_wav(target, 0.5))
 
     plan: tts.Plan = [("fx", effect), ("pause", 300), ("say", "你好")]
-    clip = tts.synthesize(plan, tts.clip_id_for(plan, "kokoro-3"), "kokoro-3")
-    # 0.5s 音效 + 0.3s 停顿 + 1.0s 语音 + 首尾垫
-    assert clip.duration_ms in (2169, 2170)
+    clip = tts.synthesize(plan, tts.clip_id_for(plan, "melo"), "melo")
+    # 0.5s 音效 + 0.3s 停顿 + 1.0s 语音
+    assert clip.duration_ms in (2048, 2049)
 
 
 def test_synthesize_plan_without_leading_say(voice_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -201,7 +204,8 @@ def test_synthesize_plan_without_leading_say(voice_dir: Path, monkeypatch: pytes
 
     plan: tts.Plan = [("fx", effect), ("pause", 250)]
     clip = tts.synthesize(plan, tts.clip_id_for(plan, "melo"), "melo")
-    assert clip.duration_ms in (869, 870)
+    # 0.25 音效 + 0.25 停顿 + 语音段（替身 0.25s：这段用例的替身时长由该用例自定）
+    assert clip.duration_ms == 749
 
     with pytest.raises(tts.VoiceSynthesisError):
         tts.synthesize([], tts.clip_id_for([], "melo"), "melo")

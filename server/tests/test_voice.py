@@ -14,7 +14,7 @@ from app.modules.doors import service as doors_service
 from app.modules.doors.events import DoorEvent, DoorEventKind
 from app.modules.sessions import service as sessions_service
 from app.modules.sessions.schemas import CommandOutcome
-from app.modules.voice import repository, schemas, service, tts
+from app.modules.voice import render, repository, schemas, service, tts
 
 DEVICE_ID = "dev-voice"
 OTHER_DEVICE_ID = "dev-voice-other"
@@ -163,7 +163,7 @@ def test_spec_uses_canonical_event_names(client: TestClient, admin_headers: dict
     assert spec["delay"] == {"minimum_ms": 0, "maximum_ms": 10_000, "default_ms": 0}
     assert spec["volume"] == {"minimum": 0, "maximum": 5, "default": 4}
     assert "priority" not in spec
-    assert [item["key"] for item in spec["voices"]][0] == "melo"
+    assert next(item["key"] for item in spec["voices"]) == "melo"
 
 
 def test_rule_crud_preview_and_clip(
@@ -248,6 +248,50 @@ def test_rule_validation(
 ) -> None:
     response = client.post("/api/v1/voice/rules", headers=admin_headers, json=_payload(**overrides))
     assert response.status_code == 422, response.text
+
+
+def test_status_lists_voice_catalog(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = client.get("/api/v1/voice/status", headers=admin_headers).json()
+    keys = [item["key"] for item in body["voices"]]
+    assert keys == ["melo"]
+    assert all("note" in item and "available" in item for item in body["voices"])
+
+    monkeypatch.setattr(tts, "probe", lambda _voice: True)
+    refreshed = client.get("/api/v1/voice/status", headers=admin_headers).json()
+    assert all(item["available"] for item in refreshed["voices"])
+
+
+def test_rule_text_and_voice_guards(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    voice_device: None,
+) -> None:
+    blank = client.post(
+        "/api/v1/voice/rules",
+        headers=admin_headers,
+        json=_payload(text="   "),
+    )
+    assert blank.status_code == 422
+    assert "不能为空" in blank.json()["detail"]
+
+    too_long = client.post(
+        "/api/v1/voice/rules",
+        headers=admin_headers,
+        json=_payload(text="长" * (render.MAX_TEMPLATE_CHARS + 1)),
+    )
+    assert too_long.status_code == 422
+
+    unknown_voice = client.post(
+        "/api/v1/voice/rules",
+        headers=admin_headers,
+        json=_payload(voice="kokoro-1"),
+    )
+    assert unknown_voice.status_code == 422
+    assert "只允许" in unknown_voice.json()["detail"]
 
 
 def test_batch_create_expands_and_skips_existing(
@@ -504,16 +548,19 @@ def test_effects_upload_rules_and_guard(
     rule = _create(client, admin_headers, text="{fx:叮咚} 固定内容")
     assert rule["sample_text"].startswith("♪叮咚")
 
-    # 被模板引用的音效不许删,也不许改掉被引用的名字;规则删掉后可删
+    # 被模板引用的音效不许删;同内容换新名上传会级联改写引用它的规则模板
     blocked = client.delete(f"/api/v1/voice/effects/{effect_id}", headers=admin_headers)
     assert blocked.status_code == 409
-    renamed_blocked = client.post(
+    cascaded = client.post(
         "/api/v1/voice/effects",
         headers=admin_headers,
         data={"name": "新名字"},
         files={"file": ("ding.wav", b"arbitrary-bytes", "audio/wav")},
     )
-    assert renamed_blocked.status_code == 409
+    assert cascaded.status_code == 200, cascaded.text
+    assert cascaded.json()["name"] == "新名字"
+    rules_listing = client.get("/api/v1/voice/rules", headers=admin_headers).json()
+    assert any("{fx:新名字}" in item["text"] for item in rules_listing)
     assert client.delete(f"/api/v1/voice/rules/{rule['id']}", headers=admin_headers).status_code == 204
     assert client.delete(f"/api/v1/voice/effects/{effect_id}", headers=admin_headers).status_code == 204
     assert client.get("/api/v1/voice/effects", headers=admin_headers).json() == []
@@ -596,6 +643,25 @@ def test_preview_and_dispatch_carry_effect(
     assert deliveries[0]["text"].startswith("♪叮")
     plain_plan: tts.Plan = [("say", "固定内容")]
     assert calls[0][1]["clip_id"] != tts.clip_id_for(plain_plan, "melo")
+
+
+def test_effect_upload_entry_guards(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    voice_device: None,
+) -> None:
+    def post(name: str, payload: bytes) -> object:
+        return client.post(
+            "/api/v1/voice/effects",
+            headers=admin_headers,
+            data={"name": name},
+            files={"file": ("x.wav", payload, "audio/wav")},
+        ).status_code
+
+    assert post("   ", b"x") == 422
+    assert post("名" * 41, b"x") == 422
+    assert post("空文件", b"") == 422
+    assert post("超限", b"x" * (tts.MAX_EFFECT_UPLOAD_BYTES + 1)) == 422
 
 
 def test_gateway_schedules_voice_events(
@@ -904,8 +970,8 @@ def test_voice_flows_into_synthesis(
     assert captured[-1] == "melo"
     assert clip.clip_id == tts.clip_id_for(plan, "melo")
 
-    other, _clip_ms = service._ensure_clip(plan, "kokoro-1")
-    assert captured[-1] == "kokoro-1"
+    other, _clip_ms = service._ensure_clip([("say", "另一段")], "melo")
+    assert captured[-1] == "melo"
     assert other.clip_id != clip.clip_id
 
 
@@ -1108,3 +1174,111 @@ def test_repository_prune_clips(fresh_db: str) -> None:
     assert len(removed) == 2
     assert repository.count_clips() == 1
     assert repository.get_clip(removed[0]) is None
+
+
+def test_effect_rename_endpoint_and_name_autofill(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    voice_device: None,
+    fake_tts: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    durations = iter([0.4, 0.6])
+
+    def fake_normalize(_src: object, target: object) -> int:
+        return _write_effect_wav(target, next(durations))
+
+    monkeypatch.setattr(tts, "normalize_to_wav", fake_normalize)
+
+    # 上传不带名称：自动取上传文件名（去扩展名）
+    upload = client.post(
+        "/api/v1/voice/effects",
+        headers=admin_headers,
+        files={"file": ("door-open.mp3", b"arbitrary-bytes", "audio/mpeg")},
+    )
+    assert upload.status_code == 200, upload.text
+    effect = upload.json()
+    assert effect["name"] == "door-open"
+    effect_id = effect["effect_id"]
+
+    # 改名端点：改名字本身
+    renamed = client.put(f"/api/v1/voice/effects/{effect_id}", headers=admin_headers, json={"name": "开门"})
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["name"] == "开门"
+
+    # 被规则模板引用的旧名：改名级联改写模板，规则不失效
+    rule = _create(client, admin_headers, text="{fx:开门} 前奏")
+    again = client.put(f"/api/v1/voice/effects/{effect_id}", headers=admin_headers, json={"name": "关门"})
+    assert again.status_code == 200, again.text
+    rules_listing = client.get("/api/v1/voice/rules", headers=admin_headers).json()
+    assert any("{fx:关门}" in item["text"] for item in rules_listing)
+    assert not any("{fx:开门}" in item["text"] for item in rules_listing)
+
+    # 与库内其他音效重名：拒绝
+    other = client.post(
+        "/api/v1/voice/effects",
+        headers=admin_headers,
+        data={"name": "别的"},
+        files={"file": ("other.wav", b"other-bytes", "audio/wav")},
+    )
+    assert other.status_code == 200
+    conflict = client.put(f"/api/v1/voice/effects/{effect_id}", headers=admin_headers, json={"name": "别的"})
+    assert conflict.status_code == 422
+
+    # 不存在的音效：404
+    missing = client.put("/api/v1/voice/effects/" + "0" * 64, headers=admin_headers, json={"name": "随意"})
+    assert missing.status_code == 404
+
+    assert client.delete(f"/api/v1/voice/rules/{rule['id']}", headers=admin_headers).status_code == 204
+
+
+def test_rule_push_plays_on_selected_device(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    voice_device: None,
+    fake_tts: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(tts, "normalize_to_wav", lambda _src, target: _write_effect_wav(target, 0.4))
+    rule = _create(client, admin_headers, text="手动 {door_no} 号", volume=3)
+    rule_id = int(rule["id"])
+
+    calls: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(sessions_service, "send_command_and_wait", _fake_send_collector(calls))
+
+    pushed = client.post(f"/api/v1/voice/rules/{rule_id}/push", headers=admin_headers, json={"device_id": "dev-voice"})
+    assert pushed.status_code == 200, pushed.text
+    body = pushed.json()
+    assert body["device_id"] == "dev-voice"
+    assert body["status"] == "ok"
+    assert "手动 1 号" in body["rendered_text"]
+
+    # 下发参数与真实事件一致：voice.play + 规则的音量
+    assert [action for action, _params in calls] == ["voice.play"]
+    assert calls[0][1]["volume"] == 3
+
+    # 最近播报里以 manual:* 落一条，detail 标明手动推送
+    deliveries = client.get("/api/v1/voice/deliveries", headers=admin_headers).json()
+    assert deliveries[0]["status"] == "ok"
+    assert deliveries[0]["detail"].startswith("手动推送")
+
+
+def test_rule_push_rejects_unknown_device_and_rule(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    voice_device: None,
+    fake_tts: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(tts, "normalize_to_wav", lambda _src, target: _write_effect_wav(target, 0.4))
+    rule = _create(client, admin_headers, text="固定内容")
+
+    missing_device = client.post(
+        f"/api/v1/voice/rules/{rule['id']}/push", headers=admin_headers, json={"device_id": "no-such"}
+    )
+    assert missing_device.status_code == 404
+
+    missing_rule = client.post(
+        "/api/v1/voice/rules/999999/push", headers=admin_headers, json={"device_id": "dev-voice"}
+    )
+    assert missing_rule.status_code == 404

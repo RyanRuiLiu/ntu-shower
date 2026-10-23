@@ -180,6 +180,10 @@ class VoiceSpecView(BaseModel):
     volume: VoiceBoundView
 
 
+class VoiceEffectRename(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+
+
 class VoiceEffectView(BaseModel):
     """音效库里的一段提示音：内容身份是归一化 WAV 的 SHA-256。"""
 
@@ -232,6 +236,19 @@ class VoicePreviewRequest(BaseModel):
     cert_no: str = Field(default="示例学号", min_length=1, max_length=64)
     door_no: int = Field(default=1, ge=1, le=48)
     voice: str = Field(default="melo", min_length=1, max_length=32)
+
+
+class VoicePushRequest(BaseModel):
+    device_id: str = Field(min_length=1, max_length=64)
+
+
+class VoicePushView(BaseModel):
+    device_id: str
+    rendered_text: str
+    status: str
+    reason_code: str
+    detail: str
+    duration_ms: int
 
 
 class VoiceRuleView(BaseModel):
