@@ -276,7 +276,8 @@ class AgentService : Service() {
         RootShell.command.maxOutputBytes = RuntimeConfig.deviceExecMaxOutputBytes.toInt()
         recentOutcomes.setCapacity(RuntimeConfig.commandDedupMaxCount.toInt())
         notice.onConfigChanged()
-        // hasReading 只表示“收到过”；真读到过就不再为了看门狗重复拉库。
+        // hasReading 表示收到过完整读数：读失败不算，每次看门狗 tick 都会再补一次，
+        // 直到读成为止。浴室数据库在没人洗浴时长期安静，事件驱动的采集补不上这次失败。
         if (notice.needsOccupancy() && !notice.hasReading()) {
             worker.execute { sender.readAndNotify() }
         }
