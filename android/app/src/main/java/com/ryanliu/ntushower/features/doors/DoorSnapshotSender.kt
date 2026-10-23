@@ -26,7 +26,7 @@ import java.util.UUID
  * 浴室 App 的写库节奏一致：它洗浴期间根本不写，只在迁移时落 SQL（见
  * `ntu-remote-shower/dbGUIDE.md`）。实测 100 天的平均上报量是每 4 分钟一份。
  */
-class DoorSnapshotSender(context: Context) {
+class DoorSnapshotSender(context: Context, private val onDoorsRead: (DoorReading) -> Unit = {}) {
 
     /** 发件箱里最旧的一条待确认帧。 */
     private data class OutboxRow(val id: Long, val snapshotId: String, val payload: String)
@@ -67,7 +67,11 @@ class DoorSnapshotSender(context: Context) {
         // 再取会把读的耗时算进去（真机实测几百毫秒），而这是个恒定偏晚的系统偏差。
         val capturedAt = ServerClock.nowRfc3339()
         val deviceClock = Clock.wallClockRfc3339()
-        val doors = DoorSnapshotReader.readAll()
+        val reading = DoorSnapshotReader.readAll()
+        // 先通知读数观察者，再判内容指纹：屏幕提示的占用条件依赖“这次读到了什么”，
+        // 与“这一帧是否值得上报”是两件事。
+        onDoorsRead(reading)
+        val doors = reading.doors
         val hash = doors.map { it.fingerprint() }.hashCode()
         if (hash == lastHash) return
         lastHash = hash
@@ -142,6 +146,16 @@ class DoorSnapshotSender(context: Context) {
      */
     fun forgetLastState() {
         lastHash = null
+    }
+
+    /**
+     * 只读一次并通知读数观察者；不更新指纹、不写发件箱。
+     *
+     * 供不 `trusted` 但仍需要在本地判断占用时使用——占用是本地事实，不应因为没连上
+     * 服务端就变成未知。与 [captureAndEnqueue] 共用调用方的工作线程，天然串行。
+     */
+    fun readAndNotify() {
+        onDoorsRead(DoorSnapshotReader.readAll())
     }
 
     /**

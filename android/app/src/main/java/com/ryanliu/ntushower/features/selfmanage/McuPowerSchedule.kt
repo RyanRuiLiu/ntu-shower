@@ -1,6 +1,7 @@
 package com.ryanliu.ntushower.features.selfmanage
 
 import android.util.Log
+import com.ryanliu.ntushower.core.clock.TimeOfDay
 import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.log.DeviceLog
 import com.xboot.stdcall.posix
@@ -96,12 +97,6 @@ object McuPowerSchedule {
     internal fun delayMinutes(nowMinuteOfDay: Int, targetMinuteOfDay: Int): Int =
         (targetMinuteOfDay - nowMinuteOfDay + MINUTES_PER_DAY) % MINUTES_PER_DAY
 
-    /** "HH:MM" → 当天第几分钟；格式不符给 null。 */
-    internal fun parseMinuteOfDay(text: String): Int? {
-        val match = Regex("""^(\d{2}):(\d{2})$""").find(text) ?: return null
-        val hour = match.groupValues[1].toInt()
-        val minute = match.groupValues[2].toInt()
-        if (hour > 23 || minute > 59) return null
-        return hour * 60 + minute
-    }
+    /** "HH:MM" → 当天第几分钟；格式不符给 null。解析规则见 [TimeOfDay]。 */
+    internal fun parseMinuteOfDay(text: String): Int? = TimeOfDay.parseMinuteOfDay(text)
 }

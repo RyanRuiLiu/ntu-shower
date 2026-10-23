@@ -73,6 +73,10 @@ class A11yService :
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
+        val pkg = event.packageName?.toString() ?: ""
+        // 本应用只有覆盖窗口，没有浴室 App 页面语义：提示窗与遮盖层的窗口/文字事件
+        // 不能被当成浴室 App 退出，也不应推动 BathAppPage 重算。
+        if (pkg == packageName) return
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
             // 只入队，不在这里算。重算要做同步 IPC，而本回调跑在**主线程**上——真机上正是
             // 这条路径把主线程按住，让看门狗的广播排不上队、超时后进程被系统以 ANR 杀掉。
@@ -88,7 +92,6 @@ class A11yService :
             )
         }
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            val pkg = event.packageName?.toString() ?: ""
             if (pkg == AppConfig.BATH_APP_PACKAGE) {
                 A11yRuntime.bathAppInForeground = true
                 // 回到前台即清除退出历史与冷却：不论此前是否处于冷却期，

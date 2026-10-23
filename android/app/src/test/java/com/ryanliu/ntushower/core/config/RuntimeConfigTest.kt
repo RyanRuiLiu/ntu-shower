@@ -93,7 +93,60 @@ class RuntimeConfigTest {
     fun supportedKeys_hasExpectedCount() {
         // 真正的键集合对账在服务端（server/tests/test_config_spec.py，按名字比对）。
         // 这里只守住数量：设备端键凭空变少或变多都该是有意的改动。
-        assertEquals(30, RuntimeConfig.supportedKeys.size)
+        assertEquals(43, RuntimeConfig.supportedKeys.size)
+    }
+
+    @Test
+    fun apply_readsNoticeKeys() {
+        RuntimeConfig.apply(
+            JSONObject()
+                .put("notice_enabled", true)
+                .put("notice_text", "测试提示")
+                .put("notice_text_size_sp", 60)
+                .put("notice_text_color", "#112233")
+                .put("notice_x_dp", 120)
+                .put("notice_y_dp", 240)
+                .put("notice_time_enabled", true)
+                .put("notice_time_start", "21:30")
+                .put("notice_time_end", "22:30")
+                .put("notice_weekdays", "1,3,5")
+                .put("notice_occupancy_enabled", true)
+                .put("notice_occupancy_min", 3)
+                .put("notice_occupancy_max", 12),
+        )
+
+        assertEquals(true, RuntimeConfig.noticeEnabled)
+        assertEquals("测试提示", RuntimeConfig.noticeText)
+        assertEquals(60, RuntimeConfig.noticeTextSizeSp)
+        assertEquals("#112233", RuntimeConfig.noticeTextColor)
+        assertEquals(120, RuntimeConfig.noticeXDp)
+        assertEquals(240, RuntimeConfig.noticeYDp)
+        assertEquals(true, RuntimeConfig.noticeTimeEnabled)
+        assertEquals("21:30", RuntimeConfig.noticeTimeStart)
+        assertEquals("22:30", RuntimeConfig.noticeTimeEnd)
+        assertEquals("1,3,5", RuntimeConfig.noticeWeekdays)
+        assertEquals(true, RuntimeConfig.noticeOccupancyEnabled)
+        assertEquals(3, RuntimeConfig.noticeOccupancyMin)
+        assertEquals(12, RuntimeConfig.noticeOccupancyMax)
+    }
+
+    @Test
+    fun apply_clampsNoticeSizeButKeepsZeroPosition() {
+        // 字号 0 会让文字不可见；x/y 与占用下限的 0 是合法值，不得被抬走。
+        RuntimeConfig.apply(
+            JSONObject()
+                .put("notice_text_size_sp", 0)
+                .put("notice_x_dp", 0)
+                .put("notice_y_dp", 0)
+                .put("notice_occupancy_min", 0)
+                .put("notice_occupancy_max", 0),
+        )
+
+        assertEquals(1, RuntimeConfig.noticeTextSizeSp)
+        assertEquals(0, RuntimeConfig.noticeXDp)
+        assertEquals(0, RuntimeConfig.noticeYDp)
+        assertEquals(0, RuntimeConfig.noticeOccupancyMin)
+        assertEquals(0, RuntimeConfig.noticeOccupancyMax)
     }
 
     @Test
@@ -151,7 +204,7 @@ class RuntimeConfigTest {
                 RuntimeConfig.apply(JSONObject().put(key, value))
             }
         }
-        assertEquals(30, RuntimeConfig.supportedKeys.size)
+        assertEquals(43, RuntimeConfig.supportedKeys.size)
     }
 
     @Test

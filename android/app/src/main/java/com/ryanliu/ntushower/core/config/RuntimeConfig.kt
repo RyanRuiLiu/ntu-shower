@@ -78,6 +78,48 @@ object RuntimeConfig {
     @Volatile var overlayMarginLeftDp = ConfigDefaults.OVERLAY_MARGIN_LEFT_DP.toInt()
         private set
 
+    // ── 屏幕提示 ──
+    // 配置面在服务端；显隐判定在设备端的 NoticeRule。这里只保存下发值。
+    @Volatile var noticeEnabled = ConfigDefaults.NOTICE_ENABLED
+        private set
+
+    @Volatile var noticeText = ConfigDefaults.NOTICE_TEXT
+        private set
+
+    @Volatile var noticeTextSizeSp = ConfigDefaults.NOTICE_TEXT_SIZE_SP.toInt()
+        private set
+
+    @Volatile var noticeTextColor = ConfigDefaults.NOTICE_TEXT_COLOR
+        private set
+
+    // x/y 与占用上下限的 0 是合法值，只挡住负数；字号则至少为 1。
+    @Volatile var noticeXDp = ConfigDefaults.NOTICE_X_DP.toInt()
+        private set
+
+    @Volatile var noticeYDp = ConfigDefaults.NOTICE_Y_DP.toInt()
+        private set
+
+    @Volatile var noticeTimeEnabled = ConfigDefaults.NOTICE_TIME_ENABLED
+        private set
+
+    @Volatile var noticeTimeStart = ConfigDefaults.NOTICE_TIME_START
+        private set
+
+    @Volatile var noticeTimeEnd = ConfigDefaults.NOTICE_TIME_END
+        private set
+
+    @Volatile var noticeWeekdays = ConfigDefaults.NOTICE_WEEKDAYS
+        private set
+
+    @Volatile var noticeOccupancyEnabled = ConfigDefaults.NOTICE_OCCUPANCY_ENABLED
+        private set
+
+    @Volatile var noticeOccupancyMin = ConfigDefaults.NOTICE_OCCUPANCY_MIN.toInt()
+        private set
+
+    @Volatile var noticeOccupancyMax = ConfigDefaults.NOTICE_OCCUPANCY_MAX.toInt()
+        private set
+
     /**
      * 是否记录自动化流程的分段耗时。
      *
@@ -201,6 +243,24 @@ object RuntimeConfig {
         "overlay_text_color" to { c, key -> overlayTextColor = c.optString(key, overlayTextColor) },
         "overlay_margin_left_dp" to
             { c, key -> overlayMarginLeftDp = atLeastOne(c.optInt(key, overlayMarginLeftDp)) },
+        "notice_enabled" to { c, key -> noticeEnabled = c.optBoolean(key, noticeEnabled) },
+        "notice_text" to { c, key -> noticeText = c.optString(key, noticeText) },
+        "notice_text_size_sp" to
+            { c, key -> noticeTextSizeSp = atLeastOne(c.optInt(key, noticeTextSizeSp)) },
+        "notice_text_color" to { c, key -> noticeTextColor = c.optString(key, noticeTextColor) },
+        "notice_x_dp" to { c, key -> noticeXDp = c.optInt(key, noticeXDp).coerceAtLeast(0) },
+        "notice_y_dp" to { c, key -> noticeYDp = c.optInt(key, noticeYDp).coerceAtLeast(0) },
+        "notice_time_enabled" to
+            { c, key -> noticeTimeEnabled = c.optBoolean(key, noticeTimeEnabled) },
+        "notice_time_start" to { c, key -> noticeTimeStart = c.optString(key, noticeTimeStart) },
+        "notice_time_end" to { c, key -> noticeTimeEnd = c.optString(key, noticeTimeEnd) },
+        "notice_weekdays" to { c, key -> noticeWeekdays = c.optString(key, noticeWeekdays) },
+        "notice_occupancy_enabled" to
+            { c, key -> noticeOccupancyEnabled = c.optBoolean(key, noticeOccupancyEnabled) },
+        "notice_occupancy_min" to
+            { c, key -> noticeOccupancyMin = c.optInt(key, noticeOccupancyMin).coerceAtLeast(0) },
+        "notice_occupancy_max" to
+            { c, key -> noticeOccupancyMax = c.optInt(key, noticeOccupancyMax).coerceAtLeast(0) },
         "automation_trace_enabled" to
             { c, key -> automationTraceEnabled = c.optBoolean(key, automationTraceEnabled) },
         "command_dedup_max_count" to
