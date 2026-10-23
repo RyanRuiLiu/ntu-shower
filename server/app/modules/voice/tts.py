@@ -1,135 +1,90 @@
-"""Piper 中文合成、分段拼装（语音/音效/停顿）、MP3 编码、内容寻址与可用性探测。
+"""语音合成：音色注册表（Melo / Kokoro）、sherpa-onnx 引擎、分段拼装与内容寻址。
 
-Piper 只通过子进程调用（`python -m piper`），模块导入时不依赖它：部署脚本在装依赖
-之前会先 `import app.main` 做预检，语音包没装也不该把预检卡住。
+## 音色与引擎
 
-## 音色与参数
+音色是**规则级字段**：每条规则自己选（`voice_rule.voice`，取值见 [VOICES]）。合成
+没有其它可调参数——上一版曾把语速/起伏/抖动/停顿做成全局配置，实测既难听出差别、
+又接连引入参数名与默认值的坑（见 [recipe] 的版本注释），全部移除，回归引擎自身的
+默认朗读。
 
-音色是模型（[VOICES] 登记，含字节数/SHA-256 发布校验，`fetch_voice_model` 据此
-核对）。语速、语调起伏、音长抖动与句间停顿全部经 [SynthParams] 进入合成，并共同
-构成音频的内容身份（[SynthParams.recipe]）：改任何一项都会算出新的 clip_id、生成
-新文件，旧缓存按最近使用淘汰，不存在"新参数读到旧音频"的组合。
+引擎走 sherpa-onnx（进程内加载并常驻——163MB 的模型每次现加载要数秒，不可接受）。
+Melo 的中文词典不认阿拉伯数字，进引擎前把数字串归一成中文数量读法
+（[normalize_numerals]）。说话人的正式名字等现场试听后
+定，先按序号上线。
 
 ## 分段拼装
 
 一条播报是「语音段 / 音效 / 停顿」的序列（来自模板渲染，见 render.py）。合成按段
-拼 WAV：语音段各跑一次 Piper（采样率由模型决定），音效从库里重采样对齐，停顿补零；
-全部串起来一次性编码成 MP3——设备端拿到的仍是一段普通 MP3，零改动。音效库里的
-文件统一归一化为 22050/单声道/16bit WAV（[normalize_to_wav]）。
+拼 WAV：语音段交给引擎、音效从库里重采样对齐、停顿补零；全部串起来一次性编码成
+MP3——设备端拿到的仍是一段普通 MP3，零改动。音效库里的文件统一归一化为
+22050/单声道/16bit WAV（[normalize_to_wav]）。
 """
 
-import ctypes.util
 import hashlib
 import importlib.util
+import re
 import shutil
 import subprocess
-import sys
+import threading
 import uuid
 import wave
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NoReturn
+from typing import NoReturn, Protocol
 
 from app.core.config import settings
 
+DEFAULT_VOICE = "melo"
+
+DEFAULT_VOICE = "melo"
+
 
 @dataclass(frozen=True)
-class VoiceModel:
-    """一个可选音色：模型资产的大小与 SHA-256 是发布校验，不是运行期猜测。"""
+class VoiceSpec:
+    """一个可选音色：引擎、模型资产与发布校验、一句话说明。"""
 
     key: str
-    """配置里写的音色名（`voice_model` 的取值）。"""
-
-    stem: str
-    model_size: int
-    model_sha256: str
-    config_size: int
-    config_sha256: str
+    engine: str
     note: str
-    """配置页给运维看的一句话取舍说明。"""
+    files: tuple[tuple[str, int, str], ...]
+    """发布校验：相对 voice 目录的文件名、字节数、SHA-256。"""
 
 
-#: 中文音色目录。`fetch_voice_model` 按 key 全量下载校验。
-VOICES: dict[str, VoiceModel] = {
-    "huayan-medium": VoiceModel(
-        "huayan-medium",
-        "zh_CN-huayan-medium",
-        63_201_294,
-        "9929917bf8cabb26fd528ea44d3a6699c11e87317a14765312420be230be0f3d",
-        4_822,
-        "d521dc45504a8ccc99e325822b35946dd701840bfb07e3dbb31a40929ed6a82b",
-        "常速音色（默认）：自然度最好，单次合成约几秒",
-    ),
-    "huayan-x-low": VoiceModel(
-        "huayan-x-low",
-        "zh_CN-huayan-x_low",
-        20_628_813,
-        "d30b143fac66d821a1285aa013295adf5cd129d3cc11d70334e51c7b20662c37",
-        4_164,
-        "5521dcb09adf68a9bee289032f7f5af18d29bff020953429b5d223ec1f881816",
-        "轻量音色：合成更快、声音更硬，适合播报很短或高峰排队明显的场景",
+#: 音色目录（暂时只有 Melo——现场试听淘汰了 Piper 两个音色，Kokoro 待补）。
+#: `fetch_voice_model` 按它全量下载校验；网页的音色下拉也由它驱动。
+VOICES: dict[str, VoiceSpec] = {
+    "melo": VoiceSpec(
+        key="melo",
+        engine="melo",
+        note="MeloTTS：中英混读最稳",
+        files=(
+            (
+                "melo/model.onnx",
+                170_429_550,
+                "bf30582eb1b012250a35b1a4a80e7dfbcf8485e7bb9de0d95efbbeef0e4ad86d",
+            ),
+            (
+                "melo/lexicon.txt",
+                6_837_671,
+                "7236884b02435ac5d10cf69b4be40a61b45aa676b5300f0e412f185748fee528",
+            ),
+            (
+                "melo/tokens.txt",
+                655,
+                "d18664a7e12bd7ea1022ddaf951e534e136815016c5a809d6b64156bffb4369d",
+            ),
+        ),
     ),
 }
-DEFAULT_VOICE = "huayan-medium"
-
-#: 语速的边界与默认（百分比）。与 `config/spec.py` 的 `voice_speech_rate` 同一取值域，
-#: 这里是合成侧的唯一换算点。
-SPEECH_RATE_MIN = 50
-SPEECH_RATE_MAX = 200
-SPEECH_RATE_DEFAULT = 100
-
-#: 语调起伏 / 音长抖动的边界与默认（Piper 的 noise-scale × 100，整数配置）。
-NOISE_SCALE_MIN = 0
-NOISE_SCALE_MAX = 100
-NOISE_SCALE_DEFAULT = 67
-NOISE_SCALE_W_DEFAULT = 80
-
-MAX_CLIP_DURATION_MS = 30_000
-MAX_CLIP_BYTES = 5 * 1024 * 1024
-#: 动态占位符会生成很多最终文本；缓存必须有上限，按最近使用淘汰。
-MAX_CLIP_ROWS = 500
-MAX_CLIP_TOTAL_BYTES = 200 * 1024 * 1024
-
-#: 音效的物理上限：它是提示音，不是音乐。
-MAX_EFFECT_DURATION_MS = 10_000
-MAX_EFFECT_UPLOAD_BYTES = 10 * 1024 * 1024
-EFFECT_SAMPLE_RATE = 22_050
-
-PIPER_TIMEOUT_S = 60
-FFMPEG_TIMEOUT_S = 30
 
 
 class VoiceSynthesisError(RuntimeError):
-    """模型缺失、Piper/ffmpeg 失败或产物不合格。"""
+    """模型缺失、引擎失败或产物不合格。"""
 
 
 class VoiceTextTooLongError(ValueError):
     """合成结果超过一条播报的物理上限。"""
-
-
-@dataclass(frozen=True)
-class SynthParams:
-    """一次合成的全部参数；音频的内容身份由它们共同决定。
-
-    语速/起伏/抖动是百分比整数（配置键的形状），换算成 Piper 的浮点在 [_piper_args]
-    一处完成。
-    """
-
-    voice: str
-    speech_rate: int
-    noise_scale: int
-    noise_scale_w: int
-    sentence_silence_ms: int
-
-    def recipe(self) -> str:
-        # v3：修 `--noise-w-scale` 参数名（v2 时代名字传错，产出又慢又怪的音频，
-        # 缓存按内容身份寻址，升版本让那批音频全部失效重造）
-        model = VOICES[self.voice]
-        return (
-            f"piper-tts-1.4.2|v3|{self.voice}|{model.model_sha256}"
-            f"|rate={self.speech_rate}|noise={self.noise_scale}|noise-w={self.noise_scale_w}"
-            f"|silence={self.sentence_silence_ms}"
-        )
 
 
 #: 拼装计划的一个段：("say", 文本) / ("fx", 音效文件路径) / ("pause", 毫秒)。
@@ -147,12 +102,11 @@ class ClipFile:
 
 
 @dataclass(frozen=True)
-class ClipStatus:
-    voice: str
-    model_present: bool
-    piper_available: bool
-    espeak_available: bool
-    ffmpeg_available: bool
+class VoiceStatusItem:
+    key: str
+    engine: str
+    note: str
+    available: bool
 
 
 def _fail(reason: str) -> NoReturn:
@@ -171,10 +125,6 @@ def voice_root() -> Path:
     return Path(settings.voice_dir)
 
 
-def models_dir() -> Path:
-    return voice_root() / "models"
-
-
 def clips_dir() -> Path:
     return voice_root() / "clips"
 
@@ -187,11 +137,6 @@ def tmp_dir() -> Path:
     return voice_root() / "tmp"
 
 
-def model_paths(voice: str) -> tuple[Path, Path]:
-    stem = VOICES[voice].stem
-    return models_dir() / f"{stem}.onnx", models_dir() / f"{stem}.onnx.json"
-
-
 def clip_path(clip_id: str) -> Path:
     return clips_dir() / f"{clip_id}.mp3"
 
@@ -200,9 +145,30 @@ def effect_path(effect_id: str) -> Path:
     return effects_dir() / f"{effect_id}.wav"
 
 
-def length_scale(speech_rate: int) -> float:
-    """语速百分比 → Piper 的 `--length-scale`（时长缩放，越小越快）。"""
-    return 100.0 / speech_rate
+MAX_CLIP_DURATION_MS = 30_000
+MAX_CLIP_BYTES = 5 * 1024 * 1024
+#: 动态占位符会生成很多最终文本；缓存必须有上限，按最近使用淘汰。
+MAX_CLIP_ROWS = 500
+MAX_CLIP_TOTAL_BYTES = 200 * 1024 * 1024
+
+#: 音效的物理上限：它是提示音，不是音乐。
+MAX_EFFECT_DURATION_MS = 10_000
+MAX_EFFECT_UPLOAD_BYTES = 10 * 1024 * 1024
+EFFECT_SAMPLE_RATE = 22_050
+
+FFMPEG_TIMEOUT_S = 30
+
+
+def recipe(voice: str) -> str:
+    """音频的内容身份之一：引擎 + 模型指纹 + 说话人。
+
+    v6：huayan/Piper 全部下线，引擎统一为 sherpa-onnx，音色成为规则级字段、合成
+    参数全部移除（v4/v5 曾把参数显式传给 Piper——参数名传错与默认值设错两个事故
+    都出自那里）。
+    """
+    spec = VOICES[voice]
+    model_hash = next(h for name, _size, h in spec.files if name.endswith(".onnx"))
+    return f"{spec.engine}|v6|{spec.key}|{model_hash[:16]}"
 
 
 def plan_identity(plan: Plan) -> str:
@@ -217,19 +183,23 @@ def plan_identity(plan: Plan) -> str:
     return "\x1f".join(parts)
 
 
-def clip_id_for(plan: Plan, params: SynthParams) -> str:
-    return hashlib.sha256(f"{params.recipe()}\n{plan_identity(plan)}".encode()).hexdigest()
+def clip_id_for(plan: Plan, voice: str) -> str:
+    return hashlib.sha256(f"{recipe(voice)}\n{plan_identity(plan)}".encode()).hexdigest()
 
 
-def probe(voice: str) -> ClipStatus:
-    model, config = model_paths(voice)
-    return ClipStatus(
-        voice=voice,
-        model_present=model.is_file() and config.is_file(),
-        piper_available=importlib.util.find_spec("piper") is not None,
-        espeak_available=shutil.which("espeak-ng") is not None or ctypes.util.find_library("espeak-ng") is not None,
-        ffmpeg_available=shutil.which("ffmpeg") is not None,
-    )
+def probe(voice: str) -> bool:
+    """这个音色现在能不能用：文件齐全且 sherpa-onnx 包在。"""
+    spec = VOICES[voice]
+    if importlib.util.find_spec("sherpa_onnx") is None:
+        return False
+    return all((voice_root() / name).is_file() for name, _size, _h in spec.files)
+
+
+def voice_statuses() -> list[VoiceStatusItem]:
+    return [
+        VoiceStatusItem(key=spec.key, engine=spec.engine, note=spec.note, available=probe(spec.key))
+        for spec in VOICES.values()
+    ]
 
 
 def sha256_of(path: Path) -> str:
@@ -240,30 +210,119 @@ def sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _piper_args(params: SynthParams) -> list[str]:
-    """百分比整数 → Piper 的浮点参数，换算只在这里发生。"""
-    return [
-        "--length-scale",
-        f"{length_scale(params.speech_rate):.4f}",
-        "--noise-scale",
-        f"{params.noise_scale / 100:.4f}",
-        "--noise-w-scale",
-        f"{params.noise_scale_w / 100:.4f}",
-        "--sentence-silence",
-        f"{params.sentence_silence_ms / 1000:.4f}",
-    ]
+# ── 引擎：实例按引擎缓存，加载一次常驻 ────────────────────────────────────
 
 
-def synthesize(plan: Plan, clip_id: str, params: SynthParams) -> ClipFile:
+class _Generated(Protocol):
+    """sherpa 引擎一次合成的产物（它没有类型存根，这里只声明用到的那两样）。"""
+
+    samples: "Iterable[float]"
+    sample_rate: int
+
+
+class _Engine(Protocol):
+    def generate(self, text: str, sid: int, speed: float) -> _Generated: ...
+
+
+_engine_lock = threading.Lock()
+_engines: dict[str, "_Engine"] = {}
+
+
+def _melo_engine() -> "_Engine":
+    import sherpa_onnx
+
+    base = voice_root() / "melo"
+    engine: _Engine = sherpa_onnx.OfflineTts(
+        sherpa_onnx.OfflineTtsConfig(
+            model=sherpa_onnx.OfflineTtsModelConfig(
+                vits=sherpa_onnx.OfflineTtsVitsModelConfig(
+                    model=str(base / "model.onnx"),
+                    lexicon=str(base / "lexicon.txt"),
+                    tokens=str(base / "tokens.txt"),
+                    data_dir=str(base / "dict"),
+                ),
+            ),
+        )
+    )
+    return engine
+
+
+def _engine_of(spec: VoiceSpec) -> "_Engine":
+    with _engine_lock:
+        engine = _engines.get(spec.engine)
+        if engine is None:
+            try:
+                engine = _melo_engine()
+            except Exception as exc:  # noqa: BLE001 —— 引擎装载失败要说人话
+                _fail_from(f"引擎 {spec.engine} 装载失败：{exc}", exc)
+            _engines[spec.engine] = engine
+        return engine
+
+
+def _say(text: str, wav_path: Path, voice: str) -> None:
+    spec = VOICES[voice]
+    engine = _engine_of(spec)
+    # 两个引擎的中文词典都直接丢阿拉伯数字（实测 OOV skipped），进引擎前统一归一
+    say_text = normalize_numerals(text)
+    try:
+        audio = engine.generate(say_text, sid=spec.sid, speed=1.0)
+    except Exception as exc:  # noqa: BLE001 —— 引擎报错原样带上
+        _fail_from(f"{spec.engine} 合成失败：{exc}", exc)
+    import array
+
+    # 钳制到 int16 范围：引擎偶发输出略超 ±1.0 的样本，直接转整型会回绕成电音
+    frames = array.array("h", (max(-32768, min(32767, int(sample * 32767))) for sample in audio.samples))
+    with wave.open(str(wav_path), "wb") as target:
+        target.setnchannels(1)
+        target.setsampwidth(2)
+        target.setframerate(audio.sample_rate)
+        target.writeframes(frames.tobytes())
+
+
+_NUM_UNITS = "零一二三四五六七八九"
+
+
+def _int_to_zh(value: int) -> str:
+    """0–9999 的数量读法（十二、三十四百以内都覆盖；更大的位数直接逐位念）。"""
+    if value >= 10_000:
+        return "".join(_NUM_UNITS[int(ch)] for ch in str(value))
+    if value < 10:
+        return _NUM_UNITS[value]
+    units = ["", "十", "百", "千"]
+    digits = str(value)
+    parts: list[str] = []
+    for index, ch in enumerate(digits):
+        digit = int(ch)
+        position = len(digits) - index - 1
+        if digit == 0:
+            if parts and not parts[-1].endswith("零"):
+                parts.append("零")
+        elif position == 1 and digit == 1 and len(digits) == 2:
+            parts.append("十")
+        else:
+            parts.append(_NUM_UNITS[digit] + units[position])
+    return "".join(parts).rstrip("零") or "零"
+
+
+def normalize_numerals(text: str) -> str:
+    """把文本里的阿拉伯数字串换成中文数量读法（12→十二）。
+
+    Melo 的词典不认阿拉伯数字（直接丢字）；学号在渲染层已是逐位中文，这里兜住
+    模板里手写的数量（「3 号喷头」→「三号喷头」）。
+    """
+    return re.sub(r"\d+", lambda match: _int_to_zh(int(match.group())), text)
+
+
+def synthesize(plan: Plan, clip_id: str, voice: str) -> ClipFile:
     """按拼装计划合成 MP3，返回内容身份与文件路径。
 
-    计划来自模板渲染（say/fx/pause）；语音段各跑一次 Piper，音效重采样对齐，
+    计划来自模板渲染（say/fx/pause）；语音段交给该音色的引擎，音效重采样对齐，
     停顿补零，串成一个 WAV 后一次性编码。调用前模板已由 render 校验。
     """
-    voice = params.voice if params.voice in VOICES else DEFAULT_VOICE
-    model, config = model_paths(voice)
-    if not model.is_file() or not config.is_file():
-        _fail(f"音色 {voice} 的模型缺失，请先运行 tools.fetch_voice_model")
+    if voice not in VOICES:
+        _fail(f"未知音色：{voice}")
+    if not probe(voice):
+        _fail(f"音色 {voice} 不可用（文件或 sherpa-onnx 包缺失），请先运行 tools.fetch_voice_model")
 
     clips_dir().mkdir(parents=True, exist_ok=True)
     tmp_dir().mkdir(parents=True, exist_ok=True)
@@ -285,7 +344,8 @@ def synthesize(plan: Plan, clip_id: str, params: SynthParams) -> ClipFile:
         for kind, value in plan:
             if kind == "say":
                 say_wav = temp_path("say")
-                _run_piper(str(value), say_wav, voice, _piper_args(params))
+                assert isinstance(value, str)
+                _say(value, say_wav, voice)
                 with wave.open(str(say_wav), "rb") as source:
                     rate = source.getframerate()
                     channels = source.getnchannels()
@@ -293,8 +353,6 @@ def synthesize(plan: Plan, clip_id: str, params: SynthParams) -> ClipFile:
                     frames.append(source.readframes(source.getnframes()))
             elif kind == "fx":
                 if rate is None:
-                    # 前面还没有语音段：以音效库的采样率为基准（Piper 模型同为 22050
-                    # 或 16000，首个语音段会带着自己的采样率来对齐后面的音效）。
                     rate = EFFECT_SAMPLE_RATE
                 fx_wav = temp_path("fx")
                 assert isinstance(value, (str, Path))
@@ -311,6 +369,9 @@ def synthesize(plan: Plan, clip_id: str, params: SynthParams) -> ClipFile:
         if rate is None:
             _fail("拼装计划为空")
 
+        # 首尾各垫静音：起播瞬间的首字吞音与收播截尾都在这里统一消掉
+        frames.insert(0, b"\x00" * (int(rate * 0.12) * channels * width))
+        frames.append(b"\x00" * (int(rate * 0.25) * channels * width))
         with wave.open(str(final_wav), "wb") as target:
             target.setnchannels(channels)
             target.setsampwidth(width)
@@ -386,32 +447,6 @@ def normalize_to_wav(source: Path, target: Path) -> int:
         FFMPEG_TIMEOUT_S,
     )
     return _wav_duration_ms(target)
-
-
-def _run_piper(text: str, wav_path: Path, voice: str, args: list[str]) -> None:
-    model, _config = model_paths(voice)
-    completed = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "piper",
-            "--model",
-            str(model),
-            *args,
-            "--output-file",
-            str(wav_path),
-        ],
-        input=text,
-        text=True,
-        capture_output=True,
-        timeout=PIPER_TIMEOUT_S,
-        check=False,
-    )
-    if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout or "").strip()[:300]
-        _fail(f"Piper 失败：{detail or completed.returncode}")
-    if not wav_path.is_file() or wav_path.stat().st_size <= 0:
-        _fail("Piper 没有生成音频文件")
 
 
 def _run_ffmpeg(wav_path: Path, mp3_path: Path) -> None:

@@ -124,6 +124,7 @@ def _rule_view(row: Row) -> schemas.VoiceRuleView:
         volume=int(row["volume"]),
         enabled=bool(row["enabled"]),
         exempt=json.loads(str(row["exempt"])),
+        voice=str(row["voice"]),
         sample_text=_sample_text(str(row["text"]), event),
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
@@ -150,19 +151,22 @@ def spec() -> schemas.VoiceSpecView:
             maximum=schemas.VOLUME_MAX,
             default=schemas.VOLUME_DEFAULT,
         ),
+        voices=[
+            schemas.VoiceInfoView(key=item.key, engine=item.engine, note=item.note, available=item.available)
+            for item in tts.voice_statuses()
+        ],
     )
 
 
 def status() -> schemas.VoiceStatusView:
-    params = _synth_params()
-    probe = tts.probe(params.voice)
+    import shutil
+
     return schemas.VoiceStatusView(
-        voice=params.voice,
-        ready=probe.model_present and probe.piper_available and probe.espeak_available and probe.ffmpeg_available,
-        model_present=probe.model_present,
-        piper_available=probe.piper_available,
-        espeak_available=probe.espeak_available,
-        ffmpeg_available=probe.ffmpeg_available,
+        voices=[
+            schemas.VoiceInfoView(key=item.key, engine=item.engine, note=item.note, available=item.available)
+            for item in tts.voice_statuses()
+        ],
+        ffmpeg_available=shutil.which("ffmpeg") is not None,
         clip_count=repository.count_clips(),
     )
 
@@ -219,6 +223,12 @@ def _exempt_json(cert_nos: list[str], exemptions: list[str]) -> str:
     return json.dumps(exemptions, ensure_ascii=False)
 
 
+def _require_known_voice(voice: str) -> None:
+    if voice not in tts.VOICES:
+        allowed = "、".join(tts.VOICES)
+        raise ApiProblemError(INVALID_VOICE_RULE, f"音色只允许 {allowed}（收到 {voice}）")
+
+
 def _require_known_devices(device_ids: list[str]) -> None:
     for device_id in device_ids:
         if device_id == schemas.WILDCARD:
@@ -237,6 +247,7 @@ def create_rule(req: schemas.VoiceRuleCreate) -> schemas.VoiceRuleCreateResult:
     if expanded > schemas.MAX_RULES_PER_CREATE:
         _reject(f"一次最多创建 {schemas.MAX_RULES_PER_CREATE} 条规则，本次展开为 {expanded} 条")
     exempt = _exempt_json(cert_nos, _normalized_exemptions(req.exempt_cert_nos))
+    _require_known_voice(req.voice)
 
     created: list[schemas.VoiceRuleView] = []
     skipped: list[schemas.VoiceRuleSkippedView] = []
@@ -254,6 +265,7 @@ def create_rule(req: schemas.VoiceRuleCreate) -> schemas.VoiceRuleCreateResult:
                     req.volume,
                     req.enabled,
                     exempt,
+                    req.voice,
                     now,
                 )
                 if rule_id is None:
@@ -274,6 +286,7 @@ def update_rule(rule_id: int, req: schemas.VoiceRuleUpdate) -> schemas.VoiceRule
     _require_known_devices(device_ids)
     text = _validated_text(req.text, req.event)
     exempt = _exempt_json(cert_nos, _normalized_exemptions(req.exempt_cert_nos))
+    _require_known_voice(req.voice)
     try:
         changed = repository.update_rule(
             rule_id,
@@ -285,6 +298,7 @@ def update_rule(rule_id: int, req: schemas.VoiceRuleUpdate) -> schemas.VoiceRule
             req.volume,
             req.enabled,
             exempt,
+            req.voice,
             now_rfc3339(),
         )
     except sqlite3.IntegrityError as exc:
@@ -325,35 +339,14 @@ def preview(req: schemas.VoicePreviewRequest) -> schemas.VoicePreviewView:
         segments = render.render_segments(text, values)
     except render.TemplateError as exc:
         _reject(str(exc))
-    clip, _clip_ms = _ensure_clip(_plan_of(segments))
+    _require_known_voice(req.voice)
+    clip, _clip_ms = _ensure_clip(_plan_of(segments), req.voice)
     return schemas.VoicePreviewView(
         rendered_text=render.render_text(segments),
         clip_id=clip.clip_id,
         clip_url=f"/voice/clips/{clip.clip_id}.mp3",
         size_bytes=clip.size_bytes,
         duration_ms=clip.duration_ms,
-    )
-
-
-def _int_config(key: str, low: int, high: int, default: int) -> int:
-    """读一个整数配置；登记表保证类型与范围，这里只处理越界回默认值这一种情形。"""
-    value = config_store.global_effective().get(key)
-    if isinstance(value, int) and low <= value <= high:
-        return value
-    return default
-
-
-def _synth_params() -> tts.SynthParams:
-    """当前生效的全部合成参数。任何一项变化都会改变音频的内容身份（见 SynthParams.recipe）。"""
-    voice = config_store.global_effective().get("voice_model")
-    return tts.SynthParams(
-        voice=voice if isinstance(voice, str) and voice in tts.VOICES else tts.DEFAULT_VOICE,
-        speech_rate=_int_config("voice_speech_rate", tts.SPEECH_RATE_MIN, tts.SPEECH_RATE_MAX, tts.SPEECH_RATE_DEFAULT),
-        noise_scale=_int_config("voice_noise_scale", tts.NOISE_SCALE_MIN, tts.NOISE_SCALE_MAX, tts.NOISE_SCALE_DEFAULT),
-        noise_scale_w=_int_config(
-            "voice_noise_scale_w", tts.NOISE_SCALE_MIN, tts.NOISE_SCALE_MAX, tts.NOISE_SCALE_W_DEFAULT
-        ),
-        sentence_silence_ms=_int_config("voice_sentence_silence_ms", 0, 2000, 0),
     )
 
 
@@ -376,13 +369,13 @@ def _plan_of(segments: list[render.Segment]) -> tts.Plan:
     return plan
 
 
-def _ensure_clip(plan: tts.Plan) -> tuple[tts.ClipFile, int]:
-    """取拼装计划对应的音频与全程耗时（含等锁与缓存检查）；命中缓存不跑 TTS，
-    缺失/损坏则重新合成。耗时给 `voice_delivery.clip_ms`，现场据此判断排队程度。
+def _ensure_clip(plan: tts.Plan, voice: str) -> tuple[tts.ClipFile, int]:
+    """取拼装计划（按该规则的音色）对应的音频与全程耗时（含等锁与缓存检查）；
+    命中缓存不跑合成，缺失/损坏则重新合成。耗时给 `voice_delivery.clip_ms`，
+    现场据此判断排队程度。
     """
     started = time.monotonic()
-    params = _synth_params()
-    clip_id = tts.clip_id_for(plan, params)
+    clip_id = tts.clip_id_for(plan, voice)
     with _clip_lock:
         row = repository.get_clip(clip_id)
         if row is not None:
@@ -406,7 +399,7 @@ def _ensure_clip(plan: tts.Plan) -> tuple[tts.ClipFile, int]:
                 )
         now = now_rfc3339()
         try:
-            clip = tts.synthesize(plan, clip_id, params)
+            clip = tts.synthesize(plan, clip_id, voice)
         except tts.VoiceTextTooLongError as exc:
             _reject(str(exc))
         except tts.VoiceSynthesisError as exc:
@@ -423,7 +416,7 @@ def prepare_static(view: schemas.VoiceRuleView) -> tts.ClipFile | None:
     if render.has_placeholders(view.text):
         return None
     try:
-        clip, _clip_ms = _ensure_clip([("say", view.text)])
+        clip, _clip_ms = _ensure_clip([("say", view.text)], view.voice)
     except Exception as exc:  # noqa: BLE001 —— 预热失败不能把已保存的规则判成失败
         log_event(
             "WARNING",
@@ -557,7 +550,7 @@ async def _dispatch_event(event: DoorEvent, max_age: int) -> None:
     if prepared is None:
         return
     plan, display_text = prepared
-    clip_id = tts.clip_id_for(plan, _synth_params())
+    clip_id = tts.clip_id_for(plan, str(rule["voice"]))
     if not repository.claim_delivery(
         event,
         rule,
@@ -572,7 +565,7 @@ async def _dispatch_event(event: DoorEvent, max_age: int) -> None:
     try:
         # 合成最长 60+30 秒且持 _clip_lock：必须离开事件循环线程去跑，否则网关的
         # 心跳与全部 HTTP 一起冻结。路由层的 preview/prepare 同理已用线程池。
-        clip, clip_ms = await run_in_threadpool(_ensure_clip, plan)
+        clip, clip_ms = await run_in_threadpool(_ensure_clip, plan, str(rule["voice"]))
     except Exception as exc:  # noqa: BLE001 —— 认领后失败要留下结果，但不重试
         repository.finish_delivery(event.event_key, "", "failed", str(exc)[:500], now_rfc3339(), False)
         log_event(

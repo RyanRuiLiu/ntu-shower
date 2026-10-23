@@ -138,6 +138,15 @@ PLACEHOLDERS: tuple[PlaceholderSpec, ...] = (
 )
 
 
+class VoiceInfoView(BaseModel):
+    """音色目录里的一项：引擎、说明、当前是否可用。"""
+
+    key: str
+    engine: str
+    note: str
+    available: bool
+
+
 class VoiceEventView(BaseModel):
     value: DoorEventKind
     label: str
@@ -166,6 +175,7 @@ class VoiceDelayView(BaseModel):
 class VoiceSpecView(BaseModel):
     events: list[VoiceEventView]
     placeholders: list[VoicePlaceholderView]
+    voices: list[VoiceInfoView]
     delay: VoiceDelayView
     volume: VoiceBoundView
 
@@ -194,6 +204,7 @@ class VoiceRuleCreate(BaseModel):
     volume: int = Field(default=VOLUME_DEFAULT, ge=VOLUME_MIN, le=VOLUME_MAX)
     enabled: bool = True
     exempt_cert_nos: list[str] = Field(default_factory=list, max_length=MAX_EXEMPT_PER_RULE)
+    voice: str = Field(default="melo", min_length=1, max_length=32)
 
 
 class VoiceRuleUpdate(BaseModel):
@@ -206,7 +217,7 @@ class VoiceRuleUpdate(BaseModel):
     volume: int = Field(default=VOLUME_DEFAULT, ge=VOLUME_MIN, le=VOLUME_MAX)
     enabled: bool = True
     exempt_cert_nos: list[str] = Field(default_factory=list, max_length=MAX_EXEMPT_PER_RULE)
-    effect_id: str = Field(default="", max_length=64)
+    voice: str = Field(default="melo", min_length=1, max_length=32)
 
 
 class VoiceRuleEnabledPatch(BaseModel):
@@ -220,6 +231,7 @@ class VoicePreviewRequest(BaseModel):
     event: DoorEventKind
     cert_no: str = Field(default="示例学号", min_length=1, max_length=64)
     door_no: int = Field(default=1, ge=1, le=48)
+    voice: str = Field(default="melo", min_length=1, max_length=32)
 
 
 class VoiceRuleView(BaseModel):
@@ -232,6 +244,7 @@ class VoiceRuleView(BaseModel):
     volume: int
     enabled: bool
     exempt: list[str]
+    voice: str
     sample_text: str
     created_at: str
     updated_at: str
@@ -259,11 +272,7 @@ class VoicePreviewView(BaseModel):
 
 
 class VoiceStatusView(BaseModel):
-    voice: str
-    ready: bool
-    model_present: bool
-    piper_available: bool
-    espeak_available: bool
+    voices: list[VoiceInfoView]
     ffmpeg_available: bool
     clip_count: int
 

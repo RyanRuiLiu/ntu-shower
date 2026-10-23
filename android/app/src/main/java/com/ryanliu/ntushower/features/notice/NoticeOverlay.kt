@@ -108,15 +108,19 @@ class NoticeOverlay(private val context: Context) {
         textView.text = text
         textView.setTextSize(TypedValue.COMPLEX_UNIT_SP, settings.textSizeSp.coerceAtLeast(1).toFloat())
         textView.setTextColor(parseColorSafely(settings.textColor))
+        // 水平偏移走 padding 而不是「maxWidth = widthPixels - x」：本 ROM 在窗口添加时机
+        // 给到的 displayMetrics 可能是暂态值（实测 boot 前后报过 730 而非 1366），手算的
+        // 宽度上限一旦冻结就再也纠正不回来，文案在半屏处被打省略号（2026-10-24 实测）。
+        // 窗口宽 MATCH_PARENT（见 layoutParams），可用宽度由框架在布局时按真实屏幕解析。
         val xPx = (settings.xDp.coerceAtLeast(0) * context.resources.displayMetrics.density).toInt()
-        textView.maxWidth = (context.resources.displayMetrics.widthPixels - xPx).coerceAtLeast(0)
+        textView.setPadding(xPx, 0, 0, 0)
         textView.requestLayout()
     }
 
     private fun layoutParams(settings: NoticeSettings): WindowManager.LayoutParams {
         val density = context.resources.displayMetrics.density
         return WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_SYSTEM_ERROR,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -125,7 +129,7 @@ class NoticeOverlay(private val context: Context) {
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = (settings.xDp.coerceAtLeast(0) * density).toInt()
+            // 水平偏移在 view 的 padding 里（见 applyText）；窗口只管垂直定位
             y = (settings.yDp.coerceAtLeast(0) * density).toInt()
         }
     }
