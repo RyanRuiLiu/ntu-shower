@@ -1,5 +1,5 @@
-// 设备 ROM 冻结在 Android 4.4（API 19）：TYPE_PHONE / FLAG_LAYOUT_IN_SCREEN 等处在新版
-// SDK 中废弃，替代项（TYPE_APPLICATION_OVERLAY 等）要求 API 26+。
+// 设备 ROM 冻结在 Android 4.4（API 19）：TYPE_SYSTEM_ERROR / FLAG_LAYOUT_IN_SCREEN 等处
+// 在新版 SDK 中废弃，替代项（TYPE_APPLICATION_OVERLAY 等）要求 API 26+。
 @file:Suppress("DEPRECATION")
 
 package com.ryanliu.ntushower.features.notice
@@ -19,8 +19,13 @@ import android.widget.TextView
  * 屏幕提示窗口：一层透明、不可触摸、不可聚焦的 TextView，盖在浴室 App 之上。
  *
  * 只负责窗口本身；显示/隐藏由 [NoticeController] 依据 [NoticeRule] 的结果驱动。
- * 窗口类型与 [com.ryanliu.ntushower.features.automation.CoverOverlay] 相同：
- * `TYPE_PHONE + SYSTEM_ALERT_WINDOW` 是这台 ROM 上已验证的组合。
+ *
+ * **窗口类型必须是 [WindowManager.LayoutParams.TYPE_SYSTEM_ERROR]，不能用 TYPE_PHONE。**
+ * KitKat 的层级（PhoneWindowManager.windowTypeToLayerLw）里 TYPE_PHONE 是第 3 层，
+ * 在状态栏（16）、下拉通知面板（15）、虚拟按键（20）之下——这台 ROM 的边缘划出
+ * 手势是死的，系统栏一旦出现就永远挂着，提示文案浮在顶部会被它盖住。
+ * TYPE_SYSTEM_ERROR 在第 22 层，高于上述全部系统窗口；权限仍是已有的
+ * SYSTEM_ALERT_WINDOW，不新增。文案位置在顶部、不可触摸，盖过系统栏没有副作用。
  *
  * 所有方法只在主线程调用；状态 `added` 只在主线程读写。
  */
@@ -113,7 +118,7 @@ class NoticeOverlay(private val context: Context) {
         return WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.TYPE_SYSTEM_ERROR,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
