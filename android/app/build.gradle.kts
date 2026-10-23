@@ -38,8 +38,8 @@ android {
         applicationId = "com.ryanliu.ntushower"
         minSdk = 19          // 设备 ROM 固定 Android 4.4，运行时下限不可动
         targetSdk = 19       // 目标设备冻结在 4.4，无升级路径
-        versionCode = 81
-        versionName = "0.4.37"
+        versionCode = 82
+        versionName = "0.4.38"
         buildConfigField("String", "SERVER_DOMAIN", "\"${providers.gradleProperty("serverDomain").get()}\"")
         buildConfigField("String", "APP_VERSION", "\"$versionName\"")
         buildConfigField("int", "VERSION_CODE", "$versionCode")
@@ -132,6 +132,14 @@ val frameworkBoundClasses = listOf(
     "**/features/automation/PageElement*",
     "**/features/automation/CommandScheduler*",
     "**/features/automation/CoverOverlay*",
+    // 屏幕提示：窗口与主线程状态机依赖 WindowManager / Handler / 系统服务；
+    // 判定逻辑在 NoticeRule 里并有单测，不随这两个外壳一起豁免
+    "**/features/notice/NoticeOverlay*",
+    "**/features/notice/NoticeController*",
+    // 提示判定的输入/输出载体：只有编译器生成的方法；判定本身由 NoticeRuleTest 覆盖
+    "**/features/notice/NoticeSettings*",
+    "**/features/notice/LocalMoment*",
+    "**/features/notice/NoticeDecision*",
     // 界面操作原语（自 service/ 迁入）：ShellUiChannel 依赖真实 su 进程与系统 Resources，
     // A11yUiChannel / UiTreeCodec 依赖无障碍节点树与窗口管理器
     "**/features/automation/A11yUiChannel*",
@@ -146,6 +154,8 @@ val frameworkBoundClasses = listOf(
     "**/features/doors/DoorMonitor*",
     "**/features/doors/DoorSnapshotReader*",
     "**/features/doors/DoorSnapshotSender*",
+    // 一次读数的载体；占用判据与完整性计算在 DoorRaw 里并有单测
+    "**/features/doors/DoorReading*",
     // 应用私有库：两个类拿的都是 android.database 的 SQLiteDatabase 与 Cursor，JVM 里只有桩。
     // 它们做的事就是建表与两条 SQL，没有可以独立验证的算法——抽一层"行与 JSON 的转换"出来
     // 只会为了被测而存在。

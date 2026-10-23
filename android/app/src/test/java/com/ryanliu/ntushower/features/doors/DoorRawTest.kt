@@ -187,4 +187,52 @@ class DoorRawTest {
 
         assertEquals(4, fingerprints.distinct().size)
     }
+
+    // ── isOccupied ──
+
+    @Test
+    fun isOccupied_cardNoCounts() {
+        assertTrue(DoorRaw.parseRow("1|1001|c|a||||0|0")!!.isOccupied())
+    }
+
+    @Test
+    fun isOccupied_accNoCountsUnlessBlankOrZero() {
+        assertTrue(DoorRaw.parseRow("1|0|c|a||||0|0")!!.isOccupied())
+        assertEquals(false, DoorRaw.parseRow("1|0|99990052|0||||0|0")!!.isOccupied())
+        assertEquals(false, DoorRaw.parseRow("1|0|99990052|||||0|0")!!.isOccupied())
+    }
+
+    @Test
+    fun isOccupied_repairAndDisabledAreNeverOccupied() {
+        assertEquals(false, DoorRaw.parseRow("1|1001|c|a||||0|1")!!.isOccupied())
+        assertEquals(false, DoorRaw.parseRow("1|1001|c|a||||0|3")!!.isOccupied())
+    }
+
+    @Test
+    fun isOccupied_selectedWithoutOccupantFieldsDoesNotCount() {
+        assertEquals(false, DoorRaw.parseRow("1|0|c||||||0|2")!!.isOccupied())
+        // 已选中但同时有占用字段时，按服务端判据仍算占用
+        assertTrue(DoorRaw.parseRow("1|0|c|a||||0|2")!!.isOccupied())
+    }
+
+    // ── parseReading ──
+
+    @Test
+    fun parseReading_completeWhenEveryLineParses() {
+        val reading = DoorRaw.parseReading("\n$validLine\n", 0)
+
+        assertTrue(reading.complete)
+        assertEquals(1, reading.doors.size)
+    }
+
+    @Test
+    fun parseReading_incompleteOnFailureEmptyOrBadLine() {
+        assertEquals(false, DoorRaw.parseReading(validLine, 1).complete)
+        assertEquals(false, DoorRaw.parseReading("", 0).complete)
+        assertEquals(false, DoorRaw.parseReading("\n\n", 0).complete)
+
+        val partial = DoorRaw.parseReading("$validLine\nbad line\n", 0)
+        assertEquals(false, partial.complete)
+        assertEquals(1, partial.doors.size)
+    }
 }

@@ -31,7 +31,7 @@ import com.ryanliu.ntushower.core.threading.MainThread
  * `WindowManager.addView` 内部会创建 Handler，必须由带 Looper 的线程调用；流程跑在
  * 后台线程，故经主线程 Handler 投递并用 CountDownLatch 同步。
  */
-class CoverOverlay(context: Context) {
+class CoverOverlay(context: Context, private val onVisibilityChanged: (Boolean) -> Unit = {}) {
 
     private val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val view: LinearLayout = LinearLayout(context).apply {
@@ -39,7 +39,13 @@ class CoverOverlay(context: Context) {
         gravity = Gravity.CENTER_VERTICAL
         setBackgroundResource(R.drawable.fm_hint)
     }
-    private var showing = false
+
+    /** 遮罩是否已请求或已显示；屏幕提示据此决定是否让出位置。 */
+    val isShowingOrPending: Boolean get() = requested || showing
+
+    @Volatile private var requested = false
+
+    @Volatile private var showing = false
 
     /**
      * 盖住屏幕。文案与样式取自 [RuntimeConfig]，改配置后下一次 show 生效。重复调用是空操作。
@@ -49,17 +55,28 @@ class CoverOverlay(context: Context) {
      * 当成灵异事件查。
      */
     fun show() {
-        if (showing) return
-        if (!MainThread.runAndWait { addInternal() }) {
+        requested = true
+        val completed = MainThread.runAndWait {
+            if (!showing) addInternal()
+        }
+        if (!completed) {
             Log.w(TAG, "overlay show timed out, screen left uncovered")
         }
+        // add 失败或超时：遮罩并没有真的盖住屏幕，不能让提示被一个不存在的遮罩压住
+        if (!showing) requested = false
+        MainThread.post { onVisibilityChanged(isShowingOrPending) }
     }
 
     /** 撤掉遮盖层。没在显示时是空操作。 */
     fun hide() {
-        if (!MainThread.runAndWait { removeInternal() }) {
+        requested = false
+        val completed = MainThread.runAndWait {
+            if (showing) removeInternal()
+        }
+        if (!completed) {
             Log.w(TAG, "overlay hide timed out")
         }
+        MainThread.post { onVisibilityChanged(isShowingOrPending) }
     }
 
     private fun addInternal() {
@@ -70,8 +87,13 @@ class CoverOverlay(context: Context) {
         if (RuntimeConfig.overlayMessage.isNotEmpty()) {
             view.addView(buildMessage(RuntimeConfig.overlayMessage))
         }
-        wm.addView(view, coverLayoutParams())
-        showing = true
+        try {
+            wm.addView(view, coverLayoutParams())
+            showing = true
+        } catch (e: Exception) {
+            showing = view.windowToken != null
+            Log.w(TAG, "overlay add failed: ${e.message}")
+        }
     }
 
     /**
@@ -128,11 +150,14 @@ class CoverOverlay(context: Context) {
         if (!showing) return
         try {
             wm.removeView(view)
-        } catch (_: Exception) {
-            // 视图可能已被系统回收（服务重启/窗口管理器异常）：撤层失败不影响主流程，
-            // showing 标志照常复位，下次 show 会重新添加
+            showing = false
+        } catch (e: Exception) {
+            // 视图可能已被系统回收（服务重启/窗口管理器异常）。用 windowToken 区分：
+            // 已脱离就复位；仍附着则保持 showing，提示不能浮到遮罩之上。
+            val detached = view.windowToken == null
+            showing = !detached
+            if (!detached) Log.w(TAG, "overlay remove failed but view still attached", e)
         }
-        showing = false
     }
 
     companion object {
