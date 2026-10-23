@@ -172,6 +172,7 @@ function renderEffects() {
         <td>
           <div class="btn-row">
             <button type="button" class="btn btn-ghost btn-sm" data-act="audition">试听</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-act="rename">改名</button>
             <button type="button" class="btn btn-danger btn-sm" data-act="delete">删除</button>
           </div>
         </td>
@@ -202,6 +203,20 @@ async function uploadEffect() {
   }
 }
 
+async function renameEffect(effect) {
+  const name = window.prompt('新的音效名称（规则模板里的 {fx:…} 会一并改写）', effect.name)
+  if (name === null) return
+  const trimmed = name.trim()
+  if (!trimmed || trimmed === effect.name) return
+  try {
+    await api.renameVoiceEffect(effect.effect_id, trimmed)
+    await reload()
+    toast('已改名')
+  } catch (error) {
+    report('voiceEffectResult', problemText(error), 'err')
+  }
+}
+
 async function deleteEffect(effect) {
   if (!window.confirm(`删除音效「${effect.name}」？`)) return
   try {
@@ -211,6 +226,19 @@ async function deleteEffect(effect) {
   } catch (error) {
     report('voiceEffectResult', problemText(error), 'err')
   }
+}
+
+/** 规则表单的音色下拉（spec.voices 驱动，展示名 + 说明）。 */
+function renderVoiceOptions(selected) {
+  const options = (spec && spec.voices ? spec.voices : []).map((item) => [
+    item.key,
+    `${item.key}（${item.note}）`,
+  ])
+  if (selected !== undefined && !options.some(([value]) => value === selected)) selected = 'melo'
+  $('voiceVoice').innerHTML = options
+    .map(([value, label]) => `<option value="${esc(value)}">${esc(label)}</option>`)
+    .join('')
+  $('voiceVoice').value = selected === undefined ? $('voiceVoice').value : selected
 }
 
 /** 规则表的设备筛选下拉：全部 / 通配 / 每台设备。 */
@@ -252,6 +280,7 @@ function renderTable() {
             <button type="button" class="btn btn-ghost btn-sm" data-act="toggle">${rule.enabled ? '停用' : '启用'}</button>
             <button type="button" class="btn btn-ghost btn-sm" data-act="edit">编辑</button>
             <button type="button" class="btn btn-ghost btn-sm" data-act="preview">试听</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-act="push">推设备</button>
             <button type="button" class="btn btn-danger btn-sm" data-act="delete">删除</button>
           </div>
         </td>
@@ -455,6 +484,21 @@ function stopPreview() {
   if (previewAudio) {
     previewAudio.pause()
     previewAudio = null
+  }
+}
+
+async function pushRule(rule) {
+  const deviceId = $('voiceDevice').value
+  if (!deviceId) return report('voiceResult', '失败 · 请先在顶部选择目标设备', 'err')
+  report('voiceResult', `正在推送到 ${deviceName(deviceId)} 播放…`, 'info')
+  try {
+    const result = await api.pushVoiceRule(rule.id, deviceId)
+    showSample(result.rendered_text)
+    const ok = result.status === 'ok'
+    report('voiceResult', ok ? '已在设备上播放。' : `设备返回：${result.detail || result.status}`, ok ? 'ok' : 'err')
+    await reload()
+  } catch (error) {
+    report('voiceResult', problemText(error), 'err')
   }
 }
 
@@ -737,6 +781,13 @@ export const voiceView = {
     dispose.add(listen($('btnVoiceReload'), 'click', reload))
     dispose.add(listen($('btnVoiceEffectUpload'), 'click', uploadEffect))
     dispose.add(
+      listen($('voiceEffectFile'), 'change', () => {
+        const file = $('voiceEffectFile').files[0]
+        // 名称自动取文件名（去扩展名），仍可手改
+        if (file) $('voiceEffectName').value = file.name.replace(/\.[^.]+$/, '')
+      }),
+    )
+    dispose.add(
       listen($('voiceEffectTable'), 'click', async (event) => {
         const button = event.target.closest('button[data-act]')
         if (!button) return
@@ -749,6 +800,7 @@ export const voiceView = {
           previewAudio.play().catch((error) => toast(`试听失败：${error.message}`))
         }
         if (button.dataset.act === 'delete') await deleteEffect(effect)
+        if (button.dataset.act === 'rename') await renameEffect(effect)
       }),
     )
     dispose.add(listen($('btnVoiceSave'), 'click', submitForm))
@@ -792,6 +844,7 @@ export const voiceView = {
         if (button.dataset.act === 'edit') enterEdit(rule)
         if (button.dataset.act === 'toggle') await toggleRule(rule)
         if (button.dataset.act === 'preview') await previewRule(rule)
+        if (button.dataset.act === 'push') await pushRule(rule)
         if (button.dataset.act === 'delete') await deleteRule(rule)
       }),
     )

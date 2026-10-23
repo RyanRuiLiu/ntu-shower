@@ -80,7 +80,7 @@ const VIEWS = [
  */
 const NAV_GROUPS = [
   ['overview', 'devices', 'inspector'],
-  ['config', 'identities', 'voice', 'releases', 'audit'],
+  ['config', 'voice', 'identities', 'releases', 'audit'],
 ]
 
 let active = null
