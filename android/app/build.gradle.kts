@@ -38,8 +38,8 @@ android {
         applicationId = "com.ryanliu.ntushower"
         minSdk = 19          // 设备 ROM 固定 Android 4.4，运行时下限不可动
         targetSdk = 19       // 目标设备冻结在 4.4，无升级路径
-        versionCode = 84
-        versionName = "0.4.40"
+        versionCode = 85
+        versionName = "0.4.41"
         buildConfigField("String", "SERVER_DOMAIN", "\"${providers.gradleProperty("serverDomain").get()}\"")
         buildConfigField("String", "APP_VERSION", "\"$versionName\"")
         buildConfigField("int", "VERSION_CODE", "$versionCode")
@@ -146,6 +146,9 @@ val frameworkBoundClasses = listOf(
     "**/features/voice/VoiceResult*",
     "**/features/voice/VoiceVolumePlan*",
     "**/features/voice/VoiceClipFile*",
+    // 自更新：安装/退避/尝试计数依赖 root shell、文件系统与设备日志，纯逻辑部分
+    // （版本比对、sha 校验）随集成路径验证
+    "**/features/selfmanage/OtaUpdater*",
     // 提示判定的输入/输出载体：只有编译器生成的方法；判定本身由 NoticeRuleTest 覆盖
     "**/features/notice/NoticeSettings*",
     "**/features/notice/LocalMoment*",

@@ -242,6 +242,13 @@
 
 ## OTA 与版本
 
+- **发布声明必须与 APK 内容版本一致，发布边界强制比对**（2026-10-24 事故的根除项）：
+  发布接口解析 APK 的二进制 manifest（`ota/apk_manifest.py`，零依赖的最小 AXML 解析），
+  声明 0.4.40 而字节是 0.4.39 的发布曾被照单全收——设备端 `pm install` 返回 Success 而
+  版本不变，manifest 永远"有新版"，六台设备陷入无限重装循环。`-SkipBuild` 带着陈旧
+  构建产物发布正是那条路。设备端配套两道：安装脚本**不再删除尝试锁**（锁在则重试被
+  退避挡住），同一版本尝试三次后停手并在 device.log 留 `ota.attempts-exhausted`，
+  等人工而不自愈——自愈的前提是发布正确，发布不正确时自愈就是循环本身。
 - **版本号在三处，由测试强制一致**：`server/app/core/version.py` 的 `APP_VERSION`、
   `server/pyproject.toml` 的 `version`、`android/app/build.gradle.kts` 的 `versionName`，
   由 `tests/test_version_consistency.py` 校验。**这三处合并不了**——前两个是 Python 侧（一个

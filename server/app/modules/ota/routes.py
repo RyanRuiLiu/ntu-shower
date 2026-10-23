@@ -15,9 +15,14 @@ from fastapi.responses import FileResponse
 
 from app.core.config import settings
 from app.core.logging import log_event
-from app.core.problems import RELEASE_NOT_FOUND, RELEASE_TOO_LARGE, ApiProblemError
+from app.core.problems import (
+    OTA_APK_MISMATCH,
+    RELEASE_NOT_FOUND,
+    RELEASE_TOO_LARGE,
+    ApiProblemError,
+)
 from app.modules.access.dependencies import require_admin
-from app.modules.ota import repository, service
+from app.modules.ota import apk_manifest, repository, service
 from app.modules.ota.schemas import (
     OtaManifest,
     ReleasePublished,
@@ -109,11 +114,36 @@ async def upload_release(
     """上传新版本 APK 并注册发布（target='all' 或逗号分隔的 device_id 列表）。
 
     发布成功后向在线的目标设备即时推送 ota.upgrade_available。
+
+    **版本必须在 HTTP 边界与 APK 内容比对**（根因闸门，2026-10-24 事故）：表单声明
+    0.4.40 而字节里是 0.4.39 的发布曾被照单全收，六台设备 pm Success 而版本不变、
+    陷入无限重装循环。APK 的真实版本从二进制 manifest 解析（apk_manifest），不一致
+    即拒——这是发布内容的唯一可信来源，发布端 `-SkipBuild` 用到陈旧构建产物时在这里
+    被拦下。
     """
     data = await file.read()
     if len(data) > settings.max_ota_bytes:
         log_event("WARNING", "ota.release-too-large", "发布被拒：超出单文件上限", version=version, size=len(data))
         raise ApiProblemError(RELEASE_TOO_LARGE, f"上限 {settings.max_ota_bytes} 字节")
+    try:
+        declared = apk_manifest.extract_versions(data)
+    except apk_manifest.ApkManifestError as exc:
+        log_event("WARNING", "ota.release-invalid-apk", "发布被拒：APK 版本读取失败", version=version, error=str(exc))
+        raise ApiProblemError(OTA_APK_MISMATCH, str(exc)) from exc
+    if declared.version_code != version_code or declared.version_name != version:
+        detail = (
+            f"APK 内容声明 {declared.version_name}({declared.version_code})，与发布的 {version}({version_code}) 不一致"
+        )
+        log_event(
+            "WARNING",
+            "ota.release-version-mismatch",
+            "发布被拒：APK 内容版本与声明不一致",
+            version=version,
+            version_code=version_code,
+            apk_version=declared.version_name,
+            apk_version_code=declared.version_code,
+        )
+        raise ApiProblemError(OTA_APK_MISMATCH, detail)
     sha256 = service.store_release(version, data)
     repository.insert_release(version, version_code, sha256, mandatory, force, target)
     notified = await service.notify_target_devices(version, version_code, mandatory, target)
