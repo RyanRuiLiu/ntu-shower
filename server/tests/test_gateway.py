@@ -217,7 +217,7 @@ def test_handshake_carries_upgrade_for_targeted_release(
         "/api/v1/ota/releases",
         headers=admin_headers,
         data={"version": "0.3.0", "version_code": 6, "target": device_id},
-        files={"file": ("ntu-shower-0.3.0.apk", io.BytesIO(b"PK"), "application/octet-stream")},
+        files={"file": ("ntu-shower-0.3.0.apk", io.BytesIO(helpers.build_apk("0.3.0", 6)), "application/octet-stream")},
     )
 
     with client.websocket_connect("/gateway/device") as ws:
@@ -240,7 +240,7 @@ def test_force_release_not_repushed_after_install_confirmation(
         "/api/v1/ota/releases",
         headers=admin_headers,
         data={"version": "0.3.1", "version_code": 8, "force": "true", "target": device_id},
-        files={"file": ("ntu-shower-0.3.1.apk", io.BytesIO(b"PK"), "application/octet-stream")},
+        files={"file": ("ntu-shower-0.3.1.apk", io.BytesIO(helpers.build_apk("0.3.1", 8)), "application/octet-stream")},
     )
 
     with client.websocket_connect("/gateway/device") as ws:

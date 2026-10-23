@@ -5,6 +5,7 @@ api_call 的写入面由 core/audit 的路径前缀决定，前缀必须覆盖�
 query）与数据重型端点的响应排除用纯函数直接钉住。
 """
 
+import io
 import json
 
 from fastapi.testclient import TestClient
@@ -88,7 +89,7 @@ def test_multipart_request_body_is_not_stored(client: TestClient, admin_headers:
         "/api/v1/ota/releases",
         headers=admin_headers,
         data={"version": "0.1.0", "version_code": 1},
-        files={"file": ("x.apk", b"PK")},
+        files={"file": ("x.apk", io.BytesIO(helpers.build_apk("0.1.0", 1)), "application/octet-stream")},
     )
     assert r.status_code == 200
 
