@@ -1,5 +1,5 @@
-// 设备 ROM 冻结在 Android 4.4（API 19）：TYPE_PHONE / FLAG_FULLSCREEN 等处在新版 SDK
-// 中废弃，替代项（TYPE_APPLICATION_OVERLAY 等）要求 API 26+。
+// 设备 ROM 冻结在 Android 4.4（API 19）：TYPE_SYSTEM_ERROR / FLAG_FULLSCREEN 等处在新版
+// SDK 中废弃，替代项（TYPE_APPLICATION_OVERLAY 等）要求 API 26+。
 @file:Suppress("DEPRECATION")
 
 package com.ryanliu.ntushower.features.automation
@@ -27,7 +27,13 @@ import com.ryanliu.ntushower.core.threading.MainThread
  *
  * 文案与样式全部经 [RuntimeConfig] 下发，所以改一句话不必重新发版。
  *
- * 窗口类型 TYPE_PHONE + SYSTEM_ALERT_WINDOW（API 19 上验证过的组合）。
+ * 窗口类型必须是 [WindowManager.LayoutParams.TYPE_SYSTEM_ERROR]，不能用 TYPE_PHONE：
+ * KitKat 的层级（PhoneWindowManager.windowTypeToLayerLw）里 TYPE_PHONE 是第 3 层，在
+ * 状态栏（16）、下拉通知面板（15）、虚拟按键（20）之下——这台 ROM 的边缘划出手势是
+ * 死的，系统栏一旦出现就永远挂着，遮盖盖不住它们不说，遮盖期间虚拟按键还浮在遮罩
+ * 之上可被点按。TYPE_SYSTEM_ERROR 在第 22 层，高于上述全部系统窗口；权限仍是已有的
+ * SYSTEM_ALERT_WINDOW，不新增。
+ *
  * `WindowManager.addView` 内部会创建 Handler，必须由带 Looper 的线程调用；流程跑在
  * 后台线程，故经主线程 Handler 投递并用 CountDownLatch 同步。
  */
@@ -135,7 +141,7 @@ class CoverOverlay(context: Context, private val onVisibilityChanged: (Boolean) 
     private fun coverLayoutParams(): WindowManager.LayoutParams = WindowManager.LayoutParams(
         WindowManager.LayoutParams.MATCH_PARENT,
         WindowManager.LayoutParams.MATCH_PARENT,
-        WindowManager.LayoutParams.TYPE_PHONE,
+        WindowManager.LayoutParams.TYPE_SYSTEM_ERROR,
         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
             WindowManager.LayoutParams.FLAG_FULLSCREEN,
