@@ -26,6 +26,7 @@ from ..modules.extend_hours import service as extend_hours_service
 from ..modules.ota import repository as ota_repository
 from ..modules.sessions import scheduler as sessions_scheduler
 from ..modules.sessions import service as sessions_service
+from ..modules.voice import service as voice_service
 
 router = APIRouter()
 
@@ -216,7 +217,7 @@ async def _handle_frame(
         # `finally` 记 offline、推 device.update（网页上看到设备闪断），其他门正在推进的
         # 会话也被打断。
         try:
-            await run_in_threadpool(doors_service.process_snapshot, device_id, payload)
+            result = await run_in_threadpool(doors_service.process_snapshot, device_id, payload)
         except Exception as exc:  # noqa: BLE001 —— 原始帧没落下去：不回执，设备保留重发
             log_event(
                 "ERROR",
@@ -232,6 +233,8 @@ async def _handle_frame(
         # 延长服务时间：拨钟会把喷头清空，这里按拨之前记下的"谁在哪个喷头"把他们分配回去。
         # 它同步返回，真正的分配在后台任务里跑——帧的处理路径上不能等命令
         extend_hours_service.on_frame(device_id)
+        # 语音播报：同步建任务后立即返回；回执失败时设备会重发同一帧，event_key 去重。
+        voice_service.schedule_events(result.events)
         await ws.send_text(
             protocol.envelope(
                 "door.snapshot_ack",

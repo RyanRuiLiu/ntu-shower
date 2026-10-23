@@ -38,8 +38,8 @@ android {
         applicationId = "com.ryanliu.ntushower"
         minSdk = 19          // 设备 ROM 固定 Android 4.4，运行时下限不可动
         targetSdk = 19       // 目标设备冻结在 4.4，无升级路径
-        versionCode = 83
-        versionName = "0.4.39"
+        versionCode = 84
+        versionName = "0.4.40"
         buildConfigField("String", "SERVER_DOMAIN", "\"${providers.gradleProperty("serverDomain").get()}\"")
         buildConfigField("String", "APP_VERSION", "\"$versionName\"")
         buildConfigField("int", "VERSION_CODE", "$versionCode")
@@ -136,6 +136,16 @@ val frameworkBoundClasses = listOf(
     // 判定逻辑在 NoticeRule 里并有单测，不随这两个外壳一起豁免
     "**/features/notice/NoticeOverlay*",
     "**/features/notice/NoticeController*",
+    // 语音播报：下载/播放/音量守卫依赖 OkHttp 文件系统、MediaPlayer/AudioManager、
+    // SharedPreferences；参数、音量计划、缓存淘汰已抽为纯逻辑并纳入覆盖
+    "**/features/voice/VoiceClipStore*",
+    "**/features/voice/VoicePlayer*",
+    "**/features/voice/VoiceVolumeGuard*",
+    // 纯数据载体：只有编译器生成的方法；业务逻辑在 VoiceClipSpec/VoiceVolume/
+    // VoiceClipCachePolicy 中并有单测
+    "**/features/voice/VoiceResult*",
+    "**/features/voice/VoiceVolumePlan*",
+    "**/features/voice/VoiceClipFile*",
     // 提示判定的输入/输出载体：只有编译器生成的方法；判定本身由 NoticeRuleTest 覆盖
     "**/features/notice/NoticeSettings*",
     "**/features/notice/LocalMoment*",

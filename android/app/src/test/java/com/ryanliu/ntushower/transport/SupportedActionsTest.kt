@@ -29,6 +29,8 @@ class SupportedActionsTest {
             "power.schedule",
             "freelist.read",
             "freelist.write",
+            "voice.play",
+            "voice.prepare",
             "bridge.open",
             "bridge.close",
             "ui.dump",
@@ -60,6 +62,8 @@ class SupportedActionsTest {
         assertTrue(SupportedActions.UI_INPUT in SupportedActions.ALL)
         assertTrue(SupportedActions.FREELIST_READ in SupportedActions.ALL)
         assertTrue(SupportedActions.FREELIST_WRITE in SupportedActions.ALL)
+        assertTrue(SupportedActions.VOICE_PLAY in SupportedActions.ALL)
+        assertTrue(SupportedActions.VOICE_PREPARE in SupportedActions.ALL)
     }
 
     @Test

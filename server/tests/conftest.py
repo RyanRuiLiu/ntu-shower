@@ -42,6 +42,7 @@ def _reset_process_singletons() -> Iterator[None]:
     from app.modules.doors import service as doors_service
     from app.modules.extend_hours import service as extend_hours_service
     from app.modules.sessions import service as sessions_service
+    from app.modules.voice import service as voice_service
 
     def clear() -> None:
         manager._connections.clear()
@@ -54,6 +55,7 @@ def _reset_process_singletons() -> Iterator[None]:
         device_clock.clear()
         extend_hours_service._reassign_tasks.clear()
         extend_hours_service._reassign_failed.clear()
+        voice_service._tasks.clear()
 
     clear()
     yield
@@ -75,6 +77,7 @@ def _isolate_default_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     """
     monkeypatch.setattr(config_module.settings, "db_path", str(tmp_path / "undeclared.db"))
     monkeypatch.setattr(config_module.settings, "ota_dir", str(tmp_path / "undeclared-ota"))
+    monkeypatch.setattr(config_module.settings, "voice_dir", str(tmp_path / "undeclared-voice"))
 
 
 @pytest.fixture(scope="session")
@@ -118,11 +121,13 @@ def fresh_db(
     monkeypatch.setattr(config_module.settings, "db_path", path)
     monkeypatch.setattr(config_module.settings, "bridge_base_port", 25655)
     monkeypatch.setattr(config_module.settings, "ota_dir", str(tmp_path / "ota_releases"))
+    monkeypatch.setattr(config_module.settings, "voice_dir", str(tmp_path / "voice"))
     monkeypatch.setattr(config_module.settings, "assign_timeout_s", 0.3)
     monkeypatch.setattr(config_module.settings, "settle_timeout_s", 0.3)
     monkeypatch.setattr(config_module.settings, "photo_timeout_s", 0.3)
     # 目录存在性由 create_app 在装配时保证一次；共享应用后每个用例自己补
     Path(config_module.settings.ota_dir).mkdir(parents=True, exist_ok=True)
+    Path(config_module.settings.voice_dir, "clips").mkdir(parents=True, exist_ok=True)
     shutil.copyfile(_schema_template, path)
     yield path
     db_module.close_all_connections()
