@@ -185,11 +185,12 @@ function renderEffects() {
 }
 
 async function uploadEffect() {
-  const name = $('voiceEffectName').value
+  const name = $('voiceEffectName').value.trim()
   const file = $('voiceEffectFile').files[0]
   if (!file) return report('voiceEffectResult', '失败 · 请选择音频文件', 'err')
+  if (!name) return report('voiceEffectResult', '失败 · 请填写音效名称', 'err')
   const form = new FormData()
-  form.append('name', name || file.name)
+  form.append('name', name)
   form.append('file', file)
   report('voiceEffectResult', '正在上传并转换…', 'info')
   try {
