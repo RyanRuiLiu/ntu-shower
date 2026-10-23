@@ -36,14 +36,13 @@ class NoticeController(context: Context, private val deviceLog: DeviceLog, priva
     private var hasReading = false
     private var lastNeedsOccupancy = false
     private var lastLoggedDecision: NoticeDecision? = null
-    private var timeTickScheduled = false
     private var retryPending = false
     private var destroyed = false
 
     private val timeTickRunnable = Runnable { onTimeTick() }
     private val addRetryRunnable = Runnable { onAddRetry() }
 
-    /** 供 AgentService 在主线程判断要不要补读一次门读数。 */
+    /** 是否收到过**完整**读数；供 AgentService 判断要不要为看门狗补读一次。 */
     fun hasReading(): Boolean = hasReading
 
     /** 纯配置读取，后台线程也可安全调用（两个字段都是 volatile）。 */
@@ -88,7 +87,6 @@ class NoticeController(context: Context, private val deviceLog: DeviceLog, priva
         if (destroyed) return
         destroyed = true
         handler.removeCallbacksAndMessages(null)
-        timeTickScheduled = false
         retryPending = false
         overlay.destroy()
         windowAdded = overlay.isAdded
@@ -98,7 +96,9 @@ class NoticeController(context: Context, private val deviceLog: DeviceLog, priva
 
     private fun onReadingOnMain(reading: DoorReading) {
         if (destroyed) return
-        hasReading = true
+        // 只有完整读数才算数：读失败也置位会让看门狗的补读路径永久失活，而浴室数据库
+        // 在没人洗浴时恰恰长期安静，那次失败就再没有事件来纠正了。
+        hasReading = reading.complete
         lastReading = reading
         evaluate()
     }
@@ -115,7 +115,7 @@ class NoticeController(context: Context, private val deviceLog: DeviceLog, priva
     private fun evaluateInternal() {
         val settings = currentSettings()
         val reading = lastReading
-        val occupied = if (settings.occupancyEnabled && hasReading && reading?.complete == true) {
+        val occupied = if (settings.occupancyEnabled && reading?.complete == true) {
             reading.doors.count { it.isOccupied() }
         } else {
             null
@@ -199,17 +199,14 @@ class NoticeController(context: Context, private val deviceLog: DeviceLog, priva
     private fun scheduleTimeTick() {
         if (destroyed) return
         handler.removeCallbacks(timeTickRunnable)
-        timeTickScheduled = false
         if (!RuntimeConfig.noticeEnabled || !RuntimeConfig.noticeTimeEnabled) return
 
         val serverMs = ServerClock.nowRfc3339()?.let { Clock.parseRfc3339(it)?.time }
         handler.postDelayed(timeTickRunnable, NoticeRule.delayUntilNextMinute(serverMs))
-        timeTickScheduled = true
     }
 
     private fun onTimeTick() {
         if (destroyed) return
-        timeTickScheduled = false
         evaluate()
         scheduleTimeTick()
     }
