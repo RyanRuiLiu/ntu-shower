@@ -494,8 +494,7 @@ async function pushRule(rule) {
     // 通配规则对全部设备生效：推给哪台由现场指定（列在线设备，输序号）
     const online = devices.filter((d) => d.online)
     if (!online.length) return report('voiceResult', '失败 · 没有在线设备可推送', 'err')
-    const list = online.map((d, i) => `${i + 1}. ${d.name || d.device_id}`).join('
-')
+    const list = online.map((d, i) => `${i + 1}. ${d.name || d.device_id}`).join('\n')
     const picked = window.prompt(`这条规则对全部设备生效。推送到哪台？输入序号：
 ${list}`, '1')
     if (picked === null) return
@@ -871,3 +870,4 @@ export const voiceView = {
     dispose.dispose()
   },
 }
+// marker-test-1792789996
