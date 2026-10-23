@@ -118,6 +118,6 @@ class SerialCommandQueueTest {
     @Test
     fun `default limit matches the server channel cap`() {
         // 与服务端 CHANNEL_QUEUE_MAX 取同一个数：两边看法一致，排障时不必换算
-        assertEquals(4, SerialCommandQueue.DEFAULT_MAX_PENDING)
+        assertEquals(8, SerialCommandQueue.DEFAULT_MAX_PENDING)
     }
 }

@@ -34,6 +34,26 @@ class VoiceClipStore(private val client: OkHttpClient) {
         }
         target.delete()
 
+        // 下载失败立即再试一次：播报事件不会重现，一次网络抖动就是丢一条播报，而
+        // 重下的代价只是几秒。校验失败同样重下——重新拿到的字节与缓存损坏无关。
+        // 不加等待：等只会吃掉命令的超时预算，抖动在毫秒级过去，重试要趁当时。
+        var last: ClipFetch.Failed? = null
+        repeat(DOWNLOAD_ATTEMPTS) {
+            when (val result = downloadFresh(dir, spec)) {
+                is ClipFetch.Ready -> {
+                    prune(dir, result.file.name)
+                    return result
+                }
+
+                is ClipFetch.Failed -> last = result
+            }
+        }
+        return last!!
+    }
+
+    /** 一次全新的下载（临时文件 → 校验 → 原子落盘）；只返回失败，成功走 [ensure] 的返回。 */
+    private fun downloadFresh(dir: File, spec: VoiceClipSpec): ClipFetch {
+        val target = File(dir, "${spec.clipId}.mp3")
         val temp = File(dir, "${spec.clipId}.part")
         temp.delete()
         val url = "https://${BuildConfig.SERVER_DOMAIN}/voice/clips/${spec.clipId}.mp3"
@@ -64,7 +84,6 @@ class VoiceClipStore(private val client: OkHttpClient) {
             temp.delete()
             return ClipFetch.Failed(ReasonCodes.VOICE_CLIP_DOWNLOAD_FAILED, "音频落盘失败")
         }
-        prune(dir, target.name)
         return ClipFetch.Ready(target, downloaded = true)
     }
 
@@ -106,6 +125,9 @@ class VoiceClipStore(private val client: OkHttpClient) {
 
     companion object {
         private const val TAG = "VoiceClipStore"
+
+        /** 下载尝试次数：第二次只在第一次失败后立刻发生，总时长仍受 callTimeout 约束。 */
+        private const val DOWNLOAD_ATTEMPTS = 2
         private const val COPY_BUFFER_SIZE = 64 * 1024
         private const val MAX_CACHE_BYTES = 20L * 1024 * 1024
     }
