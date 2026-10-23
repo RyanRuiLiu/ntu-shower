@@ -36,10 +36,7 @@ VOLUME_DEFAULT = 3
 #: 目标维度的通配值：设备维度表示「全部设备」，学号维度表示「全部学号」。
 WILDCARD = "*"
 
-#: 一次批量创建最多展开出的规则数（设备数 × 学号数）。防误操作贴进大名单把库灌爆。
-MAX_RULES_PER_CREATE = 500
-
-#: 单次请求里设备与学号各自的上限，乘积再受 [MAX_RULES_PER_CREATE] 约束。
+#: 单次提交里设备与学号列表各自的上限。
 MAX_DEVICE_TARGETS_PER_CREATE = 50
 MAX_CERT_TARGETS_PER_CREATE = 500
 
@@ -195,13 +192,13 @@ class VoiceEffectView(BaseModel):
 
 
 class VoiceRuleCreate(BaseModel):
-    """一次创建：设备集合 × 学号集合展开成规则，已存在的组合跳过并在响应里列出。
+    """一次创建：一条逻辑规则，目标与事件都按提交的作用域整体存储，不展开。
 
     两个列表里 `*` 与具体值不得混填——「全部」再挑几个具体的，语义上说不通。
     """
 
-    device_ids: list[str] = Field(min_length=1, max_length=MAX_DEVICE_TARGETS_PER_CREATE)
-    cert_nos: list[str] = Field(min_length=1, max_length=MAX_CERT_TARGETS_PER_CREATE)
+    devices: list[str] = Field(min_length=1, max_length=MAX_DEVICE_TARGETS_PER_CREATE)
+    certs: list[str] = Field(min_length=1, max_length=MAX_CERT_TARGETS_PER_CREATE)
     events: list[DoorEventKind] = Field(min_length=1)
     text: str = Field(min_length=1, max_length=120)
     delay_ms: int = Field(default=DELAY_DEFAULT_MS, ge=DELAY_MIN_MS, le=DELAY_MAX_MS)
@@ -212,10 +209,11 @@ class VoiceRuleCreate(BaseModel):
 
 
 class VoiceRuleUpdate(BaseModel):
-    # 设备与学号同宽（1–64 字符）：目标维度的公共边界，具体值与 `*` 都在其中。
-    device_id: str = Field(min_length=1, max_length=64)
-    cert_no: str = Field(min_length=1, max_length=64)
-    event: DoorEventKind
+    """整体编辑：目标（设备/学号/排除）与事件集合都是规则的一部分，一并提交。"""
+
+    devices: list[str] = Field(min_length=1, max_length=MAX_DEVICE_TARGETS_PER_CREATE)
+    certs: list[str] = Field(min_length=1, max_length=MAX_CERT_TARGETS_PER_CREATE)
+    events: list[DoorEventKind] = Field(min_length=1)
     text: str = Field(min_length=1, max_length=120)
     delay_ms: int = Field(default=DELAY_DEFAULT_MS, ge=DELAY_MIN_MS, le=DELAY_MAX_MS)
     volume: int = Field(default=VOLUME_DEFAULT, ge=VOLUME_MIN, le=VOLUME_MAX)
@@ -253,31 +251,17 @@ class VoicePushView(BaseModel):
 
 class VoiceRuleView(BaseModel):
     id: int
-    device_id: str
-    cert_no: str
-    event: DoorEventKind
+    devices: list[str]
+    certs: list[str]
+    exempt: list[str]
+    events: list[DoorEventKind]
     text: str
     delay_ms: int
     volume: int
     enabled: bool
-    exempt: list[str]
     voice: str
-    sample_text: str
     created_at: str
     updated_at: str
-
-
-class VoiceRuleSkippedView(BaseModel):
-    """批量创建里被跳过的组合：该「设备 × 学号 × 事件」已有规则（含停用的）。"""
-
-    device_id: str
-    cert_no: str
-    event: DoorEventKind
-
-
-class VoiceRuleCreateResult(BaseModel):
-    created: list[VoiceRuleView]
-    skipped: list[VoiceRuleSkippedView]
 
 
 class VoicePreviewView(BaseModel):
