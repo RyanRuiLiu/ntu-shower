@@ -1190,10 +1190,11 @@ def test_effect_rename_endpoint_and_name_autofill(
 
     monkeypatch.setattr(tts, "normalize_to_wav", fake_normalize)
 
-    # 上传不带名称：自动取上传文件名（去扩展名）
+    # 名称由前端选中文件时自动填入后提交；接口侧必填
     upload = client.post(
         "/api/v1/voice/effects",
         headers=admin_headers,
+        data={"name": "door-open"},
         files={"file": ("door-open.mp3", b"arbitrary-bytes", "audio/mpeg")},
     )
     assert upload.status_code == 200, upload.text

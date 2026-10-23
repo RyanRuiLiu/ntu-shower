@@ -105,15 +105,12 @@ def list_effects() -> list[schemas.VoiceEffectView]:
 
 @admin_router.post("/voice/effects")
 async def create_effect(
+    name: Annotated[str, Form()],
     file: Annotated[UploadFile, File()],
-    name: Annotated[str, Form()] = "",
 ) -> schemas.VoiceEffectView:
-    """上传一段提示音：任意常见格式，服务端归一化为标准 WAV 并测时长。
-
-    名称留空时取上传文件名（去扩展名）作为音效名。
-    """
+    """上传一段提示音：任意常见格式，服务端归一化为标准 WAV 并测时长。名称必填。"""
     data = await file.read()
-    return await run_in_threadpool(service.create_effect, name, data, file.filename or "未命名")
+    return await run_in_threadpool(service.create_effect, name, data)
 
 
 @admin_router.put("/voice/effects/{effect_id}")
