@@ -178,13 +178,14 @@ def test_snapshot_records_missing_doors_and_skips_nonpositive_door_no(fresh_db: 
     """
     device_id = "dev-bad-snap-1"
     empty = service.process_snapshot(device_id, {"snapshot_id": "s"})
-    assert empty == {"status": "ok", "processed": 0}
+    assert empty.processed == 0
+    assert empty.events == ()
     recorded = db.get_conn().execute("SELECT doors FROM door_snapshot WHERE snapshot_id = ?", ("s",)).fetchall()
     assert [row["doors"] for row in recorded] == ["[]"]
 
     helpers.register_trusted_device(device_id)
     result = service.process_snapshot(device_id, _snapshot([_door(0), _door(1)]))
-    assert result == {"status": "ok", "processed": 1}
+    assert result.processed == 1
 
 
 def test_last_used_ignores_sessions_that_never_opened(fresh_db: str) -> None:
@@ -551,7 +552,7 @@ def test_door_no_must_be_a_strict_in_range_integer(fresh_db: str) -> None:
         device_id,
         _snapshot([_door(1), _door("2"), _door(3.0), _door(3.7), _door(0), _door(49), _door("abc")]),
     )
-    assert result["processed"] == 3  # 只有 1、"2"、3.0 合法
+    assert result.processed == 3  # 只有 1、"2"、3.0 合法
     assert sorted(repository.get_all_live(device_id)) == [1, 2, 3]
 
 
@@ -621,7 +622,8 @@ def test_derivation_failure_returns_ok_and_keeps_the_raw_frame(fresh_db: str, mo
 
     result = service.process_snapshot("dev-derive-fail", _snapshot([_door(1)]))
 
-    assert result == {"status": "ok", "processed": 0}
+    assert result.processed == 0
+    assert result.events == ()
     row = db.read_one("SELECT COUNT(*) AS n FROM door_snapshot WHERE device_id = ?", ("dev-derive-fail",))
     assert row is not None
     assert row["n"] == 1

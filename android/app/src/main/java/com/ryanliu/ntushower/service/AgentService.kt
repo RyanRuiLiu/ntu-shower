@@ -28,6 +28,8 @@ import com.ryanliu.ntushower.features.selfmanage.A11yGuard
 import com.ryanliu.ntushower.features.selfmanage.BathDbArchiver
 import com.ryanliu.ntushower.features.selfmanage.LogShipper
 import com.ryanliu.ntushower.features.selfmanage.OtaUpdater
+import com.ryanliu.ntushower.features.voice.VoiceClipStore
+import com.ryanliu.ntushower.features.voice.VoicePlayer
 import com.ryanliu.ntushower.receiver.WatchdogReceiver
 import com.ryanliu.ntushower.transport.Envelope
 import com.ryanliu.ntushower.transport.GatewayClient
@@ -80,6 +82,7 @@ class AgentService : Service() {
     private lateinit var sender: DoorSnapshotSender
     private lateinit var overlay: CoverOverlay
     private lateinit var notice: NoticeController
+    private lateinit var voicePlayer: VoicePlayer
     private lateinit var scheduler: CommandScheduler
     private var monitor: DoorMonitor? = null
 
@@ -121,9 +124,17 @@ class AgentService : Service() {
             overlay = CoverOverlay(this) { visible -> notice.onCoverVisibilityChanged(visible) }
             notice = NoticeController(this, deviceLog) { overlay.isShowingOrPending }
             sender = DoorSnapshotSender(this) { reading -> notice.onReading(reading) }
-            scheduler = CommandScheduler(overlay, onOutcome = { outcome -> sendOutcome(outcome) })
+            voicePlayer = VoicePlayer(
+                this,
+                // callTimeout 60s 与服务端 voice.prepare 的等待窗同源：下载是音频缓存里
+                // 唯一可能长时间挂住的环节，必须有整体上限，不能只靠 readTimeout
+                VoiceClipStore(HttpClientFactory.create(this, readTimeoutSeconds = 30, callTimeoutSeconds = 60)),
+                deviceLog,
+            )
+            scheduler = CommandScheduler(overlay, voicePlayer, onOutcome = { outcome -> sendOutcome(outcome) })
             client = GatewayClient(this, callback)
             client.connect()
+            worker.execute { voicePlayer.restorePendingVolume() }
             startDoorMonitor()
             startWatchdog()
             scheduleOtaCheck()
@@ -451,6 +462,7 @@ class AgentService : Service() {
         maintenanceExecutor.shutdownNow()
         terminatingExecutor.shutdownNow()
         if (::notice.isInitialized) notice.destroy()
+        if (::voicePlayer.isInitialized) voicePlayer.shutdown()
         closeAdbBridge("service destroyed")
         client.disconnect()
         monitor?.stopWatching()

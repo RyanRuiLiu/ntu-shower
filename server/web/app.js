@@ -41,6 +41,7 @@ import { identitiesView } from './views/identities.js'
 import { inspectorView } from './views/inspector.js'
 import { overviewView } from './views/overview.js'
 import { releasesView } from './views/releases.js'
+import { voiceView } from './views/voice.js'
 
 /**
  * 运行时报错直接弹提示。
@@ -62,6 +63,7 @@ const VIEWS = [
   devicesView,
   configView,
   identitiesView,
+  voiceView,
   releasesView,
   auditView,
 ]
@@ -78,7 +80,7 @@ const VIEWS = [
  */
 const NAV_GROUPS = [
   ['overview', 'devices', 'inspector'],
-  ['config', 'identities', 'releases', 'audit'],
+  ['config', 'identities', 'voice', 'releases', 'audit'],
 ]
 
 let active = null

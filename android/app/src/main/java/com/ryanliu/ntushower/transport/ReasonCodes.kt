@@ -124,4 +124,19 @@ object ReasonCodes {
 
     /** 截屏失败 */
     const val SCREEN_CAPTURE_FAILED = "screen.capture_failed"
+
+    /** 播报参数不合法 */
+    const val VOICE_PARAMS_INVALID = "voice.params_invalid"
+
+    /** 播报音频下载失败 */
+    const val VOICE_CLIP_DOWNLOAD_FAILED = "voice.clip_download_failed"
+
+    /** 播报音频校验失败 */
+    const val VOICE_CLIP_INVALID = "voice.clip_invalid"
+
+    /** 播报播放失败 */
+    const val VOICE_PLAY_FAILED = "voice.play_failed"
+
+    /** 设置播报音量失败 */
+    const val VOICE_VOLUME_FAILED = "voice.volume_failed"
 }

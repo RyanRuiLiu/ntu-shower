@@ -112,7 +112,12 @@ def test_every_action_belongs_to_a_channel() -> None:
 
 def test_channel_names_are_defined_constants() -> None:
     """通道取值必须是已定义的常量——写错字符串会让限流失效。"""
-    known = {actions.CHANNEL_AUTOMATION, actions.CHANNEL_CAPTURE, actions.CHANNEL_MAINTENANCE}
+    known = {
+        actions.CHANNEL_AUTOMATION,
+        actions.CHANNEL_CAPTURE,
+        actions.CHANNEL_MAINTENANCE,
+        actions.CHANNEL_VOICE,
+    }
     for action, channel in actions.ACTION_CHANNELS.items():
         assert channel in known, f"{action} 的通道不认识：{channel}"
 

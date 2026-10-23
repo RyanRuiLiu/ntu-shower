@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit
  */
 object HttpClientFactory {
 
-    fun create(context: Context, readTimeoutSeconds: Long = 30): OkHttpClient {
+    fun create(context: Context, readTimeoutSeconds: Long = 30, callTimeoutSeconds: Long = 0): OkHttpClient {
         val tls = SecureTls(context)
         val spec = ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS)
             .tlsVersions(TlsVersion.TLS_1_2)
@@ -37,6 +37,9 @@ object HttpClientFactory {
             .sslSocketFactory(tls.socketFactory, tls.trustManager)
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(readTimeoutSeconds, TimeUnit.SECONDS)
+            // 0 = 不设整体超时：网关 WS 与 OTA 大文件沿用 readTimeout 语义。慢速滴漏的
+            // 响应体 readTimeout 管不住，语音下载这类有界请求用 callTimeout 封顶
+            .apply { if (callTimeoutSeconds > 0) callTimeout(callTimeoutSeconds, TimeUnit.SECONDS) }
             .build()
     }
 }
