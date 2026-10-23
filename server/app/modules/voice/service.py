@@ -23,7 +23,6 @@
 
 import asyncio
 import json
-import sqlite3
 import threading
 import time
 import uuid
@@ -113,22 +112,45 @@ def _sample_text(text: str, event: DoorEventKind) -> str:
 
 
 def _rule_view(row: Row) -> schemas.VoiceRuleView:
-    event = DoorEventKind(str(row["event"]))
+    event_values = json.loads(str(row["events"]))
     return schemas.VoiceRuleView(
         id=int(row["id"]),
-        device_id=str(row["device_id"]),
-        cert_no=str(row["cert_no"]),
-        event=event,
+        devices=json.loads(str(row["devices"])),
+        certs=json.loads(str(row["certs"])),
+        exempt=json.loads(str(row["exempt"])),
+        events=[DoorEventKind(value) for value in event_values],
         text=str(row["text"]),
         delay_ms=int(row["delay_ms"]),
         volume=int(row["volume"]),
         enabled=bool(row["enabled"]),
-        exempt=json.loads(str(row["exempt"])),
         voice=str(row["voice"]),
-        sample_text=_sample_text(str(row["text"]), event),
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
     )
+
+
+def _cert_label(view: schemas.VoiceRuleView) -> str:
+    """展示排序用的学号维度标识：具体学号的首个值，通配排最后。"""
+    if "*" in view.certs:
+        return "~"
+    return view.certs[0] if view.certs else "~"
+
+
+def list_rules() -> list[schemas.VoiceRuleView]:
+    """列表顺序即页面呈现顺序：具体学号在前（按学号分组自然聚拢）、通配学号
+    最后；同学号维度里具体设备在前、通配在后。"""
+    views = [_rule_view(row) for row in repository.list_rules()]
+    order = {str(record["device_id"]): index for index, record in enumerate(devices_service.list_devices())}
+    views.sort(
+        key=lambda view: (
+            "*" in view.certs,
+            _cert_label(view),
+            "*" in view.devices,
+            order.get(view.devices[0], len(order)) if view.devices else len(order),
+            view.id,
+        )
+    )
+    return views
 
 
 def spec() -> schemas.VoiceSpecView:
@@ -169,27 +191,6 @@ def status() -> schemas.VoiceStatusView:
         ffmpeg_available=shutil.which("ffmpeg") is not None,
         clip_count=repository.count_clips(),
     )
-
-
-def list_rules(device_id: str | None) -> list[schemas.VoiceRuleView]:
-    """列表顺序即页面呈现顺序：具体规则在前、通配在后；同层级内按设备展示顺序
-    （与设备页/顶栏下拉同一顺序），再按学号、事件。设备档案里已消失的设备排在
-    已知设备之后，规则不因设备下档而隐藏。
-    """
-    views = [_rule_view(row) for row in repository.list_rules(device_id)]
-    order = {str(record["device_id"]): index for index, record in enumerate(devices_service.list_devices())}
-    unknown = len(order)
-    views.sort(
-        key=lambda view: (
-            view.device_id == schemas.WILDCARD,
-            view.cert_no == schemas.WILDCARD,
-            order.get(view.device_id, unknown),
-            view.cert_no,
-            view.event.value,
-            view.id,
-        )
-    )
-    return views
 
 
 def _normalized_targets(values: list[str], label: str) -> list[str]:
@@ -237,76 +238,68 @@ def _require_known_devices(device_ids: list[str]) -> None:
             raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {device_id} 不在档案里")
 
 
-def create_rule(req: schemas.VoiceRuleCreate) -> schemas.VoiceRuleCreateResult:
-    """设备集合 × 学号集合 × 事件集合展开建规则；已存在的组合跳过并在响应里点名。"""
-    device_ids = _normalized_targets(req.device_ids, "设备")
-    cert_nos = _normalized_targets(req.cert_nos, "学号")
-    _require_known_devices(device_ids)
+def create_rule(req: schemas.VoiceRuleCreate) -> schemas.VoiceRuleView:
+    """创建一条逻辑规则：目标（设备/学号/排除）与事件按提交的作用域整体存储。"""
+    devices = _normalized_targets(req.devices, "设备")
+    certs = _normalized_targets(req.certs, "学号")
+    _require_known_devices(devices)
     events = list(dict.fromkeys(req.events))
-    expanded = len(device_ids) * len(cert_nos) * len(events)
-    if expanded > schemas.MAX_RULES_PER_CREATE:
-        _reject(f"一次最多创建 {schemas.MAX_RULES_PER_CREATE} 条规则，本次展开为 {expanded} 条")
-    exempt = _exempt_json(cert_nos, _normalized_exemptions(req.exempt_cert_nos))
+    if not events:
+        _reject("至少选择一个事件")
+    exempt = _exempt_json(certs, _normalized_exemptions(req.exempt_cert_nos))
     _require_known_voice(req.voice)
+    for event in events:
+        _validated_text(req.text, event)
 
-    created: list[schemas.VoiceRuleView] = []
-    skipped: list[schemas.VoiceRuleSkippedView] = []
     now = now_rfc3339()
-    for device_id in device_ids:
-        for cert_no in cert_nos:
-            for event in events:
-                text = _validated_text(req.text, event)
-                rule_id = repository.insert_rule(
-                    device_id,
-                    cert_no,
-                    event.value,
-                    text,
-                    req.delay_ms,
-                    req.volume,
-                    req.enabled,
-                    exempt,
-                    req.voice,
-                    now,
-                )
-                if rule_id is None:
-                    skipped.append(schemas.VoiceRuleSkippedView(device_id=device_id, cert_no=cert_no, event=event))
-                    continue
-                row = repository.get_rule(rule_id)
-                if row is not None:
-                    created.append(_rule_view(row))
-    return schemas.VoiceRuleCreateResult(created=created, skipped=skipped)
+    rule_id = repository.insert_rule(
+        json.dumps(devices, ensure_ascii=False),
+        json.dumps(certs, ensure_ascii=False),
+        json.dumps(events, ensure_ascii=False),
+        exempt,
+        req.text,
+        req.delay_ms,
+        req.volume,
+        req.enabled,
+        req.voice,
+        now,
+    )
+    row = repository.get_rule(rule_id)
+    if row is None:
+        raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
+    return _rule_view(row)
 
 
 def update_rule(rule_id: int, req: schemas.VoiceRuleUpdate) -> schemas.VoiceRuleView:
-    existing = repository.get_rule(rule_id)
-    if existing is None:
+    """整体编辑一条逻辑规则：目标与事件集合是规则的一部分，一并提交。"""
+    if repository.get_rule(rule_id) is None:
         raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
-    device_ids = _normalized_targets([req.device_id], "设备")
-    cert_nos = _normalized_targets([req.cert_no], "学号")
-    _require_known_devices(device_ids)
-    text = _validated_text(req.text, req.event)
-    exempt = _exempt_json(cert_nos, _normalized_exemptions(req.exempt_cert_nos))
+    devices = _normalized_targets(req.devices, "设备")
+    certs = _normalized_targets(req.certs, "学号")
+    _require_known_devices(devices)
+    events = list(dict.fromkeys(req.events))
+    if not events:
+        _reject("至少选择一个事件")
+    exempt = _exempt_json(certs, _normalized_exemptions(req.exempt_cert_nos))
     _require_known_voice(req.voice)
-    try:
-        changed = repository.update_rule(
+    for event in events:
+        _validated_text(req.text, event)
+    if (
+        repository.update_rule(
             rule_id,
-            device_ids[0],
-            cert_nos[0],
-            req.event.value,
-            text,
+            json.dumps(devices, ensure_ascii=False),
+            json.dumps(certs, ensure_ascii=False),
+            json.dumps(events, ensure_ascii=False),
+            exempt,
+            req.text,
             req.delay_ms,
             req.volume,
             req.enabled,
-            exempt,
             req.voice,
             now_rfc3339(),
         )
-    except sqlite3.IntegrityError as exc:
-        raise ApiProblemError(
-            INVALID_VOICE_RULE,
-            f"「{device_ids[0]} + {cert_nos[0]} + {req.event.value}」已有另一条规则",
-        ) from exc
-    if changed == 0:
+        == 0
+    ):
         raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
     row = repository.get_rule(rule_id)
     if row is None:
@@ -423,7 +416,7 @@ def prepare_static(view: schemas.VoiceRuleView) -> tts.ClipFile | None:
             "voice.prepare-skipped",
             "静态模板预热失败，首次播报时会再试",
             rule_id=view.id,
-            device_id=view.device_id,
+            devices=",".join(view.devices),
             error=str(exc),
         )
         return None
@@ -431,10 +424,13 @@ def prepare_static(view: schemas.VoiceRuleView) -> tts.ClipFile | None:
 
 
 def rule_device_targets(views: list[schemas.VoiceRuleView]) -> list[str]:
-    """这批规则要预热到哪些设备：具体设备去重，通配设备展开为全部在档设备。"""
-    if any(view.device_id == schemas.WILDCARD for view in views):
-        return [str(record["device_id"]) for record in devices_service.list_devices()]
-    return list(dict.fromkeys(view.device_id for view in views))
+    """这批规则要预热到哪些设备：作用域里的通配展开为全部在档设备，具体设备去重。"""
+    targets: list[str] = []
+    for view in views:
+        if "*" in view.devices:
+            return [str(record["device_id"]) for record in devices_service.list_devices()]
+        targets.extend(view.devices)
+    return list(dict.fromkeys(targets))
 
 
 def _clip_params(clip: tts.ClipFile, volume: int | None = None) -> dict[str, object]:
@@ -535,7 +531,8 @@ async def _dispatch_event(event: DoorEvent, max_age: int) -> None:
     if not event.cert_no:
         return
 
-    rule = repository.match_rule(event.device_id, event.cert_no, event.kind.value)
+    matched = repository.matching_rules(event.device_id, event.cert_no, event.kind.value)
+    rule = matched[0] if matched else None
     if rule is None:
         log_event(
             "DEBUG",
@@ -640,8 +637,10 @@ async def push_to_device(rule_id: int, device_id: str) -> schemas.VoicePushView:
         raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
     if devices_service.get_device(device_id) is None:
         raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {device_id} 不在档案里")
-    event_kind = DoorEventKind(str(row["event"]))
-    cert_no = str(row["cert_no"]) if str(row["cert_no"]) != schemas.WILDCARD else "示例学号"
+    events = json.loads(str(row["events"]))
+    event_kind = DoorEventKind(events[0])
+    certs = json.loads(str(row["certs"]))
+    cert_no = certs[0] if "*" not in certs and certs else "示例学号"
     values = render.sample_values(schemas.event_spec(event_kind).label, door_no=1, cert_no=cert_no)
     try:
         segments = render.render_segments(str(row["text"]), values)
