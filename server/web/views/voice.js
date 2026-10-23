@@ -76,10 +76,9 @@ function certCell(certNo, exempt) {
 
 /** 通配目标的纯文本写法（确认框、提示里用，不带 HTML）。 */
 function targetText(rule) {
-  const device = rule.device_id === WILDCARD ? '全部设备' : deviceName(rule.device_id)
-  const cert = rule.cert_no === WILDCARD ? '全部学号' : rule.cert_no
-  const exempt = rule.exempt && rule.exempt.length > 0 ? `（排除 ${rule.exempt.length} 人）` : ''
-  return `${device} · ${cert}${exempt} · ${eventItem(rule.event).label}`
+  const devices = rule.devices.includes(WILDCARD) ? '全部设备' : rule.devices.map(deviceName).join('、')
+  const certs = rule.certs.includes(WILDCARD) ? '全部学号' : rule.certs.join('、')
+  return `设备：${devices}；学号：${certs}`
 }
 
 function renderStatus() {
@@ -163,25 +162,23 @@ function renderEffects() {
       '<div class="empty">还没有上传音效；支持常见音频格式，会统一转换，时长不超过 10 秒。</div>'
     return
   }
-  const rows = effects
+  const cards = effects
     .map(
-      (item) => `<tr data-id="${esc(item.effect_id)}">
-        <td>${esc(item.name)}</td>
-        <td class="mono">${esc(fmtMs(item.duration_ms))}</td>
-        <td class="mono">${esc(String(Math.round(item.size_bytes / 1024)))} KB</td>
-        <td>
-          <div class="btn-row">
-            <button type="button" class="btn btn-ghost btn-sm" data-act="audition">试听</button>
-            <button type="button" class="btn btn-ghost btn-sm" data-act="rename">改名</button>
-            <button type="button" class="btn btn-danger btn-sm" data-act="delete">删除</button>
-          </div>
-        </td>
-      </tr>`,
+      (item) => `<div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px">
+      <div class="btn-row" style="align-items:center">
+        <b>${esc(item.name)}</b>
+        <span class="badge">${esc(fmtMs(item.duration_ms))}</span>
+        <span class="badge">${esc(String(Math.round(item.size_bytes / 1024)))} KB</span>
+      </div>
+      <div class="btn-row" style="margin-top:6px">
+        <button type="button" class="btn btn-ghost btn-sm" data-act="audition">试听</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-act="rename">改名</button>
+        <button type="button" class="btn btn-danger btn-sm" data-act="delete">删除</button>
+      </div>
+    </div>`,
     )
     .join('')
-  $('voiceEffectTable').innerHTML = `<table class="table"><thead><tr>
-      <th>名称</th><th>时长</th><th>大小</th><th></th>
-    </tr></thead><tbody>${rows}</tbody></table>`
+  $('voiceEffectTable').innerHTML = cards
 }
 
 async function uploadEffect() {
@@ -257,40 +254,55 @@ function renderFilter() {
   $('voiceFilterDevice').value = filterDevice
 }
 
+function certGroupLabel(rule) {
+  if (rule.certs.includes(WILDCARD)) {
+    return rule.exempt.length > 0 ? `全部学号（排除 ${rule.exempt.join('、')}）` : '全部学号'
+  }
+  return rule.certs.map((cert) => `<code>${esc(cert)}</code>`).join('、')
+}
+
 function renderTable() {
   $('voiceCount').textContent = rules.length > 0 ? `共 ${rules.length} 条` : ''
   if (rules.length === 0) {
     $('voiceTable').innerHTML = '<div class="empty">暂无语音规则</div>'
     return
   }
-  const rows = rules
-    .map((rule) => {
-      const event = eventItem(rule.event)
-      const selected = editingId === rule.id ? ' class="is-selected"' : ''
-      return `<tr${selected} data-id="${esc(String(rule.id))}">
-        <td>${deviceCell(rule.device_id)}</td>
-        <td>${certCell(rule.cert_no, rule.exempt)}</td>
-        <td><div>${esc(event.label)}</div><div class="muted">${esc(event.description)}</div></td>
-        <td>${esc(rule.text)}</td>
-        <td class="mono">${esc(fmtDelay(rule.delay_ms))}</td>
-        <td class="mono">${esc(String(rule.volume))}</td>
-        <td class="mono">${esc(rule.voice)}</td>
-        <td>${rule.enabled ? '<span class="badge badge-green">启用</span>' : '<span class="badge">停用</span>'}</td>
-        <td>
-          <div class="btn-row">
-            <button type="button" class="btn btn-ghost btn-sm" data-act="toggle">${rule.enabled ? '停用' : '启用'}</button>
-            <button type="button" class="btn btn-ghost btn-sm" data-act="edit">编辑</button>
-            <button type="button" class="btn btn-ghost btn-sm" data-act="preview">试听</button>
-            <button type="button" class="btn btn-ghost btn-sm" data-act="push">推设备</button>
-            <button type="button" class="btn btn-danger btn-sm" data-act="delete">删除</button>
-          </div>
-        </td>
-      </tr>`
-    })
-    .join('')
-  $('voiceTable').innerHTML = `<table class="table"><thead><tr>
-      <th>设备</th><th>学号</th><th>事件</th><th>播报内容</th><th>延迟</th><th>音量</th><th>音色</th><th>启用</th><th></th>
-    </tr></thead><tbody>${rows}</tbody></table>`
+  const cards = []
+  let lastGroup = null
+  for (const rule of rules) {
+    const group = certGroupLabel(rule)
+    if (group !== lastGroup) {
+      cards.push(`<div class="muted" style="margin:14px 0 4px">学号：${group}</div>`)
+      lastGroup = group
+    }
+    const eventBadges = rule.events
+      .map((value) => {
+        const item = eventItem(value)
+        return `<span class="badge badge-blue" title="${esc(item.description)}">${esc(item.label)}</span>`
+      })
+      .join(' ')
+    const devices = rule.devices.includes(WILDCARD)
+      ? '<span class="badge badge-blue">全部设备</span>'
+      : esc(rule.devices.map(deviceName).join('、'))
+    const stateBadge = rule.enabled
+      ? '<span class="badge badge-green">启用</span>'
+      : '<span class="badge">停用</span>'
+    cards.push(`<div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px">
+      <div class="btn-row" style="align-items:center">
+        ${stateBadge}<span>${devices}</span><span class="muted">·</span><span>${eventBadges}</span>
+      </div>
+      <div style="margin:6px 0">${esc(rule.text)}</div>
+      <div class="muted">延迟 ${esc(fmtDelay(rule.delay_ms))} · 音量 ${esc(String(rule.volume))} · 音色 ${esc(rule.voice)}</div>
+      <div class="btn-row" style="margin-top:6px">
+        <button type="button" class="btn btn-ghost btn-sm" data-act="toggle">${rule.enabled ? '停用' : '启用'}</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-act="edit">编辑</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-act="preview">试听</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-act="push">推设备</button>
+        <button type="button" class="btn btn-danger btn-sm" data-act="delete">删除</button>
+      </div>
+    </div>`)
+  }
+  $('voiceTable').innerHTML = cards.join('')
 }
 
 /**
@@ -325,29 +337,24 @@ function renderDeliveries() {
     $('voiceDeliveryTable').innerHTML = '<div class="empty">暂无播报记录</div>'
     return
   }
-  const rows = deliveries
+  const cards = deliveries
     .map((item) => {
       const event = eventItem(item.event)
       const dispatched = Boolean(item.dispatched_at)
-      const timeCell = dispatched
+      const time = dispatched
         ? esc(fmtDateTime(item.dispatched_at))
         : `<span class="muted" title="事件时刻（未下发）">${esc(fmtDateTime(item.occurred_at))}</span>`
-      return `<tr>
-        <td class="mono">${timeCell}</td>
-        <td>${deviceCell(item.device_id)}</td>
-        <td>${certCell(item.cert_no)}</td>
-        <td>${esc(event.label)}</td>
-        <td class="mono">${esc(String(item.door_no))}</td>
-        <td><div title="${esc(item.text || '')}">${esc(item.text || PLACEHOLDER)}</div></td>
-        <td class="mono">${esc(fmtDelay(item.delay_ms))}</td>
-        <td>${stageCell(item)}</td>
-        <td><span title="${esc(item.detail || '')}">${deliveryBadge(item.status)}</span></td>
-      </tr>`
+      return `<div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px">
+      <div class="btn-row" style="align-items:center">
+        <span class="mono">${time}</span>${deliveryBadge(item.status)}<span>${deviceCell(item.device_id)}</span>
+      </div>
+      <div class="muted" style="margin:4px 0">${esc(event.label)} · 喷头 ${esc(String(item.door_no))} · ${certCell(item.cert_no)}</div>
+      <div style="margin:4px 0">${esc(item.text || PLACEHOLDER)}</div>
+      <div class="muted">延迟 ${esc(fmtDelay(item.delay_ms))} · ${stageCell(item)}</div>
+    </div>`
     })
     .join('')
-  $('voiceDeliveryTable').innerHTML = `<table class="table"><thead><tr>
-      <th>下发时刻</th><th>设备</th><th>学号</th><th>事件</th><th>喷头号</th><th>播报内容</th><th>延迟</th><th>阶段耗时</th><th>状态</th>
-    </tr></thead><tbody>${rows}</tbody></table>`
+  $('voiceDeliveryTable').innerHTML = cards
 }
 
 function applyFormMode() {
@@ -364,9 +371,7 @@ function updateCertHint() {
     $('voiceCertHint').textContent = '排除名单：一行一个学号，这些人不播这条规则（可能命中其它规则）。'
     return
   }
-  $('voiceCertHint').textContent = editingId !== null
-    ? '编辑时只能填一个学号；批量请另用新增。'
-    : '一行一个学号可批量创建；一次最多展开 500 条规则。'
+  $('voiceCertHint').textContent = '一行一个学号；这些学号都会播这条规则。'
 }
 
 function clearForm() {
@@ -374,7 +379,8 @@ function clearForm() {
   $('voiceCertWildcard').checked = false
   $('voiceCert').disabled = false
   $('voiceCert').value = ''
-  $('voiceEvents').innerHTML = eventChecksHtml(events[0] ? [events[0].value] : [])
+  // 默认一个事件都不勾：等待开阀最常用，但「默认就响」不该替人决定
+  $('voiceEvents').innerHTML = eventChecksHtml([])
   renderVoiceOptions('melo')
   $('voiceText').value = ''
   $('voiceDelay').value = spec ? String(spec.delay.default_ms / 1000) : '0'
@@ -386,20 +392,19 @@ function clearForm() {
 }
 
 function fillForm(rule) {
-  $('voiceScope').innerHTML = scopeEditorHtml(store.devices, [rule.device_id])
-  const wildcard = rule.cert_no === WILDCARD
+  $('voiceScope').innerHTML = scopeEditorHtml(store.devices, rule.devices)
+  const wildcard = rule.certs.includes(WILDCARD)
   $('voiceCertWildcard').checked = wildcard
   $('voiceCert').disabled = false
-  // 勾「全部学号」时框里展示的是排除名单；不勾则是那一个学号
-  $('voiceCert').value = wildcard ? (rule.exempt || []).join('\n') : rule.cert_no
-  $('voiceEvents').innerHTML = eventChecksHtml([rule.event])
+  // 勾「全部学号」时框里展示的是排除名单；不勾则是目标学号列表
+  $('voiceCert').value = wildcard ? (rule.exempt || []).join('\n') : rule.certs.join('\n')
+  $('voiceEvents').innerHTML = eventChecksHtml(rule.events)
   renderVoiceOptions(rule.voice)
   $('voiceText').value = rule.text
   $('voiceDelay').value = String(rule.delay_ms / 1000)
   $('voiceVolume').value = String(rule.volume)
   $('voiceEnabled').checked = rule.enabled
   applyFormMode()
-  showSample(rule.sample_text)
 }
 
 /** 学号框按空白与常见分隔符切分（「一行一个」是主形状，贴进逗号分隔也能认）。 */
@@ -441,18 +446,7 @@ function readForm() {
     exempt_cert_nos: exempt,
     voice: $('voiceVoice') ? $('voiceVoice').value : 'melo',
   }
-  if (editingId !== null) {
-    if (deviceIds.length > 1) return report('voiceResult', '失败 · 编辑时只能选一台设备或全部设备', 'err')
-    if (selectedEvents.length > 1) {
-      return report('voiceResult', '失败 · 编辑时只能勾选一个事件；多个事件请用新增批量建', 'err')
-    }
-    // 通配学号是合法的单值目标；手填多个学号只属于新增的批量路径
-    if (!wildcardCert && certTargets.length > 1) {
-      return report('voiceResult', '失败 · 编辑时只能填一个学号', 'err')
-    }
-    return { device_id: deviceIds[0], cert_no: certTargets[0], event, ...common }
-  }
-  return { device_ids: deviceIds, cert_nos: certTargets, events: selectedEvents, ...common }
+  return { devices: deviceIds, certs: certTargets, events: selectedEvents, ...common }
 }
 
 /** 渲染效果区：用示例值展示模板渲染后的样子，引号与说明把它和真实播报区分开。 */
@@ -489,14 +483,13 @@ function stopPreview() {
 }
 
 async function pushRule(rule) {
-  let deviceId = rule.device_id
-  if (deviceId === WILDCARD) {
+  let deviceId = rule.devices.includes(WILDCARD) ? '' : rule.devices[0]
+  if (!deviceId) {
     // 通配规则对全部设备生效：推给哪台由现场指定（列在线设备，输序号）
     const online = devices.filter((d) => d.online)
     if (!online.length) return report('voiceResult', '失败 · 没有在线设备可推送', 'err')
     const list = online.map((d, i) => `${i + 1}. ${d.name || d.device_id}`).join('\n')
-    const picked = window.prompt(`这条规则对全部设备生效。推送到哪台？输入序号：
-${list}`, '1')
+    const picked = window.prompt(`这条规则对全部设备生效。推送到哪台？输入序号：\n${list}`, '1')
     if (picked === null) return
     const chosen = online[Number(picked) - 1]
     if (!chosen) return report('voiceResult', '失败 · 序号无效', 'err')
@@ -515,12 +508,13 @@ ${list}`, '1')
 }
 
 async function previewRule(rule) {
+  const cert = rule.certs.includes(WILDCARD) ? '示例学号' : rule.certs[0]
   report('voiceResult', '正在合成试听…', 'info')
   try {
     const result = await api.previewVoiceRule({
       text: rule.text,
-      event: rule.event,
-      cert_no: rule.cert_no === WILDCARD ? '示例学号' : rule.cert_no,
+      event: rule.events[0],
+      cert_no: cert,
       door_no: 1,
       voice: rule.voice || 'melo',
     })
@@ -535,20 +529,8 @@ async function previewRule(rule) {
 async function previewForm() {
   const payload = readForm()
   if (!payload) return
-  const cert = payload.cert_nos ? payload.cert_nos[0] : payload.cert_no
-  // 创建形态是 events 数组（可勾多个），预览取第一个；编辑形态是单个 event
-  const event = payload.events ? payload.events[0] : payload.event
-  await previewRule({ text: payload.text, event, cert_no: cert, voice: payload.voice })
-}
-
-/** 保存后的那句话按结果状态说：一条没建成、全部跳过、建成几条，各是各的说法。 */
-function createResultMessage(payload, created, skipped) {
-  const warmNote = ANY_PLACEHOLDER.test(payload.text)
-    ? '带占位符的文本在首次播报时渲染生成'
-    : '固定文本的音频已开始预热到设备'
-  if (created === 0) return `没有新建：${skipped} 个目标已有规则（含停用的）。`
-  const skipNote = skipped > 0 ? `，跳过 ${skipped} 条（目标已有规则）` : ''
-  return `已新建 ${created} 条规则${skipNote}；${warmNote}。`
+  const cert = payload.certs.includes(WILDCARD) ? '示例学号' : payload.certs[0]
+  await previewRule({ text: payload.text, event: payload.events[0], cert_no: cert, voice: payload.voice })
 }
 
 async function submitForm() {
@@ -563,10 +545,11 @@ async function submitForm() {
         : '固定文本的音频已重新预热。'
       report('voiceResult', `已保存；${warmNote}`, 'ok')
     } else {
-      const result = await api.createVoiceRule(payload)
-      report('voiceResult', createResultMessage(payload, result.created.length, result.skipped.length), 'ok')
-      if (result.created.length === 0) return
-      // 一个都没建成（目标全已存在）：表单原样留着，调整名单后可直接重试
+      await api.createVoiceRule(payload)
+      const warmNote = ANY_PLACEHOLDER.test(payload.text)
+        ? '带占位符的文本在首次播报时渲染生成'
+        : '固定文本的音频已开始预热到设备'
+      report('voiceResult', `已新建规则；${warmNote}。`, 'ok')
     }
     editingId = null
     await reload()
