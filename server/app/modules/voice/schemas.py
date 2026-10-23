@@ -31,7 +31,7 @@ DELAY_DEFAULT_MS = 0
 
 VOLUME_MIN = 0
 VOLUME_MAX = 5
-VOLUME_DEFAULT = 4
+VOLUME_DEFAULT = 3
 
 #: 目标维度的通配值：设备维度表示「全部设备」，学号维度表示「全部学号」。
 WILDCARD = "*"

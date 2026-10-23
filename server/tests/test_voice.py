@@ -161,7 +161,7 @@ def test_spec_uses_canonical_event_names(client: TestClient, admin_headers: dict
         "event",
     ]
     assert spec["delay"] == {"minimum_ms": 0, "maximum_ms": 10_000, "default_ms": 0}
-    assert spec["volume"] == {"minimum": 0, "maximum": 5, "default": 4}
+    assert spec["volume"] == {"minimum": 0, "maximum": 5, "default": 3}
     assert "priority" not in spec
     assert next(item["key"] for item in spec["voices"]) == "melo"
 
