@@ -82,6 +82,8 @@ class SerialCommandQueue<T>(private val maxPending: Int = DEFAULT_MAX_PENDING) {
          *
          * 与服务端 `CHANNEL_QUEUE_MAX` 取同一个数：两边看法一致，排障时不必换算。
          */
-        const val DEFAULT_MAX_PENDING = 4
+        // 与服务端 CHANNEL_QUEUE_MAX 同值同源（同通道排队上限，见 sessions/service.py）：
+        // 语音风暴时一扇门一条播报，喷头最多的设备同时迁移也不应触发"排满"拒绝
+        const val DEFAULT_MAX_PENDING = 8
     }
 }
