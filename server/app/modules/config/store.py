@@ -86,7 +86,7 @@ def validate(values: ConfigValues) -> ConfigValues:
     checked: ConfigValues = {}
     for key, value in values.items():
         spec = SPECS_BY_KEY[key]
-        checked[key] = _check_value(spec.key, spec.kind, spec.minimum, spec.maximum, value)
+        checked[key] = _check_value(spec.key, spec.kind, spec.minimum, spec.maximum, spec.choices, value)
     return checked
 
 
@@ -95,6 +95,7 @@ def _check_value(
     kind: ConfigKind,
     minimum: int | None,
     maximum: int | None,
+    choices: tuple[str, ...] | None,
     value: object,
 ) -> int | bool | str | dict[str, str]:
     if kind is ConfigKind.INT:
@@ -115,6 +116,9 @@ def _check_value(
     if kind is ConfigKind.TEXT:
         if not isinstance(value, str):
             _reject(f"{key} 需要文本，收到 {type(value).__name__}")
+        if choices is not None and value not in choices:
+            allowed = "、".join(choices)
+            _reject(f"{key} 只允许 {allowed}（收到 {value}）")
         return value
 
     if kind is ConfigKind.TIME:
@@ -273,6 +277,7 @@ def describe() -> list[ConfigSpecView]:
             "maximum": spec.maximum,
             "unit": spec.unit,
             "group": spec.group,
+            "choices": list(spec.choices) if spec.choices is not None else None,
         }
         for spec in CONFIG_SPECS
     ]

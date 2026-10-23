@@ -108,6 +108,17 @@ function controlHtml(spec, value, id, isOverridden) {
       </div>${desc}`
   }
   if (spec.kind === 'text') {
+    // 登记表声明了封闭取值集的文本键渲染成下拉：取值只有那几个，自由输入只会制造
+    // 拼错的非法值。取值仍走 data-kind="text" 的 value 通道，读取逻辑不用分叉
+    if (spec.choices && spec.choices.length > 0) {
+      const options = spec.choices
+        .map((choice) => `<option value="${esc(choice)}" ${choice === value ? 'selected' : ''}>${esc(choice)}</option>`)
+        .join('')
+      return `<div class="field">
+        <label for="${esc(id)}">${esc(spec.title)}${badgeHtml}${resetButton}</label>
+        <select id="${esc(id)}" data-key="${esc(spec.key)}" data-kind="text">${options}</select>
+      </div>${desc}`
+    }
     return `<div class="field">
         <label for="${esc(id)}">${esc(spec.title)}${badgeHtml}${resetButton}</label>
         <input id="${esc(id)}" type="text" data-key="${esc(spec.key)}" data-kind="text"

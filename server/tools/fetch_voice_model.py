@@ -1,4 +1,5 @@
-"""下载 Piper 中文模型到 `settings.voice_dir/models/` 并校验字节数与 SHA-256。
+"""下载 Piper 中文模型（全部音色，见 `tts.VOICES`）到 `settings.voice_dir/models/`
+并校验字节数与 SHA-256。
 
 部署时手动执行一次：
 
@@ -59,19 +60,26 @@ def _download(url: str, target: Path, size: int, sha256: str) -> None:
         temp.unlink(missing_ok=True)
 
 
+def _files() -> list[tuple[str, str, int, str]]:
+    files: list[tuple[str, str, int, str]] = []
+    for voice in tts.VOICES.values():
+        # stem 形如 zh_CN-huayan-medium → 仓库路径 zh/zh_CN/{speaker}/{quality}/{stem}
+        _lang, speaker, quality = voice.stem.split("-")
+        base = f"https://huggingface.co/rhasspy/piper-voices/resolve/main/zh/zh_CN/{speaker}/{quality}/{voice.stem}"
+        files.append((f"{voice.stem}.onnx", f"{base}.onnx", voice.model_size, voice.model_sha256))
+        files.append((f"{voice.stem}.onnx.json", f"{base}.onnx.json", voice.config_size, voice.config_sha256))
+    return files
+
+
 def main() -> int:
-    files = (
-        (tts.MODEL_NAME, tts.MODEL_URL, tts.MODEL_SIZE, tts.MODEL_SHA256),
-        (tts.CONFIG_NAME, tts.CONFIG_URL, tts.CONFIG_SIZE, tts.CONFIG_SHA256),
-    )
-    for name, url, size, sha256 in files:
+    for name, url, size, sha256 in _files():
         target = tts.models_dir() / name
         if _matches(target, size, sha256):
             print(f"已就绪：{name}")
             continue
         _download(url, target, size, sha256)
         print(f"已校验：{name}")
-    print("语音模型已就绪。")
+    print(f"语音模型已就绪（{len(tts.VOICES)} 个音色）。")
     return 0
 
 

@@ -31,6 +31,7 @@ class ConfigSpecView(TypedDict):
     minimum: int | None
     maximum: int | None
     unit: str
+    choices: list[str] | None
     group: str
     """界面分组（配置页按它分卡片），取值见 spec.GROUPS。"""
 

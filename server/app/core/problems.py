@@ -51,6 +51,9 @@ VOICE_RULE_NOT_FOUND = Problem("voice-rule-not-found", 404, "找不到语音规�
 INVALID_VOICE_RULE = Problem("invalid-voice-rule", 422, "语音规则不合法")
 VOICE_SYNTHESIS_FAILED = Problem("voice-synthesis-failed", 503, "语音合成失败")
 VOICE_CLIP_NOT_FOUND = Problem("voice-clip-not-found", 404, "找不到播报音频")
+INVALID_VOICE_EFFECT = Problem("invalid-voice-effect", 422, "音效不合法")
+VOICE_EFFECT_NOT_FOUND = Problem("voice-effect-not-found", 404, "找不到音效")
+VOICE_EFFECT_IN_USE = Problem("voice-effect-in-use", 409, "音效正在被规则使用")
 
 # ── 请求格式 ──
 VALIDATION_FAILED = Problem("validation-failed", 422, "提交的内容有误")
@@ -79,6 +82,9 @@ REGISTRY: tuple[Problem, ...] = (
     INVALID_VOICE_RULE,
     VOICE_SYNTHESIS_FAILED,
     VOICE_CLIP_NOT_FOUND,
+    INVALID_VOICE_EFFECT,
+    VOICE_EFFECT_NOT_FOUND,
+    VOICE_EFFECT_IN_USE,
     VALIDATION_FAILED,
 )
 

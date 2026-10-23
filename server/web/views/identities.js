@@ -8,7 +8,7 @@
  *   枚举是唯一来源），不硬编码第二份。
  * - **设备作用域**（device_scope）回答"对哪些设备做"：`["*"]` 即全部设备，否则
  *   是设备 id 列表。开关在两种模式间切换，勾选与展示一律用设备名；登记与编辑
- *   共用同一形状（scopeEditor）。
+ *   共用同一形状（core/device-scope.js，与语音页的规则目标同一份实现）。
  *
  * ## 热更新
  *
@@ -28,11 +28,11 @@
 import { api } from '../core/api.js'
 import { problemText, report } from '../core/outcome.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
-import { subscribe } from '../core/store.js'
+import { bindScopeToggle, readScopeEditor, scopeEditorHtml } from '../core/device-scope.js'
+import { deviceName, refreshDevices, store, subscribe } from '../core/store.js'
 import { toast } from '../core/toast.js'
 
 let capabilities = []
-let devices = []
 let identities = []
 /** 编辑态：正在编辑的标识与其来源类型（PUT 需回传 kind）；null 即登记模式。 */
 let editingIdentity = null
@@ -41,11 +41,6 @@ let editingKind = 'web'
 const KIND_LABEL = {
   openid: '小程序用户',
   web: '网页用户',
-}
-
-function deviceName(id) {
-  const device = devices.find((item) => item.device_id === id)
-  return device ? device.name || device.device_id : id
 }
 
 function scopeText(scope) {
@@ -76,41 +71,6 @@ function capabilityChecksHtml(selected) {
         </label>`
     })
     .join('')
-}
-
-/**
- * 作用域编辑器（登记与编辑共用同一形状）。
- *
- * 开关决定模式：全部设备（["*"]，设备勾选禁用且全选）或指定设备（按名勾选）。
- * 开关联动由视图根上的事件委托处理（见 mount），重渲染后依旧生效。
- */
-function scopeEditorHtml(selectedScope) {
-  const wildcard = selectedScope.includes('*')
-  const boxes = devices
-    .map((device) => {
-      const on = wildcard || selectedScope.includes(device.device_id)
-      return `<label class="field-row" style="margin:0 8px 0 0">
-          <input type="checkbox" data-scope-device="${esc(device.device_id)}" ${on ? 'checked' : ''} ${wildcard ? 'disabled' : ''}>
-          <span>${esc(device.name || device.device_id)}</span>
-        </label>`
-    })
-    .join('')
-  return `<div data-scope-container>
-      <label class="field-row" style="margin-bottom:4px">
-        <input type="checkbox" data-scope-wildcard ${wildcard ? 'checked' : ''}>
-        <span>全部设备</span>
-      </label>
-      <div class="btn-row">${boxes || '<span class="muted">暂无设备</span>'}</div>
-    </div>`
-}
-
-/** 从作用域编辑器容器读出提交值；指定模式下至少一台，否则返回 null（由调用方报错）。 */
-function readScopeEditor(container) {
-  if (container.querySelector('[data-scope-wildcard]').checked) return ['*']
-  const picked = [...container.querySelectorAll('input[data-scope-device]:checked')].map(
-    (input) => input.dataset.scopeDevice,
-  )
-  return picked.length > 0 ? picked : null
 }
 
 function render(list) {
@@ -145,9 +105,9 @@ function render(list) {
 
 async function reload() {
   try {
-    const [bundle, deviceList] = await Promise.all([api.identities(), api.devices()])
+    // 设备清单经 store 的 setter 拉取：作用域编辑器与 deviceName 都读 store.devices
+    const [bundle] = await Promise.all([api.identities(), refreshDevices()])
     capabilities = bundle.capabilities
-    devices = deviceList
     identities = bundle.identities
     render(identities)
     if (editingIdentity !== null) {
@@ -188,7 +148,7 @@ function applyFormMode() {
 /** 把一行身份的值填入表单（编辑模式的控件内容）。 */
 function fillForm(item) {
   $('capBox').innerHTML = capabilityChecksHtml(item.capabilities || [])
-  $('formScope').innerHTML = scopeEditorHtml(item.device_scope || [])
+  $('formScope').innerHTML = scopeEditorHtml(store.devices, item.device_scope || [])
   $('inLabel').value = item.label || ''
   $('editingIdentityValue').textContent = item.identity
   $('editingKindValue').textContent = `来源：${KIND_LABEL[item.kind] || item.kind}`
@@ -197,7 +157,7 @@ function fillForm(item) {
 /** 清空表单回登记模式的内容：能力位全不选、作用域全部设备、各输入框置空。 */
 function clearForm() {
   $('capBox').innerHTML = capabilityChecksHtml([])
-  $('formScope').innerHTML = scopeEditorHtml(['*'])
+  $('formScope').innerHTML = scopeEditorHtml(store.devices, ['*'])
   $('inLabel').value = ''
   $('inOpenid').value = ''
   $('inCustomIdentity').value = ''
@@ -417,19 +377,8 @@ export const identitiesView = {
       }),
     )
 
-    // 作用域开关联动（登记与编辑共用一条委托）：
-    // 切到全部设备时禁用并全选设备勾选，切回指定模式时恢复可选
-    dispose.add(
-      listen(root, 'change', (event) => {
-        if (!event.target.matches('[data-scope-wildcard]')) return
-        const container = event.target.closest('[data-scope-container]')
-        const on = event.target.checked
-        for (const box of container.querySelectorAll('input[data-scope-device]')) {
-          box.disabled = on
-          if (on) box.checked = true
-        }
-      }),
-    )
+    // 作用域开关联动（登记与编辑共用一条委托），实现收在 core/device-scope.js
+    dispose.add(bindScopeToggle(root))
 
     // 名单事件委托：编辑与撤销。编辑只把值搬进表单，表格本身不动
     dispose.add(
