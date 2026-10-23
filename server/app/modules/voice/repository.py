@@ -1,14 +1,21 @@
 """语音播报三张表的 SQL 集中管理。
 
 `voice_clip` 是内容层（按最终文本合成，多个规则共用），`voice_rule` 是配置层
-（文本是模板，带延迟），`voice_delivery` 是投递层（事件 key 去重 + 现场调延迟的
-时刻记录）。规则删除不删音频与历史投递。`voice_delivery` 没有清理机制是故意的：
-它与统计表同一取向，是"谁在何时被播报了什么"的现场痕迹。
+（文本是模板，带延迟），`voice_delivery` 是投递层（事件 key 去重 + 现场调延迟用的
+时刻与各阶段耗时）。规则删除不删音频与历史投递。`voice_delivery` 没有清理机制是
+故意的：它与统计表同一取向，是"谁在何时被播报了什么"的现场痕迹。
+
+`voice_rule` 的目标维度允许 `*`（设备=全部设备、学号=全部学号），`exempt` 是
+「全部学号」规则的排除名单（JSON 数组文本，匹配在 service 层做集合判断）。「设备 ×
+学号 × 事件」有唯一约束：一个目标只有一条规则，匹配的胜负完全由特异度决定（具体压过
+通配），没有需要人来裁的平局。匹配与列表都走特异度排序；规则是人手配置的量级
+（几百行封顶），不需要为它建索引，旧的匹配索引已随之移除。
 
 `voice_clip` 的淘汰只删登记行，文件由 service 层删；DB 重置会留下孤儿音频文件，
 按 clip_id 与文件名同名，手工清理按这个对应关系来。
 """
 
+import json
 from sqlite3 import Row
 
 from app.core.db import get_conn, read_one, write
@@ -36,12 +43,21 @@ def init_tables() -> None:
             delay_ms    INTEGER NOT NULL DEFAULT 0,
             volume      INTEGER NOT NULL,
             enabled     INTEGER NOT NULL DEFAULT 1,
-            priority    INTEGER NOT NULL,
+            exempt      TEXT    NOT NULL DEFAULT '[]',
             created_at  TEXT    NOT NULL,
             updated_at  TEXT    NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_voice_rule_match
-            ON voice_rule (device_id, cert_no, event, enabled, priority, id);
+        DROP INDEX IF EXISTS idx_voice_rule_match;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_voice_rule_target
+            ON voice_rule (device_id, cert_no, event);
+
+        CREATE TABLE IF NOT EXISTS voice_effect (
+            effect_id   TEXT PRIMARY KEY,
+            name        TEXT    NOT NULL,
+            size_bytes  INTEGER NOT NULL,
+            duration_ms INTEGER NOT NULL,
+            created_at  TEXT    NOT NULL
+        );
 
         CREATE TABLE IF NOT EXISTS voice_delivery (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,6 +72,10 @@ def init_tables() -> None:
             delay_ms      INTEGER NOT NULL,
             occurred_at   TEXT    NOT NULL,
             dispatched_at TEXT    NOT NULL DEFAULT '',
+            prepared_at   TEXT    NOT NULL DEFAULT '',
+            done_at       TEXT    NOT NULL DEFAULT '',
+            clip_ms       INTEGER NOT NULL DEFAULT 0,
+            downloaded    INTEGER NOT NULL DEFAULT 0,
             status        TEXT    NOT NULL,
             detail        TEXT    NOT NULL DEFAULT '',
             trace_id      TEXT    NOT NULL DEFAULT '',
@@ -75,35 +95,47 @@ def insert_rule(
     delay_ms: int,
     volume: int,
     enabled: bool,
-    priority: int,
+    exempt: str,
     now: str,
-) -> int:
+) -> int | None:
+    """插入一条规则；该目标已有规则时跳过并返回 None（唯一约束的正面表达）。"""
     cursor = write(
         "INSERT INTO voice_rule"
-        " (device_id, cert_no, event, text, delay_ms, volume, enabled, priority, created_at, updated_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?)",
-        (device_id, cert_no, event, text, delay_ms, volume, int(enabled), priority, now, now),
+        " (device_id, cert_no, event, text, delay_ms, volume, enabled, exempt, created_at, updated_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?)"
+        " ON CONFLICT (device_id, cert_no, event) DO NOTHING",
+        (device_id, cert_no, event, text, delay_ms, volume, int(enabled), exempt, now, now),
     )
+    if cursor.rowcount != 1:
+        return None
     return int(cursor.lastrowid or 0)
 
 
 def update_rule(
     rule_id: int,
+    device_id: str,
     cert_no: str,
     event: str,
     text: str,
     delay_ms: int,
     volume: int,
     enabled: bool,
-    priority: int,
+    exempt: str,
     now: str,
 ) -> int:
     cursor = write(
-        "UPDATE voice_rule SET cert_no=?, event=?, text=?, delay_ms=?, volume=?,"
-        " enabled=?, priority=?, updated_at=? WHERE id=?",
-        (cert_no, event, text, delay_ms, volume, int(enabled), priority, now, rule_id),
+        "UPDATE voice_rule SET device_id=?, cert_no=?, event=?, text=?, delay_ms=?,"
+        " volume=?, enabled=?, exempt=?, updated_at=? WHERE id=?",
+        (device_id, cert_no, event, text, delay_ms, volume, int(enabled), exempt, now, rule_id),
     )
     return cursor.rowcount
+
+
+def set_enabled(rule_id: int, enabled: bool, now: str) -> int:
+    return write(
+        "UPDATE voice_rule SET enabled=?, updated_at=? WHERE id=?",
+        (int(enabled), now, rule_id),
+    ).rowcount
 
 
 def delete_rule(rule_id: int) -> int:
@@ -115,27 +147,42 @@ def get_rule(rule_id: int) -> Row | None:
 
 
 def list_rules(device_id: str | None) -> list[Row]:
+    """按特异度排序：具体设备在全部设备之前，具体学号在全部学号之前。
+
+    传 `device_id='*'` 时只列通配设备的规则——与具体设备同一套相等筛选，两个
+    语义都成立，不另设开关。
+    """
+    ordering = " ORDER BY (device_id='*') ASC, (cert_no='*') ASC, device_id, cert_no, event, id"
     if device_id:
-        return (
-            get_conn()
-            .execute(
-                "SELECT * FROM voice_rule WHERE device_id=? ORDER BY cert_no, event, priority, id",
-                (device_id,),
-            )
-            .fetchall()
-        )
-    return get_conn().execute("SELECT * FROM voice_rule ORDER BY device_id, cert_no, event, priority, id").fetchall()
+        return get_conn().execute("SELECT * FROM voice_rule WHERE device_id=?" + ordering, (device_id,)).fetchall()
+    return get_conn().execute("SELECT * FROM voice_rule" + ordering).fetchall()
 
 
 def match_rule(device_id: str, cert_no: str, event: str) -> Row | None:
-    """同一设备/学号/事件只取启用规则里优先级最小的一条；同值按 id。"""
-    return read_one(
-        "SELECT id, device_id, cert_no, event, text, delay_ms, volume"
-        " FROM voice_rule"
-        " WHERE device_id=? AND cert_no=? AND event=? AND enabled=1"
-        " ORDER BY priority ASC, id ASC LIMIT 1",
-        (device_id, cert_no, event),
+    """具体压过通配：先比设备维度，再比学号维度，各维度具体值在前。
+
+    「全部学号」的规则带排除名单：名单里有这个学号就跳过它，让位给次特异的
+    候选。候选最多四条（两维度各两种取值），在 Python 里做集合判断，不值得
+    为它把 JSON 拆进 SQL。
+    """
+    rows: list[Row] = (
+        get_conn()
+        .execute(
+            "SELECT id, device_id, cert_no, event, text, delay_ms, volume, exempt"
+            " FROM voice_rule"
+            " WHERE event=? AND enabled=1"
+            "   AND device_id IN (?, '*') AND cert_no IN (?, '*')"
+            " ORDER BY (device_id='*') ASC, (cert_no='*') ASC, id ASC",
+            (event, device_id, cert_no),
+        )
+        .fetchall()
     )
+    for row in rows:
+        if row["cert_no"] != "*":
+            return row
+        if cert_no not in json.loads(str(row["exempt"])):
+            return row
+    return None
 
 
 def get_clip(clip_id: str) -> Row | None:
@@ -190,6 +237,44 @@ def prune_clips(max_rows: int, max_bytes: int) -> list[str]:
     return removed
 
 
+def upsert_effect(effect_id: str, name: str, size_bytes: int, duration_ms: int, now: str) -> None:
+    """登记一段音效；同一内容（归一化后同哈希）再传就是改名。"""
+    write(
+        "INSERT INTO voice_effect (effect_id, name, size_bytes, duration_ms, created_at)"
+        " VALUES (?,?,?,?,?)"
+        " ON CONFLICT(effect_id) DO UPDATE SET name=excluded.name",
+        (effect_id, name, size_bytes, duration_ms, now),
+    )
+
+
+def get_effect(effect_id: str) -> Row | None:
+    return read_one("SELECT * FROM voice_effect WHERE effect_id=?", (effect_id,))
+
+
+def list_effects() -> list[Row]:
+    return get_conn().execute("SELECT * FROM voice_effect ORDER BY created_at, effect_id").fetchall()
+
+
+def count_rules_referencing_fx(name: str) -> int:
+    """模板里写了 `{fx:名称}` 的规则数（含停用的：停用的规则随时会再启用）。
+
+    用 instr 而不是 LIKE：名称里可能出现 LIKE 的通配符，instr 没有这层语义。
+    """
+    row = read_one(
+        "SELECT COUNT(*) AS count FROM voice_rule WHERE instr(text, '{fx:' || ? || '}') > 0",
+        (name,),
+    )
+    return int(row["count"]) if row is not None else 0
+
+
+def get_effect_by_name(name: str) -> Row | None:
+    return read_one("SELECT * FROM voice_effect WHERE name=?", (name,))
+
+
+def delete_effect(effect_id: str) -> int:
+    return write("DELETE FROM voice_effect WHERE effect_id=?", (effect_id,)).rowcount
+
+
 def claim_delivery(
     event: DoorEvent,
     rule: Row,
@@ -224,10 +309,24 @@ def claim_delivery(
     return cursor.rowcount == 1
 
 
-def finish_delivery(event_key: str, dispatched_at: str, status: str, detail: str) -> None:
+def mark_clip_ready(event_key: str, prepared_at: str, clip_ms: int) -> None:
     write(
-        "UPDATE voice_delivery SET dispatched_at=?, status=?, detail=? WHERE event_key=?",
-        (dispatched_at, status, detail, event_key),
+        "UPDATE voice_delivery SET prepared_at=?, clip_ms=? WHERE event_key=?",
+        (prepared_at, clip_ms, event_key),
+    )
+
+
+def finish_delivery(
+    event_key: str,
+    dispatched_at: str,
+    status: str,
+    detail: str,
+    done_at: str,
+    downloaded: bool,
+) -> None:
+    write(
+        "UPDATE voice_delivery SET dispatched_at=?, status=?, detail=?, done_at=?, downloaded=? WHERE event_key=?",
+        (dispatched_at, status, detail, done_at, int(downloaded), event_key),
     )
 
 
@@ -236,7 +335,8 @@ def list_deliveries(limit: int) -> list[Row]:
         get_conn()
         .execute(
             "SELECT id, rule_id, device_id, cert_no, event, door_no, text, delay_ms,"
-            " occurred_at, dispatched_at, status, detail"
+            " occurred_at, dispatched_at, prepared_at, done_at, clip_ms, downloaded,"
+            " status, detail"
             " FROM voice_delivery ORDER BY id DESC LIMIT ?",
             (limit,),
         )

@@ -3,23 +3,30 @@
 ## 唯一判定链
 
 `handle_events` 只做一次「时效 → 匹配 → 渲染 → 认领 → 生成/取缓存 → 延迟 → 下发」。
-事件来自 `doors` 的帧派生；规则只按设备/学号/事件精确匹配；同一事件只认领一次。
+事件来自 `doors` 的帧派生；规则按「设备/学号两维度各自具体或通配」匹配，具体压过
+通配；同一事件只认领一次。
 
 ## 模板与缓存
 
-规则存模板，事件发生时用真实会话值渲染成最终文本；`voice_clip` 按最终文本缓存。
-静态模板（无占位符）在保存时预热；带占位符的规则不预热，首次出现新文本时再合成，
-之后命中缓存。缓存按最近使用淘汰，动态占位符不会无限增长。
+规则存模板，事件发生时用真实会话值渲染成最终文本；`voice_clip` 按最终文本加语速
+缓存。静态模板（无占位符）在保存/启用时预热；带占位符的规则不预热，首次出现新文本
+时再合成，之后命中缓存。时长占位符每场取值都不同，含它们的模板每次都现场合成——
+`voice_delivery.clip_ms` 记录的就是这段耗时。缓存按最近使用淘汰，不会无限增长。
 
-## 延迟
+## 延迟与预热
 
-`delay_ms` 从事件发生时刻算起，用来错开浴室 App 自己的结算语音。音频合成可以与
-延迟重叠：先准备好音频，再补足剩余的等待。实际下发时刻写入 `voice_delivery`，
-现场按该记录与设备日志调整。
+`delay_ms` 从事件发生时刻算起，用来错开浴室 App 自己的结算语音。延迟窗口用于两件
+重叠的事：音频合成（服务端）与音频下载（设备端）——合成完成后若窗口还有剩余，先发
+`voice.prepare` 让设备把音频拉下来，`voice.play` 到达即命中设备缓存，下载不再排到
+延迟之后。实际下发时刻与各阶段耗时写入 `voice_delivery`，现场按该记录与设备日志调整。
 """
 
 import asyncio
+import json
+import sqlite3
 import threading
+import time
+import uuid
 from sqlite3 import Row
 from typing import NoReturn
 
@@ -30,6 +37,10 @@ from app.core.clock import now_rfc3339, parse_rfc3339, seconds_between
 from app.core.logging import log_event, trace_id_var
 from app.core.problems import (
     DEVICE_NOT_FOUND,
+    INVALID_VOICE_EFFECT,
+    INVALID_VOICE_RULE,
+    VOICE_EFFECT_IN_USE,
+    VOICE_EFFECT_NOT_FOUND,
     VOICE_RULE_NOT_FOUND,
     VOICE_SYNTHESIS_FAILED,
     ApiProblemError,
@@ -44,6 +55,9 @@ from app.modules.sessions.schemas import CommandOutcome
 from . import render, repository, schemas, tts
 
 VOICE_PREPARE_TIMEOUT_S = 60.0
+#: 延迟窗口内预热的超时 = 剩余窗口 + 这段宽限：窗口本身很短时下载还能在宽限里完成，
+#: voice.play 会在设备的串行 voice 通道上排在它后面，总时序不受影响。
+PREPARE_GRACE_S = 30.0
 PLAY_TIMEOUT_MIN_S = 30.0
 PLAY_TIMEOUT_MAX_S = 120.0
 
@@ -71,14 +85,23 @@ def _normalize_text(text: str) -> str:
     return normalized
 
 
+def _fx_names(text: str) -> list[str]:
+    """模板里引用的音效名（去重、保持出现顺序）。"""
+    return list(dict.fromkeys(render.FX_NAME_PATTERN.findall(text)))
+
+
 def _validated_text(text: str, event: DoorEventKind) -> str:
     normalized = _normalize_text(text)
     label = schemas.event_spec(event).label
     try:
         render.validate_template(normalized)
-        render.render_template(normalized, render.sample_values(label))
+        segments = render.render_segments(normalized, render.sample_values(label))
+        render.render_text(segments)
     except render.TemplateError as exc:
         _reject(str(exc))
+    missing = [name for name in _fx_names(normalized) if repository.get_effect_by_name(name) is None]
+    if missing:
+        _reject(f"音效不在库里：{'、'.join(missing)}")
     return normalized
 
 
@@ -101,7 +124,7 @@ def _rule_view(row: Row) -> schemas.VoiceRuleView:
         delay_ms=int(row["delay_ms"]),
         volume=int(row["volume"]),
         enabled=bool(row["enabled"]),
-        priority=int(row["priority"]),
+        exempt=json.loads(str(row["exempt"])),
         sample_text=_sample_text(str(row["text"]), event),
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
@@ -111,7 +134,7 @@ def _rule_view(row: Row) -> schemas.VoiceRuleView:
 def spec() -> schemas.VoiceSpecView:
     return schemas.VoiceSpecView(
         events=[
-            schemas.VoiceEventView(value=item.value, label=item.label, description=item.description)
+            schemas.VoiceEventView(value=item.value, label=item.label, description=item.description, phase=item.phase)
             for item in schemas.VOICE_EVENTS
         ],
         placeholders=[
@@ -128,17 +151,14 @@ def spec() -> schemas.VoiceSpecView:
             maximum=schemas.VOLUME_MAX,
             default=schemas.VOLUME_DEFAULT,
         ),
-        priority=schemas.VoiceBoundView(
-            minimum=schemas.PRIORITY_MIN,
-            maximum=schemas.PRIORITY_MAX,
-            default=schemas.PRIORITY_DEFAULT,
-        ),
     )
 
 
 def status() -> schemas.VoiceStatusView:
-    probe = tts.probe()
+    params = _synth_params()
+    probe = tts.probe(params.voice)
     return schemas.VoiceStatusView(
+        voice=params.voice,
         ready=probe.model_present and probe.piper_available and probe.espeak_available and probe.ffmpeg_available,
         model_present=probe.model_present,
         piper_available=probe.piper_available,
@@ -149,59 +169,148 @@ def status() -> schemas.VoiceStatusView:
 
 
 def list_rules(device_id: str | None) -> list[schemas.VoiceRuleView]:
-    return [_rule_view(row) for row in repository.list_rules(device_id)]
-
-
-def create_rule(req: schemas.VoiceRuleCreate) -> schemas.VoiceRuleView:
-    if devices_service.get_device(req.device_id) is None:
-        raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {req.device_id} 不在档案里")
-    cert_no = req.cert_no.strip()
-    if not cert_no:
-        _reject("学号不能为空")
-    text = _validated_text(req.text, req.event)
-    now = now_rfc3339()
-    rule_id = repository.insert_rule(
-        req.device_id,
-        cert_no,
-        req.event.value,
-        text,
-        req.delay_ms,
-        req.volume,
-        req.enabled,
-        req.priority,
-        now,
+    """列表顺序即页面呈现顺序：具体规则在前、通配在后；同层级内按设备展示顺序
+    （与设备页/顶栏下拉同一顺序），再按学号、事件。设备档案里已消失的设备排在
+    已知设备之后，规则不因设备下档而隐藏。
+    """
+    views = [_rule_view(row) for row in repository.list_rules(device_id)]
+    order = {str(record["device_id"]): index for index, record in enumerate(devices_service.list_devices())}
+    unknown = len(order)
+    views.sort(
+        key=lambda view: (
+            view.device_id == schemas.WILDCARD,
+            view.cert_no == schemas.WILDCARD,
+            order.get(view.device_id, unknown),
+            view.cert_no,
+            view.event.value,
+            view.id,
+        )
     )
-    row = repository.get_rule(rule_id)
-    if row is None:
-        raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
-    return _rule_view(row)
+    return views
+
+
+def _normalized_targets(values: list[str], label: str) -> list[str]:
+    """去空格、去重并保持顺序；「全部」与具体值混填直接拒绝。"""
+    targets: list[str] = []
+    for raw in values:
+        item = raw.strip()
+        if not item:
+            _reject(f"{label}里不能有空值")
+        if len(item) > 64:
+            _reject(f"{label}最多 64 个字符")
+        if item not in targets:
+            targets.append(item)
+    if schemas.WILDCARD in targets and len(targets) > 1:
+        _reject(f"{label}里「全部」不能与具体值混填")
+    return targets
+
+
+def _normalized_exemptions(values: list[str]) -> list[str]:
+    """排除名单与目标名单同一套归一化；「全部」没有排除的意义，出现即拒绝。"""
+    targets = _normalized_targets(values, "排除名单")
+    if schemas.WILDCARD in targets:
+        _reject("排除名单里不能有「全部」")
+    return targets
+
+
+def _exempt_json(cert_nos: list[str], exemptions: list[str]) -> str:
+    """排除名单的落库形状；只对「全部学号」的规则有意义，其余组合拒绝。"""
+    if exemptions and schemas.WILDCARD not in cert_nos:
+        _reject("排除名单只用于「全部学号」的规则")
+    return json.dumps(exemptions, ensure_ascii=False)
+
+
+def _require_known_devices(device_ids: list[str]) -> None:
+    for device_id in device_ids:
+        if device_id == schemas.WILDCARD:
+            continue
+        if devices_service.get_device(device_id) is None:
+            raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {device_id} 不在档案里")
+
+
+def create_rule(req: schemas.VoiceRuleCreate) -> schemas.VoiceRuleCreateResult:
+    """设备集合 × 学号集合 × 事件集合展开建规则；已存在的组合跳过并在响应里点名。"""
+    device_ids = _normalized_targets(req.device_ids, "设备")
+    cert_nos = _normalized_targets(req.cert_nos, "学号")
+    _require_known_devices(device_ids)
+    events = list(dict.fromkeys(req.events))
+    expanded = len(device_ids) * len(cert_nos) * len(events)
+    if expanded > schemas.MAX_RULES_PER_CREATE:
+        _reject(f"一次最多创建 {schemas.MAX_RULES_PER_CREATE} 条规则，本次展开为 {expanded} 条")
+    exempt = _exempt_json(cert_nos, _normalized_exemptions(req.exempt_cert_nos))
+
+    created: list[schemas.VoiceRuleView] = []
+    skipped: list[schemas.VoiceRuleSkippedView] = []
+    now = now_rfc3339()
+    for device_id in device_ids:
+        for cert_no in cert_nos:
+            for event in events:
+                text = _validated_text(req.text, event)
+                rule_id = repository.insert_rule(
+                    device_id,
+                    cert_no,
+                    event.value,
+                    text,
+                    req.delay_ms,
+                    req.volume,
+                    req.enabled,
+                    exempt,
+                    now,
+                )
+                if rule_id is None:
+                    skipped.append(schemas.VoiceRuleSkippedView(device_id=device_id, cert_no=cert_no, event=event))
+                    continue
+                row = repository.get_rule(rule_id)
+                if row is not None:
+                    created.append(_rule_view(row))
+    return schemas.VoiceRuleCreateResult(created=created, skipped=skipped)
 
 
 def update_rule(rule_id: int, req: schemas.VoiceRuleUpdate) -> schemas.VoiceRuleView:
     existing = repository.get_rule(rule_id)
     if existing is None:
         raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
-    cert_no = req.cert_no.strip()
-    if not cert_no:
-        _reject("学号不能为空")
+    device_ids = _normalized_targets([req.device_id], "设备")
+    cert_nos = _normalized_targets([req.cert_no], "学号")
+    _require_known_devices(device_ids)
     text = _validated_text(req.text, req.event)
-    changed = repository.update_rule(
-        rule_id,
-        cert_no,
-        req.event.value,
-        text,
-        req.delay_ms,
-        req.volume,
-        req.enabled,
-        req.priority,
-        now_rfc3339(),
-    )
+    exempt = _exempt_json(cert_nos, _normalized_exemptions(req.exempt_cert_nos))
+    try:
+        changed = repository.update_rule(
+            rule_id,
+            device_ids[0],
+            cert_nos[0],
+            req.event.value,
+            text,
+            req.delay_ms,
+            req.volume,
+            req.enabled,
+            exempt,
+            now_rfc3339(),
+        )
+    except sqlite3.IntegrityError as exc:
+        raise ApiProblemError(
+            INVALID_VOICE_RULE,
+            f"「{device_ids[0]} + {cert_nos[0]} + {req.event.value}」已有另一条规则",
+        ) from exc
     if changed == 0:
         raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
     row = repository.get_rule(rule_id)
     if row is None:
         raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
     return _rule_view(row)
+
+
+def set_enabled(rule_id: int, enabled: bool) -> schemas.VoiceRuleView:
+    row = repository.get_rule(rule_id)
+    if row is None:
+        raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
+    if repository.set_enabled(rule_id, enabled, now_rfc3339()) == 0:
+        raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
+    updated = repository.get_rule(rule_id)
+    if updated is None:
+        raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
+    return _rule_view(updated)
 
 
 def delete_rule(rule_id: int) -> None:
@@ -220,12 +329,12 @@ def preview(req: schemas.VoicePreviewRequest) -> schemas.VoicePreviewView:
         shower_seconds=req.shower_seconds,
     )
     try:
-        rendered = render.render_template(text, values)
+        segments = render.render_segments(text, values)
     except render.TemplateError as exc:
         _reject(str(exc))
-    clip = _ensure_clip(rendered)
+    clip, _clip_ms = _ensure_clip(_plan_of(segments))
     return schemas.VoicePreviewView(
-        rendered_text=rendered,
+        rendered_text=render.render_text(segments),
         clip_id=clip.clip_id,
         clip_url=f"/voice/clips/{clip.clip_id}.mp3",
         size_bytes=clip.size_bytes,
@@ -233,9 +342,54 @@ def preview(req: schemas.VoicePreviewRequest) -> schemas.VoicePreviewView:
     )
 
 
-def _ensure_clip(text: str) -> tts.ClipFile:
-    """取最终文本对应的音频；命中缓存不跑 TTS，缺失/损坏则重新合成。"""
-    clip_id = tts.clip_id_for_text(text)
+def _int_config(key: str, low: int, high: int, default: int) -> int:
+    """读一个整数配置；登记表保证类型与范围，这里只处理越界回默认值这一种情形。"""
+    value = config_store.global_effective().get(key)
+    if isinstance(value, int) and low <= value <= high:
+        return value
+    return default
+
+
+def _synth_params() -> tts.SynthParams:
+    """当前生效的全部合成参数。任何一项变化都会改变音频的内容身份（见 SynthParams.recipe）。"""
+    voice = config_store.global_effective().get("voice_model")
+    return tts.SynthParams(
+        voice=voice if isinstance(voice, str) and voice in tts.VOICES else tts.DEFAULT_VOICE,
+        speech_rate=_int_config("voice_speech_rate", tts.SPEECH_RATE_MIN, tts.SPEECH_RATE_MAX, tts.SPEECH_RATE_DEFAULT),
+        noise_scale=_int_config("voice_noise_scale", tts.NOISE_SCALE_MIN, tts.NOISE_SCALE_MAX, tts.NOISE_SCALE_DEFAULT),
+        noise_scale_w=_int_config(
+            "voice_noise_scale_w", tts.NOISE_SCALE_MIN, tts.NOISE_SCALE_MAX, tts.NOISE_SCALE_W_DEFAULT
+        ),
+        sentence_silence_ms=_int_config("voice_sentence_silence_ms", 0, 2000, 0),
+    )
+
+
+def _plan_of(segments: list[render.Segment]) -> tts.Plan:
+    """渲染分段 → 合成计划：音效名解析成库里的文件，名字不在库即拒绝。"""
+    plan: tts.Plan = []
+    for segment in segments:
+        if segment.kind == render.SAY:
+            plan.append(("say", segment.text))
+        elif segment.kind == render.FX:
+            row = repository.get_effect_by_name(segment.effect)
+            if row is None:
+                raise ApiProblemError(VOICE_EFFECT_NOT_FOUND, f"音效「{segment.effect}」不在库里")
+            path = tts.effect_path(str(row["effect_id"]))
+            if not path.is_file():
+                raise ApiProblemError(VOICE_EFFECT_NOT_FOUND, f"音效「{segment.effect}」的文件缺失")
+            plan.append(("fx", path))
+        else:
+            plan.append(("pause", segment.pause_ms))
+    return plan
+
+
+def _ensure_clip(plan: tts.Plan) -> tuple[tts.ClipFile, int]:
+    """取拼装计划对应的音频与全程耗时（含等锁与缓存检查）；命中缓存不跑 TTS，
+    缺失/损坏则重新合成。耗时给 `voice_delivery.clip_ms`，现场据此判断排队程度。
+    """
+    started = time.monotonic()
+    params = _synth_params()
+    clip_id = tts.clip_id_for(plan, params)
     with _clip_lock:
         row = repository.get_clip(clip_id)
         if row is not None:
@@ -247,16 +401,19 @@ def _ensure_clip(text: str) -> tts.ClipFile:
             ):
                 now = now_rfc3339()
                 repository.touch_clip(clip_id, now)
-                return tts.ClipFile(
-                    clip_id=clip_id,
-                    sha256=str(row["sha256"]),
-                    size_bytes=int(row["size_bytes"]),
-                    duration_ms=int(row["duration_ms"]),
-                    path=path,
+                return (
+                    tts.ClipFile(
+                        clip_id=clip_id,
+                        sha256=str(row["sha256"]),
+                        size_bytes=int(row["size_bytes"]),
+                        duration_ms=int(row["duration_ms"]),
+                        path=path,
+                    ),
+                    int((time.monotonic() - started) * 1000),
                 )
         now = now_rfc3339()
         try:
-            clip = tts.synthesize(text, clip_id)
+            clip = tts.synthesize(plan, clip_id, params)
         except tts.VoiceTextTooLongError as exc:
             _reject(str(exc))
         except tts.VoiceSynthesisError as exc:
@@ -264,15 +421,16 @@ def _ensure_clip(text: str) -> tts.ClipFile:
         repository.upsert_clip(clip.clip_id, clip.sha256, clip.size_bytes, clip.duration_ms, now)
         for removed_id in repository.prune_clips(tts.MAX_CLIP_ROWS, tts.MAX_CLIP_TOTAL_BYTES):
             tts.clip_path(removed_id).unlink(missing_ok=True)
-        return clip
+        return clip, int((time.monotonic() - started) * 1000)
 
 
 def prepare_static(view: schemas.VoiceRuleView) -> tts.ClipFile | None:
-    """静态模板保存时预热；带占位符的规则不生成固定音频。"""
+    """静态模板保存/启用时预热；含任一种记法（占位符/音效/停顿）的模板不预热——
+    它们的最终音频要等事件发生才知道。"""
     if render.has_placeholders(view.text):
         return None
     try:
-        return _ensure_clip(view.text)
+        clip, _clip_ms = _ensure_clip([("say", view.text)])
     except Exception as exc:  # noqa: BLE001 —— 预热失败不能把已保存的规则判成失败
         log_event(
             "WARNING",
@@ -283,33 +441,54 @@ def prepare_static(view: schemas.VoiceRuleView) -> tts.ClipFile | None:
             error=str(exc),
         )
         return None
+    return clip
 
 
-def schedule_prepare(view: schemas.VoiceRuleView, clip: tts.ClipFile | None) -> None:
-    if clip is None:
-        return
-    params = {
+def rule_device_targets(views: list[schemas.VoiceRuleView]) -> list[str]:
+    """这批规则要预热到哪些设备：具体设备去重，通配设备展开为全部在档设备。"""
+    if any(view.device_id == schemas.WILDCARD for view in views):
+        return [str(record["device_id"]) for record in devices_service.list_devices()]
+    return list(dict.fromkeys(view.device_id for view in views))
+
+
+def _clip_params(clip: tts.ClipFile, volume: int | None = None) -> dict[str, object]:
+    params: dict[str, object] = {
         "clip_id": clip.clip_id,
         "sha256": clip.sha256,
         "size_bytes": clip.size_bytes,
         "duration_ms": clip.duration_ms,
     }
+    if volume is not None:
+        params["volume"] = volume
+    return params
+
+
+def _spawn_prepare(device_id: str, clip: tts.ClipFile, timeout_s: float) -> None:
+    """后台让设备预下载一段音频；失败只留痕，不影响之后的 voice.play。"""
     try:
-        task = asyncio.get_running_loop().create_task(_prepare(view.device_id, params))
+        task = asyncio.get_running_loop().create_task(_prepare(device_id, _clip_params(clip), timeout_s))
     except Exception as exc:  # noqa: BLE001 —— 调度失败只记日志，不影响保存响应
-        log_event("ERROR", "voice.schedule-failed", "语音预热调度失败", error=str(exc))
+        log_event("ERROR", "voice.schedule-failed", "语音预热调度失败", device_id=device_id, error=str(exc))
         return
     _tasks.add(task)
     task.add_done_callback(_task_done)
 
 
-async def _prepare(device_id: str, params: dict[str, object]) -> None:
+def schedule_prepare(device_ids: list[str], clip: tts.ClipFile | None) -> None:
+    """规则保存/启用后，把静态音频推到目标设备预下载。"""
+    if clip is None:
+        return
+    for device_id in device_ids:
+        _spawn_prepare(device_id, clip, VOICE_PREPARE_TIMEOUT_S)
+
+
+async def _prepare(device_id: str, params: dict[str, object], timeout_s: float) -> None:
     try:
         outcome = await sessions_service.send_command_and_wait(
             device_id,
             actions.VOICE_PREPARE,
             params,
-            timeout_s=VOICE_PREPARE_TIMEOUT_S,
+            timeout_s=timeout_s,
         )
     except Exception as exc:  # noqa: BLE001 —— 预热是后台优化，失败只留痕
         log_event("WARNING", "voice.prepare-failed", "语音预热失败", device_id=device_id, error=str(exc))
@@ -319,6 +498,7 @@ async def _prepare(device_id: str, params: dict[str, object]) -> None:
         "voice.prepared",
         "语音预热命令已收尾",
         device_id=device_id,
+        clip_id=str(params.get("clip_id", "")),
         status=str(outcome["status"]),
         reason_code=str(outcome["reason_code"] or "-"),
     )
@@ -380,14 +560,15 @@ async def _dispatch_event(event: DoorEvent, max_age: int) -> None:
         )
         return
 
-    rendered = _event_text(event, str(rule["text"]))
-    if rendered is None:
+    prepared = _event_segments(event, str(rule["text"]))
+    if prepared is None:
         return
-    clip_id = tts.clip_id_for_text(rendered)
+    plan, display_text = prepared
+    clip_id = tts.clip_id_for(plan, _synth_params())
     if not repository.claim_delivery(
         event,
         rule,
-        rendered,
+        display_text,
         clip_id,
         event.occurred_at,
         trace_id_var.get(),
@@ -398,9 +579,9 @@ async def _dispatch_event(event: DoorEvent, max_age: int) -> None:
     try:
         # 合成最长 60+30 秒且持 _clip_lock：必须离开事件循环线程去跑，否则网关的
         # 心跳与全部 HTTP 一起冻结。路由层的 preview/prepare 同理已用线程池。
-        clip = await run_in_threadpool(_ensure_clip, rendered)
+        clip, clip_ms = await run_in_threadpool(_ensure_clip, plan)
     except Exception as exc:  # noqa: BLE001 —— 认领后失败要留下结果，但不重试
-        repository.finish_delivery(event.event_key, "", "failed", str(exc)[:500])
+        repository.finish_delivery(event.event_key, "", "failed", str(exc)[:500], now_rfc3339(), False)
         log_event(
             "ERROR",
             "voice.delivery-failed",
@@ -410,10 +591,18 @@ async def _dispatch_event(event: DoorEvent, max_age: int) -> None:
             error=str(exc),
         )
         return
+    repository.mark_clip_ready(event.event_key, now_rfc3339(), clip_ms)
 
-    await _wait_for_delay(event, int(rule["delay_ms"]))
+    delay_ms = int(rule["delay_ms"])
+    remaining_s = delay_ms / 1000 - _elapsed_s(event.occurred_at)
+    if remaining_s > 0:
+        # 延迟窗口还有剩余：先让设备把音频拉下来，voice.play 到达即命中设备缓存，
+        # 下载不再排到延迟之后。不等它完成——设备串行 voice 通道自然排队，晚到的
+        # play 排在它后面，先后顺序不变。
+        _spawn_prepare(event.device_id, clip, remaining_s + PREPARE_GRACE_S)
+        await asyncio.sleep(remaining_s)
     if max_age > 0 and _elapsed_s(event.occurred_at) > max_age:
-        repository.finish_delivery(event.event_key, "", "skipped", "事件已超过时效")
+        repository.finish_delivery(event.event_key, "", "skipped", "事件已超过时效", now_rfc3339(), False)
         log_event(
             "INFO",
             "voice.event-stale",
@@ -424,24 +613,20 @@ async def _dispatch_event(event: DoorEvent, max_age: int) -> None:
         return
 
     dispatched_at = now_rfc3339()
-    params = {
-        "clip_id": clip.clip_id,
-        "sha256": clip.sha256,
-        "size_bytes": clip.size_bytes,
-        "duration_ms": clip.duration_ms,
-        "volume": int(rule["volume"]),
-    }
     outcome = await sessions_service.send_command_and_wait(
         event.device_id,
         actions.VOICE_PLAY,
-        params,
+        _clip_params(clip, int(rule["volume"])),
         timeout_s=_play_timeout_s(clip.duration_ms),
     )
+    downloaded = _downloaded(outcome)
     repository.finish_delivery(
         event.event_key,
         dispatched_at,
         str(outcome["status"]),
         _detail(outcome),
+        now_rfc3339(),
+        downloaded,
     )
     log_event(
         "INFO",
@@ -451,11 +636,14 @@ async def _dispatch_event(event: DoorEvent, max_age: int) -> None:
         event=event.kind.value,
         status=str(outcome["status"]),
         reason_code=str(outcome["reason_code"] or "-"),
-        delay_ms=int(rule["delay_ms"]),
+        delay_ms=delay_ms,
+        clip_ms=clip_ms,
+        downloaded=downloaded,
     )
 
 
-def _event_text(event: DoorEvent, template: str) -> str | None:
+def _event_segments(event: DoorEvent, template: str) -> tuple[tts.Plan, str] | None:
+    """真实事件值渲染模板 → 合成计划与展示文本；找不到会话或渲染失败返回 None。"""
     durations = doors_service.session_durations(event.session_id)
     if durations is None:
         log_event(
@@ -476,7 +664,7 @@ def _event_text(event: DoorEvent, template: str) -> str | None:
         shower_seconds=durations.flow_s,
     )
     try:
-        return render.render_template(template, values)
+        segments = render.render_segments(template, values)
     except render.TemplateError as exc:
         log_event(
             "WARNING",
@@ -487,12 +675,7 @@ def _event_text(event: DoorEvent, template: str) -> str | None:
             error=str(exc),
         )
         return None
-
-
-async def _wait_for_delay(event: DoorEvent, delay_ms: int) -> None:
-    remaining = delay_ms / 1000 - _elapsed_s(event.occurred_at)
-    if remaining > 0:
-        await asyncio.sleep(remaining)
+    return _plan_of(segments), render.render_text(segments)
 
 
 def _elapsed_s(occurred_at: str) -> float:
@@ -513,6 +696,105 @@ def _detail(outcome: CommandOutcome) -> str:
     return f"{reason} {message}".strip()[:500]
 
 
+def _downloaded(outcome: CommandOutcome) -> bool:
+    """设备结果里带的「是否现场下载」；结果没有 data 时按未下载记。"""
+    data = outcome["data"]
+    return bool(data.get("downloaded")) if isinstance(data, dict) else False
+
+
+def _offset_ms(start: str, end: str) -> int | None:
+    """两个时刻的毫秒差；任一端缺失或无法解析即为 None（跳过的投递没有下发时刻）。"""
+    if not start or not end:
+        return None
+    begin = parse_rfc3339(start)
+    finish = parse_rfc3339(end)
+    if begin is None or finish is None:
+        return None
+    return max(0, int((finish - begin).total_seconds() * 1000))
+
+
+def _effect_view(row: Row) -> schemas.VoiceEffectView:
+    return schemas.VoiceEffectView(
+        effect_id=str(row["effect_id"]),
+        name=str(row["name"]),
+        size_bytes=int(row["size_bytes"]),
+        duration_ms=int(row["duration_ms"]),
+        created_at=str(row["created_at"]),
+    )
+
+
+def list_effects() -> list[schemas.VoiceEffectView]:
+    return [_effect_view(row) for row in repository.list_effects()]
+
+
+def create_effect(name: str, data: bytes) -> schemas.VoiceEffectView:
+    """收一段音频：归一化成标准 WAV、算内容身份、登记入库。
+
+    内容身份按归一化后的字节算：同一段声音换个容器再传不会变成两个音效，
+    只会更新名字。
+    """
+    name = " ".join(name.split())
+    if not name:
+        raise ApiProblemError(INVALID_VOICE_EFFECT, "音效名称不能为空")
+    if len(name) > 40:
+        raise ApiProblemError(INVALID_VOICE_EFFECT, "音效名称最多 40 个字符")
+    if not data:
+        raise ApiProblemError(INVALID_VOICE_EFFECT, "音效文件为空")
+    if len(data) > tts.MAX_EFFECT_UPLOAD_BYTES:
+        raise ApiProblemError(
+            INVALID_VOICE_EFFECT, f"音效文件超过 {tts.MAX_EFFECT_UPLOAD_BYTES // (1024 * 1024)}MB 上限"
+        )
+
+    tts.effects_dir().mkdir(parents=True, exist_ok=True)
+    tts.tmp_dir().mkdir(parents=True, exist_ok=True)
+    token = uuid.uuid4().hex
+    source = tts.tmp_dir() / f"effect-upload.{token}.src"
+    normalized = tts.tmp_dir() / f"effect-upload.{token}.wav"
+    try:
+        source.write_bytes(data)
+        try:
+            duration_ms = tts.normalize_to_wav(source, normalized)
+        except tts.VoiceSynthesisError as exc:
+            raise ApiProblemError(INVALID_VOICE_EFFECT, f"音效解不开：{exc}") from exc
+        if duration_ms <= 0:
+            raise ApiProblemError(INVALID_VOICE_EFFECT, "音效时长为零")
+        if duration_ms > tts.MAX_EFFECT_DURATION_MS:
+            raise ApiProblemError(
+                INVALID_VOICE_EFFECT,
+                f"音效超过 {tts.MAX_EFFECT_DURATION_MS // 1000} 秒上限（收到 {duration_ms / 1000:.1f} 秒）",
+            )
+        effect_id = tts.sha256_of(normalized)
+        target = tts.effect_path(effect_id)
+        normalized.replace(target)
+    finally:
+        source.unlink(missing_ok=True)
+        normalized.unlink(missing_ok=True)
+    existing = repository.get_effect(effect_id)
+    if existing is not None and str(existing["name"]) != name:
+        used = repository.count_rules_referencing_fx(str(existing["name"]))
+        if used > 0:
+            raise ApiProblemError(
+                VOICE_EFFECT_IN_USE,
+                f"有 {used} 条规则的模板写着 {{fx:{existing['name']}}}，这个名字不能改",
+            )
+    repository.upsert_effect(effect_id, name, target.stat().st_size, duration_ms, now_rfc3339())
+    row = repository.get_effect(effect_id)
+    if row is None:
+        raise ApiProblemError(VOICE_EFFECT_NOT_FOUND, effect_id)
+    return _effect_view(row)
+
+
+def delete_effect(effect_id: str) -> None:
+    row = repository.get_effect(effect_id)
+    if row is None:
+        raise ApiProblemError(VOICE_EFFECT_NOT_FOUND, effect_id)
+    used = repository.count_rules_referencing_fx(str(row["name"]))
+    if used > 0:
+        raise ApiProblemError(VOICE_EFFECT_IN_USE, f"有 {used} 条规则的模板写着 {{fx:{row['name']}}}，先改规则再删")
+    repository.delete_effect(effect_id)
+    tts.effect_path(effect_id).unlink(missing_ok=True)
+
+
 def list_deliveries(limit: int) -> list[schemas.VoiceDeliveryView]:
     return [
         schemas.VoiceDeliveryView(
@@ -526,8 +808,13 @@ def list_deliveries(limit: int) -> list[schemas.VoiceDeliveryView]:
             delay_ms=int(row["delay_ms"]),
             occurred_at=str(row["occurred_at"]),
             dispatched_at=str(row["dispatched_at"]),
+            done_at=str(row["done_at"]),
             status=str(row["status"]),
             detail=str(row["detail"]),
+            clip_ms=int(row["clip_ms"]),
+            dispatch_offset_ms=_offset_ms(str(row["occurred_at"]), str(row["dispatched_at"])),
+            finish_offset_ms=_offset_ms(str(row["dispatched_at"]), str(row["done_at"])),
+            downloaded=bool(row["downloaded"]),
         )
         for row in repository.list_deliveries(limit)
     ]

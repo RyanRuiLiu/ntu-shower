@@ -12,13 +12,20 @@ from enum import Enum
 
 
 class DoorEventKind(str, Enum):
-    """五种播报事件。取值是跨端契约的一部分，中文名由 voice 的事件目录给出。"""
+    """七种播报事件。取值是跨端契约的一部分，中文名由 voice 的事件目录给出。
+
+    `released` 按释放前最后一帧的占用状态拆成三种：未开阀就被释放（预约未到/续期
+    场景）、淋浴后释放（正常结算）、暂停中被释放。三者的播报内容语义不同——「本次
+    淋浴 X 分钟」只对淋浴后释放成立。
+    """
 
     ASSIGNED = "assigned"
     SHOWER_STARTED = "shower_started"
     PAUSED = "paused"
     RESUMED = "resumed"
-    RELEASED = "released"
+    RELEASED_UNUSED = "released_unused"
+    RELEASED_AFTER_SHOWER = "released_after_shower"
+    RELEASED_WHILE_PAUSED = "released_while_paused"
 
 
 @dataclass(frozen=True)

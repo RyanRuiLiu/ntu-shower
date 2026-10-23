@@ -117,15 +117,38 @@ def test_paused_to_bathing_emits_resumed(fresh_db: str) -> None:
     assert [event.kind for event in events] == [DoorEventKind.RESUMED]
 
 
-def test_occupied_to_free_emits_released_with_session_cert(fresh_db: str) -> None:
+def test_waiting_to_free_emits_released_unused(fresh_db: str) -> None:
     device_id = "voice-event-release"
     _process(device_id, [_door(1)], T0)
     _process(device_id, [_occupied()], T1)
     events = _process(device_id, [_door(1)], T2)
 
-    assert [event.kind for event in events] == [DoorEventKind.RELEASED]
+    assert [event.kind for event in events] == [DoorEventKind.RELEASED_UNUSED]
     assert events[0].cert_no == "C1"
-    assert events[0].event_key.endswith(":released")
+    assert events[0].event_key.endswith(":released_unused")
+
+
+def test_bathing_to_free_emits_released_after_shower(fresh_db: str) -> None:
+    device_id = "voice-event-release-shower"
+    _process(device_id, [_door(1)], T0)
+    _process(device_id, [_occupied()], T1)
+    _process(device_id, [_bathing()], T2)
+    events = _process(device_id, [_door(1)], T3)
+
+    assert [event.kind for event in events] == [DoorEventKind.RELEASED_AFTER_SHOWER]
+    assert events[0].event_key.endswith(":released_after_shower")
+
+
+def test_paused_to_free_emits_released_while_paused(fresh_db: str) -> None:
+    device_id = "voice-event-release-paused"
+    _process(device_id, [_door(1)], T0)
+    _process(device_id, [_occupied()], T1)
+    _process(device_id, [_bathing()], T2)
+    _process(device_id, [_paused()], T3)
+    events = _process(device_id, [_door(1)], "2026-09-30T12:05:00.000Z")
+
+    assert [event.kind for event in events] == [DoorEventKind.RELEASED_WHILE_PAUSED]
+    assert events[0].event_key.endswith(":released_while_paused")
 
 
 def test_free_to_bathing_emits_only_assigned(fresh_db: str) -> None:

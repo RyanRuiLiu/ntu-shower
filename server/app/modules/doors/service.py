@@ -724,6 +724,15 @@ def _transition_kind(old_state: str, state: DoorState) -> DoorEventKind | None:
     return None
 
 
+def _release_kind(last_occupied_state: str) -> DoorEventKind:
+    """释放前最后一帧的占用状态 → 释放事件；不认识的按未开阀处理（观测下界）。"""
+    if last_occupied_state == DoorState.BATHING.value:
+        return DoorEventKind.RELEASED_AFTER_SHOWER
+    if last_occupied_state == DoorState.PAUSED.value:
+        return DoorEventKind.RELEASED_WHILE_PAUSED
+    return DoorEventKind.RELEASED_UNUSED
+
+
 def _maintain_session(
     device_id: str,
     door_no: int,
@@ -747,7 +756,9 @@ def _maintain_session(
     - 新会话 / 换人 → `assigned`；换人不为旧学号产出 `released`；
     - 同一会话的 `waiting→bathing` / `paused→bathing` / `bathing→paused`
       → `shower_started` / `resumed` / `paused`；
-    - 本帧离开占用态且上一帧仍占着 → `released`，学号取**被结束的会话行**。
+    - 本帧离开占用态且上一帧仍占着 → 按**上一帧的占用状态**产出
+      `released_unused` / `released_after_shower` / `released_while_paused`，
+      学号取**被结束的会话行**。
     """
     out: list[DoorEvent] = []
     gap = _gap(previous, at)
@@ -773,13 +784,13 @@ def _maintain_session(
                 if not blind and session_cert:
                     out.append(
                         _door_event(
-                            DoorEventKind.RELEASED,
+                            _release_kind(str(previous["state"])),
                             device_id,
                             door_no,
                             session_cert,
                             session_id,
                             at,
-                            f"session:{session_id}:released",
+                            f"session:{session_id}:{_release_kind(str(previous['state'])).value}",
                         )
                     )
         return out

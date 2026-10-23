@@ -66,6 +66,17 @@ export function currentRuntime() {
 }
 
 /**
+ * 设备的显示名：没有登记名时用设备 ID 本身。
+ *
+ * 多处要把 device_id 说给人听（表格、徽标、提示），各自写一遍查找就是三份漂移源，
+ * 收在这里，与设备清单同一份状态。
+ */
+export function deviceName(id) {
+  const device = store.devices.find((item) => item.device_id === id)
+  return device ? device.name || device.device_id : id
+}
+
+/**
  * 刷新设备精简清单（公开端点，无需身份）。
  *
  * 只在"还没选"或"选中的设备已从清单消失"时才改选择——用户正看着某台设备时，
