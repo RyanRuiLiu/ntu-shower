@@ -37,19 +37,19 @@ def get_spec() -> schemas.VoiceSpecView:
 
 
 @admin_router.get("/voice/rules")
-def list_rules(device_id: str | None = Query(default=None)) -> list[schemas.VoiceRuleView]:
-    return service.list_rules(device_id)
+def list_rules() -> list[schemas.VoiceRuleView]:
+    return service.list_rules()
 
 
 @admin_router.post("/voice/rules")
-async def create_rule(req: schemas.VoiceRuleCreate) -> schemas.VoiceRuleCreateResult:
+async def create_rule(req: schemas.VoiceRuleCreate) -> schemas.VoiceRuleView:
     try:
-        result = await run_in_threadpool(service.create_rule, req)
+        view = await run_in_threadpool(service.create_rule, req)
     except service.InvalidVoiceRuleError as exc:
         raise ApiProblemError(INVALID_VOICE_RULE, str(exc)) from exc
-    clip = await run_in_threadpool(service.prepare_static, result.created[0]) if result.created else None
-    service.schedule_prepare(service.rule_device_targets(result.created), clip)
-    return result
+    clip = await run_in_threadpool(service.prepare_static, view) if view.enabled else None
+    service.schedule_prepare(service.rule_device_targets([view]), clip)
+    return view
 
 
 @admin_router.put("/voice/rules/{rule_id}")
