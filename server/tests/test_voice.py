@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from tests import helpers
 
-from app.core.clock import now_rfc3339, shift_rfc3339
+from app.core.clock import now_rfc3339
 from app.modules.config import store as config_store
 from app.modules.doors import service as doors_service
 from app.modules.doors.events import DoorEvent, DoorEventKind
@@ -137,18 +137,6 @@ def _fake_send_collector(calls: list[tuple[str, dict[str, object]]]) -> object:
     return fake_send
 
 
-def _patch_durations(monkeypatch: pytest.MonkeyPatch, flow_s: int = 0) -> None:
-    monkeypatch.setattr(
-        doors_service,
-        "session_durations",
-        lambda _session_id: doors_service.SessionDurations(
-            assigned_at=now_rfc3339(),
-            ended_at="",
-            flow_s=flow_s,
-        ),
-    )
-
-
 def test_spec_uses_canonical_event_names(client: TestClient, admin_headers: dict[str, str]) -> None:
     response = client.get("/api/v1/voice/spec", headers=admin_headers)
     assert response.status_code == 200
@@ -171,8 +159,6 @@ def test_spec_uses_canonical_event_names(client: TestClient, admin_headers: dict
         "cert_no",
         "cert_no:4",
         "event",
-        "assigned_duration",
-        "shower_duration",
     ]
     assert spec["delay"] == {"minimum_ms": 0, "maximum_ms": 10_000, "default_ms": 0}
     assert spec["volume"] == {"minimum": 0, "maximum": 5, "default": 4}
@@ -613,7 +599,6 @@ def test_preview_and_dispatch_carry_effect(
     _create(client, admin_headers, text="{fx:叮} 固定内容")
     calls: list[tuple[str, dict[str, object]]] = []
     monkeypatch.setattr(sessions_service, "send_command_and_wait", _fake_send_collector(calls))
-    _patch_durations(monkeypatch)
 
     asyncio.run(service.handle_events((_event(now_rfc3339()),)))
 
@@ -721,20 +706,11 @@ def test_handle_events_delivers_once_and_records_stage_timings(
     _create(
         client,
         admin_headers,
-        text="{event}，{door_no} 号，分配 {assigned_duration}，淋浴 {shower_duration}",
+        text="{event}，{door_no} 号喷头已就绪",
         volume=3,
     )
     now = now_rfc3339()
     event = _event(now)
-    monkeypatch.setattr(
-        doors_service,
-        "session_durations",
-        lambda _session_id: doors_service.SessionDurations(
-            assigned_at=shift_rfc3339(now, -1122),
-            ended_at="",
-            flow_s=965,
-        ),
-    )
     calls: list[tuple[str, dict[str, object]]] = []
     monkeypatch.setattr(sessions_service, "send_command_and_wait", _fake_send_collector(calls))
 
@@ -750,7 +726,7 @@ def test_handle_events_delivers_once_and_records_stage_timings(
     deliveries = client.get("/api/v1/voice/deliveries", headers=admin_headers).json()
     assert len(deliveries) == 1
     delivery = deliveries[0]
-    assert delivery["text"] == "等待开阀，5 号，分配 18分42秒，淋浴 16分5秒"
+    assert delivery["text"] == "等待开阀，5 号喷头已就绪"
     assert delivery["status"] == "ok"
     assert delivery["delay_ms"] == 0
     assert delivery["dispatched_at"]
@@ -773,7 +749,6 @@ def test_handle_events_preloads_clip_inside_delay_window(
     _create(client, admin_headers, delay_ms=50)
     calls: list[tuple[str, dict[str, object]]] = []
     monkeypatch.setattr(sessions_service, "send_command_and_wait", _fake_send_collector(calls))
-    _patch_durations(monkeypatch)
 
     asyncio.run(service.handle_events((_event(now_rfc3339()),)))
 
@@ -795,9 +770,9 @@ def test_handle_events_skips_stale_and_no_rule(
     monkeypatch.setattr(sessions_service, "send_command_and_wait", _fake_send_collector(calls))
     monkeypatch.setattr(doors_service, "session_durations", lambda _id: None)
 
+    # 时效过期与无规则两条都不播;播报不再依赖会话表(时长占位符已移除)
     asyncio.run(service.handle_events((_event("2000-01-01T00:00:00.000Z"),)))
     asyncio.run(service.handle_events((_event(now_rfc3339(), cert_no="C2"),)))
-    asyncio.run(service.handle_events((_event(now_rfc3339()),)))
 
     assert calls == []
     assert client.get("/api/v1/voice/deliveries", headers=admin_headers).json() == []
@@ -813,7 +788,6 @@ def test_wildcard_rule_matches_any_cert(
     _create(client, admin_headers, device_ids=["*"], cert_nos=["*"], text="全场通用")
     calls: list[tuple[str, dict[str, object]]] = []
     monkeypatch.setattr(sessions_service, "send_command_and_wait", _fake_send_collector(calls))
-    _patch_durations(monkeypatch)
 
     asyncio.run(service.handle_events((_event(now_rfc3339(), device_id=OTHER_DEVICE_ID, cert_no="C77"),)))
 
@@ -838,7 +812,6 @@ def test_handle_events_marks_tts_failure(
         raise tts.VoiceSynthesisError(message)
 
     monkeypatch.setattr(tts, "synthesize", boom)
-    _patch_durations(monkeypatch)
 
     asyncio.run(service.handle_events((_event(now_rfc3339()),)))
 
@@ -1068,7 +1041,6 @@ def test_stale_after_delay(
     _create(client, admin_headers, delay_ms=0)
     calls: list[tuple[str, dict[str, object]]] = []
     monkeypatch.setattr(sessions_service, "send_command_and_wait", _fake_send_collector(calls))
-    _patch_durations(monkeypatch)
     # 三次读时：事件时效初检（未超）→ 算剩余延迟（为 0）→ 延迟后再查时效（超了）
     elapsed = [0.0, 0.0, 100.0]
 
@@ -1096,7 +1068,6 @@ def test_event_text_render_failure(
     _create(client, admin_headers, cert_nos=[cert_no], text="x" * 110 + "{cert_no}")
     calls: list[tuple[str, dict[str, object]]] = []
     monkeypatch.setattr(sessions_service, "send_command_and_wait", _fake_send_collector(calls))
-    _patch_durations(monkeypatch)
 
     asyncio.run(service.handle_events((_event(now_rfc3339(), cert_no=cert_no),)))
 

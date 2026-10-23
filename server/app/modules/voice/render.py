@@ -1,14 +1,13 @@
-"""播报模板的校验、分段渲染与时长口播格式。
+"""播报模板的校验与分段渲染。
 
 模板是「语音段 / 音效 / 停顿」的序列，三种记法：
 
-- `{key}`：可靠占位符（封闭集合，用真实会话值替换后照常朗读）；
+- `{key}`：可靠占位符（封闭集合，用事件值替换后照常朗读）；
 - `{fx:名称}`：在该位置插入音效库里这个音效（不朗读，只响）；
 - `{pause:毫秒}`：在该位置插入静音（不朗读）。
 
 渲染产出分段序列（[render_segments]），合成按段拼装 WAV；展示文本（[render_text]）
-把音效写成 ♪名称、停顿写成 （停顿1.5秒），给人看、不进 TTS。时间不从裸数字直接
-交给 TTS：先格式化成「35秒 / 12分钟 / 12分34秒」，避免被读成「十二比三十四」。
+把音效写成 ♪名称、停顿写成 （停顿1.5秒），给人看、不进 TTS。
 """
 
 import dataclasses
@@ -32,7 +31,7 @@ TRUNCATE_MAX = 10
 
 #: 模板里音效名的提取器（校验与守卫用，与 TOKEN_PATTERN 的 fx 分支同一形状）。
 FX_NAME_PATTERN = re.compile(r"\{fx:([^{}]+)\}")
-PLACEHOLDER_KEYS = frozenset({"door_no", "cert_no", "event", "assigned_duration", "shower_duration"})
+PLACEHOLDER_KEYS = frozenset({"door_no", "cert_no", "event"})
 
 #: 停顿的边界（毫秒）：太短的停顿听不出来，太长的该拆成两条规则。
 PAUSE_MIN_MS = 100
@@ -183,35 +182,15 @@ def render_template(text: str, values: Mapping[str, str]) -> str:
     return render_text(render_segments(text, values))
 
 
-def spoken_duration(seconds: int) -> str:
-    """秒数 → 中文口播文本。
-
-    - 不足一分钟：`35秒`
-    - 整分钟：`12分钟`
-    - 其余：`12分34秒`（秒数不补零，TTS 读作十二分三十四秒）
-    """
-    total = max(0, int(seconds))
-    minutes, rest = divmod(total, 60)
-    if total < 60:
-        return f"{total}秒"
-    if rest == 0:
-        return f"{minutes}分钟"
-    return f"{minutes}分{rest}秒"
-
-
 def sample_values(
     event_label: str,
     *,
     door_no: int = 1,
     cert_no: str = "示例学号",
-    assigned_seconds: int = 1122,
-    shower_seconds: int = 965,
 ) -> dict[str, str]:
-    """试听/示例文本的上下文；实际事件用真实会话值替换。"""
+    """试听/示例文本的上下文；实际事件用真实事件值替换。"""
     return {
         "door_no": str(door_no),
         "cert_no": cert_no,
         "event": event_label,
-        "assigned_duration": spoken_duration(assigned_seconds),
-        "shower_duration": spoken_duration(shower_seconds),
     }
