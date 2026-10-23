@@ -33,7 +33,7 @@ from typing import NoReturn
 from starlette.concurrency import run_in_threadpool
 
 from app.core import actions
-from app.core.clock import now_rfc3339, parse_rfc3339, seconds_between
+from app.core.clock import now_rfc3339, parse_rfc3339
 from app.core.logging import log_event, trace_id_var
 from app.core.problems import (
     DEVICE_NOT_FOUND,
@@ -47,7 +47,6 @@ from app.core.problems import (
 )
 from app.modules.config import store as config_store
 from app.modules.devices import service as devices_service
-from app.modules.doors import service as doors_service
 from app.modules.doors.events import DoorEvent, DoorEventKind
 from app.modules.sessions import service as sessions_service
 from app.modules.sessions.schemas import CommandOutcome
@@ -321,13 +320,7 @@ def delete_rule(rule_id: int) -> None:
 def preview(req: schemas.VoicePreviewRequest) -> schemas.VoicePreviewView:
     text = _validated_text(req.text, req.event)
     label = schemas.event_spec(req.event).label
-    values = render.sample_values(
-        label,
-        door_no=req.door_no,
-        cert_no=req.cert_no,
-        assigned_seconds=req.assigned_seconds,
-        shower_seconds=req.shower_seconds,
-    )
+    values = render.sample_values(label, door_no=req.door_no, cert_no=req.cert_no)
     try:
         segments = render.render_segments(text, values)
     except render.TemplateError as exc:
@@ -643,25 +636,15 @@ async def _dispatch_event(event: DoorEvent, max_age: int) -> None:
 
 
 def _event_segments(event: DoorEvent, template: str) -> tuple[tts.Plan, str] | None:
-    """真实事件值渲染模板 → 合成计划与展示文本；找不到会话或渲染失败返回 None。"""
-    durations = doors_service.session_durations(event.session_id)
-    if durations is None:
-        log_event(
-            "WARNING",
-            "voice.session-missing",
-            "语音事件找不到会话，跳过",
-            device_id=event.device_id,
-            session_id=event.session_id,
-        )
-        return None
-    end = durations.ended_at or event.occurred_at
-    assigned_seconds = max(0, seconds_between(durations.assigned_at, end))
+    """真实事件值渲染模板 → 合成计划与展示文本；渲染失败返回 None。
+
+    占位符只有事件自带的事实（喷头号/学号/目标状态），播报不依赖会话表——
+    会话找不到也能照常播（曾为时长占位符查会话，已随时长占位符一并移除）。
+    """
     values = render.sample_values(
         schemas.event_spec(event.kind).label,
         door_no=event.door_no,
         cert_no=event.cert_no,
-        assigned_seconds=assigned_seconds,
-        shower_seconds=durations.flow_s,
     )
     try:
         segments = render.render_segments(template, values)

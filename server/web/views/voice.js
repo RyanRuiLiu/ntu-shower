@@ -22,7 +22,6 @@ import { deviceName, refreshDevices, store } from '../core/store.js'
 import { toast } from '../core/toast.js'
 
 const WILDCARD = '*'
-const DURATION_PLACEHOLDERS = /\{(assigned_duration|shower_duration)\}/
 const ANY_PLACEHOLDER = /\{(fx:|pause:|[a-z_])/
 
 let spec = null
@@ -143,7 +142,7 @@ function renderSpec() {
     '<button type="button" class="ph-chip" data-ph="pause:500" title="在该位置插入 0.5 秒静音；数字可改成 100–5000 的毫秒数">（停顿0.5秒）</button>',
   ]
   $('voicePlaceholders').innerHTML = `${chips.join(" ")}
-    <div class="muted" style="margin-top:4px">点一下插到模板光标处，说明悬停可见。时长两个占位符每次取值都不同，不命中音频缓存；音效与停顿只响不读。</div>`
+    <div class="muted" style="margin-top:4px">点一下插到模板光标处，说明悬停可见；音效与停顿只响不读。</div>`
   if (!spec) return
   const delayMin = spec.delay.minimum_ms / 1000
   const delayMax = spec.delay.maximum_ms / 1000
@@ -338,12 +337,6 @@ function updateCertHint() {
     : '一行一个学号可批量创建；一次最多展开 500 条规则。'
 }
 
-/** 模板里出现时长占位符时提示：每次取值不同，不会命中缓存，播报前都要现场合成。 */
-function templateHint() {
-  const text = $('voiceText').value
-  $('voiceTextWarn').hidden = !DURATION_PLACEHOLDERS.test(text)
-}
-
 function clearForm() {
   $('voiceScope').innerHTML = scopeEditorHtml(store.devices, [store.deviceId || WILDCARD])
   $('voiceCertWildcard').checked = false
@@ -356,7 +349,6 @@ function clearForm() {
   $('voiceEnabled').checked = true
   $('voiceSample').hidden = true
   $('voiceSampleText').textContent = ''
-  $('voiceTextWarn').hidden = true
   applyFormMode()
 }
 
@@ -372,7 +364,6 @@ function fillForm(rule) {
   $('voiceDelay').value = String(rule.delay_ms / 1000)
   $('voiceVolume').value = String(rule.volume)
   $('voiceEnabled').checked = rule.enabled
-  templateHint()
   applyFormMode()
   showSample(rule.sample_text)
 }
@@ -446,7 +437,6 @@ function insertPlaceholder(key) {
   const caret = start + token.length
   input.focus()
   input.setSelectionRange(caret, caret)
-  templateHint()
 }
 
 function playPreview(url) {
@@ -471,8 +461,6 @@ async function previewRule(rule) {
       event: rule.event,
       cert_no: rule.cert_no === WILDCARD ? '示例学号' : rule.cert_no,
       door_no: 1,
-      assigned_seconds: 1122,
-      shower_seconds: 965,
     })
     showSample(result.rendered_text)
     playPreview(result.clip_url)
@@ -695,7 +683,6 @@ export const voiceView = {
             <label for="voiceText">播报内容（模板）</label>
             <input id="voiceText" type="text" placeholder="例如：{event}，{door_no} 号喷头">
             <div id="voicePlaceholders"></div>
-            <div class="note-amber" id="voiceTextWarn" hidden>时长占位符的取值随会话变化：不会命中音频缓存，每次播报都现场合成（秒级），高峰可能排队或超过时效被跳过</div>
           </div>
           <div class="field">
             <label for="voiceDelay" id="voiceDelayLabel">触发延迟</label>
@@ -756,7 +743,6 @@ export const voiceView = {
     dispose.add(listen($('btnVoiceSave'), 'click', submitForm))
     dispose.add(listen($('btnVoicePreview'), 'click', previewForm))
     dispose.add(listen($('btnVoiceCancel'), 'click', exitEdit))
-    dispose.add(listen($('voiceText'), 'input', templateHint))
     dispose.add(bindScopeToggle(root))
     dispose.add(
       listen($('voicePlaceholders'), 'click', (event) => {

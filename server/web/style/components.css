@@ -171,18 +171,6 @@
   background: var(--blue-bg);
 }
 
-/* ── 块状提示（琥珀）：一句话以上的警示/说明用它，徽标只装得下短状态词 ── */
-
-.note-amber {
-  padding: var(--sp-1) var(--sp-2);
-  border: 1px solid var(--amber);
-  border-radius: 6px;
-  background: var(--amber-bg);
-  color: var(--amber);
-  font-size: var(--fs-small);
-  line-height: 1.6;
-}
-
 /* ── 占位符插入片：长得像徽标、行为像按钮，点击插入到输入框光标处 ── */
 
 .ph-chip {
