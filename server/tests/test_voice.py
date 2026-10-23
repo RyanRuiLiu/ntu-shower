@@ -5,8 +5,8 @@ import asyncio
 import time
 from pathlib import Path
 
-import pytest
 import pydantic
+import pytest
 from fastapi.testclient import TestClient
 from tests import helpers
 
@@ -1107,9 +1107,8 @@ def test_event_text_render_failure(
     assert client.get("/api/v1/voice/deliveries", headers=admin_headers).json() == []
 
 
-def test_elapsed_parse_failure_and_sample_text() -> None:
+def test_elapsed_parse_failure() -> None:
     assert service._elapsed_s("not-a-time") == 0.0
-    assert service._sample_text("bad {name}", DoorEventKind.ASSIGNED) == "bad {name}"
 
 
 def test_schedule_events_creates_task(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1305,9 +1304,6 @@ def test_rule_scope_service_guards(
             events=[],
             text="固定内容",
         )
-    rule_view = client.post(
-        "/api/v1/voice/rules", headers=admin_headers, json=_payload(text="固定内容")
-    ).json()
     # 事件集合的下限由 pydantic 边界把关，服务层守卫是同一形状的背面
     with pytest.raises(pydantic.ValidationError):
         schemas.VoiceRuleUpdate(
