@@ -489,14 +489,26 @@ function stopPreview() {
 }
 
 async function pushRule(rule) {
-  const deviceId = $('voiceDevice').value
-  if (!deviceId) return report('voiceResult', '失败 · 请先在顶部选择目标设备', 'err')
+  let deviceId = rule.device_id
+  if (deviceId === WILDCARD) {
+    // 通配规则对全部设备生效：推给哪台由现场指定（列在线设备，输序号）
+    const online = devices.filter((d) => d.online)
+    if (!online.length) return report('voiceResult', '失败 · 没有在线设备可推送', 'err')
+    const list = online.map((d, i) => `${i + 1}. ${d.name || d.device_id}`).join('
+')
+    const picked = window.prompt(`这条规则对全部设备生效。推送到哪台？输入序号：
+${list}`, '1')
+    if (picked === null) return
+    const chosen = online[Number(picked) - 1]
+    if (!chosen) return report('voiceResult', '失败 · 序号无效', 'err')
+    deviceId = chosen.device_id
+  }
   report('voiceResult', `正在推送到 ${deviceName(deviceId)} 播放…`, 'info')
   try {
     const result = await api.pushVoiceRule(rule.id, deviceId)
     showSample(result.rendered_text)
     const ok = result.status === 'ok'
-    report('voiceResult', ok ? '已在设备上播放。' : `设备返回：${result.detail || result.status}`, ok ? 'ok' : 'err')
+    report('voiceResult', ok ? `已在 ${deviceName(deviceId)} 上播放。` : `设备返回：${result.detail || result.status}`, ok ? 'ok' : 'err')
     await reload()
   } catch (error) {
     report('voiceResult', problemText(error), 'err')
