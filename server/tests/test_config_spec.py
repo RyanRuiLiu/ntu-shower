@@ -16,7 +16,9 @@ from app.modules.config.spec import (
     GROUPS,
     SPECS_BY_KEY,
     TIME,
+    WEEKDAYS,
     parse_time,
+    parse_weekdays,
 )
 
 ANDROID_RUNTIME_CONFIG = (
@@ -127,3 +129,22 @@ def test_defaults_are_within_declared_bounds() -> None:
             default = parse_time(spec.default)
         assert isinstance(default, int), f"{spec.key} 的默认值不是合法时刻：{spec.default!r}"
         assert spec.minimum <= default <= (spec.maximum or default), f"{spec.key} 的默认值不在范围内"
+
+
+def test_weekday_default_is_canonical() -> None:
+    """星期键的默认值必须是规范形式，且能被解析成七天。"""
+    spec = SPECS_BY_KEY["notice_weekdays"]
+
+    assert spec.kind is WEEKDAYS
+    assert isinstance(spec.default, str)
+    assert parse_weekdays(spec.default) == (1, 2, 3, 4, 5, 6, 7)
+    assert spec.default == "1,2,3,4,5,6,7"
+
+
+def test_parse_weekdays_normalizes_and_rejects() -> None:
+    """去重、升序、去空白；空项、越界、非数字一律不给值。"""
+    assert parse_weekdays(" 3, 1, 3 ") == (1, 3)
+    assert parse_weekdays("1,2,3,4,5,6,7") == (1, 2, 3, 4, 5, 6, 7)
+
+    for bad in ("", " ", "0", "8", "1,8", "1,,2", "1,a", "mon"):
+        assert parse_weekdays(bad) is None, bad

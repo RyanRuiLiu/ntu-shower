@@ -17,8 +17,8 @@
  *
  * ## 控件形态按 kind
  *
- * bool → 勾选框；int → 数字输入（带上下限与单位）；text → 文本框；
- * text_map（如学生凭证）→ "键=值" 行编辑器。
+ * bool → 勾选框；int → 数字输入（带上下限与单位）；text → 文本框；time → 时间输入；
+ * weekdays → 七个星期复选框；text_map（如学生凭证）→ "键=值" 行编辑器。
  *
  * 表单由服务端登记表生成（`GET /api/v1/config/spec`），键名/类型/范围/分组不在
  * 前端另抄一份。
@@ -39,6 +39,20 @@ let section = ''
 let overriddenKeys = new Set()
 /** 编辑目标：global（主）或 device（辅）。只在支持按设备区分的分区里有意义。 */
 let target = 'global'
+
+/**
+ * 星期的唯一取值表：ISO 1=周一……7=周日。
+ * 渲染、读取、恢复默认都消费这一份，不在三个地方各写一遍。
+ */
+const WEEKDAY_OPTIONS = [
+  { value: '1', label: '周一' },
+  { value: '2', label: '周二' },
+  { value: '3', label: '周三' },
+  { value: '4', label: '周四' },
+  { value: '5', label: '周五' },
+  { value: '6', label: '周六' },
+  { value: '7', label: '周日' },
+]
 
 /**
  * 这个分区能不能按设备区分：它的键里有设备 scope 的才行。
@@ -70,6 +84,17 @@ function controlHtml(spec, value, id, isOverridden) {
         <input id="${esc(id)}" type="checkbox" data-key="${esc(spec.key)}" data-kind="bool" ${checked}>
         <span>${esc(spec.title)}${badgeHtml}</span>${resetButton}
       </label>${desc}`
+  }
+  if (spec.kind === 'weekdays') {
+    const selected = new Set(String(value || '').split(',').filter(Boolean))
+    const boxes = WEEKDAY_OPTIONS.map(
+      (option) =>
+        `<label class="weekday-option"><input type="checkbox" value="${option.value}" ${selected.has(option.value) ? 'checked' : ''}>${option.label}</label>`,
+    ).join('')
+    return `<div class="field">
+        <label>${esc(spec.title)}${badgeHtml}${resetButton}</label>
+        <div class="weekday-options" id="${esc(id)}" data-key="${esc(spec.key)}" data-kind="weekdays">${boxes}</div>
+      </div>${desc}`
   }
   if (spec.kind === 'text_map') {
     const lines = Object.entries(value || {})
@@ -116,7 +141,12 @@ function resetOne(key) {
   const spec = specs.find((item) => item.key === key)
   if (!spec) return
   const input = $(`cfg-${key}`)
-  if (spec.kind === 'bool') input.checked = Boolean(spec.default)
+  if (spec.kind === 'weekdays') {
+    const selected = new Set(String(spec.default || '').split(','))
+    input.querySelectorAll('input[type="checkbox"]').forEach((box) => {
+      box.checked = selected.has(box.value)
+    })
+  } else if (spec.kind === 'bool') input.checked = Boolean(spec.default)
   else if (spec.kind === 'text_map') input.value = ''
   else input.value = spec.default
   toast(`已将「${spec.title}」恢复为默认值（尚未保存）`)
@@ -187,9 +217,15 @@ function readForm() {
   for (const input of $('configGrid').querySelectorAll('[data-key]')) {
     const key = input.dataset.key
     const kind = input.dataset.kind
-    // 只有 int 要转数字、bool 要看勾选、text_map 要拆行，**其余一律取原文**：把"字符串"
-    // 当默认出口，将来加一个文本类 kind 时不会因为漏了一个分支而被静默丢掉值
-    if (kind === 'bool') config[key] = input.checked
+    // 只有 int 要转数字、bool 要看勾选、weekdays 要收集勾选项、text_map 要拆行，
+    // **其余一律取原文**：把"字符串"当默认出口，将来加一个文本类 kind 时不会因为
+    // 漏了一个分支而被静默丢掉值
+    if (kind === 'weekdays') {
+      config[key] = [...input.querySelectorAll('input[type="checkbox"]:checked')]
+        .map((box) => box.value)
+        .sort()
+        .join(',')
+    } else if (kind === 'bool') config[key] = input.checked
     else if (kind === 'text_map') config[key] = parseTextMap(input.value)
     else if (kind === 'int') {
       const value = Number(input.value)

@@ -15,7 +15,7 @@ object DoorSnapshotReader {
         "SELECT doorNo, cardno, certno, accno, openTime, inTime, closeTime, bathTime, status" +
             " FROM t_doorlist ORDER BY doorNo;"
 
-    fun readAll(): List<DoorRaw> {
+    fun readAll(): DoorReading {
         val startedAt = Uptime.nowMs()
         // 走数据通道：这条命令是生命线（数据库一变就触发），与界面注入、远程命令
         // 共用通道会让它被无关命令拖住，而用户正看着喷头状态挑喷头
@@ -23,10 +23,10 @@ object DoorSnapshotReader {
         val elapsed = Uptime.nowMs() - startedAt
         if (result.exitCode != 0) {
             Log.w(TAG, "read failed (${elapsed}ms)")
-            return emptyList()
+            return DoorReading(emptyList(), complete = false)
         }
-        val doors = DoorRaw.parseRows(result.output)
+        val reading = DoorRaw.parseReading(result.output, result.exitCode)
         PerfLogger.log(TAG, "sqlite3 read", elapsed)
-        return doors
+        return reading
     }
 }

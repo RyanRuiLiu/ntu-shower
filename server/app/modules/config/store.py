@@ -23,7 +23,9 @@ from .spec import (
     ConfigScope,
     defaults,
     format_time,
+    format_weekdays,
     parse_time,
+    parse_weekdays,
 )
 
 #: 全局覆盖的写锁。`put_global_overrides` 是**覆盖式**写入——收整份配置、剔掉等于默认值
@@ -129,6 +131,14 @@ def _check_value(
         if minimum is not None and minutes < minimum:
             _reject(f"{key} 不得早于 {format_time(minimum)}（收到 {value}）")
         return value
+
+    if kind is ConfigKind.WEEKDAYS:
+        if not isinstance(value, str):
+            _reject(f"{key} 需要星期文本，收到 {type(value).__name__}")
+        days = parse_weekdays(value)
+        if days is None:
+            _reject(f"{key} 至少选择一天，取值必须是 1–7，逗号分隔（收到 {value!r}）")
+        return format_weekdays(days)
 
     if not isinstance(value, dict):
         _reject(f"{key} 需要映射，收到 {type(value).__name__}")
