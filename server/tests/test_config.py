@@ -287,6 +287,42 @@ def test_validate_accepts_and_rejects_times(fresh_db: str) -> None:
         store.validate({"extend_hours_at": "22:59"})
 
 
+def test_validate_accepts_and_rejects_weekdays(fresh_db: str) -> None:
+    """星期键：规范化、空集合、越界与非数字都在入口拒绝。"""
+    assert store.validate({"notice_weekdays": " 3, 1, 3 "}) == {"notice_weekdays": "1,3"}
+    assert store.validate({"notice_weekdays": "1,2,3,4,5,6,7"}) == {"notice_weekdays": "1,2,3,4,5,6,7"}
+
+    with pytest.raises(store.InvalidConfigError, match="需要星期文本"):
+        store.validate({"notice_weekdays": 123})
+    with pytest.raises(store.InvalidConfigError, match="至少选择一天"):
+        store.validate({"notice_weekdays": ""})
+    with pytest.raises(store.InvalidConfigError, match="1–7"):
+        store.validate({"notice_weekdays": "1,8"})
+    with pytest.raises(store.InvalidConfigError, match="1–7"):
+        store.validate({"notice_weekdays": "1,,2"})
+    with pytest.raises(store.InvalidConfigError, match="1–7"):
+        store.validate({"notice_weekdays": "mon"})
+
+
+def test_notice_defaults_are_registered(fresh_db: str) -> None:
+    """13 个提示键的默认值随登记表生效；总开关默认关闭。"""
+    effective = store.global_effective()
+
+    assert effective["notice_enabled"] is False
+    assert effective["notice_text"] == ""
+    assert effective["notice_text_size_sp"] == 48
+    assert effective["notice_text_color"] == "#d94f16"
+    assert effective["notice_x_dp"] == 40
+    assert effective["notice_y_dp"] == 40
+    assert effective["notice_time_enabled"] is False
+    assert effective["notice_time_start"] == "22:00"
+    assert effective["notice_time_end"] == "23:00"
+    assert effective["notice_weekdays"] == "1,2,3,4,5,6,7"
+    assert effective["notice_occupancy_enabled"] is False
+    assert effective["notice_occupancy_min"] == 0
+    assert effective["notice_occupancy_max"] == 48
+
+
 def test_defaults_returns_independent_maps(fresh_db: str) -> None:
     """TEXT_MAP 默认值是可变对象：返回副本才不会污染登记表。"""
     first = store.defaults()

@@ -84,6 +84,19 @@
   min-width: 0;
 }
 
+/* 星期复选框：一行放不下就换行，不把文字挤成竖排 */
+.weekday-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.weekday-option {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
 /* ── 结果区：每个能出错的操作都要有一块 ─────────────────── */
 
 .result {

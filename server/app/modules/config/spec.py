@@ -8,6 +8,7 @@ scope=DEVICE 的键下发给设备，设备端 RuntimeConfig 是它的消费者�
 """
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 
@@ -28,11 +29,19 @@ class ConfigKind(str, Enum):
     """一天里的一个时刻，`HH:MM`。时刻不是时长、也没有单位：`23:49` 与 `1429 分钟` 是
     同一件事，而后者要读的人自己换算。下限与上限用自 0 点起的分钟数表达。"""
 
+    WEEKDAYS = "weekdays"
+    """星期集合，值形如 `1,2,3,4,5`，1=周一……7=周日。空集合不合法。
+    与 [TIME] 一样，识别与规范化的全部知识都在 [parse_weekdays] / [format_weekdays]
+    里，校验、默认值与测试都从这一份派生。"""
+
 
 #: `HH:MM` 形式的一天内时刻，小时 00–23、分钟 00–59。时刻这个类型的全部知识都在下面
 #: 这两个函数里——怎么认它、怎么让它与分钟数互相换算。校验（[spec.py] 的范围）与测试
 #: （默认值在不在范围内）都要用它，写第二份的地方必然与第一份漂移。
 _TIME_PATTERN = re.compile(r"([01]\d|2[0-3]):([0-5]\d)")
+
+#: 星期值的唯一形状：ASCII `1`–`7`。ISO 编号，周一=1、周日=7。
+_WEEKDAY_PATTERN = re.compile(r"[1-7]")
 
 
 def parse_time(value: str) -> int | None:
@@ -46,6 +55,27 @@ def parse_time(value: str) -> int | None:
 def format_time(minutes: int) -> str:
     """自 0 点起的分钟数 → `HH:MM`，用于把范围错误说得像人话。"""
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def parse_weekdays(value: str) -> tuple[int, ...] | None:
+    """`1,2,5` → `(1,2,5)`；空串、空项、越界或非数字给 None。
+
+    去重并升序：`3,1,3` 与 `1,3` 是同一个集合，存进配置的永远是规范形式。
+    """
+    parts = [part.strip() for part in value.split(",")]
+    if not parts or any(not part for part in parts):
+        return None
+    days: set[int] = set()
+    for part in parts:
+        if _WEEKDAY_PATTERN.fullmatch(part) is None:
+            return None
+        days.add(int(part))
+    return tuple(sorted(days))
+
+
+def format_weekdays(days: Iterable[int]) -> str:
+    """星期集合 → 规范形式 `1,2,3`。"""
+    return ",".join(str(day) for day in sorted(set(days)))
 
 
 class ConfigScope(str, Enum):
@@ -117,6 +147,8 @@ GROUPS: tuple[GroupSpec, ...] = (
     # ── 设备下发：会推到设备，支持单台覆盖 ──
     GroupSpec("power", "电源计划", "device"),
     GroupSpec("overlay", "操作遮罩", "device"),
+    GroupSpec("notice", "屏幕提示", "device"),
+    GroupSpec("notice_condition", "提示条件", "device"),
     GroupSpec("doors", "喷头状态采集", "device"),
     GroupSpec("ui", "界面操作", "device"),
     GroupSpec("automation", "自动化流程", "device"),
@@ -135,6 +167,7 @@ BOOL = ConfigKind.BOOL
 TEXT = ConfigKind.TEXT
 TEXT_MAP = ConfigKind.TEXT_MAP
 TIME = ConfigKind.TIME
+WEEKDAYS = ConfigKind.WEEKDAYS
 
 #: 全部配置键的规格。新增配置键时只改这里——服务端校验、客户端渲染、文档
 #: 生成都从它派生。
@@ -305,6 +338,148 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         maximum=2000,
         unit="dp",
         group="overlay",
+    ),
+    # ── 屏幕提示 ──
+    # 配置面在服务端，显隐判定在设备端：服务端只下发文字/样式/条件，设备用服务端
+    # 时间轴与本地 t_doorlist 判断此刻是否显示。边界与理由见 docs/DECISIONS.md。
+    ConfigSpec(
+        "notice_enabled",
+        BOOL,
+        DEVICE,
+        False,
+        "显示屏幕提示",
+        "开启后，若提示文字非空且显示条件满足，就在浴室屏幕上显示一行字。默认关闭；关闭时不创建提示窗",
+        group="notice",
+    ),
+    ConfigSpec(
+        "notice_text",
+        TEXT,
+        DEVICE,
+        "",
+        "提示文字",
+        "要显示的一行文字。为空时即使开关打开也不显示。换行会被替换为空格；超出屏幕右缘的部分以省略号截断",
+        group="notice",
+    ),
+    ConfigSpec(
+        "notice_text_size_sp",
+        INT,
+        DEVICE,
+        48,
+        "提示字号",
+        "单位为 sp，跟随系统字体缩放。设备屏幕为 1366×768 横屏；默认 48sp 是操作遮罩 80sp 的六成，保证一米左右可读",
+        minimum=10,
+        maximum=200,
+        unit="sp",
+        group="notice",
+    ),
+    ConfigSpec(
+        "notice_text_color",
+        TEXT,
+        DEVICE,
+        "#d94f16",
+        "提示文字颜色",
+        "十六进制颜色，如 #d94f16；也可写 #AARRGGBB 带透明度。格式无法识别时显示白色，并在设备日志留痕",
+        group="notice",
+    ),
+    ConfigSpec(
+        "notice_x_dp",
+        INT,
+        DEVICE,
+        40,
+        "提示左边距",
+        "文字左边缘距屏幕左边缘的距离，单位为 dp。屏幕固定 1366×768；填到超过屏幕宽度的值会让文字落到屏幕外",
+        minimum=0,
+        maximum=2000,
+        unit="dp",
+        group="notice",
+    ),
+    ConfigSpec(
+        "notice_y_dp",
+        INT,
+        DEVICE,
+        40,
+        "提示上边距",
+        "文字上边缘距屏幕顶部的距离，单位为 dp。屏幕固定 1366×768；填到超过屏幕高度的值会让文字落到屏幕外",
+        minimum=0,
+        maximum=2000,
+        unit="dp",
+        group="notice",
+    ),
+    # ── 提示条件 ──
+    ConfigSpec(
+        "notice_time_enabled",
+        BOOL,
+        DEVICE,
+        False,
+        "启用时间条件",
+        "开启后，只有设备当前的服务端时间落在下面的星期与时段内才显示。服务端时间尚无锚点"
+        "时（刚启动且未连上服务端）不显示；设备离线但已有锚点时，仍按单调钟继续走时。"
+        "时间按设备系统时区换算，与浴室 App 的日历一致",
+        group="notice_condition",
+    ),
+    ConfigSpec(
+        "notice_time_start",
+        TIME,
+        DEVICE,
+        "22:00",
+        "提示时段开始",
+        "每天的开始时刻，含这一刻。开始晚于结束时视为跨午夜（如 23:30–00:30）；开始等于"
+        "结束表示全天。延长服务期间设备表盘可能被拨快跨日，而本条件按真实的服务端时间"
+        "判断，两者会不一致",
+        group="notice_condition",
+    ),
+    ConfigSpec(
+        "notice_time_end",
+        TIME,
+        DEVICE,
+        "23:00",
+        "提示时段结束",
+        "每天的结束时刻，不含这一刻。与开始时刻相同表示全天",
+        group="notice_condition",
+    ),
+    ConfigSpec(
+        "notice_weekdays",
+        WEEKDAYS,
+        DEVICE,
+        "1,2,3,4,5,6,7",
+        "提示生效星期",
+        "只在选中的星期生效。1=周一……7=周日。跨午夜的时段按开始那一天归属：例如周五 "
+        "23:30–00:30 会覆盖周六 00:00–00:30，即使周六未勾选",
+        group="notice_condition",
+    ),
+    ConfigSpec(
+        "notice_occupancy_enabled",
+        BOOL,
+        DEVICE,
+        False,
+        "启用占用条件",
+        "开启后，只有当前占用的喷头数落在下面的区间内才显示。占用指等待开阀、淋浴中、"
+        "已暂停三种状态；维修中与已禁用不算。读不到完整的喷头读数时不显示",
+        group="notice_condition",
+    ),
+    ConfigSpec(
+        "notice_occupancy_min",
+        INT,
+        DEVICE,
+        0,
+        "占用喷头数下限",
+        "包含下限。与上限相同可以精确匹配一个数字；下限大于上限时提示不会显示",
+        minimum=0,
+        maximum=48,
+        unit="个",
+        group="notice_condition",
+    ),
+    ConfigSpec(
+        "notice_occupancy_max",
+        INT,
+        DEVICE,
+        48,
+        "占用喷头数上限",
+        "包含上限。最大 48 与协议里的喷头号上限一致；0 表示只在没有喷头被占用时显示",
+        minimum=0,
+        maximum=48,
+        unit="个",
+        group="notice_condition",
     ),
     ConfigSpec(
         "automation_trace_enabled",

@@ -22,6 +22,7 @@ import com.ryanliu.ntushower.features.automation.CommandScheduler
 import com.ryanliu.ntushower.features.automation.CoverOverlay
 import com.ryanliu.ntushower.features.doors.DoorMonitor
 import com.ryanliu.ntushower.features.doors.DoorSnapshotSender
+import com.ryanliu.ntushower.features.notice.NoticeController
 import com.ryanliu.ntushower.features.remote.AdbBridge
 import com.ryanliu.ntushower.features.selfmanage.A11yGuard
 import com.ryanliu.ntushower.features.selfmanage.BathDbArchiver
@@ -78,6 +79,7 @@ class AgentService : Service() {
     private lateinit var client: GatewayClient
     private lateinit var sender: DoorSnapshotSender
     private lateinit var overlay: CoverOverlay
+    private lateinit var notice: NoticeController
     private lateinit var scheduler: CommandScheduler
     private var monitor: DoorMonitor? = null
 
@@ -114,8 +116,11 @@ class AgentService : Service() {
             // 中间那几秒（网络不通时则是一直）该用上次的值，而不是编译进 APK 的默认值。
             // 没有缓存（首次安装、或读不出来）时保持默认值，随后被 hello_ack 覆盖。
             ConfigCache.load(this)?.let { RuntimeConfig.apply(it) }
-            sender = DoorSnapshotSender(this)
-            overlay = CoverOverlay(this)
+            // 先造遮盖层，再造就绪时读取遮盖状态的控制器，最后造读数发送器：
+            // 遮盖层回调引用稍后初始化的 notice，遮罩只在自动化流程中显示，构造期不会回调。
+            overlay = CoverOverlay(this) { visible -> notice.onCoverVisibilityChanged(visible) }
+            notice = NoticeController(this, deviceLog) { overlay.isShowingOrPending }
+            sender = DoorSnapshotSender(this) { reading -> notice.onReading(reading) }
             scheduler = CommandScheduler(overlay, onOutcome = { outcome -> sendOutcome(outcome) })
             client = GatewayClient(this, callback)
             client.connect()
@@ -270,6 +275,11 @@ class AgentService : Service() {
         // 输出上限要在命令下发之前同步到通道上，之后设就晚了：读超了的部分已经在内存里
         RootShell.command.maxOutputBytes = RuntimeConfig.deviceExecMaxOutputBytes.toInt()
         recentOutcomes.setCapacity(RuntimeConfig.commandDedupMaxCount.toInt())
+        notice.onConfigChanged()
+        // hasReading 只表示“收到过”；真读到过就不再为了看门狗重复拉库。
+        if (notice.needsOccupancy() && !notice.hasReading()) {
+            worker.execute { sender.readAndNotify() }
+        }
     }
 
     private fun applyConfig(envelope: Envelope) {
@@ -366,8 +376,13 @@ class AgentService : Service() {
     private fun startDoorMonitor() {
         monitor?.stopWatching()
         monitor = DoorMonitor {
-            if (trusted) {
-                worker.execute { sender.captureAndEnqueue(client, DoorSnapshotSender.SOURCE_DB_WATCH) }
+            worker.execute {
+                if (trusted) {
+                    sender.captureAndEnqueue(client, DoorSnapshotSender.SOURCE_DB_WATCH)
+                } else if (notice.needsOccupancy()) {
+                    // 占用是本地事实：没连上服务端时也要读，只是不写发件箱。
+                    sender.readAndNotify()
+                }
             }
         }.also { it.startWatching() }
     }
@@ -434,6 +449,7 @@ class AgentService : Service() {
         worker.shutdownNow()
         maintenanceExecutor.shutdownNow()
         terminatingExecutor.shutdownNow()
+        if (::notice.isInitialized) notice.destroy()
         closeAdbBridge("service destroyed")
         client.disconnect()
         monitor?.stopWatching()

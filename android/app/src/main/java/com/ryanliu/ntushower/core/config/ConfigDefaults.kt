@@ -47,6 +47,45 @@ object ConfigDefaults {
     /** 遮罩文字左边距 */
     const val OVERLAY_MARGIN_LEFT_DP = 600L
 
+    /** 显示屏幕提示 */
+    const val NOTICE_ENABLED = false
+
+    /** 提示文字 */
+    const val NOTICE_TEXT = ""
+
+    /** 提示字号 */
+    const val NOTICE_TEXT_SIZE_SP = 48L
+
+    /** 提示文字颜色 */
+    const val NOTICE_TEXT_COLOR = "#d94f16"
+
+    /** 提示左边距 */
+    const val NOTICE_X_DP = 40L
+
+    /** 提示上边距 */
+    const val NOTICE_Y_DP = 40L
+
+    /** 启用时间条件 */
+    const val NOTICE_TIME_ENABLED = false
+
+    /** 提示时段开始 */
+    const val NOTICE_TIME_START = "22:00"
+
+    /** 提示时段结束 */
+    const val NOTICE_TIME_END = "23:00"
+
+    /** 提示生效星期 */
+    const val NOTICE_WEEKDAYS = "1,2,3,4,5,6,7"
+
+    /** 启用占用条件 */
+    const val NOTICE_OCCUPANCY_ENABLED = false
+
+    /** 占用喷头数下限 */
+    const val NOTICE_OCCUPANCY_MIN = 0L
+
+    /** 占用喷头数上限 */
+    const val NOTICE_OCCUPANCY_MAX = 48L
+
     /** 记录自动化耗时 */
     const val AUTOMATION_TRACE_ENABLED = false
 
@@ -117,6 +156,19 @@ object ConfigDefaults {
         .put("overlay_text_size_sp", OVERLAY_TEXT_SIZE_SP)
         .put("overlay_text_color", OVERLAY_TEXT_COLOR)
         .put("overlay_margin_left_dp", OVERLAY_MARGIN_LEFT_DP)
+        .put("notice_enabled", NOTICE_ENABLED)
+        .put("notice_text", NOTICE_TEXT)
+        .put("notice_text_size_sp", NOTICE_TEXT_SIZE_SP)
+        .put("notice_text_color", NOTICE_TEXT_COLOR)
+        .put("notice_x_dp", NOTICE_X_DP)
+        .put("notice_y_dp", NOTICE_Y_DP)
+        .put("notice_time_enabled", NOTICE_TIME_ENABLED)
+        .put("notice_time_start", NOTICE_TIME_START)
+        .put("notice_time_end", NOTICE_TIME_END)
+        .put("notice_weekdays", NOTICE_WEEKDAYS)
+        .put("notice_occupancy_enabled", NOTICE_OCCUPANCY_ENABLED)
+        .put("notice_occupancy_min", NOTICE_OCCUPANCY_MIN)
+        .put("notice_occupancy_max", NOTICE_OCCUPANCY_MAX)
         .put("automation_trace_enabled", AUTOMATION_TRACE_ENABLED)
         .put("command_dedup_max_count", COMMAND_DEDUP_MAX_COUNT)
         .put("bath_response_timeout_ms", BATH_RESPONSE_TIMEOUT_MS)
