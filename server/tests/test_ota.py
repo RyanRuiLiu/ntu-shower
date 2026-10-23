@@ -217,7 +217,7 @@ def test_upload_publishes_and_notifies_target_devices(
         "/api/v1/ota/releases",
         headers=admin_headers,
         data={"version": "0.2.5", "version_code": 7, "target": "dev-target-1"},
-        files={"file": ("ntu-shower-0.2.5.apk", io.BytesIO(b"PK"), "application/octet-stream")},
+        files={"file": ("ntu-shower-0.2.5.apk", io.BytesIO(helpers.build_apk("0.2.5", 7)), "application/octet-stream")},
     )
 
     assert r.status_code == 200
@@ -226,6 +226,36 @@ def test_upload_publishes_and_notifies_target_devices(
     assert len(body["sha256"]) == 64
     manifest = client.get("/ota/manifest", params={"device_id": "dev-target-1", "version_code": 6}).json()
     assert manifest["up_to_date"] is False
+
+
+def test_upload_rejects_apk_whose_content_version_differs(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    ota_dir: Path,
+) -> None:
+    """发布声明与 APK 内容版本不一致即拒：正是 2026-10-24 全线空转循环的根因。"""
+    r = client.post(
+        "/api/v1/ota/releases",
+        headers=admin_headers,
+        data={"version": "0.4.40", "version_code": 84},
+        files={"file": ("stale.apk", io.BytesIO(helpers.build_apk("0.4.39", 83)), "application/octet-stream")},
+    )
+
+    assert r.status_code == 422
+    assert r.json()["type"].endswith("/problems/ota-apk-mismatch")
+    assert client.get("/api/v1/ota/releases").json() == []
+
+
+def test_upload_rejects_unreadable_apk(client: TestClient, admin_headers: dict[str, str], ota_dir: Path) -> None:
+    r = client.post(
+        "/api/v1/ota/releases",
+        headers=admin_headers,
+        data={"version": "0.4.40", "version_code": 84},
+        files={"file": ("broken.apk", io.BytesIO(b"garbage"), "application/octet-stream")},
+    )
+
+    assert r.status_code == 422
+    assert r.json()["type"].endswith("/problems/ota-apk-mismatch")
 
 
 def test_upload_requires_admin(client: TestClient, ops_headers: dict[str, str]) -> None:

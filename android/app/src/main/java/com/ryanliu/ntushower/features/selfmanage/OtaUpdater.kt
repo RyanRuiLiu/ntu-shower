@@ -28,6 +28,9 @@ import java.security.MessageDigest
  *    `version_code`（服务端据此标记 `ota_release_install`）；真未生效时发布保持
  *    待装，按调用侧退避重装收敛。无障碍重绑由 A11yGuard 看门狗负责。
  */
+// TooManyFunctions：检查、退避、尝试计数、下载、脱手安装是同一条生命周期的五件事，
+// 拆开只会让"一次 OTA 到底经过几步"更难一屏读完
+@Suppress("TooManyFunctions")
 class OtaUpdater(
     context: Context,
     private val client: OkHttpClient,
@@ -68,9 +71,24 @@ class OtaUpdater(
                 Log.i(TAG, "same version attempted recently, backing off")
                 return false
             }
+            // 尝试数到上限就停并留 ERROR（device.log 会送上服务端设备页）——"安装成功
+            // 而版本未变"会让 manifest 永远视为有新版，没有这个上限就是无限重装循环
+            // （2026-10-24 全线实测：发布字节声明 0.4.39 却登记为 0.4.40，六台设备
+            // pm Success 而版本不动）。上限后的处置是**等待人工**，不自动清零
+            val attempts = attemptCount(code)
+            if (attempts >= MAX_INSTALL_ATTEMPTS) {
+                deviceLog.error(
+                    "ota.attempts-exhausted",
+                    "version=$code attempts=$attempts 已达上限，停止重试等待人工处理；" +
+                        "查 ota-install.log 与服务端发布记录",
+                )
+                return false
+            }
+            writeAttemptCount(code, attempts + 1)
+            cleanupAttemptFiles(code)
             // 锁先落盘再动手：安装脚本杀死本进程后，下一次启动看到它才知道"刚试过"
             lock.writeText(versionStamp(manifest))
-            applyUpdate(manifest, lock)
+            applyUpdate(manifest)
             true
         } catch (e: Exception) {
             Log.e(TAG, "ota check failed: ${e.message}")
@@ -80,8 +98,27 @@ class OtaUpdater(
         }
     }
 
-    /** 安装尝试锁：一个版本一个文件，mtime 即上次尝试时刻。脚本收尾时删掉它。 */
+    /** 安装尝试锁：一个版本一个文件，mtime 即上次尝试时刻。脚本收尾时**不删**（见 installDetached），换版本时清理。 */
     private fun attemptLock(code: Int): File = File(AppConfig.WORK_DIR, "ota-attempt-$code.lock")
+
+    private fun attemptCountFile(code: Int): File = File(AppConfig.WORK_DIR, "ota-attempts-$code")
+
+    private fun attemptCount(code: Int): Int = attemptCountFile(code).readText().trim().toIntOrNull() ?: 0
+
+    private fun writeAttemptCount(code: Int, count: Int) {
+        attemptCountFile(code).writeText(count.toString())
+    }
+
+    /** 换新版本时清掉旧版本的锁与计数；正在用的两个保留。 */
+    private fun cleanupAttemptFiles(currentCode: Int) {
+        val prefixes = listOf("ota-attempt-", "ota-attempts-")
+        val keep = listOf("ota-attempt-$currentCode.lock", "ota-attempts-$currentCode")
+        AppConfig.WORK_DIR.let { work ->
+            val dir = File(work)
+            dir.listFiles { file -> file.isFile && prefixes.any { file.name.startsWith(it) } && file.name !in keep }
+                ?.forEach { it.delete() }
+        }
+    }
 
     private fun versionStamp(manifest: JSONObject): String =
         "${manifest.optString("version")} at ${Clock.wallClockRfc3339()}"
@@ -101,7 +138,7 @@ class OtaUpdater(
         }
     }
 
-    private fun applyUpdate(manifest: JSONObject, lock: File) {
+    private fun applyUpdate(manifest: JSONObject) {
         val version = manifest.getString("version")
         if (!Regex(OtaContract.VERSION_PATTERN).matches(version)) {
             // 版本号参与文件名构造，所以这里先按允许的形状校验一遍：设备这一侧自己成立，
@@ -125,7 +162,7 @@ class OtaUpdater(
         }
 
         onProgress(version, "installing", "")
-        installDetached(target, version, lock)
+        installDetached(target, version)
     }
 
     /**
@@ -157,7 +194,7 @@ class OtaUpdater(
      * 末尾把 APK 与尝试锁删掉：前者是下载产物，后者的使命（跨重启退避）到 pm 收尾
      * 为止。失败也没关系，重试本来就要重下。
      */
-    private fun installDetached(apk: File, version: String, lock: File) {
+    private fun installDetached(apk: File, version: String) {
         val log = File(AppConfig.WORK_DIR, INSTALL_LOG_NAME).absolutePath
         val pkg = BuildConfig.APPLICATION_ID
         val myPid = android.os.Process.myPid()
@@ -174,7 +211,11 @@ class OtaUpdater(
                 // 这条输出就是安装结论，原文落盘
                 "pm install -r ${apk.absolutePath} >> $log 2>&1; " +
                 "am startservice -n $pkg/com.ryanliu.ntushower.service.AgentService >> $log 2>&1; " +
-                "echo OTA_END >> $log; rm -f ${apk.absolutePath}; rm -f ${lock.absolutePath}",
+                // 尝试锁**不能在这里删**：安装"成功而版本未变"（本 ROM 在进程存活时替换
+                // 会这样，见上）时，锁在则下次尝试被退避挡住并计入尝试数，到上限即停；
+                // 锁被删则立即重试、无限循环（2026-10-24 全线实测）。锁由
+                // [cleanupAttemptFiles] 在换新版本时清理
+                "echo OTA_END >> $log; rm -f ${apk.absolutePath}",
         )
     }
 
@@ -250,5 +291,8 @@ class OtaUpdater(
 
         /** 同一版本安装尝试的退避窗口：窗口内不重复下载与安装。 */
         private const val RETRY_BACKOFF_MS = 5 * 60_000L
+
+        /** 同一版本的安装尝试上限：到顶停手留痕等人工，防"Success 而版本未变"的无限循环。 */
+        private const val MAX_INSTALL_ATTEMPTS = 3
     }
 }
