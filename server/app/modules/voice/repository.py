@@ -36,9 +36,9 @@ def init_tables() -> None:
 
         CREATE TABLE IF NOT EXISTS voice_rule (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            device_id   TEXT    NOT NULL,
-            cert_no     TEXT    NOT NULL,
-            event       TEXT    NOT NULL,
+            devices     TEXT    NOT NULL,
+            certs       TEXT    NOT NULL,
+            events      TEXT    NOT NULL,
             text        TEXT    NOT NULL,
             delay_ms    INTEGER NOT NULL DEFAULT 0,
             volume      INTEGER NOT NULL,
@@ -48,9 +48,6 @@ def init_tables() -> None:
             created_at  TEXT    NOT NULL,
             updated_at  TEXT    NOT NULL
         );
-        DROP INDEX IF EXISTS idx_voice_rule_match;
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_voice_rule_target
-            ON voice_rule (device_id, cert_no, event);
 
         CREATE TABLE IF NOT EXISTS voice_effect (
             effect_id   TEXT PRIMARY KEY,
@@ -86,50 +83,70 @@ def init_tables() -> None:
             ON voice_delivery (created_at);
         """
     )
+    # 作用域制重设计（2026-10-24）：旧形状（设备/学号单值列）与新模型不兼容。
+    # 语音功能未上线，旧的测试规则直接弃置——不写迁移（明确指示）。
+    columns = [row["name"] for row in get_conn().execute("PRAGMA table_info(voice_rule)")]
+    if columns and "devices" not in columns:
+        get_conn().execute("DROP TABLE voice_rule")
+        get_conn().executescript(
+            """
+            CREATE TABLE IF NOT EXISTS voice_rule (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                devices     TEXT    NOT NULL,
+                certs       TEXT    NOT NULL,
+                events      TEXT    NOT NULL,
+                text        TEXT    NOT NULL,
+                delay_ms    INTEGER NOT NULL DEFAULT 0,
+                volume      INTEGER NOT NULL,
+                enabled     INTEGER NOT NULL DEFAULT 1,
+                exempt      TEXT    NOT NULL DEFAULT '[]',
+                voice       TEXT    NOT NULL,
+                created_at  TEXT    NOT NULL,
+                updated_at  TEXT    NOT NULL
+            );
+            """
+        )
 
 
 def insert_rule(
-    device_id: str,
-    cert_no: str,
-    event: str,
+    devices: str,
+    certs: str,
+    events: str,
+    exempt: str,
     text: str,
     delay_ms: int,
     volume: int,
     enabled: bool,
-    exempt: str,
     voice: str,
     now: str,
-) -> int | None:
-    """插入一条规则；该目标已有规则时跳过并返回 None（唯一约束的正面表达）。"""
+) -> int:
+    """插入一条逻辑规则：目标（设备/学号）与事件都以创建时的作用域整体存储。"""
     cursor = write(
         "INSERT INTO voice_rule"
-        " (device_id, cert_no, event, text, delay_ms, volume, enabled, exempt, voice, created_at, updated_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?)"
-        " ON CONFLICT (device_id, cert_no, event) DO NOTHING",
-        (device_id, cert_no, event, text, delay_ms, volume, int(enabled), exempt, voice, now, now),
+        " (devices, certs, events, exempt, text, delay_ms, volume, enabled, voice, created_at, updated_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (devices, certs, events, exempt, text, delay_ms, volume, int(enabled), voice, now, now),
     )
-    if cursor.rowcount != 1:
-        return None
     return int(cursor.lastrowid or 0)
 
 
 def update_rule(
     rule_id: int,
-    device_id: str,
-    cert_no: str,
-    event: str,
+    devices: str,
+    certs: str,
+    events: str,
+    exempt: str,
     text: str,
     delay_ms: int,
     volume: int,
     enabled: bool,
-    exempt: str,
     voice: str,
     now: str,
 ) -> int:
     cursor = write(
-        "UPDATE voice_rule SET device_id=?, cert_no=?, event=?, text=?, delay_ms=?,"
-        " volume=?, enabled=?, exempt=?, voice=?, updated_at=? WHERE id=?",
-        (device_id, cert_no, event, text, delay_ms, volume, int(enabled), exempt, voice, now, rule_id),
+        "UPDATE voice_rule SET devices=?, certs=?, events=?, exempt=?, text=?, delay_ms=?,"
+        " volume=?, enabled=?, voice=?, updated_at=? WHERE id=?",
+        (devices, certs, events, exempt, text, delay_ms, volume, int(enabled), voice, now, rule_id),
     )
     return cursor.rowcount
 
@@ -149,43 +166,34 @@ def get_rule(rule_id: int) -> Row | None:
     return read_one("SELECT * FROM voice_rule WHERE id=?", (rule_id,))
 
 
-def list_rules(device_id: str | None) -> list[Row]:
-    """按特异度排序：具体设备在全部设备之前，具体学号在全部学号之前。
+def list_rules() -> list[Row]:
+    return get_conn().execute("SELECT * FROM voice_rule ORDER BY id").fetchall()
 
-    传 `device_id='*'` 时只列通配设备的规则——与具体设备同一套相等筛选，两个
-    语义都成立，不另设开关。
+
+def matching_rules(device_id: str, cert_no: str, event: str) -> list[Row]:
+    """一次事件命中的启用规则，按特异度排序：具体压过通配，先设备后学号。
+
+    「全部学号」的规则带排除名单：名单里的学号跳过该规则。规则量级是几十条，
+    在 Python 里做集合判断，不值得把 JSON 拆进 SQL。
     """
-    ordering = " ORDER BY (device_id='*') ASC, (cert_no='*') ASC, device_id, cert_no, event, id"
-    if device_id:
-        return get_conn().execute("SELECT * FROM voice_rule WHERE device_id=?" + ordering, (device_id,)).fetchall()
-    return get_conn().execute("SELECT * FROM voice_rule" + ordering).fetchall()
-
-
-def match_rule(device_id: str, cert_no: str, event: str) -> Row | None:
-    """具体压过通配：先比设备维度，再比学号维度，各维度具体值在前。
-
-    「全部学号」的规则带排除名单：名单里有这个学号就跳过它，让位给次特异的
-    候选。候选最多四条（两维度各两种取值），在 Python 里做集合判断，不值得
-    为它把 JSON 拆进 SQL。
-    """
-    rows: list[Row] = (
-        get_conn()
-        .execute(
-            "SELECT id, device_id, cert_no, event, text, delay_ms, volume, exempt, voice"
-            " FROM voice_rule"
-            " WHERE event=? AND enabled=1"
-            "   AND device_id IN (?, '*') AND cert_no IN (?, '*')"
-            " ORDER BY (device_id='*') ASC, (cert_no='*') ASC, id ASC",
-            (event, device_id, cert_no),
-        )
-        .fetchall()
-    )
-    for row in rows:
-        if row["cert_no"] != "*":
-            return row
-        if cert_no not in json.loads(str(row["exempt"])):
-            return row
-    return None
+    hits: list[tuple[tuple[int, int, int], Row]] = []
+    for row in get_conn().execute("SELECT * FROM voice_rule WHERE enabled=1").fetchall():
+        if event not in json.loads(str(row["events"])):
+            continue
+        devices = json.loads(str(row["devices"]))
+        certs = json.loads(str(row["certs"]))
+        if not ("*" in devices or device_id in devices):
+            continue
+        if "*" in certs:
+            if cert_no in json.loads(str(row["exempt"])):
+                continue
+        elif cert_no not in certs:
+            continue
+        specificity = (0 if "*" in devices else 1, 0 if "*" in certs else 1, int(row["id"]))
+        hits.append((specificity, row))
+    # 特异度数值越大越具体（1=具体、0=通配），降序即“具体压过通配”
+    hits.sort(key=lambda item: item[0], reverse=True)
+    return [row for _key, row in hits]
 
 
 def get_clip(clip_id: str) -> Row | None:

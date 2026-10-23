@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 import pytest
+import pydantic
 from fastapi.testclient import TestClient
 from tests import helpers
 
@@ -45,8 +46,8 @@ def fake_tts(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _payload(**overrides: object) -> dict[str, object]:
     payload: dict[str, object] = {
-        "device_ids": [DEVICE_ID],
-        "cert_nos": ["C1"],
+        "devices": [DEVICE_ID],
+        "certs": ["C1"],
         "events": ["assigned"],
         "text": "欢迎使用，{door_no} 号喷头",
         "voice": "melo",
@@ -59,22 +60,18 @@ def _payload(**overrides: object) -> dict[str, object]:
 
 
 def _create(client: TestClient, headers: dict[str, str], **overrides: object) -> dict[str, object]:
-    """创建并返回第一条新建规则的视图；调用方自行断言 created/skipped 的数量。"""
+    """创建一条逻辑规则并返回其视图。"""
     response = client.post("/api/v1/voice/rules", headers=headers, json=_payload(**overrides))
     assert response.status_code == 200, response.text
-    result: dict[str, object] = response.json()
-    created = result["created"]
-    assert isinstance(created, list), result
-    assert created, result
-    first: dict[str, object] = created[0]
-    return first
+    rule: dict[str, object] = response.json()
+    return rule
 
 
 def _update_body(**overrides: object) -> dict[str, object]:
     body: dict[str, object] = {
-        "device_id": DEVICE_ID,
-        "cert_no": "C1",
-        "event": "assigned",
+        "devices": [DEVICE_ID],
+        "certs": ["C1"],
+        "events": ["assigned"],
         "text": "固定内容",
         "delay_ms": 0,
         "volume": 3,
@@ -174,9 +171,10 @@ def test_rule_crud_preview_and_clip(
 ) -> None:
     created = _create(client, admin_headers)
     rule_id = created["id"]
-    assert created["sample_text"] == "欢迎使用，1 号喷头"
+    assert created["devices"] == [DEVICE_ID]
+    assert created["certs"] == ["C1"]
+    assert created["events"] == ["assigned"]
     assert created["delay_ms"] == 0
-    assert created["event"] == "assigned"
 
     listed = client.get("/api/v1/voice/rules", headers=admin_headers).json()
     assert [item["id"] for item in listed] == [rule_id]
@@ -209,7 +207,7 @@ def test_rule_crud_preview_and_clip(
         json=_update_body(delay_ms=3000, volume=4, enabled=False),
     )
     assert updated.status_code == 200
-    assert updated.json()["sample_text"] == "固定内容"
+    assert updated.json()["text"] == "固定内容"
     assert updated.json()["delay_ms"] == 3000
     assert updated.json()["enabled"] is False
 
@@ -228,11 +226,11 @@ def test_rule_crud_preview_and_clip(
         {"text": "你好 {name}"},
         {"text": "{door_no"},
         {"text": "   "},
-        {"cert_nos": ["   "]},
-        {"cert_nos": []},
-        {"device_ids": []},
-        {"device_ids": ["*", DEVICE_ID]},
-        {"cert_nos": ["*", "C1"]},
+        {"certs": ["   "]},
+        {"certs": []},
+        {"devices": []},
+        {"devices": ["*", DEVICE_ID]},
+        {"certs": ["*", "C1"]},
         {"delay_ms": 10_001},
         {"volume": 6},
         {"events": ["bogus"]},
@@ -294,39 +292,26 @@ def test_rule_text_and_voice_guards(
     assert "只允许" in unknown_voice.json()["detail"]
 
 
-def test_batch_create_expands_and_skips_existing(
+def test_create_stores_scope_as_authored(
     client: TestClient,
     admin_headers: dict[str, str],
     voice_device: None,
     fake_tts: None,
 ) -> None:
-    result = client.post(
-        "/api/v1/voice/rules",
-        headers=admin_headers,
-        json=_payload(cert_nos=["C1", "C2", "C2", "C3"]),
-    )
-    assert result.status_code == 200, result.text
-    body = result.json()
-    assert [item["cert_no"] for item in body["created"]] == ["C1", "C2", "C3"]
-    assert body["skipped"] == []
+    """一条逻辑规则整存创建时的作用域：按提交的作用域整体存储（提交值去重保序）。"""
+    created = _create(client, admin_headers, certs=["C1", "C2", "C2", "C3"])
+    # 提交值去重保序：重复的 C2 只留一份
+    assert created["certs"] == ["C1", "C2", "C3"]
+    assert created["devices"] == [DEVICE_ID]
 
-    # 同目标再建一遍：全部跳过，幂等且点名
-    again = client.post(
-        "/api/v1/voice/rules",
-        headers=admin_headers,
-        json=_payload(cert_nos=["C1", "C2"]),
-    ).json()
-    assert again["created"] == []
-    assert {(item["device_id"], item["cert_no"]) for item in again["skipped"]} == {
-        (DEVICE_ID, "C1"),
-        (DEVICE_ID, "C2"),
-    }
+    listed = client.get("/api/v1/voice/rules", headers=admin_headers).json()
+    assert [item["id"] for item in listed] == [created["id"]]
 
-    # 设备 × 学号的乘积有上限
+    # 学号列表超上限在 HTTP 边界拒绝
     many = client.post(
         "/api/v1/voice/rules",
         headers=admin_headers,
-        json=_payload(device_ids=[DEVICE_ID, OTHER_DEVICE_ID], cert_nos=[f"C{i}" for i in range(300)]),
+        json=_payload(certs=[f"C{i}" for i in range(501)]),
     )
     assert many.status_code == 422
 
@@ -337,68 +322,60 @@ def test_match_specificity_exact_beats_wildcard(
     voice_device: None,
     fake_tts: None,
 ) -> None:
-    only_device = _create(client, admin_headers, cert_nos=["*"], text="设备级通配")
-    only_cert = _create(client, admin_headers, device_ids=["*"], cert_nos=["C9"], text="学号跨设备")
-    exact = _create(client, admin_headers, cert_nos=["C9"], text="完全具体")
+    only_device = _create(client, admin_headers, certs=["*"], text="设备级通配")
+    only_cert = _create(client, admin_headers, devices=["*"], certs=["C9"], text="学号跨设备")
+    exact = _create(client, admin_headers, certs=["C9"], text="完全具体")
 
-    # 完全具体 > 仅学号通配 > 仅设备通配 > 双通配
-    matched = repository.match_rule(DEVICE_ID, "C9", "assigned")
-    assert matched is not None
-    assert int(matched["id"]) == int(exact["id"])
-    assert repository.match_rule(OTHER_DEVICE_ID, "C9", "assigned") is not None
-    assert int(repository.match_rule(OTHER_DEVICE_ID, "C9", "assigned")["id"]) == int(only_cert["id"])
-    assert repository.match_rule(DEVICE_ID, "C7", "assigned") is not None
-    assert int(repository.match_rule(DEVICE_ID, "C7", "assigned")["id"]) == int(only_device["id"])
+    # 完全具体 > 仅设备通配 > 仅学号通配 > 双通配（设备维度先于学号维度）
+    matched = repository.matching_rules(DEVICE_ID, "C9", "assigned")
+    assert [int(row["id"]) for row in matched] == [int(exact["id"]), int(only_device["id"]), int(only_cert["id"])]
+    assert [int(row["id"]) for row in repository.matching_rules(OTHER_DEVICE_ID, "C9", "assigned")] == [
+        int(only_cert["id"])
+    ]
+    assert [int(row["id"]) for row in repository.matching_rules(DEVICE_ID, "C7", "assigned")] == [
+        int(only_device["id"])
+    ]
 
     # 停用具体规则后，同目标由次特异的顶上（设备维度先于学号维度：设备级通配压过
     # 跨设备学号）——覆盖切换不需要第二条同目标规则
     client.patch(f"/api/v1/voice/rules/{exact['id']}", headers=admin_headers, json={"enabled": False})
-    matched = repository.match_rule(DEVICE_ID, "C9", "assigned")
-    assert matched is not None
-    assert int(matched["id"]) == int(only_device["id"])
+    matched = repository.matching_rules(DEVICE_ID, "C9", "assigned")
+    assert [int(row["id"]) for row in matched] == [int(only_device["id"]), int(only_cert["id"])]
 
-    # 列表按特异度排序：具体在前，通配在后；通配设备可用筛选单独列出
+    # 列表按特异度排序：具体在前，通配在后
     listed = client.get("/api/v1/voice/rules", headers=admin_headers).json()
     ids = [item["id"] for item in listed]
     assert ids.index(int(exact["id"])) < ids.index(int(only_device["id"]))
-    wildcard_rows = client.get("/api/v1/voice/rules", headers=admin_headers, params={"device_id": "*"}).json()
-    assert [item["id"] for item in wildcard_rows] == [int(only_cert["id"])]
-    other_rows = client.get("/api/v1/voice/rules", headers=admin_headers, params={"device_id": OTHER_DEVICE_ID}).json()
-    assert other_rows == []
 
 
-def test_update_moves_device_and_conflicts(
+def test_update_moves_target(
     client: TestClient,
     admin_headers: dict[str, str],
     voice_device: None,
     fake_tts: None,
 ) -> None:
-    moved = _create(client, admin_headers, cert_nos=["C1"])
+    moved = _create(client, admin_headers, certs=["C1"])
     to_other = client.put(
         f"/api/v1/voice/rules/{moved['id']}",
         headers=admin_headers,
-        json=_update_body(device_id=OTHER_DEVICE_ID),
+        json=_update_body(devices=[OTHER_DEVICE_ID]),
     )
     assert to_other.status_code == 200
-    assert to_other.json()["device_id"] == OTHER_DEVICE_ID
+    assert to_other.json()["devices"] == [OTHER_DEVICE_ID]
 
-    first = _create(client, admin_headers, cert_nos=["C2"])
-    second = _create(client, admin_headers, cert_nos=["C3"])
-    conflict = client.put(
+    # 目标重叠的两条规则并存是合法的：匹配按特异度与 id 裁决，不由唯一约束拦截
+    _create(client, admin_headers, certs=["C2"])
+    second = _create(client, admin_headers, certs=["C3"])
+    retargeted = client.put(
         f"/api/v1/voice/rules/{second['id']}",
         headers=admin_headers,
-        json=_update_body(cert_no="C2", event="assigned"),
+        json=_update_body(certs=["C2"], events=["assigned"]),
     )
-    assert conflict.status_code == 422
-    assert "已有另一条规则" in conflict.json()["detail"]
-    # 冲突的更新不落库：原两条规则目标原样
-    listed = client.get("/api/v1/voice/rules", headers=admin_headers).json()
-    by_id = {item["id"]: item for item in listed}
-    assert by_id[int(first["id"])]["cert_no"] == "C2"
-    assert by_id[int(second["id"])]["cert_no"] == "C3"
+    assert retargeted.status_code == 200
+    assert retargeted.json()["certs"] == ["C2"]
 
 
-def test_list_rules_follows_device_display_order(
+def test_list_rules_groups_by_cert_then_device_display_order(
     client: TestClient,
     admin_headers: dict[str, str],
     voice_device: None,
@@ -406,13 +383,17 @@ def test_list_rules_follows_device_display_order(
 ) -> None:
     from app.modules.devices import repository as devices_repository
 
-    # 管理员把另一台设备排到前面：同层级（都是具体设备）内规则表跟着设备展示顺序走
+    # 展示按学号分组聚拢：具体学号的规则在前、按学号排序；同学号内跟着设备展示顺序走；
+    # 通配学号的规则排在最后
     devices_repository.set_order([OTHER_DEVICE_ID, DEVICE_ID])
-    first = _create(client, admin_headers, cert_nos=["C1"])
-    second = _create(client, admin_headers, device_ids=[OTHER_DEVICE_ID], cert_nos=["C1"])
+    wildcard_cert = _create(client, admin_headers, certs=["*"])
+    first = _create(client, admin_headers, certs=["C1"])
+    second = _create(client, admin_headers, devices=[OTHER_DEVICE_ID], certs=["C1"])
     listed = client.get("/api/v1/voice/rules", headers=admin_headers).json()
-    assert [item["device_id"] for item in listed] == [OTHER_DEVICE_ID, DEVICE_ID]
-    assert [int(item["id"]) for item in listed] == [int(second["id"]), int(first["id"])]
+    # 设备展示顺序 OTHER 在前：同学号的规则跟着设备展示顺序走
+    assert [item["id"] for item in listed] == [int(second["id"]), int(first["id"]), int(wildcard_cert["id"])]
+    assert listed[0]["certs"] == ["C1"]
+    assert listed[-1]["certs"] == ["*"]
 
 
 def test_wildcard_rule_exemptions(
@@ -424,35 +405,37 @@ def test_wildcard_rule_exemptions(
     _create(
         client,
         admin_headers,
-        device_ids=["*"],
-        cert_nos=["*"],
+        devices=["*"],
+        certs=["*"],
         text="全场通用",
         exempt_cert_nos=["C1", "C2"],
     )
     # 被排除的学号不命中这条规则；此刻没有别的候选，就不播
-    assert repository.match_rule(DEVICE_ID, "C1", "assigned") is None
-    matched = repository.match_rule(DEVICE_ID, "C9", "assigned")
+    assert repository.matching_rules(DEVICE_ID, "C1", "assigned") == []
+    matched = repository.matching_rules(DEVICE_ID, "C9", "assigned")
     assert matched is not None
 
     listed = client.get("/api/v1/voice/rules", headers=admin_headers).json()
     assert listed[0]["exempt"] == ["C1", "C2"]
 
     # 排除只作用于那条规则：更具体的设备级通配照常接住被全场规则排除的人
-    _create(client, admin_headers, cert_nos=["*"], text="设备级", exempt_cert_nos=["C9"])
-    fell_through = repository.match_rule(DEVICE_ID, "C9", "assigned")
+    _create(client, admin_headers, certs=["*"], text="设备级", exempt_cert_nos=["C9"])
+    fell_through = repository.matching_rules(DEVICE_ID, "C9", "assigned")
     assert fell_through is not None
-    assert fell_through["device_id"] == "*"
-    assert fell_through["cert_no"] == "*"
-    specific = repository.match_rule(DEVICE_ID, "C1", "assigned")
+    import json as json_module
+
+    assert json_module.loads(fell_through[0]["devices"]) == ["*"]
+    assert json_module.loads(fell_through[0]["certs"]) == ["*"]
+    specific = repository.matching_rules(DEVICE_ID, "C1", "assigned")
     assert specific is not None
-    assert specific["cert_no"] == "*"
+    assert json_module.loads(specific[0]["certs"]) == ["*"]
 
     # 排除名单只允许配「全部学号」；名单里不许再写「全部」
     assert (
         client.post(
             "/api/v1/voice/rules",
             headers=admin_headers,
-            json=_payload(cert_nos=["C1"], exempt_cert_nos=["C9"]),
+            json=_payload(certs=["C1"], exempt_cert_nos=["C9"]),
         ).status_code
         == 422
     )
@@ -460,7 +443,7 @@ def test_wildcard_rule_exemptions(
         client.post(
             "/api/v1/voice/rules",
             headers=admin_headers,
-            json=_payload(cert_nos=["*"], exempt_cert_nos=["*"]),
+            json=_payload(certs=["*"], exempt_cert_nos=["*"]),
         ).status_code
         == 422
     )
@@ -470,9 +453,9 @@ def test_wildcard_rule_exemptions(
         f"/api/v1/voice/rules/{listed[0]['id']}",
         headers=admin_headers,
         json={
-            "device_id": "*",
-            "cert_no": "*",
-            "event": "assigned",
+            "devices": ["*"],
+            "certs": ["*"],
+            "events": ["assigned"],
             "text": "全场通用",
             "delay_ms": 0,
             "volume": 4,
@@ -482,7 +465,7 @@ def test_wildcard_rule_exemptions(
     )
     assert updated.status_code == 200
     assert updated.json()["exempt"] == []
-    assert repository.match_rule(DEVICE_ID, "C1", "assigned") is not None
+    assert repository.matching_rules(DEVICE_ID, "C1", "assigned") is not None
 
 
 def _write_effect_wav(target: Path, seconds: float = 0.5, rate: int = 22050) -> int:
@@ -546,7 +529,7 @@ def test_effects_upload_rules_and_guard(
     assert missing.status_code == 422
     assert "不存在" in missing.json()["detail"]
     rule = _create(client, admin_headers, text="{fx:叮咚} 固定内容")
-    assert rule["sample_text"].startswith("♪叮咚")
+    assert rule["text"] == "{fx:叮咚} 固定内容"
 
     # 被模板引用的音效不许删;同内容换新名上传会级联改写引用它的规则模板
     blocked = client.delete(f"/api/v1/voice/effects/{effect_id}", headers=admin_headers)
@@ -704,9 +687,7 @@ def test_gateway_schedules_voice_events(
 
 
 def test_missing_device_and_rule(client: TestClient, admin_headers: dict[str, str], voice_device: None) -> None:
-    assert (
-        client.post("/api/v1/voice/rules", headers=admin_headers, json=_payload(device_ids=["nope"])).status_code == 404
-    )
+    assert client.post("/api/v1/voice/rules", headers=admin_headers, json=_payload(devices=["nope"])).status_code == 404
     assert (
         client.put(
             "/api/v1/voice/rules/999",
@@ -839,7 +820,7 @@ def test_wildcard_rule_matches_any_cert(
     fake_tts: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _create(client, admin_headers, device_ids=["*"], cert_nos=["*"], text="全场通用")
+    _create(client, admin_headers, devices=["*"], certs=["*"], text="全场通用")
     calls: list[tuple[str, dict[str, object]]] = []
     monkeypatch.setattr(sessions_service, "send_command_and_wait", _fake_send_collector(calls))
 
@@ -884,8 +865,8 @@ def test_prepare_static_and_schedule(
     fake_tts: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    static = schemas.VoiceRuleView(**_create(client, admin_headers, text="固定内容", cert_nos=["C2"]))
-    dynamic = schemas.VoiceRuleView(**_create(client, admin_headers, text="你好 {door_no}", cert_nos=["C3"]))
+    static = schemas.VoiceRuleView(**_create(client, admin_headers, text="固定内容", certs=["C2"]))
+    dynamic = schemas.VoiceRuleView(**_create(client, admin_headers, text="你好 {door_no}", certs=["C3"]))
 
     clip = service.prepare_static(static)
     assert clip is not None
@@ -911,7 +892,7 @@ def test_wildcard_rule_warms_all_registered_devices(
     fake_tts: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    view = schemas.VoiceRuleView(**_create(client, admin_headers, device_ids=["*"], text="固定内容"))
+    view = schemas.VoiceRuleView(**_create(client, admin_headers, devices=["*"], text="固定内容"))
     clip = service.prepare_static(view)
     assert clip is not None
     assert set(service.rule_device_targets([view])) == {DEVICE_ID, OTHER_DEVICE_ID}
@@ -1000,7 +981,7 @@ def test_update_validation_and_preview_render_failure(
     update = client.put(
         f"/api/v1/voice/rules/{created['id']}",
         headers=admin_headers,
-        json=_update_body(cert_no="   "),
+        json=_update_body(certs=["   "]),
     )
     assert update.status_code == 422
 
@@ -1116,7 +1097,7 @@ def test_event_text_render_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cert_no = "C" * 60
-    _create(client, admin_headers, cert_nos=[cert_no], text="x" * 110 + "{cert_no}")
+    _create(client, admin_headers, certs=[cert_no], text="x" * 110 + "{cert_no}")
     calls: list[tuple[str, dict[str, object]]] = []
     monkeypatch.setattr(sessions_service, "send_command_and_wait", _fake_send_collector(calls))
 
@@ -1283,3 +1264,72 @@ def test_rule_push_rejects_unknown_device_and_rule(
         "/api/v1/voice/rules/999999/push", headers=admin_headers, json={"device_id": "dev-voice"}
     )
     assert missing_rule.status_code == 404
+
+
+def test_rule_update_rejects_bad_scope_shapes(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    voice_device: None,
+    fake_tts: None,
+) -> None:
+    """整体编辑的形状校验与创建同一套：排除名单只配「全部学号」，事件至少一个。"""
+    rule = _create(client, admin_headers, certs=["*"])
+
+    exempt_on_concrete = client.put(
+        f"/api/v1/voice/rules/{rule['id']}",
+        headers=admin_headers,
+        json=_update_body(certs=["C1"], exempt_cert_nos=["C9"]),
+    )
+    assert exempt_on_concrete.status_code == 422
+    assert "排除名单只用于" in exempt_on_concrete.json()["detail"]
+
+    no_events = client.put(
+        f"/api/v1/voice/rules/{rule['id']}",
+        headers=admin_headers,
+        json=_update_body(events=[]),
+    )
+    assert no_events.status_code == 422
+
+
+def test_rule_scope_service_guards(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    voice_device: None,
+    fake_tts: None,
+) -> None:
+    """服务层形状守卫：事件集合为空在服务层拒绝（HTTP 边界拦不住服务层直调）。"""
+    with pytest.raises(pydantic.ValidationError):
+        schemas.VoiceRuleCreate(
+            devices=[DEVICE_ID],
+            certs=["C1"],
+            events=[],
+            text="固定内容",
+        )
+    rule_view = client.post(
+        "/api/v1/voice/rules", headers=admin_headers, json=_payload(text="固定内容")
+    ).json()
+    # 事件集合的下限由 pydantic 边界把关，服务层守卫是同一形状的背面
+    with pytest.raises(pydantic.ValidationError):
+        schemas.VoiceRuleUpdate(
+            devices=[DEVICE_ID],
+            certs=["C1"],
+            events=[],
+            text="固定内容",
+        )
+
+
+def test_effect_rename_service_guards(fresh_db: str, fake_tts: None) -> None:
+    from app.core.problems import ApiProblemError
+
+    effect_id = "a" * 64
+    repository.upsert_effect(effect_id, "叮", 10, 100, now_rfc3339())
+
+    with pytest.raises(ApiProblemError):
+        service.rename_effect("b" * 64, "随意")
+    with pytest.raises(ApiProblemError):
+        service.rename_effect(effect_id, "   ")
+    with pytest.raises(ApiProblemError):
+        service.rename_effect(effect_id, "长" * 41)
+    # 同名改名是空操作，原样返回
+    same = service.rename_effect(effect_id, "叮")
+    assert same.name == "叮"
