@@ -73,7 +73,11 @@ _channel_locks: dict[tuple[str, str], asyncio.Lock] = {}
 
 #: 同通道允许排队的命令数上限。无限增长时后排命令必然已超客户端超时，不如立刻
 #: 告知调用方过载，让它换个时间再试。
-CHANNEL_QUEUE_MAX = 4
+#:
+#: 取值依据：一条待投递播报在 voice 通道上至多占 1 个排队位（prepare 先行、play
+#: 随后），喷头最多的设备全部同时迁移就是 8 场；低于它，语音风暴时后排播报会被
+#: 当成过载拒掉。与设备端 SerialCommandQueue.DEFAULT_MAX_PENDING 同值。
+CHANNEL_QUEUE_MAX = 8
 
 # device_id → 挂起中的配置确认（一设备同时至多一个待确认推送，后到覆盖先到）
 _config_pending: dict[str, PendingResult] = {}

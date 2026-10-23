@@ -14,6 +14,13 @@ import org.json.JSONObject
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 
+/** 命令执行队列的归属；与服务端 `ACTION_CHANNELS` 的通道划分一一对应。 */
+enum class CommandChannel {
+    AUTOMATION,
+    CAPTURE,
+    VOICE,
+}
+
 /** 调度器产出的命令结果（与 session.command_result payload 对应）。 */
 data class CommandOutcome(
     val commandId: String,
@@ -102,13 +109,13 @@ class CommandScheduler(
     private val voiceQueue = SerialCommandQueue<Command>()
 
     fun enqueue(command: Command, expireAtMs: Long) {
-        when (command) {
+        when (channelOf(command)) {
             // 图像采集资源独立，不占用自动化队列——否则一条慢截图会把
             // 浴室 APP 的操作序列堵住
-            is Command.Photo, is Command.Screen -> dispatch(command, captureQueue, expireAtMs) { runCapture(it) }
+            CommandChannel.CAPTURE -> dispatch(command, captureQueue, expireAtMs) { runCapture(it) }
 
             // 语音独立执行器：与自动化、采集互不阻塞
-            is Command.PlayVoice, is Command.PrepareVoice -> dispatch(command, voiceQueue, expireAtMs) {
+            CommandChannel.VOICE -> dispatch(command, voiceQueue, expireAtMs) {
                 runVoice(it)
             }
 
@@ -116,7 +123,7 @@ class CommandScheduler(
             // 并行会读到操作到一半的界面。它和截图则毫无关系——早先归在采集队列是
             // 错的，那会让"看界面"和"读界面"互相排队，服务端并发取这两个时必有一个
             // 被拒（同通道互斥）
-            else -> dispatch(command, automationQueue, expireAtMs) { runAutomation(it) }
+            CommandChannel.AUTOMATION -> dispatch(command, automationQueue, expireAtMs) { runAutomation(it) }
         }
     }
 
@@ -468,5 +475,15 @@ class CommandScheduler(
 
     companion object {
         private const val TAG = "CommandScheduler"
+
+        /**
+         * 命令落哪条队列。这是服务端 `ACTION_CHANNELS` 通道划分在设备端的镜像，
+         * 由 [CommandSchedulerChannelTest] 与服务端逐动作对账——改任一侧都要两同步。
+         */
+        fun channelOf(command: Command): CommandChannel = when (command) {
+            is Command.Photo, is Command.Screen -> CommandChannel.CAPTURE
+            is Command.PlayVoice, is Command.PrepareVoice -> CommandChannel.VOICE
+            else -> CommandChannel.AUTOMATION
+        }
     }
 }
