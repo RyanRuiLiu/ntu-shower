@@ -772,17 +772,13 @@ def list_effects() -> list[schemas.VoiceEffectView]:
     return [_effect_view(row) for row in repository.list_effects()]
 
 
-def create_effect(name: str, data: bytes, upload_filename: str = "") -> schemas.VoiceEffectView:
+def create_effect(name: str, data: bytes) -> schemas.VoiceEffectView:
     """收一段音频：归一化成标准 WAV、算内容身份、登记入库。
 
     内容身份按归一化后的字节算：同一段声音换个容器再传不会变成两个音效，
-    只会更新名字。名称留空时取上传文件名（去扩展名）。
+    只会更新名字。名称由前端选中文件时自动填入（用户可见可改），必填。
     """
     name = " ".join(name.split())
-    if not name:
-        # 名称留空时用上传文件名去扩展名顶上（路由已保证非空文件）
-        stem = upload_filename.rsplit(".", 1)[0] if "." in upload_filename else upload_filename
-        name = " ".join(stem.split())
     if not name:
         raise ApiProblemError(INVALID_VOICE_EFFECT, "音效名称不能为空")
     if len(name) > 40:
