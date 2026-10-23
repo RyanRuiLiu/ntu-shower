@@ -126,8 +126,8 @@ class PlaceholderSpec:
     description: str
 
 
-#: 可靠占位符的封闭集合。时间两个是秒级口播文本，不是裸数字；它们的取值随会话
-#: 变化，含它们的模板每次都生成新文本、不会命中音频缓存（保存与试听的界面都会提示）。
+#: 可靠占位符的封闭集合。播报以预热的固定音频为主，不提供随会话变化的量——
+#: 曾有时长两个占位符：每次取值都不同、永不命中缓存、每场都要现场合成，已移除。
 PLACEHOLDERS: tuple[PlaceholderSpec, ...] = (
     PlaceholderSpec("door_no", "喷头号", "事件里的喷头号。"),
     PlaceholderSpec("cert_no", "学号", "事件里的学号，逐位念（数字念数字、字母念字母名），不会读成一个大数。"),
@@ -135,16 +135,6 @@ PLACEHOLDERS: tuple[PlaceholderSpec, ...] = (
         "cert_no:4", "学号后 4 位", "只念学号末 4 位，同样逐位念；4 可改成 1–10 的其它位数，如 {cert_no:2}。"
     ),
     PlaceholderSpec("event", "事件目标状态", "等待开阀 / 淋浴中 / 已暂停 / 空闲。"),
-    PlaceholderSpec(
-        "assigned_duration",
-        "分配时长",
-        "秒级；读作 12分34秒 / 12分钟。取值随会话变化：含它的模板不会命中音频缓存，每次播报都现场合成（秒级耗时）。",
-    ),
-    PlaceholderSpec(
-        "shower_duration",
-        "淋浴时长",
-        "秒级；读作 12分34秒 / 12分钟。取值随会话变化：含它的模板不会命中音频缓存，每次播报都现场合成（秒级耗时）。",
-    ),
 )
 
 
@@ -230,8 +220,6 @@ class VoicePreviewRequest(BaseModel):
     event: DoorEventKind
     cert_no: str = Field(default="示例学号", min_length=1, max_length=64)
     door_no: int = Field(default=1, ge=1, le=48)
-    assigned_seconds: int = Field(default=1122, ge=0, le=86400)
-    shower_seconds: int = Field(default=965, ge=0, le=86400)
 
 
 class VoiceRuleView(BaseModel):

@@ -49,22 +49,6 @@ def _params(**overrides: object) -> tts.SynthParams:
     return tts.SynthParams(**values)
 
 
-@pytest.mark.parametrize(
-    ("seconds", "expected"),
-    [
-        (0, "0秒"),
-        (35, "35秒"),
-        (60, "1分钟"),
-        (61, "1分1秒"),
-        (754, "12分34秒"),
-        (1122, "18分42秒"),
-        (965, "16分5秒"),
-    ],
-)
-def test_spoken_duration(seconds: int, expected: str) -> None:
-    assert render.spoken_duration(seconds) == expected
-
-
 def test_validate_template_accepts_closed_placeholders() -> None:
     assert render.validate_template("{event}，{door_no} 号喷头") == ("event", "door_no")
     assert render.has_placeholders("{door_no}") is True
@@ -81,11 +65,8 @@ def test_validate_template_rejects_bad_shapes(text: str) -> None:
 
 
 def test_render_template_uses_values_and_limits() -> None:
-    values = render.sample_values("淋浴中", door_no=5, assigned_seconds=1122, shower_seconds=965)
-    assert (
-        render.render_template("{event}，{door_no} 号，分配 {assigned_duration}", values)
-        == "淋浴中，5 号，分配 18分42秒"
-    )
+    values = render.sample_values("淋浴中", door_no=5)
+    assert render.render_template("{event}，{door_no} 号喷头", values) == "淋浴中，5 号喷头"
     with pytest.raises(render.TemplateError):
         render.render_template("{event} {missing}", values)
     with pytest.raises(render.TemplateError):
