@@ -62,8 +62,8 @@ const VIEWS = [
   inspectorView,
   devicesView,
   configView,
-  identitiesView,
   voiceView,
+  identitiesView,
   releasesView,
   auditView,
 ]
