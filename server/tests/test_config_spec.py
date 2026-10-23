@@ -148,3 +148,14 @@ def test_parse_weekdays_normalizes_and_rejects() -> None:
 
     for bad in ("", " ", "0", "8", "1,8", "1,,2", "1,a", "mon"):
         assert parse_weekdays(bad) is None, bad
+
+
+def test_text_choices_reject_unknown_value() -> None:
+    """声明了封闭取值集的文本键（如音色）只收表内的值。"""
+    from app.modules.config import store as config_store
+    from app.modules.config.spec import SPECS_BY_KEY
+
+    assert SPECS_BY_KEY["voice_model"].choices == ("huayan-medium", "huayan-x-low")
+    config_store.validate({"voice_model": "huayan-x-low"})
+    with pytest.raises(ValueError, match="只允许"):
+        config_store.validate({"voice_model": "some-other-voice"})

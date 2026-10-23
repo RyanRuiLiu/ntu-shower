@@ -126,7 +126,7 @@ ssh <deploy-host> 'sudo NT_ROLLBACK=/opt/ntu-shower/backups/server-<时间戳>.t
 ### 语音播报前置（voice，启用时一次性）
 
 服务端只在规则保存/试听时调用 Piper；模型、`espeak-ng`、`ffmpeg` 不随代码包发布。
-首次启用语音或换模型后执行一次：
+首次启用语音或补齐另一个音色后执行一次（脚本按登记表下载**全部音色**并校验）：
 
 ```bash
 # requirements.txt 已由 deploy.sh 安装；确认生产解释器能导入 Piper
@@ -254,17 +254,23 @@ ssh <deploy-host> 'curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.1
 
 ### 语音播报不响
 
-1. **规则是否匹配**：设备、学号、事件逐字比较；规则停用或没有规则就不会下发。看
-   `/api/v1/voice/deliveries` 有没有对应记录。
+1. **规则是否匹配**：设备、学号两个维度各自具体或「全部」（`*`），具体压过通配
+   （先设备、后学号维度）；「全部学号」的规则可能把这个学号放进了排除名单；规则
+   停用或没有规则就不会下发。看 `/api/v1/voice/deliveries` 有没有对应记录。
 2. **事件是否过期**：`voice_event_max_age_s` 默认 60 秒，离线积压或延迟过长会跳过；
    投递状态为 `skipped`。
 3. **命令是否到达设备**：审计页看 `voice.play` / `voice.prepare` 的 status 与
    reason_code；离线是 `device.offline`，旧 APK 是 `device.unsupported_action`。
 4. **音频是否就绪**：`/api/v1/voice/status`；规则保存 503 时先按上一节补 Piper/模型。
-5. **设备是否真的在播**：设备 `device.log` 看 `audio.played` / `audio.play-failed` /
+5. **音效是否就绪**：模板里 `{fx:名称}` 引用的音效先看「音效库」里还在不在（被引用
+   的音效删不掉、改不了名；若库被外部动过，保存规则时会点名缺失）。上传支持常见格式，
+   服务端统一转换，时长上限 10 秒；`{pause:毫秒}` 是纯静音，不查库。
+6. **设备是否真的在播**：设备 `device.log` 看 `audio.played` / `audio.play-failed` /：设备 `device.log` 看 `audio.played` / `audio.play-failed` /
    `audio.volume-restored`；音量恢复失败会保留待恢复标记，下次启动或播放前再试。
-6. **和浴室 App 的结算提示重叠**：调该规则的 `delay_ms`（从事件时刻算起；页面按秒输入），
-   用 `voice_delivery` 的 `occurred_at` / `dispatched_at` 与设备日志对照，现场实测后定值。
+7. **和浴室 App 的结算提示重叠**：调该规则的 `delay_ms`（从事件时刻算起；页面按秒输入）。
+   网页「最近播报」的阶段耗时列（备音频 / 事件→下发 / 下发→收尾 / 现场下载还是命中
+   设备缓存）就是为这一定值准备的；结合设备日志对照，现场实测后落值。语速整体偏快偏慢
+   调全局配置 `voice_speech_rate`，改完试听即时生效。
 
 ### 调试通道（ADB 桥）
 

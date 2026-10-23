@@ -124,15 +124,22 @@ export const api = {
   saveDeviceConfig: (id, config) => send(devicePath(id, '/config'), put({ config })),
   clearDeviceConfig: (id) => send(devicePath(id, '/config'), del()),
 
-  // ── 语音播报 ──（admin；规则按设备 + 学号 + 事件匹配）
+  // ── 语音播报 ──（admin；规则目标 = 设备 × 学号，各自可具体或「全部」）
   voiceSpec: () => send(`${API_V1}/voice/spec`),
-  voiceRules: () => send(`${API_V1}/voice/rules`),
+  /** device_id 省略列全部；传 '*' 只列「全部设备」的通配规则。 */
+  voiceRules: (deviceId) => send(`${API_V1}/voice/rules${query({ device_id: deviceId })}`),
+  /** 一次可展开多设备 × 多学号；已存在的组合由服务端跳过并在响应里点名。 */
   createVoiceRule: (value) => send(`${API_V1}/voice/rules`, post(value)),
   updateVoiceRule: (id, value) => send(`${API_V1}/voice/rules/${id}`, put(value)),
+  patchVoiceRule: (id, value) => send(`${API_V1}/voice/rules/${id}`, patch(value)),
   deleteVoiceRule: (id) => send(`${API_V1}/voice/rules/${id}`, del()),
   voiceStatus: () => send(`${API_V1}/voice/status`),
   voiceDeliveries: () => send(`${API_V1}/voice/deliveries`),
   previewVoiceRule: (value) => send(`${API_V1}/voice/preview`, post(value)),
+  // ── 音效库 ──（admin 管理；试听文件按内容寻址公开，同 /voice/clips）
+  voiceEffects: () => send(`${API_V1}/voice/effects`),
+  uploadVoiceEffect: (form) => send(`${API_V1}/voice/effects`, { method: 'POST', body: form, raw: true }),
+  deleteVoiceEffect: (id) => send(`${API_V1}/voice/effects/${id}`, del()),
 
   // ── 身份 ──（admin；名单响应含能力位枚举，身份页一次装载）
   identities: () => send(`${API_V1}/identities`),
