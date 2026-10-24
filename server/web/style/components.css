@@ -91,6 +91,15 @@
   flex: 1 1 auto;
 }
 
+/* 卡片操作行：按钮整组靠右；窄屏放不下时按组换行，不再是与徽标挤一行 */
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
 /* 卡片正文与次要说明行 */
 .card-text {
   margin: var(--sp-2) 0;
