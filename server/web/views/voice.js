@@ -667,6 +667,7 @@ export const voiceView = {
 
   mount(root) {
     root.innerHTML = `
+      <div class="grid grid-2">
       <section class="panel">
         <div class="panel-head">
           <span class="panel-title">合成状态</span>
@@ -692,6 +693,7 @@ export const voiceView = {
           <div id="voiceEffectTable"></div>
         </div>
       </section>
+      </div>
 
       <section class="panel">
         <div class="panel-head">
@@ -705,6 +707,7 @@ export const voiceView = {
         <div class="panel-body flush" id="voiceTable"></div>
       </section>
 
+      <div class="grid grid-2">
       <section class="panel" id="voiceFormPanel">
         <div class="panel-head">
           <span class="panel-title" id="voiceFormTitle">新增语音规则</span>
@@ -773,7 +776,8 @@ export const voiceView = {
           <span class="panel-note" id="voiceDeliveryCount"></span>
         </div>
         <div class="panel-body flush" id="voiceDeliveryTable"></div>
-      </section>`
+      </section>
+      </div>`
 
     dispose = disposer()
     dispose.add(listen($('btnVoiceReload'), 'click', reload))
