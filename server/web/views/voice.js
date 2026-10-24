@@ -63,15 +63,15 @@ function deviceCell(deviceId) {
   return esc(deviceName(deviceId))
 }
 
-function certCell(certNo, exempt) {
-  if (certNo === WILDCARD) {
+function certCell(rule) {
+  if (rule.certs.includes(WILDCARD)) {
     const badge = '<span class="badge badge-blue">全部学号</span>'
-    if (exempt && exempt.length > 0) {
-      return `<div>${badge}</div><div class="muted" title="${esc(exempt.join('、'))}">排除 ${exempt.length} 人</div>`
+    if (rule.exempt && rule.exempt.length > 0) {
+      return `<div>${badge}</div><div class="muted" title="${esc(rule.exempt.join('、'))}">排除 ${rule.exempt.length} 人</div>`
     }
     return badge
   }
-  return `<code>${esc(certNo)}</code>`
+  return rule.certs.map((cert) => `<code>${esc(cert)}</code>`).join('、')
 }
 
 /** 通配目标的纯文本写法（确认框、提示里用，不带 HTML）。 */
@@ -162,23 +162,25 @@ function renderEffects() {
       '<div class="empty">还没有上传音效；支持常见音频格式，会统一转换，时长不超过 10 秒。</div>'
     return
   }
-  const cards = effects
+  const rows = effects
     .map(
-      (item) => `<div class="card" data-id="${esc(item.effect_id)}">
-      <div class="card-head">
-        <b>${esc(item.name)}</b>
-        <span class="badge">${esc(fmtMs(item.duration_ms))}</span>
-        <span class="badge">${esc(String(Math.round(item.size_bytes / 1024)))} KB</span>
-      </div>
-      <div class="card-actions">
-        <button type="button" class="btn btn-ghost btn-sm" data-act="audition">试听</button>
-        <button type="button" class="btn btn-ghost btn-sm" data-act="rename">改名</button>
-        <button type="button" class="btn btn-danger btn-sm" data-act="delete">删除</button>
-      </div>
-    </div>`,
+      (item) => `<tr data-id="${esc(item.effect_id)}">
+        <td>${esc(item.name)}</td>
+        <td class="mono">${esc(fmtMs(item.duration_ms))}</td>
+        <td class="mono">${esc(String(Math.round(item.size_bytes / 1024)))} KB</td>
+        <td>
+          <div class="btn-row">
+            <button type="button" class="btn btn-ghost btn-sm" data-act="audition">试听</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-act="rename">改名</button>
+            <button type="button" class="btn btn-danger btn-sm" data-act="delete">删除</button>
+          </div>
+        </td>
+      </tr>`,
     )
     .join('')
-  $('voiceEffectTable').innerHTML = cards
+  $('voiceEffectTable').innerHTML = `<table class="table"><thead><tr>
+      <th>名称</th><th>时长</th><th>大小</th><th></th>
+    </tr></thead><tbody>${rows}</tbody></table>`
 }
 
 async function uploadEffect() {
@@ -254,56 +256,48 @@ function renderFilter() {
   $('voiceFilterDevice').value = filterDevice
 }
 
-function certGroupLabel(rule) {
-  if (rule.certs.includes(WILDCARD)) {
-    return rule.exempt.length > 0 ? `全部学号（排除 ${rule.exempt.join('、')}）` : '全部学号'
-  }
-  return rule.certs.map((cert) => `<code>${esc(cert)}</code>`).join('、')
-}
-
 function renderTable() {
   $('voiceCount').textContent = rules.length > 0 ? `共 ${rules.length} 条` : ''
   if (rules.length === 0) {
     $('voiceTable').innerHTML = '<div class="empty">暂无语音规则</div>'
     return
   }
-  const cards = []
-  let lastGroup = null
-  for (const rule of rules) {
-    const group = certGroupLabel(rule)
-    if (group !== lastGroup) {
-      cards.push(`<div class="group-label">学号：${group}</div>`)
-      lastGroup = group
-    }
-    const eventBadges = rule.events
-      .map((value) => {
-        const item = eventItem(value)
-        return `<span class="badge badge-blue" title="${esc(item.description)}">${esc(item.label)}</span>`
-      })
-      .join(' ')
-    const devices = rule.devices.includes(WILDCARD)
-      ? '<span class="badge badge-blue">全部设备</span>'
-      : esc(rule.devices.map(deviceName).join('、'))
-    const stateBadge = rule.enabled
-      ? '<span class="badge badge-green">启用</span>'
-      : '<span class="badge">停用</span>'
-    // 按钮随页面宽度自适应：宽屏占头部行右端，窄屏整组换行垂下（btn-row 自带 wrap）
-    cards.push(`<div class="card" data-id="${esc(String(rule.id))}">
-      <div class="card-head">
-        ${stateBadge}<span>${devices}</span><span class="card-meta">·</span><span>${eventBadges}</span>
-      </div>
-      <div class="card-text">${esc(rule.text)}</div>
-      <div class="card-meta">延迟：${esc(fmtDelay(rule.delay_ms))} · 音量：${esc(String(rule.volume))} · 音色：${esc(rule.voice)}</div>
-      <div class="card-actions">
-        <button type="button" class="btn btn-ghost btn-sm" data-act="toggle">${rule.enabled ? '停用' : '启用'}</button>
-        <button type="button" class="btn btn-ghost btn-sm" data-act="edit">编辑</button>
-        <button type="button" class="btn btn-ghost btn-sm" data-act="preview">试听</button>
-        <button type="button" class="btn btn-ghost btn-sm" data-act="push">推设备</button>
-        <button type="button" class="btn btn-danger btn-sm" data-act="delete">删除</button>
-      </div>
-    </div>`)
-  }
-  $('voiceTable').innerHTML = cards.join('')
+  const rows = rules
+    .map((rule) => {
+      const eventBadges = rule.events
+        .map((value) => {
+          const item = eventItem(value)
+          return `<span class="badge badge-blue" title="${esc(item.description)}">${esc(item.label)}</span>`
+        })
+        .join(' ')
+      const devices = rule.devices.includes(WILDCARD)
+        ? '<span class="badge badge-blue">全部设备</span>'
+        : esc(rule.devices.map(deviceName).join('、'))
+      const selected = editingId === rule.id ? ' class="is-selected"' : ''
+      return `<tr${selected} data-id="${esc(String(rule.id))}">
+        <td>${devices}</td>
+        <td>${certCell(rule)}</td>
+        <td>${eventBadges}</td>
+        <td><div title="${esc(rule.text)}">${esc(rule.text)}</div></td>
+        <td class="mono">${esc(fmtDelay(rule.delay_ms))}</td>
+        <td class="mono">${esc(String(rule.volume))}</td>
+        <td class="mono">${esc(rule.voice)}</td>
+        <td>${rule.enabled ? '<span class="badge badge-green">启用</span>' : '<span class="badge">停用</span>'}</td>
+        <td>
+          <div class="btn-row">
+            <button type="button" class="btn btn-ghost btn-sm" data-act="toggle">${rule.enabled ? '停用' : '启用'}</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-act="edit">编辑</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-act="preview">试听</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-act="push">推设备</button>
+            <button type="button" class="btn btn-danger btn-sm" data-act="delete">删除</button>
+          </div>
+        </td>
+      </tr>`
+    })
+    .join('')
+  $('voiceTable').innerHTML = `<table class="table"><thead><tr>
+      <th>设备</th><th>学号</th><th>事件</th><th>播报内容</th><th>延迟</th><th>音量</th><th>音色</th><th>启用</th><th></th>
+    </tr></thead><tbody>${rows}</tbody></table>`
 }
 
 /**
@@ -325,12 +319,11 @@ function stageCell(item) {
   let cache = ''
   if (dispatched) {
     cache = item.downloaded
-      ? '<span class="badge badge-amber">现场下载</span>'
-      : '<span class="badge badge-green">设备缓存</span>'
+      ? ' <span class="badge badge-amber">现场下载</span>'
+      : ' <span class="badge badge-green">设备缓存</span>'
   }
   const tooltip = '备音频 = 认领后备齐音频（含排队）；下发 = 事件发生到下发播放；收尾 = 下发到设备收尾'
-  // 耗时文本与缓存徽标两端分开：一行内的两个信息不再连成一片
-  return `<div class="card-head"><span class="mono" title="${esc(tooltip)}">${esc(parts.join(' · '))}</span><span class="spacer"></span>${cache}</div>`
+  return `<div class="mono" title="${esc(tooltip)}">${esc(parts.join(' · '))}${cache}</div>`
 }
 
 function renderDeliveries() {
@@ -339,25 +332,29 @@ function renderDeliveries() {
     $('voiceDeliveryTable').innerHTML = '<div class="empty">暂无播报记录</div>'
     return
   }
-  const cards = deliveries
+  const rows = deliveries
     .map((item) => {
       const event = eventItem(item.event)
       const dispatched = Boolean(item.dispatched_at)
-      const time = dispatched
+      const timeCell = dispatched
         ? esc(fmtDateTime(item.dispatched_at))
         : `<span class="muted" title="事件时刻（未下发）">${esc(fmtDateTime(item.occurred_at))}</span>`
-      return `<div class="card">
-      <div class="card-head">
-        <span class="mono">${time}</span>${deliveryBadge(item.status)}<span>${deviceCell(item.device_id)}</span>
-      </div>
-      <div class="card-meta" style="margin-top:var(--sp-1)">${esc(event.label)} · 喷头 ${esc(String(item.door_no))} 号 · ${certCell(item.cert_no)}</div>
-      <div class="card-text">${esc(item.text || PLACEHOLDER)}</div>
-      <div class="card-meta">延迟：${esc(fmtDelay(item.delay_ms))}</div>
-      ${stageCell(item)}
-    </div>`
+      return `<tr>
+        <td class="mono">${timeCell}</td>
+        <td>${deviceCell(item.device_id)}</td>
+        <td>${certCell({ certs: [item.cert_no], exempt: [] })}</td>
+        <td><div>${esc(event.label)}</div></td>
+        <td class="mono">${esc(String(item.door_no))}</td>
+        <td><div title="${esc(item.text || '')}">${esc(item.text || PLACEHOLDER)}</div></td>
+        <td class="mono">${esc(fmtDelay(item.delay_ms))}</td>
+        <td>${stageCell(item)}</td>
+        <td><span title="${esc(item.detail || '')}">${deliveryBadge(item.status)}</span></td>
+      </tr>`
     })
     .join('')
-  $('voiceDeliveryTable').innerHTML = cards
+  $('voiceDeliveryTable').innerHTML = `<table class="table"><thead><tr>
+      <th>下发时刻</th><th>设备</th><th>学号</th><th>事件</th><th>喷头</th><th>播报内容</th><th>延迟</th><th>阶段耗时</th><th>状态</th>
+    </tr></thead><tbody>${rows}</tbody></table>`
 }
 
 function applyFormMode() {
