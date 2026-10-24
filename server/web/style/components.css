@@ -68,55 +68,6 @@
   margin-top: var(--sp-3);
 }
 
-/* ── 通用卡片（列表项的堆叠容器；语音规则/音效/播报记录共用） ─────── */
-
-.card {
-  margin-bottom: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-}
-
-/* 卡片头部：徽标/参数与操作按钮同处一行，窄屏整组换行 */
-.card-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-2);
-}
-
-/* 头部里把后续内容推到行尾的弹性占位 */
-.spacer {
-  flex: 1 1 auto;
-}
-
-/* 卡片操作行：按钮整组靠右；窄屏放不下时按组换行，不再是与徽标挤一行 */
-.card-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: var(--sp-2);
-  margin-top: var(--sp-3);
-  padding-top: var(--sp-2);
-  border-top: 1px solid var(--border);
-}
-
-/* 卡片正文与次要说明行 */
-.card-text {
-  margin: var(--sp-3) 0;
-}
-
-.card-meta {
-  color: var(--muted);
-}
-
-/* 列表分组标头（如按学号分组） */
-.group-label {
-  margin: var(--sp-3) 0 var(--sp-1);
-  color: var(--muted);
-}
-
 /* ── 字段 ───────────────────────────────────────────────── */
 
 .field {
