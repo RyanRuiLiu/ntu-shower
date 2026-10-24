@@ -139,14 +139,14 @@ def test_spec_uses_canonical_event_names(client: TestClient, admin_headers: dict
     assert response.status_code == 200
     spec = response.json()
     events = {item["value"]: item for item in spec["events"]}
-    # 事件名是「发生了什么」：结果状态（等待开阀/空闲等）只出现在转换说明里
-    assert events["assigned"]["label"] == "分配"
-    assert events["shower_started"]["label"] == "开始淋浴"
-    assert events["paused"]["label"] == "暂停用水"
-    assert events["resumed"]["label"] == "恢复淋浴"
-    assert events["released_unused"]["label"] == "释放（未开阀）"
-    assert events["released_after_shower"]["label"] == "释放（结算完成）"
-    assert events["released_while_paused"]["label"] == "释放（暂停中）"
+    # 事件名就是状态转换式：七个互不重名，看名字即知发生了什么
+    assert events["assigned"]["label"] == "空闲 / 已选中 → 等待开阀"
+    assert events["shower_started"]["label"] == "等待开阀 → 淋浴中"
+    assert events["paused"]["label"] == "淋浴中 → 已暂停"
+    assert events["resumed"]["label"] == "已暂停 → 淋浴中"
+    assert events["released_unused"]["label"] == "等待开阀 → 空闲"
+    assert events["released_after_shower"]["label"] == "淋浴中 → 空闲"
+    assert events["released_while_paused"]["label"] == "已暂停 → 空闲"
     # 选择界面按阶段分组:分配一项、用水三项、释放三项
     phases = [item["phase"] for item in spec["events"]]
     assert phases.count("分配") == 1
@@ -762,7 +762,7 @@ def test_handle_events_delivers_once_and_records_stage_timings(
     deliveries = client.get("/api/v1/voice/deliveries", headers=admin_headers).json()
     assert len(deliveries) == 1
     delivery = deliveries[0]
-    assert delivery["text"] == "分配，5 号喷头已就绪"
+    assert delivery["text"] == "空闲或已选中，转为等待开阀，5 号喷头已就绪"
     assert delivery["status"] == "ok"
     assert delivery["delay_ms"] == 0
     assert delivery["dispatched_at"]
@@ -1330,3 +1330,13 @@ def test_effect_rename_service_guards(fresh_db: str, fake_tts: None) -> None:
     # 同名改名是空操作，原样返回
     same = service.rename_effect(effect_id, "叮")
     assert same.name == "叮"
+
+
+def test_render_branch_guards() -> None:
+    """渲染分支守卫：空内容、无名音效占位符在渲染层拒绝。"""
+    with pytest.raises(render.TemplateError):
+        render.render_segments("   ", render.sample_values("分配"))
+    with pytest.raises(render.TemplateError):
+        render.render_segments("{fx:} 固定", render.sample_values("分配"))
+    # 全量渲染：值齐全时逐段拼出最终文本
+    assert render.render_text(render.render_segments("你好 {door_no}", render.sample_values("分配"))) == "你好 1"

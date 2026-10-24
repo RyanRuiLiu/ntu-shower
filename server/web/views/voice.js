@@ -48,7 +48,7 @@ function fmtDelay(ms) {
 
 function fmtMs(ms) {
   const value = Number(ms || 0)
-  return value < 1000 ? `${value}ms` : `${(value / 1000).toFixed(1)}秒`
+  return value < 1000 ? `${Math.round(value)} 毫秒` : `${(value / 1000).toFixed(1)} 秒`
 }
 
 function deliveryBadge(value) {
@@ -100,8 +100,8 @@ function renderStatus() {
     )
     .join('')
   $('voiceStatus').innerHTML = `<div class="btn-row">${ffmpeg}<span class="badge badge-blue">音频 ${esc(String(status.clip_count))} 个</span></div>
-    <table class="table" style="margin-top:8px"><thead><tr><th>音色</th><th>说明</th><th>状态</th><th></th></tr></thead><tbody>${rows}</tbody></table>
-    <div class="muted" style="margin-top:8px">音色在每条规则上单独选；具体规则压过通配（先设备、后学号维度），延迟从事件发生时刻算起，窗口内设备并行预下载。</div>`
+    <table class="table" style="margin-top:var(--sp-2)"><thead><tr><th>音色</th><th>说明</th><th>状态</th><th></th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="muted" style="margin-top:var(--sp-2)">音色在每条规则上单独选；具体规则压过通配（先设备、后学号维度），延迟从事件发生时刻算起，窗口内设备并行预下载。</div>`
 }
 
 /** 边界一律来自 /voice/spec：输入范围与标签文字都由它渲染，页面不抄第二份。 */
@@ -112,13 +112,13 @@ function eventChecksHtml(selected) {
       const boxes = events
         .filter((item) => (item.phase || '其它') === phase)
         .map(
-          (item) => `<label class="field-row" style="margin:0 12px 0 0">
+          (item) => `<label class="field-row" style="margin:0 var(--sp-3) 0 0">
               <input type="checkbox" data-event="${esc(item.value)}" ${selected.includes(item.value) ? 'checked' : ''}>
-              <span title="${esc(item.description)}">${esc(item.label)}（${esc(item.description)}）</span>
+              <span title="${esc(item.description)}">${esc(item.label)}</span>
             </label>`,
         )
         .join('')
-      return `<div style="margin-bottom:4px"><span class="muted">${esc(phase)}</span><div class="btn-row">${boxes}</div></div>`
+      return `<div style="margin-bottom:var(--sp-1)"><span class="muted">${esc(phase)}</span><div class="btn-row">${boxes}</div></div>`
     })
     .join('')
 }
@@ -142,7 +142,7 @@ function renderSpec() {
     '<button type="button" class="ph-chip" data-ph="pause:500" title="在该位置插入 0.5 秒静音；数字可改成 100–5000 的毫秒数">（停顿0.5秒）</button>',
   ]
   $('voicePlaceholders').innerHTML = `${chips.join(" ")}
-    <div class="muted" style="margin-top:4px">点一下插到模板光标处，说明悬停可见；音效与停顿只响不读。</div>`
+    <div class="muted" style="margin-top:var(--sp-1)">点一下插到模板光标处，说明悬停可见；音效与停顿只响不读。</div>`
   if (!spec) return
   const delayMin = spec.delay.minimum_ms / 1000
   const delayMax = spec.delay.maximum_ms / 1000
@@ -164,12 +164,12 @@ function renderEffects() {
   }
   const cards = effects
     .map(
-      (item) => `<div data-id="${esc(item.effect_id)}" style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px">
-      <div class="btn-row" style="align-items:center">
+      (item) => `<div class="card" data-id="${esc(item.effect_id)}">
+      <div class="card-head">
         <b>${esc(item.name)}</b>
         <span class="badge">${esc(fmtMs(item.duration_ms))}</span>
         <span class="badge">${esc(String(Math.round(item.size_bytes / 1024)))} KB</span>
-        <span style="flex:1 1 auto"></span>
+        <span class="spacer"></span>
         <button type="button" class="btn btn-ghost btn-sm" data-act="audition">试听</button>
         <button type="button" class="btn btn-ghost btn-sm" data-act="rename">改名</button>
         <button type="button" class="btn btn-danger btn-sm" data-act="delete">删除</button>
@@ -271,7 +271,7 @@ function renderTable() {
   for (const rule of rules) {
     const group = certGroupLabel(rule)
     if (group !== lastGroup) {
-      cards.push(`<div class="muted" style="margin:14px 0 4px">学号：${group}</div>`)
+      cards.push(`<div class="group-label">学号：${group}</div>`)
       lastGroup = group
     }
     const eventBadges = rule.events
@@ -287,18 +287,18 @@ function renderTable() {
       ? '<span class="badge badge-green">启用</span>'
       : '<span class="badge">停用</span>'
     // 按钮随页面宽度自适应：宽屏占头部行右端，窄屏整组换行垂下（btn-row 自带 wrap）
-    cards.push(`<div data-id="${esc(String(rule.id))}" style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px">
-      <div class="btn-row" style="align-items:center">
-        ${stateBadge}<span>${devices}</span><span class="muted">·</span><span>${eventBadges}</span>
-        <span style="flex:1 1 auto"></span>
+    cards.push(`<div class="card" data-id="${esc(String(rule.id))}">
+      <div class="card-head">
+        ${stateBadge}<span>${devices}</span><span class="card-meta">·</span><span>${eventBadges}</span>
+        <span class="spacer"></span>
         <button type="button" class="btn btn-ghost btn-sm" data-act="toggle">${rule.enabled ? '停用' : '启用'}</button>
         <button type="button" class="btn btn-ghost btn-sm" data-act="edit">编辑</button>
         <button type="button" class="btn btn-ghost btn-sm" data-act="preview">试听</button>
         <button type="button" class="btn btn-ghost btn-sm" data-act="push">推设备</button>
         <button type="button" class="btn btn-danger btn-sm" data-act="delete">删除</button>
       </div>
-      <div style="margin:6px 0">${esc(rule.text)}</div>
-      <div class="muted">延迟 ${esc(fmtDelay(rule.delay_ms))} · 音量 ${esc(String(rule.volume))} · 音色 ${esc(rule.voice)}</div>
+      <div class="card-text">${esc(rule.text)}</div>
+      <div class="card-meta">延迟：${esc(fmtDelay(rule.delay_ms))} · 音量：${esc(String(rule.volume))} · 音色：${esc(rule.voice)}</div>
     </div>`)
   }
   $('voiceTable').innerHTML = cards.join('')
@@ -314,11 +314,11 @@ function stageCell(item) {
   if (item.status === 'failed' && !dispatched) {
     parts.push('备音频失败')
   } else {
-    parts.push(`备${fmtMs(item.clip_ms)}`)
+    parts.push(`备音频 ${fmtMs(item.clip_ms)}`)
   }
-  if (dispatched) parts.push(`发${fmtMs(item.dispatch_offset_ms)}`)
+  if (dispatched) parts.push(`下发 ${fmtMs(item.dispatch_offset_ms)}`)
   if (item.finish_offset_ms !== null && item.finish_offset_ms !== undefined) {
-    parts.push(`完${fmtMs(item.finish_offset_ms)}`)
+    parts.push(`收尾 ${fmtMs(item.finish_offset_ms)}`)
   }
   let cache = ''
   if (dispatched) {
@@ -326,7 +326,7 @@ function stageCell(item) {
       ? ' <span class="badge badge-amber">现场下载</span>'
       : ' <span class="badge badge-green">设备缓存</span>'
   }
-  const tooltip = '备 = 认领后备齐音频（含排队）；发 = 事件到下发；完 = 下发到设备收尾'
+  const tooltip = '备音频 = 认领后备齐音频（含排队）；下发 = 事件发生到下发播放；收尾 = 下发到设备收尾'
   return `<div class="mono" title="${esc(tooltip)}">${esc(parts.join(' · '))}${cache}</div>`
 }
 
@@ -343,13 +343,13 @@ function renderDeliveries() {
       const time = dispatched
         ? esc(fmtDateTime(item.dispatched_at))
         : `<span class="muted" title="事件时刻（未下发）">${esc(fmtDateTime(item.occurred_at))}</span>`
-      return `<div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px">
-      <div class="btn-row" style="align-items:center">
+      return `<div class="card">
+      <div class="card-head">
         <span class="mono">${time}</span>${deliveryBadge(item.status)}<span>${deviceCell(item.device_id)}</span>
       </div>
-      <div class="muted" style="margin:4px 0">${esc(event.label)} · 喷头 ${esc(String(item.door_no))} · ${certCell(item.cert_no)}</div>
-      <div style="margin:4px 0">${esc(item.text || PLACEHOLDER)}</div>
-      <div class="muted">延迟 ${esc(fmtDelay(item.delay_ms))} · ${stageCell(item)}</div>
+      <div class="card-meta" style="margin-top:var(--sp-1)">${esc(event.label)} · 喷头 ${esc(String(item.door_no))} 号 · ${certCell(item.cert_no)}</div>
+      <div class="card-text">${esc(item.text || PLACEHOLDER)}</div>
+      <div class="card-meta">延迟：${esc(fmtDelay(item.delay_ms))} · ${stageCell(item)}</div>
     </div>`
     })
     .join('')
@@ -678,7 +678,7 @@ export const voiceView = {
         <div class="panel-body">
           <div class="field">
             <label for="voiceEffectName">上传音效（mp3/wav/ogg/m4a/aac/flac 等常见格式，按内容校验并统一转换，时长 ≤ 10 秒）</label>
-            <div class="btn-row" style="align-items:center">
+            <div class="btn-row" >
               <input id="voiceEffectName" type="text" placeholder="名称（如：叮）" style="width:140px">
               <input id="voiceEffectFile" type="file" accept="audio/*">
               <button type="button" class="btn btn-sm" id="btnVoiceEffectUpload">上传</button>
@@ -712,7 +712,7 @@ export const voiceView = {
           </div>
           <div class="field">
             <label>学号</label>
-            <label class="field-row" style="margin-bottom:4px">
+            <label class="field-row" style="margin-bottom:var(--sp-1)">
               <input type="checkbox" id="voiceCertWildcard">
               <span>全部学号（不限学号；下方名单变成排除名单）</span>
             </label>
@@ -825,7 +825,21 @@ export const voiceView = {
         const button = event.target.closest('button[data-act="audition"]')
         if (!button) return
         const voice = button.closest('tr').dataset.voice
-        await previewRule({ text: '二五三零一一零零五七 号同学，请到 5 号喷头准备就浴', event: events[0] ? events[0].value : 'assigned', cert_no: '示例学号', voice })
+        // 音色试听走预览接口本身：不经规则形状的 previewRule（它要求 certs/events 数组）
+        report('voiceResult', `正在合成 ${voice} 的音色样本…`, 'info')
+        try {
+          const result = await api.previewVoiceRule({
+            text: '二五三零一一零零五七 号同学，请到 5 号喷头准备就浴',
+            event: events[0] ? events[0].value : 'assigned',
+            cert_no: '示例学号',
+            door_no: 1,
+            voice,
+          })
+          showSample(result.rendered_text)
+          playPreview(result.clip_url)
+        } catch (error) {
+          report('voiceResult', problemText(error), 'err')
+        }
       }),
     )
     dispose.add(
