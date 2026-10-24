@@ -305,14 +305,15 @@ function renderTable() {
 function stageCell(item) {
   const dispatched = item.dispatch_offset_ms !== null && item.dispatch_offset_ms !== undefined
   const parts = []
+  // 单元格只放数字，语义全部进悬停提示
   if (item.status === 'failed' && !dispatched) {
-    parts.push('音频准备失败')
+    parts.push('准备失败')
   } else {
-    parts.push(`音频准备 ${fmtMs(item.clip_ms)}`)
+    parts.push(fmtMs(item.clip_ms))
   }
-  if (dispatched) parts.push(`事件到下发 ${fmtMs(item.dispatch_offset_ms)}`)
+  if (dispatched) parts.push(fmtMs(item.dispatch_offset_ms))
   if (item.finish_offset_ms !== null && item.finish_offset_ms !== undefined) {
-    parts.push(`下发到播完 ${fmtMs(item.finish_offset_ms)}`)
+    parts.push(fmtMs(item.finish_offset_ms))
   }
   let cache = ''
   if (dispatched) {
@@ -320,8 +321,16 @@ function stageCell(item) {
       ? '（<span class="badge badge-amber">现场下载</span>）'
       : '（<span class="badge badge-green">设备缓存</span>）'
   }
-  const tooltip =
-    '音频准备 = 事件认领后备齐音频（含排队等待）；事件到下发 = 从事件发生到向设备发出播放命令；下发到播完 = 从下发到设备播完收尾（含下载与播放）'
+  const tooltip = [
+    `音频准备 ${fmtMs(item.clip_ms)}：事件认领后备齐音频，含排队等待`,
+    dispatched ? `事件到下发 ${fmtMs(item.dispatch_offset_ms)}：从事件发生到向设备发出播放命令` : '',
+    item.finish_offset_ms !== null && item.finish_offset_ms !== undefined
+      ? `下发到播完 ${fmtMs(item.finish_offset_ms)}：从下发到设备播完收尾，含下载与播放`
+      : '',
+    dispatched ? (item.downloaded ? '设备现场下载了音频' : '设备命中本地缓存，未下载') : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
   return `<div class="mono" title="${esc(tooltip)}">${esc(parts.join(' · '))}${cache}</div>`
 }
 
