@@ -721,7 +721,7 @@ export const voiceView = {
             <div class="muted" id="voiceCertHint"></div>
           </div>
           <div class="field">
-            <label>事件（可勾多个，每个事件各建一条规则；编辑时只保留一个）</label>
+            <label>事件（可勾多个，都在这条规则里生效）</label>
             <div id="voiceEvents"></div>
           </div>
           <div class="field">
