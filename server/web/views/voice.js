@@ -279,9 +279,7 @@ function renderTable() {
         <td>${certCell(rule)}</td>
         <td>${eventBadges}</td>
         <td><div title="${esc(rule.text)}">${esc(rule.text)}</div></td>
-        <td class="mono">${esc(fmtDelay(rule.delay_ms))}</td>
-        <td class="mono">${esc(String(rule.volume))}</td>
-        <td class="mono">${esc(rule.voice)}</td>
+        <td class="mono">延迟 ${esc(fmtDelay(rule.delay_ms))} · 音量 ${esc(String(rule.volume))} · ${esc(rule.voice)}</td>
         <td>${rule.enabled ? '<span class="badge badge-green">启用</span>' : '<span class="badge">停用</span>'}</td>
         <td>
           <div class="btn-row">
@@ -296,7 +294,7 @@ function renderTable() {
     })
     .join('')
   $('voiceTable').innerHTML = `<table class="table"><thead><tr>
-      <th>设备</th><th>学号</th><th>事件</th><th>播报内容</th><th>延迟</th><th>音量</th><th>音色</th><th>启用</th><th></th>
+      <th>设备</th><th>学号</th><th>事件</th><th>播报内容</th><th>参数</th><th>启用</th><th></th>
     </tr></thead><tbody>${rows}</tbody></table>`
 }
 
@@ -692,6 +690,7 @@ export const voiceView = {
       </section>
       </div>
 
+      <div class="grid grid-2">
       <section class="panel">
         <div class="panel-head">
           <span class="panel-title">语音规则</span>
@@ -704,7 +703,6 @@ export const voiceView = {
         <div class="panel-body flush" id="voiceTable"></div>
       </section>
 
-      <div class="grid grid-2">
       <section class="panel" id="voiceFormPanel">
         <div class="panel-head">
           <span class="panel-title" id="voiceFormTitle">新增语音规则</span>
@@ -766,6 +764,7 @@ export const voiceView = {
           <div class="result" id="voiceResult"></div>
         </div>
       </section>
+      </div>
 
       <section class="panel">
         <div class="panel-head">
@@ -773,8 +772,7 @@ export const voiceView = {
           <span class="panel-note" id="voiceDeliveryCount"></span>
         </div>
         <div class="panel-body flush" id="voiceDeliveryTable"></div>
-      </section>
-      </div>`
+      </section>`
 
     dispose = disposer()
     dispose.add(listen($('btnVoiceReload'), 'click', reload))
