@@ -318,7 +318,7 @@ def delete_rule(rule_id: int) -> None:
 
 def preview(req: schemas.VoicePreviewRequest) -> schemas.VoicePreviewView:
     text = _validated_text(req.text, req.event)
-    label = schemas.event_spec(req.event).label
+    label = schemas.event_spoken(schemas.event_spec(req.event))
     values = render.sample_values(label, door_no=req.door_no, cert_no=req.cert_no)
     try:
         segments = render.render_segments(text, values)
@@ -633,7 +633,7 @@ async def push_to_device(rule_id: int, device_id: str) -> schemas.VoicePushView:
     event_kind = DoorEventKind(events[0])
     certs = json.loads(str(row["certs"]))
     cert_no = certs[0] if "*" not in certs and certs else "示例学号"
-    values = render.sample_values(schemas.event_spec(event_kind).label, door_no=1, cert_no=cert_no)
+    values = render.sample_values(schemas.event_spoken(schemas.event_spec(event_kind)), door_no=1, cert_no=cert_no)
     try:
         segments = render.render_segments(str(row["text"]), values)
     except render.TemplateError as exc:
@@ -695,7 +695,7 @@ def _event_segments(event: DoorEvent, template: str) -> tuple[tts.Plan, str] | N
     会话找不到也能照常播（曾为时长占位符查会话，已随时长占位符一并移除）。
     """
     values = render.sample_values(
-        schemas.event_spec(event.kind).label,
+        schemas.event_spoken(schemas.event_spec(event.kind)),
         door_no=event.door_no,
         cert_no=event.cert_no,
     )

@@ -62,51 +62,51 @@ def _state(state: DoorState) -> str:
     return state_label(state)
 
 
-#: 事件目录：值与 `DoorEventKind` 一一对应。label 是「发生了什么事」的事件名
-#: （勾选、徽标与 {event} 占位符同用这一份），不是结果状态——用「空闲」这类
-#: 单字状态当名字，三个释放事件会重名且语义不明。description 保留状态迁移
-#: 关系供勾选界面提示；phase 是勾选界面的分组。
+#: 事件目录：值与 `DoorEventKind` 一一对应。**事件名就是状态转换式**（`A → B`），
+#: 勾选、徽标与目录共用这一份——七个转换式互不重名，看名字即知发生了什么；
+#: 拿结果状态（空闲等）当名字会三个重名且语义不明。description 只留补充语境
+#: （悬停提示）；phase 是勾选界面的分组。
 VOICE_EVENTS: tuple[VoiceEventSpec, ...] = (
     VoiceEventSpec(
         DoorEventKind.ASSIGNED,
-        "分配",
-        f"{_state(DoorState.FREE)} / {_state(DoorState.SELECTED)} → {_state(DoorState.WAITING)}（等待开阀）",
+        f"{_state(DoorState.FREE)} / {_state(DoorState.SELECTED)} → {_state(DoorState.WAITING)}",
+        "分配到喷头，等待开阀",
         "分配",
     ),
     VoiceEventSpec(
         DoorEventKind.SHOWER_STARTED,
-        "开始淋浴",
         f"{_state(DoorState.WAITING)} → {_state(DoorState.BATHING)}",
+        "开阀出水",
         "用水",
     ),
     VoiceEventSpec(
         DoorEventKind.PAUSED,
-        "暂停用水",
         f"{_state(DoorState.BATHING)} → {_state(DoorState.PAUSED)}",
+        "中途关阀暂停",
         "用水",
     ),
     VoiceEventSpec(
         DoorEventKind.RESUMED,
-        "恢复淋浴",
         f"{_state(DoorState.PAUSED)} → {_state(DoorState.BATHING)}",
+        "暂停后恢复出水",
         "用水",
     ),
     VoiceEventSpec(
         DoorEventKind.RELEASED_UNUSED,
-        "释放（未开阀）",
-        f"{_state(DoorState.WAITING)} → {_state(DoorState.FREE)}：没开阀就被释放",
+        f"{_state(DoorState.WAITING)} → {_state(DoorState.FREE)}",
+        "没开阀就被释放",
         "释放",
     ),
     VoiceEventSpec(
         DoorEventKind.RELEASED_AFTER_SHOWER,
-        "释放（结算完成）",
-        f"{_state(DoorState.BATHING)} → {_state(DoorState.FREE)}：正常结算收尾",
+        f"{_state(DoorState.BATHING)} → {_state(DoorState.FREE)}",
+        "正常结算收尾",
         "释放",
     ),
     VoiceEventSpec(
         DoorEventKind.RELEASED_WHILE_PAUSED,
-        "释放（暂停中）",
-        f"{_state(DoorState.PAUSED)} → {_state(DoorState.FREE)}：暂停中被释放",
+        f"{_state(DoorState.PAUSED)} → {_state(DoorState.FREE)}",
+        "暂停中被释放",
         "释放",
     ),
 )
@@ -116,6 +116,11 @@ VOICE_EVENTS_BY_VALUE: dict[DoorEventKind, VoiceEventSpec] = {event.value: event
 
 def event_spec(value: DoorEventKind) -> VoiceEventSpec:
     return VOICE_EVENTS_BY_VALUE[value]
+
+
+def event_spoken(spec: VoiceEventSpec) -> str:
+    """转换式的口语形式（{event} 占位符的读法）：箭头读「转为」、并列读「或」。"""
+    return spec.label.replace(" → ", "，转为").replace(" / ", "或")
 
 
 @dataclass(frozen=True)
@@ -135,8 +140,8 @@ PLACEHOLDERS: tuple[PlaceholderSpec, ...] = (
     ),
     PlaceholderSpec(
         "event",
-        "事件名",
-        "分配 / 开始淋浴 / 暂停用水 / 恢复淋浴 / 释放（含括注，按事件类型区分）。",
+        "事件（转换式）",
+        "读所选事件的转换，如「等待开阀，转为淋浴中」「淋浴中，转为空闲」。",
     ),
 )
 
