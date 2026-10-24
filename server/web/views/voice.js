@@ -306,21 +306,22 @@ function stageCell(item) {
   const dispatched = item.dispatch_offset_ms !== null && item.dispatch_offset_ms !== undefined
   const parts = []
   if (item.status === 'failed' && !dispatched) {
-    parts.push('备音频失败')
+    parts.push('音频准备失败')
   } else {
-    parts.push(`备音频 ${fmtMs(item.clip_ms)}`)
+    parts.push(`音频准备 ${fmtMs(item.clip_ms)}`)
   }
-  if (dispatched) parts.push(`下发 ${fmtMs(item.dispatch_offset_ms)}`)
+  if (dispatched) parts.push(`事件到下发 ${fmtMs(item.dispatch_offset_ms)}`)
   if (item.finish_offset_ms !== null && item.finish_offset_ms !== undefined) {
-    parts.push(`收尾 ${fmtMs(item.finish_offset_ms)}`)
+    parts.push(`下发到播完 ${fmtMs(item.finish_offset_ms)}`)
   }
   let cache = ''
   if (dispatched) {
     cache = item.downloaded
-      ? ' <span class="badge badge-amber">现场下载</span>'
-      : ' <span class="badge badge-green">设备缓存</span>'
+      ? '（<span class="badge badge-amber">现场下载</span>）'
+      : '（<span class="badge badge-green">设备缓存</span>）'
   }
-  const tooltip = '备音频 = 认领后备齐音频（含排队）；下发 = 事件发生到下发播放；收尾 = 下发到设备收尾'
+  const tooltip =
+    '音频准备 = 事件认领后备齐音频（含排队等待）；事件到下发 = 从事件发生到向设备发出播放命令；下发到播完 = 从下发到设备播完收尾（含下载与播放）'
   return `<div class="mono" title="${esc(tooltip)}">${esc(parts.join(' · '))}${cache}</div>`
 }
 
@@ -351,7 +352,7 @@ function renderDeliveries() {
     })
     .join('')
   $('voiceDeliveryTable').innerHTML = `<table class="table"><thead><tr>
-      <th>下发时刻</th><th>设备</th><th>学号</th><th>事件</th><th>喷头</th><th>播报内容</th><th>延迟</th><th>阶段耗时</th><th>状态</th>
+      <th>下发时刻</th><th>设备</th><th>学号</th><th>事件</th><th>喷头</th><th>播报内容</th><th>延迟</th><th>耗时</th><th>状态</th>
     </tr></thead><tbody>${rows}</tbody></table>`
 }
 
