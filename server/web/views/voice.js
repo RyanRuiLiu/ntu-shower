@@ -169,7 +169,8 @@ function renderEffects() {
         <b>${esc(item.name)}</b>
         <span class="badge">${esc(fmtMs(item.duration_ms))}</span>
         <span class="badge">${esc(String(Math.round(item.size_bytes / 1024)))} KB</span>
-        <span class="spacer"></span>
+      </div>
+      <div class="card-actions">
         <button type="button" class="btn btn-ghost btn-sm" data-act="audition">试听</button>
         <button type="button" class="btn btn-ghost btn-sm" data-act="rename">改名</button>
         <button type="button" class="btn btn-danger btn-sm" data-act="delete">删除</button>
@@ -290,15 +291,16 @@ function renderTable() {
     cards.push(`<div class="card" data-id="${esc(String(rule.id))}">
       <div class="card-head">
         ${stateBadge}<span>${devices}</span><span class="card-meta">·</span><span>${eventBadges}</span>
-        <span class="spacer"></span>
+      </div>
+      <div class="card-text">${esc(rule.text)}</div>
+      <div class="card-meta">延迟：${esc(fmtDelay(rule.delay_ms))} · 音量：${esc(String(rule.volume))} · 音色：${esc(rule.voice)}</div>
+      <div class="card-actions">
         <button type="button" class="btn btn-ghost btn-sm" data-act="toggle">${rule.enabled ? '停用' : '启用'}</button>
         <button type="button" class="btn btn-ghost btn-sm" data-act="edit">编辑</button>
         <button type="button" class="btn btn-ghost btn-sm" data-act="preview">试听</button>
         <button type="button" class="btn btn-ghost btn-sm" data-act="push">推设备</button>
         <button type="button" class="btn btn-danger btn-sm" data-act="delete">删除</button>
       </div>
-      <div class="card-text">${esc(rule.text)}</div>
-      <div class="card-meta">延迟：${esc(fmtDelay(rule.delay_ms))} · 音量：${esc(String(rule.volume))} · 音色：${esc(rule.voice)}</div>
     </div>`)
   }
   $('voiceTable').innerHTML = cards.join('')
@@ -323,11 +325,12 @@ function stageCell(item) {
   let cache = ''
   if (dispatched) {
     cache = item.downloaded
-      ? ' <span class="badge badge-amber">现场下载</span>'
-      : ' <span class="badge badge-green">设备缓存</span>'
+      ? '<span class="badge badge-amber">现场下载</span>'
+      : '<span class="badge badge-green">设备缓存</span>'
   }
   const tooltip = '备音频 = 认领后备齐音频（含排队）；下发 = 事件发生到下发播放；收尾 = 下发到设备收尾'
-  return `<div class="mono" title="${esc(tooltip)}">${esc(parts.join(' · '))}${cache}</div>`
+  // 耗时文本与缓存徽标两端分开：一行内的两个信息不再连成一片
+  return `<div class="card-head"><span class="mono" title="${esc(tooltip)}">${esc(parts.join(' · '))}</span><span class="spacer"></span>${cache}</div>`
 }
 
 function renderDeliveries() {
@@ -349,7 +352,8 @@ function renderDeliveries() {
       </div>
       <div class="card-meta" style="margin-top:var(--sp-1)">${esc(event.label)} · 喷头 ${esc(String(item.door_no))} 号 · ${certCell(item.cert_no)}</div>
       <div class="card-text">${esc(item.text || PLACEHOLDER)}</div>
-      <div class="card-meta">延迟：${esc(fmtDelay(item.delay_ms))} · ${stageCell(item)}</div>
+      <div class="card-meta">延迟：${esc(fmtDelay(item.delay_ms))}</div>
+      ${stageCell(item)}
     </div>`
     })
     .join('')
