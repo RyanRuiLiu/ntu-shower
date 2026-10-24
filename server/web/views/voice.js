@@ -318,8 +318,8 @@ function stageCell(item) {
   let cache = ''
   if (dispatched) {
     cache = item.downloaded
-      ? '（<span class="badge badge-amber">现场下载</span>）'
-      : '（<span class="badge badge-green">设备缓存</span>）'
+      ? ' <span class="badge badge-amber">现场下载</span>'
+      : ' <span class="badge badge-green">设备缓存</span>'
   }
   const tooltip = [
     `音频准备 ${fmtMs(item.clip_ms)}：事件认领后备齐音频，含排队等待`,
