@@ -103,7 +103,6 @@ def _validated_text(text: str, event: DoorEventKind) -> str:
     return normalized
 
 
-
 def _rule_view(row: Row) -> schemas.VoiceRuleView:
     event_values = json.loads(str(row["events"]))
     return schemas.VoiceRuleView(
