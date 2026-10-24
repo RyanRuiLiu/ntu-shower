@@ -62,48 +62,50 @@ def _state(state: DoorState) -> str:
     return state_label(state)
 
 
-#: 事件目录：值与 `DoorEventKind` 一一对应，中文名全部来自 `DoorState` 的正名。
-#: 释放按前一占用状态拆成三种——「本次淋浴 X 分钟」只对淋浴后释放成立。
+#: 事件目录：值与 `DoorEventKind` 一一对应。label 是「发生了什么事」的事件名
+#: （勾选、徽标与 {event} 占位符同用这一份），不是结果状态——用「空闲」这类
+#: 单字状态当名字，三个释放事件会重名且语义不明。description 保留状态迁移
+#: 关系供勾选界面提示；phase 是勾选界面的分组。
 VOICE_EVENTS: tuple[VoiceEventSpec, ...] = (
     VoiceEventSpec(
         DoorEventKind.ASSIGNED,
-        _state(DoorState.WAITING),
-        f"{_state(DoorState.FREE)} / {_state(DoorState.SELECTED)} → {_state(DoorState.WAITING)}",
+        "分配",
+        f"{_state(DoorState.FREE)} / {_state(DoorState.SELECTED)} → {_state(DoorState.WAITING)}（等待开阀）",
         "分配",
     ),
     VoiceEventSpec(
         DoorEventKind.SHOWER_STARTED,
-        _state(DoorState.BATHING),
+        "开始淋浴",
         f"{_state(DoorState.WAITING)} → {_state(DoorState.BATHING)}",
         "用水",
     ),
     VoiceEventSpec(
         DoorEventKind.PAUSED,
-        _state(DoorState.PAUSED),
+        "暂停用水",
         f"{_state(DoorState.BATHING)} → {_state(DoorState.PAUSED)}",
         "用水",
     ),
     VoiceEventSpec(
         DoorEventKind.RESUMED,
-        _state(DoorState.BATHING),
+        "恢复淋浴",
         f"{_state(DoorState.PAUSED)} → {_state(DoorState.BATHING)}",
         "用水",
     ),
     VoiceEventSpec(
         DoorEventKind.RELEASED_UNUSED,
-        _state(DoorState.FREE),
+        "释放（未开阀）",
         f"{_state(DoorState.WAITING)} → {_state(DoorState.FREE)}：没开阀就被释放",
         "释放",
     ),
     VoiceEventSpec(
         DoorEventKind.RELEASED_AFTER_SHOWER,
-        _state(DoorState.FREE),
+        "释放（结算完成）",
         f"{_state(DoorState.BATHING)} → {_state(DoorState.FREE)}：正常结算收尾",
         "释放",
     ),
     VoiceEventSpec(
         DoorEventKind.RELEASED_WHILE_PAUSED,
-        _state(DoorState.FREE),
+        "释放（暂停中）",
         f"{_state(DoorState.PAUSED)} → {_state(DoorState.FREE)}：暂停中被释放",
         "释放",
     ),
@@ -131,7 +133,11 @@ PLACEHOLDERS: tuple[PlaceholderSpec, ...] = (
     PlaceholderSpec(
         "cert_no:4", "学号后 4 位", "只念学号末 4 位，同样逐位念；4 可改成 1–10 的其它位数，如 {cert_no:2}。"
     ),
-    PlaceholderSpec("event", "事件目标状态", "等待开阀 / 淋浴中 / 已暂停 / 空闲。"),
+    PlaceholderSpec(
+        "event",
+        "事件名",
+        "分配 / 开始淋浴 / 暂停用水 / 恢复淋浴 / 释放（含括注，按事件类型区分）。",
+    ),
 )
 
 

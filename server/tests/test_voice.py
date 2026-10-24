@@ -139,13 +139,14 @@ def test_spec_uses_canonical_event_names(client: TestClient, admin_headers: dict
     assert response.status_code == 200
     spec = response.json()
     events = {item["value"]: item for item in spec["events"]}
-    assert events["assigned"]["label"] == "等待开阀"
-    assert events["shower_started"]["label"] == "淋浴中"
-    assert events["paused"]["label"] == "已暂停"
-    assert events["resumed"]["label"] == "淋浴中"
-    assert events["released_unused"]["label"] == "空闲"
-    assert events["released_after_shower"]["label"] == "空闲"
-    assert events["released_while_paused"]["label"] == "空闲"
+    # 事件名是「发生了什么」：结果状态（等待开阀/空闲等）只出现在转换说明里
+    assert events["assigned"]["label"] == "分配"
+    assert events["shower_started"]["label"] == "开始淋浴"
+    assert events["paused"]["label"] == "暂停用水"
+    assert events["resumed"]["label"] == "恢复淋浴"
+    assert events["released_unused"]["label"] == "释放（未开阀）"
+    assert events["released_after_shower"]["label"] == "释放（结算完成）"
+    assert events["released_while_paused"]["label"] == "释放（暂停中）"
     # 选择界面按阶段分组:分配一项、用水三项、释放三项
     phases = [item["phase"] for item in spec["events"]]
     assert phases.count("分配") == 1
@@ -761,7 +762,7 @@ def test_handle_events_delivers_once_and_records_stage_timings(
     deliveries = client.get("/api/v1/voice/deliveries", headers=admin_headers).json()
     assert len(deliveries) == 1
     delivery = deliveries[0]
-    assert delivery["text"] == "等待开阀，5 号喷头已就绪"
+    assert delivery["text"] == "分配，5 号喷头已就绪"
     assert delivery["status"] == "ok"
     assert delivery["delay_ms"] == 0
     assert delivery["dispatched_at"]
