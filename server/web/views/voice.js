@@ -164,7 +164,7 @@ function renderEffects() {
   }
   const cards = effects
     .map(
-      (item) => `<div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px">
+      (item) => `<div data-id="${esc(item.effect_id)}" style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px">
       <div class="btn-row" style="align-items:center">
         <b>${esc(item.name)}</b>
         <span class="badge">${esc(fmtMs(item.duration_ms))}</span>
@@ -287,7 +287,7 @@ function renderTable() {
     const stateBadge = rule.enabled
       ? '<span class="badge badge-green">启用</span>'
       : '<span class="badge">停用</span>'
-    cards.push(`<div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px">
+    cards.push(`<div data-id="${esc(String(rule.id))}" style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px">
       <div class="btn-row" style="align-items:center">
         ${stateBadge}<span>${devices}</span><span class="muted">·</span><span>${eventBadges}</span>
       </div>
@@ -786,7 +786,7 @@ export const voiceView = {
       listen($('voiceEffectTable'), 'click', async (event) => {
         const button = event.target.closest('button[data-act]')
         if (!button) return
-        const id = button.closest('tr').dataset.id
+        const id = button.closest('[data-id]')?.dataset.id
         const effect = effects.find((item) => item.effect_id === id)
         if (!effect) return
         if (button.dataset.act === 'audition') {
@@ -833,7 +833,7 @@ export const voiceView = {
       listen($('voiceTable'), 'click', async (event) => {
         const button = event.target.closest('button[data-act]')
         if (!button) return
-        const id = Number(button.closest('tr').dataset.id)
+        const id = Number(button.closest('[data-id]')?.dataset.id)
         const rule = rules.find((item) => item.id === id)
         if (!rule) return
         if (button.dataset.act === 'edit') enterEdit(rule)
