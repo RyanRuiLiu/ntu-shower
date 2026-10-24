@@ -169,8 +169,7 @@ function renderEffects() {
         <b>${esc(item.name)}</b>
         <span class="badge">${esc(fmtMs(item.duration_ms))}</span>
         <span class="badge">${esc(String(Math.round(item.size_bytes / 1024)))} KB</span>
-      </div>
-      <div class="btn-row" style="margin-top:6px">
+        <span style="flex:1 1 auto"></span>
         <button type="button" class="btn btn-ghost btn-sm" data-act="audition">试听</button>
         <button type="button" class="btn btn-ghost btn-sm" data-act="rename">改名</button>
         <button type="button" class="btn btn-danger btn-sm" data-act="delete">删除</button>
@@ -287,19 +286,19 @@ function renderTable() {
     const stateBadge = rule.enabled
       ? '<span class="badge badge-green">启用</span>'
       : '<span class="badge">停用</span>'
+    // 按钮随页面宽度自适应：宽屏占头部行右端，窄屏整组换行垂下（btn-row 自带 wrap）
     cards.push(`<div data-id="${esc(String(rule.id))}" style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px">
       <div class="btn-row" style="align-items:center">
         ${stateBadge}<span>${devices}</span><span class="muted">·</span><span>${eventBadges}</span>
-      </div>
-      <div style="margin:6px 0">${esc(rule.text)}</div>
-      <div class="muted">延迟 ${esc(fmtDelay(rule.delay_ms))} · 音量 ${esc(String(rule.volume))} · 音色 ${esc(rule.voice)}</div>
-      <div class="btn-row" style="margin-top:6px">
+        <span style="flex:1 1 auto"></span>
         <button type="button" class="btn btn-ghost btn-sm" data-act="toggle">${rule.enabled ? '停用' : '启用'}</button>
         <button type="button" class="btn btn-ghost btn-sm" data-act="edit">编辑</button>
         <button type="button" class="btn btn-ghost btn-sm" data-act="preview">试听</button>
         <button type="button" class="btn btn-ghost btn-sm" data-act="push">推设备</button>
         <button type="button" class="btn btn-danger btn-sm" data-act="delete">删除</button>
       </div>
+      <div style="margin:6px 0">${esc(rule.text)}</div>
+      <div class="muted">延迟 ${esc(fmtDelay(rule.delay_ms))} · 音量 ${esc(String(rule.volume))} · 音色 ${esc(rule.voice)}</div>
     </div>`)
   }
   $('voiceTable').innerHTML = cards.join('')
