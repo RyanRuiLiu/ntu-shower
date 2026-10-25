@@ -343,6 +343,25 @@ let capturing = false
 let refreshInFlight = false
 let refreshPending = false
 
+/**
+ * 把画面框缩到面板能容纳的最大尺寸，保持设备宽高比。
+ *
+ * 覆盖层、高亮与坐标换算都以框为基准，所以框必须与图片显示区域同尺寸；
+ * 面板尺寸变化（窗口缩放、右侧界面树收起）时重算。
+ */
+function fitScreen() {
+  const frame = $('screenFrame')
+  if (frame.hidden) return
+  const img = $('screenshot')
+  const width = img.naturalWidth || deviceWidth
+  const height = img.naturalHeight || deviceHeight
+  const panel = $('screenPanel')
+  if (!width || !height || !panel.clientWidth || !panel.clientHeight) return
+  const scale = Math.min(panel.clientWidth / width, panel.clientHeight / height)
+  frame.style.setProperty('--screen-w', `${Math.max(1, Math.floor(width * scale))}px`)
+  frame.style.setProperty('--screen-h', `${Math.max(1, Math.floor(height * scale))}px`)
+}
+
 async function capture() {
   const deviceId = await requireDevice()
   if (!deviceId) return
@@ -365,6 +384,7 @@ async function capture() {
       $('screenshot').src = url
       $('screenFrame').hidden = false
       $('screenHint').hidden = true
+      fitScreen()
       highlight(selected)
       if (nodes.length > 0) renderTree()
       setOpState(`画面 ${deviceWidth}×${deviceHeight}`, 'ok')
@@ -1007,13 +1027,19 @@ export const inspectorView = {
 
     dispose.add(listen(frame, 'contextmenu', (event) => event.preventDefault()))
 
-    // 窗口尺寸变了，高亮框的百分比虽然还对着，但拖动中的箭头坐标要重算
+    // 窗口尺寸变了：重算画面框，再让高亮与拖动箭头按新尺寸重画
     dispose.add(
       listen(window, 'resize', () => {
+        fitScreen()
         highlight(selected)
         clearSwipe()
       }),
     )
+
+    // 右侧界面树收起/展开也会改变画面面板宽度；以面板自身尺寸为准重算
+    const screenObserver = new ResizeObserver(() => fitScreen())
+    screenObserver.observe($('screenPanel'))
+    dispose.add(() => screenObserver.disconnect())
 
     // ── 右键菜单 ──
     dispose.add(
