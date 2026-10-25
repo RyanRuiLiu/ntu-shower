@@ -311,8 +311,12 @@ def claim_delivery(
     occurred_at: str,
     trace_id: str,
     now: str,
+    delay_ms: int | None = None,
 ) -> bool:
-    """认领一次事件；同一 `event_key` 只成功一次。"""
+    """认领一次事件；同一 `event_key` 只成功一次。
+
+    `delay_ms` 省略时取规则上的值；手动推送不经过延迟窗口，显式传 0。
+    """
     cursor = write(
         "INSERT OR IGNORE INTO voice_delivery"
         " (event_key, rule_id, device_id, door_no, cert_no, event, text, clip_id,"
@@ -327,7 +331,7 @@ def claim_delivery(
             event.kind.value,
             text,
             clip_id,
-            int(rule["delay_ms"]),
+            int(rule["delay_ms"]) if delay_ms is None else delay_ms,
             occurred_at,
             "pending",
             trace_id,
@@ -362,7 +366,7 @@ def list_deliveries(limit: int) -> list[Row]:
     return (
         get_conn()
         .execute(
-            "SELECT id, rule_id, device_id, cert_no, event, door_no, text, delay_ms,"
+            "SELECT id, event_key, rule_id, device_id, cert_no, event, door_no, text, delay_ms,"
             " occurred_at, dispatched_at, prepared_at, done_at, clip_ms, downloaded,"
             " status, detail"
             " FROM voice_delivery ORDER BY id DESC LIMIT ?",

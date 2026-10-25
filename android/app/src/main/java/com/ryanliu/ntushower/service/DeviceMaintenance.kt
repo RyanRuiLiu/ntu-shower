@@ -4,6 +4,8 @@ import android.util.Log
 import com.ryanliu.ntushower.BuildConfig
 import com.ryanliu.ntushower.core.a11y.A11yRuntime
 import com.ryanliu.ntushower.core.config.AppConfig
+import com.ryanliu.ntushower.core.log.DeviceLog
+import com.ryanliu.ntushower.core.log.LogTail
 import com.ryanliu.ntushower.core.shell.RootShell
 import com.ryanliu.ntushower.features.automation.BathAppRestart
 import com.ryanliu.ntushower.features.automation.CommandOutcome
@@ -25,14 +27,28 @@ import java.io.File
  *
  * 重启本程序、重启整机**先回报再动作**：它们会杀死本进程，若不先回报，命令方只能等超时。
  */
+// TooManyFunctions：维护动作按动作名一对一分派；合并会把每条动作各自的收尾保证藏进
+// 一个长 when，反而更难核对。
+@Suppress("TooManyFunctions")
 object DeviceMaintenance {
 
     private const val TAG = "DeviceMaintenance"
+
+    private const val DEFAULT_LOG_TAIL_LINES = 200
+    private const val MAX_LOG_TAIL_LINES = 500
+
+    /** 可远程读取的三份日志。路径固定，文件名来自 AppConfig / DeviceLog 的唯一定义。 */
+    private val LOG_FILES = mapOf(
+        "device" to DeviceLog.FILE_NAME,
+        "crash" to AppConfig.CRASH_LOG_NAME,
+        "ota" to AppConfig.OTA_INSTALL_LOG_NAME,
+    )
 
     /** 本模块负责的 action。调用方据此判断是否要把它挪到工作线程。 */
     private val HANDLED = setOf(
         SupportedActions.APP_RESTART,
         SupportedActions.DEVICE_EXEC,
+        SupportedActions.DEVICE_LOG_TAIL,
         SupportedActions.DEVICE_REBOOT,
         SupportedActions.BATH_RESTART,
         SupportedActions.CLOCK_SET,
@@ -94,6 +110,11 @@ object DeviceMaintenance {
 
                 SupportedActions.DEVICE_EXEC -> {
                     onOutcome(execShell(params, commandId))
+                    reported = true
+                }
+
+                SupportedActions.DEVICE_LOG_TAIL -> {
+                    onOutcome(logTailOutcome(params, commandId))
                     reported = true
                 }
 
@@ -196,6 +217,38 @@ object DeviceMaintenance {
             data = JSONObject()
                 .put("output", result.output)
                 .put("exit_code", result.exitCode),
+        )
+    }
+
+    /**
+     * 读取日志尾部：与 `device.exec` 分开，只读固定文件、固定行数与字节上限。
+     *
+     * `present=false` 是正常结果（crash.log 只在真正崩溃后才产生），不是失败；管理台
+     * 据此能区分“设备上没有这份日志”与“上送链路没工作”。
+     */
+    private fun logTailOutcome(params: JSONObject, commandId: String): CommandOutcome {
+        val kind = params.optString("kind", "device")
+        val name = LOG_FILES[kind]
+            ?: return CommandOutcome(
+                commandId,
+                OutcomeStatus.FAILED,
+                ReasonCodes.DEVICE_INTERNAL_ERROR,
+                "未知日志种类：$kind",
+            )
+        val lines = params.optInt("lines", DEFAULT_LOG_TAIL_LINES).coerceIn(1, MAX_LOG_TAIL_LINES)
+        val result = LogTail.read(File(AppConfig.WORK_DIR, name), lines)
+        return CommandOutcome(
+            commandId,
+            OutcomeStatus.OK,
+            "",
+            "",
+            data = JSONObject()
+                .put("content", result.content)
+                .put("kind", kind)
+                .put("lines", result.lines)
+                .put("truncated", result.truncated)
+                .put("present", result.present)
+                .put("size_bytes", result.sizeBytes),
         )
     }
 

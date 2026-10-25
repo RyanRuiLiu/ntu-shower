@@ -39,6 +39,7 @@ class DeviceLogTest {
         assertEquals(2, lines.size)
         assertEquals("command.received", lines[0].getString("event"))
         assertEquals("ui.touch", lines[0].getString("action"))
+        assertEquals(DeviceLog.SEVERITY_INFO, lines[0].getString("severity"))
         assertEquals("command.result", lines[1].getString("event"))
         assertEquals("cmd-1", lines[1].getString("command_id"))
         // 两类时间都在：ts 给"什么时候"（服务端校准过），uptime_ms 给"开机多久后"
@@ -69,18 +70,35 @@ class DeviceLogTest {
     }
 
     @Test
-    fun `gateway and lifecycle and error use their own events`() {
+    fun `gateway and lifecycle and error use their own events and severity`() {
         val log = DeviceLog(folder.root)
 
         log.gateway(connected = true, detail = "trusted=true")
         log.lifecycle("service.started", "action=watchdog")
+        log.warn("notice.window-failed", "addView failed")
         log.error("bridge.open-failed", "adbd not responding")
 
         val lines = readLines(File(folder.root, DeviceLog.FILE_NAME))
         assertEquals("gateway.connected", lines[0].getString("event"))
+        assertEquals(DeviceLog.SEVERITY_INFO, lines[0].getString("severity"))
         assertEquals("service.started", lines[1].getString("event"))
         assertEquals("action=watchdog", lines[1].getString("detail"))
-        assertEquals("bridge.open-failed", lines[2].getString("event"))
+        assertEquals(DeviceLog.SEVERITY_WARN, lines[2].getString("severity"))
+        assertEquals("bridge.open-failed", lines[3].getString("event"))
+        assertEquals(DeviceLog.SEVERITY_ERROR, lines[3].getString("severity"))
+    }
+
+    @Test
+    fun `warn and error advance the critical mark`() {
+        val log = DeviceLog(folder.root)
+        val before = DeviceLog.criticalMark()
+
+        log.lifecycle("service.started", "action=watchdog")
+        assertEquals(before, DeviceLog.criticalMark())
+        log.warn("notice.window-failed", "addView failed")
+        log.error("bridge.open-failed", "adbd not responding")
+
+        assertEquals(before + 2, DeviceLog.criticalMark())
     }
 
     @Test

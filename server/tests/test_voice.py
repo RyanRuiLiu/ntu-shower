@@ -764,6 +764,7 @@ def test_handle_events_delivers_once_and_records_stage_timings(
     delivery = deliveries[0]
     assert delivery["text"] == "空闲或已选中，转为等待开阀，5 号喷头已就绪"
     assert delivery["status"] == "ok"
+    assert delivery["source"] == "auto"
     assert delivery["delay_ms"] == 0
     assert delivery["dispatched_at"]
     assert delivery["done_at"]
@@ -1239,9 +1240,11 @@ def test_rule_push_plays_on_selected_device(
     assert [action for action, _params in calls] == ["voice.play"]
     assert calls[0][1]["volume"] == 3
 
-    # 最近播报里以 manual:* 落一条，detail 标明手动推送
+    # 最近推送里以 manual:* 落一条：来源可区分，且不记规则的延迟（手动推送不等窗口）
     deliveries = client.get("/api/v1/voice/deliveries", headers=admin_headers).json()
     assert deliveries[0]["status"] == "ok"
+    assert deliveries[0]["source"] == "manual"
+    assert deliveries[0]["delay_ms"] == 0
     assert deliveries[0]["detail"].startswith("手动推送")
 
 
@@ -1338,5 +1341,13 @@ def test_render_branch_guards() -> None:
         render.render_segments("   ", render.sample_values("分配"))
     with pytest.raises(render.TemplateError):
         render.render_segments("{fx:} 固定", render.sample_values("分配"))
+    with pytest.raises(render.TemplateError):
+        render.validate_template("{fx:} 固定")
+
+
+def test_offset_ms_rejects_unparseable_timestamps() -> None:
+    """投递时刻解析失败时，耗时字段留空，不拿 0 冒充。"""
+    assert service._offset_ms("not-a-time", "also-bad") is None
+    assert service._offset_ms(now_rfc3339(), "not-a-time") is None
     # 全量渲染：值齐全时逐段拼出最终文本
     assert render.render_text(render.render_segments("你好 {door_no}", render.sample_values("分配"))) == "你好 1"

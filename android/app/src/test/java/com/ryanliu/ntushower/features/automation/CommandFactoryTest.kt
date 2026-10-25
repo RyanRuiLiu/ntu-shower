@@ -126,6 +126,7 @@ class CommandFactoryTest {
         // 反查：设备声明支持但工厂不认识的 action 会让命令永远无法执行
         val queued = SupportedActions.ALL - setOf(
             SupportedActions.DEVICE_EXEC,
+            SupportedActions.DEVICE_LOG_TAIL,
             SupportedActions.DEVICE_REBOOT,
             SupportedActions.APP_RESTART,
             SupportedActions.BATH_RESTART,
@@ -148,6 +149,7 @@ class CommandFactoryTest {
         // 那说明能力集合（设备对服务端的自我声明）已经和实现脱节了。
         val maintenance = setOf(
             SupportedActions.DEVICE_EXEC,
+            SupportedActions.DEVICE_LOG_TAIL,
             SupportedActions.DEVICE_REBOOT,
             SupportedActions.APP_RESTART,
             SupportedActions.BATH_RESTART,

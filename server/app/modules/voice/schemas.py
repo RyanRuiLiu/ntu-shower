@@ -17,6 +17,7 @@
 """
 
 from dataclasses import dataclass
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -296,9 +297,11 @@ class VoiceDeliveryView(BaseModel):
     - `dispatch_offset_ms`：事件发生 → 下发 `voice.play`。
     - `finish_offset_ms`：下发 → 设备收尾（含下载与播放；未下发即为 None）。
     - `downloaded`：设备是否现场下载（False 表示命中设备缓存）。
+    - `source`：触发来源。`auto` 是事件自动触发，`manual` 是管理台手动推送。
     """
 
     id: int
+    source: Literal["auto", "manual"]
     rule_id: int
     device_id: str
     cert_no: str

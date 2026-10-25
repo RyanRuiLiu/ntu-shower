@@ -34,7 +34,11 @@ class NoticeOverlay(private val context: Context) {
     private val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
     private val textView = TextView(context).apply {
-        setSingleLine(true)
+        // 单行展示用 maxLines 而不是 setSingleLine(true)：后者会把 mHorizontallyScrolling
+        // 置为 true，TextView.onMeasure 随即把布局宽度算成 VERY_WIDE（约 100 万像素）。
+        // 此时 CENTER_HORIZONTAL 会把文字居中到这块极宽画布的中间，窗口里什么都看不到
+        // （API 19 实测，2026-10-25）。maxLines=1 的布局宽度等于窗口宽度，居中才有意义。
+        maxLines = 1
         ellipsize = TextUtils.TruncateAt.END
         includeFontPadding = false
         gravity = Gravity.START or Gravity.TOP
@@ -108,12 +112,33 @@ class NoticeOverlay(private val context: Context) {
         textView.text = text
         textView.setTextSize(TypedValue.COMPLEX_UNIT_SP, settings.textSizeSp.coerceAtLeast(1).toFloat())
         textView.setTextColor(parseColorSafely(settings.textColor))
-        // 水平偏移走 padding 而不是「maxWidth = widthPixels - x」：本 ROM 在窗口添加时机
-        // 给到的 displayMetrics 可能是暂态值（实测 boot 前后报过 730 而非 1366），手算的
-        // 宽度上限一旦冻结就再也纠正不回来，文案在半屏处被打省略号（2026-10-24 实测）。
-        // 窗口宽 MATCH_PARENT（见 layoutParams），可用宽度由框架在布局时按真实屏幕解析。
-        val xPx = (settings.xDp.coerceAtLeast(0) * context.resources.displayMetrics.density).toInt()
-        textView.setPadding(xPx, 0, 0, 0)
+        // 水平位置走 padding，不手算屏幕宽度：本 ROM 在窗口添加时机给到的 displayMetrics
+        // 可能是暂态值（实测 boot 前后报过 730 而非 1366），手算的宽度上限一旦冻结就再也
+        // 纠正不回来，文案在半屏处被打省略号（2026-10-24 实测）。窗口宽 MATCH_PARENT，
+        // 可用宽度由框架在布局时按真实屏幕解析。
+        //
+        // 三种对齐共用全宽窗口：左/右用对应一侧的边距，居中用对称 padding 表达偏移
+        // （内容区中心 = (paddingLeft + width - paddingRight) / 2，左 padding 加 2 * offset
+        // 即中心右移 offset，负偏移则加右 padding）。
+        val density = context.resources.displayMetrics.density
+        val xPx = (settings.xDp.coerceAtLeast(0) * density).toInt()
+        when (settings.align) {
+            NoticeAlign.CENTER -> {
+                textView.gravity = Gravity.CENTER_HORIZONTAL or Gravity.TOP
+                val shift = (settings.centerOffsetDp * density).toInt() * 2
+                textView.setPadding(shift.coerceAtLeast(0), 0, (-shift).coerceAtLeast(0), 0)
+            }
+
+            NoticeAlign.RIGHT -> {
+                textView.gravity = Gravity.END or Gravity.TOP
+                textView.setPadding(0, 0, xPx, 0)
+            }
+
+            else -> {
+                textView.gravity = Gravity.START or Gravity.TOP
+                textView.setPadding(xPx, 0, 0, 0)
+            }
+        }
         textView.requestLayout()
     }
 

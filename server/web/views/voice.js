@@ -6,8 +6,8 @@
  * 一个「设备 × 学号 × 事件」只有一条规则，覆盖切换靠停用具体规则让通配顶上。
  *
  * 延迟从事件发生时刻算起：浴室 App 自己会播结算提示，延迟用来错开它。延迟窗口
- * 同时用于设备端预下载音频；「最近播报」带各阶段耗时（备音频 / 下发 / 收尾），
- * 现场按它调延迟与语速。
+ * 同时用于设备端预下载音频；「最近推送」带各阶段耗时（音频准备 / 事件到下发 /
+ * 下发到播完），现场按它调延迟与语速。投递来源分自动触发与手动推送。
  *
  * 页面只经 core/api.js 出网，不直接 fetch；表单与表格沿用项目已有的
  * panel / field / table / badge / btn 结构，设备选择与身份页共用 core/device-scope.js。
@@ -61,6 +61,13 @@ function deliveryBadge(value) {
 function deviceCell(deviceId) {
   if (deviceId === WILDCARD) return '<span class="badge badge-blue">全部设备</span>'
   return esc(deviceName(deviceId))
+}
+
+/** 投递来源：自动触发是事件派生，手动推送是管理台按规则真播一遍。 */
+function sourceBadge(source) {
+  return source === 'manual'
+    ? '<span class="badge badge-blue">手动推送</span>'
+    : '<span class="badge">自动触发</span>'
 }
 
 function certCell(rule) {
@@ -286,7 +293,7 @@ function renderTable() {
             <button type="button" class="btn btn-ghost btn-sm" data-act="toggle">${rule.enabled ? '停用' : '启用'}</button>
             <button type="button" class="btn btn-ghost btn-sm" data-act="edit">编辑</button>
             <button type="button" class="btn btn-ghost btn-sm" data-act="preview">试听</button>
-            <button type="button" class="btn btn-ghost btn-sm" data-act="push">推设备</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-act="push">推送</button>
             <button type="button" class="btn btn-danger btn-sm" data-act="delete">删除</button>
           </div>
         </td>
@@ -349,6 +356,7 @@ function renderDeliveries() {
         : `<span class="muted" title="事件时刻（未下发）">${esc(fmtDateTime(item.occurred_at))}</span>`
       return `<tr>
         <td class="mono">${timeCell}</td>
+        <td>${sourceBadge(item.source)}</td>
         <td>${deviceCell(item.device_id)}</td>
         <td>${certCell({ certs: [item.cert_no], exempt: [] })}</td>
         <td><div>${esc(event.label)}</div></td>
@@ -361,7 +369,7 @@ function renderDeliveries() {
     })
     .join('')
   $('voiceDeliveryTable').innerHTML = `<table class="table"><thead><tr>
-      <th>下发时刻</th><th>设备</th><th>学号</th><th>事件</th><th>喷头</th><th>播报内容</th><th>延迟</th><th>耗时</th><th>状态</th>
+      <th>下发时刻</th><th>来源</th><th>设备</th><th>学号</th><th>事件</th><th>喷头</th><th>播报内容</th><th>延迟</th><th>耗时</th><th>状态</th>
     </tr></thead><tbody>${rows}</tbody></table>`
 }
 
@@ -778,7 +786,7 @@ export const voiceView = {
 
       <section class="panel">
         <div class="panel-head">
-          <span class="panel-title">最近播报</span>
+          <span class="panel-title">最近推送</span>
           <span class="panel-note" id="voiceDeliveryCount"></span>
         </div>
         <div class="panel-body flush" id="voiceDeliveryTable"></div>
@@ -879,4 +887,3 @@ export const voiceView = {
     dispose.dispose()
   },
 }
-// marker-test-1792789996

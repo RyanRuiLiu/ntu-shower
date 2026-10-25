@@ -7,6 +7,7 @@ import android.content.Intent
 import android.os.IBinder
 import android.util.Log
 import com.ryanliu.ntushower.BuildConfig
+import com.ryanliu.ntushower.core.a11y.A11yRuntime
 import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.config.ConfigCache
@@ -78,6 +79,13 @@ class AgentService : Service() {
     private val terminatingExecutor = Executors.newSingleThreadExecutor()
     private var otaCheckFuture: ScheduledFuture<*>? = null
     private var otaUpdater: OtaUpdater? = null
+    private var logShipFuture: ScheduledFuture<*>? = null
+    private var lastLogShipAt = 0L
+    private var lastCriticalMark = 0L
+    private var lastHealthSnapshotAt = 0L
+
+    @Volatile private var configRevision = 0
+
     private lateinit var client: GatewayClient
     private lateinit var sender: DoorSnapshotSender
     private lateinit var overlay: CoverOverlay
@@ -101,7 +109,11 @@ class AgentService : Service() {
         // 每次拉起都核对无障碍链路：看门狗周期（watchdog_interval_s，默认 60 秒）就是
         // 巡检周期。总开关被系统置 0 时本服务会失去无障碍这个自举锚点，看门狗的拉起
         // 是它仅剩的恢复机会——只在首次初始化时核对，这种情况下一次都不会执行。
-        worker.execute { A11yGuard.ensureAvailable() }
+        worker.execute {
+            A11yGuard.ensureAvailable(deviceLog)
+            // 修复过程本身会写 a11y.* 事件；通道已就绪就立刻送一份，不等周期
+            if (::client.isInitialized && client.isReady()) LogShipper.shipChanged(client)
+        }
 
         // 清掉上一世残留的命令 pid 文件。正常路径由 shell 包裹脚本自己删（见
         // ShellChannel.wrap），只有命令被异常打断（进程被杀、断电）才会留下——
@@ -138,6 +150,7 @@ class AgentService : Service() {
             startDoorMonitor()
             startWatchdog()
             scheduleOtaCheck()
+            startLogShipping()
             deviceLog.lifecycle("service.started", "action=${intent?.action ?: "startService"}")
             Log.i(TAG, "service started")
         }
@@ -300,6 +313,7 @@ class AgentService : Service() {
         // 配置统一入口：全部键回写 RuntimeConfig，随后刷新依赖配置的组件并存一份给下次启动
         RuntimeConfig.apply(config)
         ConfigCache.save(this, config)
+        configRevision = revision
         syncConfigDependents()
         client.refreshHeartbeat()
         scheduleOtaCheck()
@@ -309,6 +323,42 @@ class AgentService : Service() {
         client.send(MessageTypes.CONFIG_ACK, JSONObject().put("revision", revision), replyTo = envelope.id)
         deviceLog.lifecycle("config.applied", "revision=$revision")
         Log.i(TAG, "config applied revision=$revision heartbeat=${RuntimeConfig.heartbeatIntervalS}s")
+    }
+
+    /**
+     * 日志上送与健康记录的周期任务。
+     *
+     * 60 秒一跳：关键事件（warn/error）当跳就发；普通变化最多 5 分钟发一次；
+     * 每 30 分钟写一条 health.snapshot，让"设备一直安静"与"上送链路坏了"可区分。
+     * 文件没变时 LogShipper 不发，周期任务本身不产生流量。
+     */
+    private fun startLogShipping() {
+        if (logShipFuture != null) return
+        logShipFuture = otaScheduler.scheduleWithFixedDelay(
+            { worker.execute { shipLogs() } },
+            LOG_SHIP_TICK_S,
+            LOG_SHIP_TICK_S,
+            TimeUnit.SECONDS,
+        )
+    }
+
+    private fun shipLogs() {
+        if (!::client.isInitialized || !client.isReady()) return
+        val now = Uptime.nowMs()
+        val critical = DeviceLog.criticalMark()
+        val criticalChanged = critical != lastCriticalMark
+        if (!criticalChanged && now - lastLogShipAt < LOG_SHIP_PERIOD_MS) return
+        if (now - lastHealthSnapshotAt >= LOG_HEALTH_SNAPSHOT_MS) {
+            lastHealthSnapshotAt = now
+            deviceLog.lifecycle(
+                "health.snapshot",
+                "a11y=${A11yRuntime.source != null} gateway=true version=${BuildConfig.APP_VERSION} " +
+                    "config_revision=$configRevision",
+            )
+        }
+        LogShipper.shipChanged(client, force = criticalChanged)
+        lastLogShipAt = now
+        lastCriticalMark = critical
     }
 
     /** 定时检查 OTA：间隔来自服务端配置，变更后重新调度（复用同一 updater 与 HTTP 客户端）。 */
@@ -457,6 +507,7 @@ class AgentService : Service() {
         // 先停掉一切会继续调度工作的东西，再拆连接：
         // 只断连接不关线程池，会让定时任务与服务线程在 Service 销毁后继续存活
         otaCheckFuture?.cancel(false)
+        logShipFuture?.cancel(false)
         otaScheduler.shutdownNow()
         worker.shutdownNow()
         maintenanceExecutor.shutdownNow()
@@ -475,5 +526,14 @@ class AgentService : Service() {
 
         /** 首次 OTA 检查的延迟：覆盖安装后尽快对齐版本，之后按配置间隔。 */
         private const val FIRST_OTA_CHECK_DELAY_S = 30L
+
+        /** 日志上送检查周期。 */
+        private const val LOG_SHIP_TICK_S = 60L
+
+        /** 非关键变化的普通上送间隔；关键事件不受它限制。 */
+        private const val LOG_SHIP_PERIOD_MS = 5 * 60_000L
+
+        /** 健康记录间隔：保证上送内容即使没有业务事件也在缓慢更新。 */
+        private const val LOG_HEALTH_SNAPSHOT_MS = 30 * 60_000L
     }
 }

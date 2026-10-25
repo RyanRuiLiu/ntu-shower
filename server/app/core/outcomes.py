@@ -51,6 +51,14 @@ ACTION_DATA: dict[str, dict[str, str]] = {
         "output": "命令的输出（stdout 与 stderr 合并）",
         "exit_code": "进程退出码；命令超时或 shell 不可用时为 null",
     },
+    "device.log_tail": {
+        "content": "日志尾部原文，按行拼接",
+        "kind": "日志种类（device / crash / ota）",
+        "lines": "实际返回的行数",
+        "truncated": "是否因为行数或字节上限截掉了更早的内容",
+        "present": "设备上是否存在该日志文件（false 表示尚未产生，例如从未崩溃）",
+        "size_bytes": "读取前文件的总字节数",
+    },
     "freelist.read": {
         "content": "免费名单文件的原文，含行尾",
     },
