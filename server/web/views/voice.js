@@ -82,6 +82,11 @@ function certCell(rule) {
   return rule.certs.map((cert) => codeCell(cert)).join('、')
 }
 
+/** 预览用的示例学号：通配规则取样例，具体规则取第一个。 */
+function sampleCert(certs) {
+  return certs.includes(WILDCARD) ? '示例学号' : certs[0]
+}
+
 /** 通配目标的纯文本写法（确认框、提示里用，不带 HTML）。 */
 function targetText(rule) {
   const devices = rule.devices.includes(WILDCARD) ? '全部设备' : rule.devices.map(deviceName).join('、')
@@ -452,7 +457,6 @@ function readForm() {
   if (certTargets.length === 0) return report('voiceResult', '失败 · 请填写学号（或勾选全部学号）', 'err')
   const selectedEvents = readEventSelection()
   if (selectedEvents.length === 0) return report('voiceResult', '失败 · 请勾选至少一个事件', 'err')
-  const event = selectedEvents[0]
   const text = $('voiceText').value.trim()
   if (!text) return report('voiceResult', '失败 · 请填写播报内容', 'err')
   const common = {
@@ -500,13 +504,16 @@ function stopPreview() {
 }
 
 async function pushRule(rule) {
-  let deviceId = rule.devices.includes(WILDCARD) ? '' : rule.devices[0]
+  // 规则的目标设备取交集：通配规则即全部设备。多台在线时由现场选，只有一台才直推
+  const allowed = rule.devices.includes(WILDCARD)
+    ? store.devices
+    : store.devices.filter((device) => rule.devices.includes(device.device_id))
+  const online = allowed.filter((device) => device.online)
+  if (online.length === 0) return report('voiceResult', '失败 · 没有在线设备可推送', 'err')
+  let deviceId = online.length === 1 ? online[0].device_id : ''
   if (!deviceId) {
-    // 通配规则对全部设备生效：推给哪台由现场指定（列在线设备，输序号）
-    const online = devices.filter((d) => d.online)
-    if (!online.length) return report('voiceResult', '失败 · 没有在线设备可推送', 'err')
-    const list = online.map((d, i) => `${i + 1}. ${d.name || d.device_id}`).join('\n')
-    const picked = window.prompt(`这条规则对全部设备生效。推送到哪台？输入序号：\n${list}`, '1')
+    const list = online.map((device, index) => `${index + 1}. ${device.name || device.device_id}`).join('\n')
+    const picked = window.prompt(`这条规则作用于多台设备。推送到哪台？输入序号：\n${list}`, '1')
     if (picked === null) return
     const chosen = online[Number(picked) - 1]
     if (!chosen) return report('voiceResult', '失败 · 序号无效', 'err')
@@ -524,16 +531,19 @@ async function pushRule(rule) {
   }
 }
 
-async function previewRule(rule) {
-  const cert = rule.certs.includes(WILDCARD) ? '示例学号' : rule.certs[0]
-  report('voiceResult', '正在合成试听…', 'info')
+/**
+ * 预览一条播报。入参是已经选定的文本 / 事件 / 学号 / 音色——不要求完整规则形状，
+ * 规则行、表单、音色样三处都走这一份。
+ */
+async function previewRule({ text, event, cert, voice, pending = '正在合成试听…' }) {
+  report('voiceResult', pending, 'info')
   try {
     const result = await api.previewVoiceRule({
-      text: rule.text,
-      event: rule.events[0],
+      text,
+      event,
       cert_no: cert,
       door_no: 1,
-      voice: rule.voice || 'melo',
+      voice: voice || 'melo',
     })
     showSample(result.rendered_text)
     playPreview(result.clip_url)
@@ -546,8 +556,12 @@ async function previewRule(rule) {
 async function previewForm() {
   const payload = readForm()
   if (!payload) return
-  const cert = payload.certs.includes(WILDCARD) ? '示例学号' : payload.certs[0]
-  await previewRule({ text: payload.text, event: payload.events[0], cert_no: cert, voice: payload.voice })
+  await previewRule({
+    text: payload.text,
+    event: payload.events[0],
+    cert: sampleCert(payload.certs),
+    voice: payload.voice,
+  })
 }
 
 async function submitForm() {
@@ -847,21 +861,13 @@ export const voiceView = {
         const button = event.target.closest('button[data-act="audition"]')
         if (!button) return
         const voice = button.closest('tr').dataset.voice
-        // 音色试听走预览接口本身：不经规则形状的 previewRule（它要求 certs/events 数组）
-        report('voiceResult', `正在合成 ${voice} 的音色样本…`, 'info')
-        try {
-          const result = await api.previewVoiceRule({
-            text: '二五三零一一零零五七 号同学，请到 5 号喷头准备就浴',
-            event: events[0] ? events[0].value : 'assigned',
-            cert_no: '示例学号',
-            door_no: 1,
-            voice,
-          })
-          showSample(result.rendered_text)
-          playPreview(result.clip_url)
-        } catch (error) {
-          report('voiceResult', problemText(error), 'err')
-        }
+        await previewRule({
+          text: '二五三零一一零零五七 号同学，请到 5 号喷头准备就浴',
+          event: events[0] ? events[0].value : 'assigned',
+          cert: '示例学号',
+          voice,
+          pending: `正在合成 ${voice} 的音色样本…`,
+        })
       }),
     )
     dispose.add(
@@ -873,7 +879,14 @@ export const voiceView = {
         if (!rule) return
         if (button.dataset.act === 'edit') enterEdit(rule)
         if (button.dataset.act === 'toggle') await toggleRule(rule)
-        if (button.dataset.act === 'preview') await previewRule(rule)
+        if (button.dataset.act === 'preview') {
+          await previewRule({
+            text: rule.text,
+            event: rule.events[0],
+            cert: sampleCert(rule.certs),
+            voice: rule.voice,
+          })
+        }
         if (button.dataset.act === 'push') await pushRule(rule)
         if (button.dataset.act === 'delete') await deleteRule(rule)
       }),
