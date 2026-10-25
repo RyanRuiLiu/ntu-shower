@@ -47,6 +47,7 @@
 }
 
 .kpi-fill {
+  width: var(--ratio, 0);
   height: 100%;
   background: var(--tone, var(--muted));
   border-radius: 2px;
@@ -335,7 +336,7 @@
 
 .task-board .task-chip.off {
   color: var(--muted);
-  background: rgb(110 118 129 / 12%);
+  background: var(--gray-bg);
 }
 
 .task-board .task-meta {

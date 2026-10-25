@@ -59,7 +59,7 @@
 }
 
 .tb button:active {
-  color: #fff;
+  color: var(--on-strong);
   background: var(--accent);
   border-color: var(--accent);
 }
@@ -152,7 +152,7 @@
   justify-content: center;
   min-width: 0;
   overflow: hidden;
-  background: #000;
+  background: var(--canvas-bg);
 }
 
 /* `object-fit: contain` 配合两个 max-* 保证画面按原始比例落在面板里，
@@ -166,7 +166,12 @@
 }
 
 .screen-panel.is-loading {
-  background: linear-gradient(90deg, #111 25%, #1a1a1a 50%, #111 75%);
+  background: linear-gradient(
+    90deg,
+    var(--canvas-stripe-a) 25%,
+    var(--canvas-stripe-b) 50%,
+    var(--canvas-stripe-a) 75%
+  );
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
 }
@@ -197,6 +202,10 @@
 
 .highlight {
   position: absolute;
+  left: var(--left, 0);
+  top: var(--top, 0);
+  width: var(--width, 0);
+  height: var(--height, 0);
   border: 2px solid var(--orange);
   border-radius: 2px;
   background: var(--orange-bg);
@@ -229,6 +238,8 @@
 /* 长按指示：一圈进度 + 实时秒数。走满一圈表示到了长按的界线，颜色随之变橙 */
 .press-ring {
   position: absolute;
+  left: var(--x, 0);
+  top: var(--y, 0);
   z-index: 7;
   pointer-events: none;
   transform: translate(-50%, -50%);
@@ -247,11 +258,13 @@
 
 .press-label {
   position: absolute;
+  left: var(--x, 0);
+  top: var(--y, 0);
   z-index: 8;
   padding: 1px 6px;
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: rgb(0 0 0 / 85%);
+  background: var(--overlay-strong);
   color: var(--dim);
   font: var(--fs-chip) var(--font-mono);
   pointer-events: none;
@@ -268,7 +281,7 @@
 }
 
 .crosshair line {
-  stroke: rgb(255 255 255 / 25%);
+  stroke: var(--outline-soft);
   stroke-width: 1;
   stroke-dasharray: 4, 4;
 }
@@ -276,11 +289,13 @@
 /* 光标处的设备坐标：点击之前先看清会点到哪里 */
 .coord-tip {
   position: absolute;
+  left: var(--x, 0);
+  top: var(--y, 0);
   z-index: 12;
   padding: 4px 8px;
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: rgb(0 0 0 / 85%);
+  background: var(--overlay-strong);
   color: var(--text);
   font: var(--fs-chip) var(--font-mono);
   white-space: nowrap;
@@ -290,10 +305,12 @@
 /* 点击反馈 */
 .ripple {
   position: absolute;
+  left: var(--x, 0);
+  top: var(--y, 0);
   margin: -11px 0 0 -11px;
   width: 22px;
   height: 22px;
-  border: 2px solid rgb(255 255 255 / 60%);
+  border: 2px solid var(--tone, var(--outline-strong));
   border-radius: 50%;
   animation: ripple 0.5s ease-out forwards;
 }
@@ -458,6 +475,7 @@
   align-items: flex-start;
   min-height: 18px;
   padding: 2px 6px;
+  padding-left: calc(var(--sp-1) + var(--depth, 0) * var(--sp-3));
   border-left: 2px solid transparent;
   line-height: 1.35;
   cursor: pointer;
@@ -603,6 +621,11 @@
   border-top: 1px solid var(--row-alt);
 }
 
+/* 最后一节（操作按钮）与面板底边留出面板体一致的间距。 */
+.prop-section:last-child {
+  padding-bottom: var(--sp-2);
+}
+
 .prop-section-title {
   margin-bottom: 4px;
   color: var(--muted);
@@ -673,7 +696,7 @@
 
 .prop-tap:not(:disabled):hover {
   background: var(--green);
-  color: #fff;
+  color: var(--on-strong);
 }
 
 /* ── 输入栏：在右列底部 ─────────────────────────────────── */
@@ -745,13 +768,15 @@
 
 .ctx-menu {
   position: fixed;
+  left: var(--x, 0);
+  top: var(--y, 0);
   z-index: 100;
   min-width: 170px;
   padding: 4px 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--elevated);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
+  box-shadow: var(--shadow-panel);
 }
 
 .ctx-menu .item {

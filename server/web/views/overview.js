@@ -64,7 +64,7 @@ function renderKpi(doors) {
       <div class="kpi-card ${tone}">
         <span class="kpi-label">${esc(label)}</span>
         <span class="kpi-num">${value}</span>
-        <div class="kpi-bar"><div class="kpi-fill" style="width:${(ratio * 100).toFixed(1)}%"></div></div>
+        <div class="kpi-bar"><div class="kpi-fill" data-ratio="${(ratio * 100).toFixed(1)}"></div></div>
       </div>`
   }).join('')
 }
@@ -221,6 +221,10 @@ function stopTicking() {
 
 function paint() {
   $('kpi').innerHTML = renderKpi(store.doors)
+  // 占比是运行时几何值：只写比例变量，宽度声明留在 CSS
+  for (const fill of $('kpi').querySelectorAll('.kpi-fill[data-ratio]')) {
+    fill.style.setProperty('--ratio', `${fill.dataset.ratio}%`)
+  }
   $('doors').innerHTML = renderDoors(store.doors)
   // 闪一下就把标记撤掉，否则下次重排还会带着它
   for (const card of $('doors').querySelectorAll('.door.flash')) {
