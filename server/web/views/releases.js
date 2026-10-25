@@ -120,10 +120,12 @@ export const releasesView = {
             <label for="inTarget">目标设备（留空表示全部设备，或填写设备 ID）</label>
             <input id="inTarget" type="text" placeholder="留空表示全部设备">
           </div>
-          <label class="field-row" style="margin-bottom:12px">
-            <input id="inForce" type="checkbox">
-            <span>强制推送<span class="muted"> · 忽略版本号，仅用于调试</span></span>
-          </label>
+          <div class="field">
+            <label class="field-row">
+              <input id="inForce" type="checkbox">
+              <span>强制推送<span class="muted"> · 忽略版本号，仅用于调试</span></span>
+            </label>
+          </div>
           <div class="btn-row">
             <button type="button" class="btn btn-sm" id="btnUpload">发布</button>
           </div>

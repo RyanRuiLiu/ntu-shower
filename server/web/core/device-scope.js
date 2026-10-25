@@ -20,14 +20,14 @@ export function scopeEditorHtml(devices, selected) {
   const boxes = devices
     .map((device) => {
       const on = wildcard || selected.includes(device.device_id)
-      return `<label class="field-row" style="margin:0 8px 0 0">
+      return `<label class="field-row">
           <input type="checkbox" data-scope-device="${esc(device.device_id)}" ${on ? 'checked' : ''} ${wildcard ? 'disabled' : ''}>
           <span>${esc(device.name || device.device_id)}</span>
         </label>`
     })
     .join('')
-  return `<div data-scope-container>
-      <label class="field-row" style="margin-bottom:4px">
+  return `<div data-scope-container class="check-group">
+      <label class="field-row">
         <input type="checkbox" data-scope-wildcard ${wildcard ? 'checked' : ''}>
         <span>全部设备</span>
       </label>

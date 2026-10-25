@@ -181,7 +181,7 @@ function renderForm(values) {
   const used = new Set()
   // 先分区（基础能力/拓展功能），区内再排分组卡片
   const cards = SECTIONS
-    .map(([sectionKey, sectionTitle]) => {
+    .map(([sectionKey]) => {
       const groupKeys = groups.filter((group) => group.section === sectionKey)
       const groupCards = groupKeys
         .map(({ key: groupKey, title }) => {
@@ -201,7 +201,7 @@ function renderForm(values) {
       // 非当前分区只是隐藏，**不从 DOM 里去掉**：保存时 readForm 要收全部键——服务端是
       // 覆盖式写入（`store.put_global_overrides`），只提交一半会把另一半的覆盖当成已删除。
       const hidden = sectionKey === section ? '' : ' hidden'
-      return `<div class="cfg-section" data-section="${esc(sectionKey)}"${hidden}><div class="cfg-section-title">${esc(sectionTitle)}</div><div class="cfg-grid">${groupCards}</div></div>`
+      return `<div class="cfg-section" data-section="${esc(sectionKey)}"${hidden}><div class="cfg-grid">${groupCards}</div></div>`
     })
     .join('')
   const orphans = specs.filter((spec) => !used.has(spec.key))
@@ -246,7 +246,7 @@ function readForm() {
   return config
 }
 
-/** 页签、按钮文案与那句说明：都跟着（分区 + 编辑目标）走，一处写完。 */
+/** 页签与按钮文案：都跟着（分区 + 编辑目标）走，一处写完。 */
 function refreshChrome() {
   const perDevice = sectionIsPerDevice(section)
   $('cfgSections').innerHTML = SECTIONS.map(
@@ -257,9 +257,6 @@ function refreshChrome() {
     ? `<span class="cfg-tab${target === 'global' ? ' is-active' : ''}" data-target="global">全部设备（全局默认）</span>
        <span class="cfg-tab${target === 'device' ? ' is-active' : ''}" data-target="device">单台设备（覆盖）</span>`
     : ''
-  $('cfgHint').textContent = perDevice
-    ? '设备下发的配置：全局默认为主，设备覆盖为辅。标记「继承」的项跟随全局默认值，改过即成为该设备的覆盖项，可恢复为继承。各模块与单项都提供「恢复默认」，恢复后需点「保存」才生效。'
-    : '服务端业务：这些在服务器上运行，不下发设备、也不按设备区分。点「保存」即刻生效。'
 }
 
 /** 切分区；切到不按设备区分的分区时把编辑目标收回全局。 */
@@ -366,11 +363,10 @@ export const configView = {
           </div>
         </div>
         <div class="panel-body">
-          <div class="muted" id="cfgHint" style="margin-bottom:8px"></div>
           <div id="configGrid"><div class="empty">正在加载…</div></div>
+          <div class="result" id="configResult"></div>
         </div>
-      </section>
-      <div class="result" id="configResult" style="padding:0 4px"></div>`
+      </section>`
 
     dispose = disposer()
     dispose.add(subscribe('device', () => { if (sectionIsPerDevice(section) && target === 'device') reload() }))
