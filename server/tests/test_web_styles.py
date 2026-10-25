@@ -18,6 +18,9 @@ STYLE_PROP = re.compile(r"\.style\.(?!setProperty\()")
 SET_PROP = re.compile(r"\.style\.setProperty\(\s*[\"'](?!--)")
 #: 颜色只能出现在 tokens.css；CSS 选择器里的 #id 不匹配 3–8 位十六进制。
 COLOR = re.compile(r"(?<![\w-])#[0-9a-fA-F]{3,8}\b|rgba?\(")
+FONT_SIZE = re.compile(r"font-size:\s*(?![^\n]*var\(--fs-)")
+RADIUS = re.compile(r"border-radius:\s*(?![^\n]*var\(--radius)")
+TRANSITION = re.compile(r"transition:\s*(?![^\n]*var\(--transition)")
 
 
 def _web_sources() -> Iterator[Path]:
@@ -46,7 +49,20 @@ def test_runtime_geometry_only_sets_custom_properties() -> None:
     assert not offenders, "内联样式属性只能通过 --* 自定义属性写入：\n" + "\n".join(offenders)
 
 
+def _style_sources() -> Iterator[Path]:
+    yield from sorted((WEB / "style").glob("*.css"))
+
+
 def test_colors_live_only_in_tokens() -> None:
     tokens = WEB / "style" / "tokens.css"
-    offenders = _offenders(COLOR, (path for path in sorted((WEB / "style").glob("*.css")) if path != tokens))
+    offenders = _offenders(COLOR, (path for path in _style_sources() if path != tokens))
     assert not offenders, "颜色值只能写在 tokens.css：\n" + "\n".join(offenders)
+
+
+def test_typography_radius_and_transition_use_tokens() -> None:
+    tokens = WEB / "style" / "tokens.css"
+    sources = [path for path in _style_sources() if path != tokens]
+    offenders = (
+        _offenders(FONT_SIZE, iter(sources)) + _offenders(RADIUS, iter(sources)) + _offenders(TRANSITION, iter(sources))
+    )
+    assert not offenders, "字号 / 圆角 / 过渡只能引用 tokens：\n" + "\n".join(offenders)
