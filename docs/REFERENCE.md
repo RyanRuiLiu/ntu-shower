@@ -222,7 +222,7 @@ status == 3（RAW_STATUS_DISABLED） → 已禁用
 
 ### 4.3 `door_state_event` —— 每一次状态转换
 
-只在状态**真的变了**时写一行。两种帧不记：**首帧**（没有"从哪来"）与**全貌帧**（`source = startup`，它只刷现态、不派生，见 `SOURCE_STARTUP`）。
+只在状态**真的变了**时写一行。两种帧不记：**首帧**（没有"从哪来"）与**全貌帧**（`source = startup`，它只刷现态、不派生，见 `SOURCE_STARTUP`）。语音的 `assigned` 不依赖这张表：它是会话生命周期事实，全貌帧/盲区帧只要 `open_time` 可平移也会补发（见 `docs/DECISIONS.md` 的语音事件一节）。
 
 | 字段 | 是什么 |
 |---|---|
