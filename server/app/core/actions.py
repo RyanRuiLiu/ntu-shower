@@ -37,6 +37,13 @@ SCREEN_CAPTURE = "screen.capture"
 DEVICE_EXEC = "device.exec"
 """执行：在设备上运行一条 root shell 命令，结果在 data.output 与 data.exit_code。"""
 
+DEVICE_LOG_TAIL = "device.log_tail"
+"""读设备日志尾部：params.kind 取 device / crash / ota，params.lines 为要取的行数。
+
+结果在 data.content / present / size_bytes / lines / truncated。与 `device.exec` 分开
+是因为它只读、固定路径、有行数与字节上限，管理台不需要为此拼 shell 命令。
+"""
+
 DEVICE_REBOOT = "device.reboot"
 """重启整机。设备重启后 agent 随之重来，会话与喷头现态由重连后的全貌帧重建。
 
@@ -180,6 +187,7 @@ ALL_ACTIONS: tuple[str, ...] = (
     CAMERA_CAPTURE,
     SCREEN_CAPTURE,
     DEVICE_EXEC,
+    DEVICE_LOG_TAIL,
     DEVICE_REBOOT,
     APP_RESTART,
     BATH_RESTART,
@@ -230,6 +238,7 @@ ACTION_CHANNELS: dict[str, str] = {
     VOICE_PLAY: CHANNEL_VOICE,
     VOICE_PREPARE: CHANNEL_VOICE,
     DEVICE_EXEC: CHANNEL_MAINTENANCE,
+    DEVICE_LOG_TAIL: CHANNEL_MAINTENANCE,
     DEVICE_REBOOT: CHANNEL_MAINTENANCE,
     APP_RESTART: CHANNEL_MAINTENANCE,
     BATH_RESTART: CHANNEL_MAINTENANCE,

@@ -19,11 +19,13 @@ admin 端点统一挂 require_admin；下发命令的端点额外要求设备已
 （require_trusted_online_device）——把命令发给离线设备只会白等超时。
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from app.core import actions
+from app.core.clock import now_rfc3339
 from app.core.connections import manager
-from app.core.problems import DEVICE_NOT_FOUND, VALIDATION_FAILED, ApiProblemError
+from app.core.outcomes import OK as OUTCOME_OK
+from app.core.problems import DEVICE_LOG_READ_FAILED, DEVICE_NOT_FOUND, VALIDATION_FAILED, ApiProblemError
 from app.core.protocol import as_int
 from app.modules.access.capabilities import user_actions
 from app.modules.access.dependencies import optional_identity, require_admin
@@ -49,6 +51,9 @@ from .schemas import (
 
 router = APIRouter(prefix="/api/v1", tags=["devices"])
 admin_router = APIRouter(prefix="/api/v1/devices", dependencies=[Depends(require_admin)], tags=["devices-admin"])
+
+#: 可查看/上送的三份设备日志。
+LOG_KINDS = ("device", "crash", "ota")
 
 
 def _ui_timeout_s(device_id: str) -> float:
@@ -88,18 +93,56 @@ def list_devices(caller: IdentityRecord | None = Depends(optional_identity)) -> 
 
 @admin_router.get("/{device_id}/logs")
 def get_device_logs(device_id: str, kind: str = "device") -> schemas.DeviceLogView:
-    """该设备最近一次上送的日志（kind=device / crash）。
+    """该设备最近一次上送的日志（kind=device / crash / ota）。
 
-    设备每次握手成功自动上送日志尾部；这份内容回答"设备离线期间发生了什么"，
-    现场不用再读文件。设备从未上送过（0.4.35 之前、或该类日志为空）时 404。
+    上送的是离线时留下的副本：设备每次握手、变化后的周期与关键错误后都会更新；
+    要看此刻设备上的原文走 `/logs/live`。设备从未上送过该类日志时 404。
     """
-    if kind not in ("device", "crash"):
-        raise ApiProblemError(VALIDATION_FAILED, f"日志种类 {kind}（应为 device 或 crash）")
+    if kind not in LOG_KINDS:
+        raise ApiProblemError(VALIDATION_FAILED, f"日志种类 {kind}（应为 {' / '.join(LOG_KINDS)}）")
     _require_device(device_id)
     latest = service.latest_device_log(device_id, kind)
     if latest is None:
         raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {device_id} 尚无 {kind} 日志上送")
     return schemas.DeviceLogView.model_validate(latest)
+
+
+@admin_router.get("/{device_id}/logs/live")
+async def get_live_device_log(
+    device_id: str,
+    kind: str = "device",
+    lines: int = Query(default=200, ge=1, le=500),
+) -> schemas.DeviceLogLiveView:
+    """从设备现读日志尾部；设备离线时返回 409，页面再显示上次上送内容。
+
+    `present=false` 不是错误：crash.log 只在真正崩溃后才会出现，ota-install.log 只在
+    发起过安装后才会出现；页面据此显示"设备上暂无该日志"。
+    """
+    if kind not in LOG_KINDS:
+        raise ApiProblemError(VALIDATION_FAILED, f"日志种类 {kind}（应为 {' / '.join(LOG_KINDS)}）")
+    outcome = await device_action(
+        device_id,
+        actions.DEVICE_LOG_TAIL,
+        {"kind": kind, "lines": lines},
+        DEVICE_ACTION_TIMEOUT_S,
+    )
+    if outcome["status"] != OUTCOME_OK.value:
+        raise ApiProblemError(
+            DEVICE_LOG_READ_FAILED,
+            outcome["terminal_message"] or "设备未返回日志内容",
+        )
+    data = outcome["data"]
+    if not isinstance(data, dict):
+        raise ApiProblemError(DEVICE_LOG_READ_FAILED, "设备返回的日志结果为空")
+    return schemas.DeviceLogLiveView(
+        content=str(data.get("content", "")),
+        kind=str(data.get("kind", kind)),
+        lines=as_int(data.get("lines"), 0),
+        truncated=bool(data.get("truncated", False)),
+        present=bool(data.get("present", False)),
+        size_bytes=as_int(data.get("size_bytes"), 0),
+        read_at=now_rfc3339(),
+    )
 
 
 @admin_router.get("/runtime")

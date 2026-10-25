@@ -3,6 +3,7 @@ package com.ryanliu.ntushower.features.selfmanage
 import android.util.Log
 import com.ryanliu.ntushower.core.a11y.A11yRuntime
 import com.ryanliu.ntushower.core.clock.Uptime
+import com.ryanliu.ntushower.core.log.DeviceLog
 import com.ryanliu.ntushower.core.shell.RootShell
 
 /**
@@ -61,30 +62,56 @@ object A11yGuard {
     /** 修完之后等系统重绑的上限。 */
     private const val BIND_WAIT_MS = 10_000L
 
+    /**
+     * 换包/进程重启后先等系统自己重绑的窗口。
+     *
+     * 系统在包被替换后会调度 A11yService 重启（真机约 1–5 秒）。此时设置全对、只是还没
+     * 绑上；立刻摘清单会触发系统把总开关置 0，反而要等下一个看门狗。先等它自己绑。
+     */
+    private const val SYSTEM_REBIND_GRACE_MS = 6_000L
+
     /** 等待重绑时的轮询间隔。 */
     private const val BIND_POLL_MS = 250L
 
     /** 核对并按需修复；返回修复后链路是否完整。链路本已完整时是只读操作。 */
-    fun ensureAvailable(): Boolean {
+    fun ensureAvailable(deviceLog: DeviceLog): Boolean {
+        var switch = readSwitch()
+        var list = readServiceList()
         val bound = A11yRuntime.source != null
-        val switch = readSwitch()
-        val list = readServiceList()
         if (!A11yState.needsRepair(switch, list, COMPONENT, bound)) return true
 
         Log.w(TAG, "accessibility degraded: bound=$bound enabled=$switch, repairing")
+        deviceLog.lifecycle("a11y.repair-started", "bound=$bound enabled=$switch list=$list")
         if (!bound && !A11yState.needsRepair(switch, list, COMPONENT, bound = true)) {
-            // 设置全对却没绑上：系统侧的绑定状态坏了，改值没用（写同样的值它不重新评估），
-            // 必须把组件从清单里摘掉再放回，逼它重走一遍绑定
+            // 设置全对却没绑上：先给系统一个自然重绑窗口。换包后它已经调度了 A11yService
+            // 重启；立即摘清单会把 accessibility_enabled 带成 0（实测），反而拖到下一个
+            // 看门狗。窗口过后仍未绑，才说明系统侧绑定真的坏了，走强制重绑。
+            if (waitForBind(SYSTEM_REBIND_GRACE_MS)) {
+                Log.i(TAG, "accessibility restored by system rebind")
+                deviceLog.lifecycle("a11y.restored", "by=system-rebind")
+                return true
+            }
+            Log.w(TAG, "accessibility still unbound after grace, forcing rebind")
+            deviceLog.lifecycle("a11y.rebind", "reason=unbound-after-grace")
             rebind()
+            // **必须重新读**：rebind 把清单摘空会让系统把总开关置 0，修复前的 switch
+            // 已经是过期读数；沿用它会跳过 enableSwitch，链路要等下一个看门狗才回来。
+            switch = readSwitch()
+            list = readServiceList()
         }
+        // **先补清单，再开总开关**：重装换包会把 enabled_accessibility_services 清空，
+        // 清单为空时开总开关会被系统立即回写为 0（2026-10-25 2F 实测）。顺序反过来
+        // 就是本次故障的另一半：清单补回来时总开关已经被拒，仍要等下一个看门狗。
+        if (!A11ySettingsMerge.contains(list, COMPONENT)) appendToServiceList()
         if (!A11yState.isSwitchOn(switch)) enableSwitch()
-        if (!A11ySettingsMerge.contains(readServiceList(), COMPONENT)) appendToServiceList()
 
-        var stillBound = waitForBind()
+        val stillBound = waitForBind()
         if (stillBound) {
             Log.i(TAG, "accessibility restored")
+            deviceLog.lifecycle("a11y.restored", "by=guard")
         } else {
             Log.e(TAG, "accessibility repair failed")
+            deviceLog.error("a11y.repair-failed", "enabled=${readSwitch()} list=${readServiceList()}")
         }
         return stillBound
     }
@@ -99,8 +126,8 @@ object A11yGuard {
      * 只做一轮等待，不做多层重试环：看门狗本身就是重试入口，60 秒后还会再来一次。
      * 这个方法只在修复路径上调用（链路本来就完整时提前返回了），正常运行时不会走到。
      */
-    private fun waitForBind(): Boolean {
-        val deadline = Uptime.nowMs() + BIND_WAIT_MS
+    private fun waitForBind(timeoutMs: Long = BIND_WAIT_MS): Boolean {
+        val deadline = Uptime.nowMs() + timeoutMs
         while (Uptime.nowMs() < deadline) {
             if (A11yRuntime.source != null) return true
             Thread.sleep(BIND_POLL_MS)

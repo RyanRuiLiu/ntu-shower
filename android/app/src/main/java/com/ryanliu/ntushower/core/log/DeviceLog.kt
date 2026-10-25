@@ -5,6 +5,7 @@ import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.logfile.CappedLogFile
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * 设备端统一日志：**全设备唯一**的结构化落盘入口（一个类、一个文件、一种格式）。
@@ -46,6 +47,7 @@ class DeviceLog(dir: File, private val maxBytes: Long = CappedLogFile.DEFAULT_MA
                 .put("event", if (duplicate) "command.duplicate" else "command.received")
                 .put("command_id", commandId)
                 .put("action", action),
+            SEVERITY_INFO,
         )
     }
 
@@ -57,7 +59,7 @@ class DeviceLog(dir: File, private val maxBytes: Long = CappedLogFile.DEFAULT_MA
             .put("status", status)
             .put("reason_code", reasonCode)
         if (elapsedMs >= 0) entry.put("elapsed_ms", elapsedMs)
-        write(entry)
+        write(entry, SEVERITY_INFO)
     }
 
     /** 网关链路生命周期（连接/断开与原因）。 */
@@ -66,6 +68,7 @@ class DeviceLog(dir: File, private val maxBytes: Long = CappedLogFile.DEFAULT_MA
             JSONObject()
                 .put("event", if (connected) "gateway.connected" else "gateway.disconnected")
                 .put("detail", detail),
+            SEVERITY_INFO,
         )
     }
 
@@ -80,25 +83,49 @@ class DeviceLog(dir: File, private val maxBytes: Long = CappedLogFile.DEFAULT_MA
             JSONObject()
                 .put("event", event)
                 .put("detail", detail),
+            SEVERITY_INFO,
+        )
+    }
+
+    /** 非致命异常：流程继续，但这是排查时该看到的现场。 */
+    fun warn(event: String, detail: String) {
+        criticalCount.incrementAndGet()
+        write(
+            JSONObject()
+                .put("event", event)
+                .put("detail", detail),
+            SEVERITY_WARN,
         )
     }
 
     /** 关键错误（catch 到的异常摘要）。堆栈细节留在 Logcat，这里记可检索的事实。 */
     fun error(event: String, detail: String) {
+        criticalCount.incrementAndGet()
         write(
             JSONObject()
                 .put("event", event)
                 .put("detail", detail),
+            SEVERITY_ERROR,
         )
     }
 
-    private fun write(entry: JSONObject) {
+    private fun write(entry: JSONObject, severity: String) {
         entry.put("ts", Clock.wallClockRfc3339())
         entry.put("uptime_ms", Uptime.nowMs())
+        entry.put("severity", severity)
         CappedLogFile.append(file, entry.toString() + "\n", maxBytes)
     }
 
     companion object {
         const val FILE_NAME = "device.log"
+
+        const val SEVERITY_INFO = "info"
+        const val SEVERITY_WARN = "warn"
+        const val SEVERITY_ERROR = "error"
+
+        /** 进程内 warn/error 计数：上送侧据此在关键事件后尽快发一份，不必等周期。 */
+        private val criticalCount = AtomicLong(0)
+
+        fun criticalMark(): Long = criticalCount.get()
     }
 }
