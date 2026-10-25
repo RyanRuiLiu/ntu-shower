@@ -496,6 +496,11 @@ tr.audit-row.is-selected td {
 
 /* ── 表格：设备、身份、发布、审计都用它 ─────────────────── */
 
+/* 表格容器：不在 flush 面板里的表格也要能横向滚动，列才不会被压缩换行。 */
+.table-wrap {
+  overflow-x: auto;
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;
@@ -524,6 +529,16 @@ tr.audit-row.is-selected td {
 
 .table tbody tr:hover {
   background: var(--elevated);
+}
+
+/* 行尾动作保持一行：窄屏让表格整体横向滚动，不把按钮逐个挤成竖排 */
+.table .btn-row {
+  flex-wrap: nowrap;
+}
+
+.table .btn-row .btn {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 /* 行选中态：与页面其他区域联动的行（如身份页正在编辑的那一行）用它标出对应关系。

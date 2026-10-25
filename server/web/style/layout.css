@@ -228,10 +228,10 @@
 /* ── 网格：面板内并排两块 ───────────────────────────────── */
 
 /*
- * 两张网格都用 `minmax(min(360px, 100%), 1fr)`：`100%` 那一项让最小轨道宽度不超过
- * 容器，窄屏自动落成一列。没有它，`minmax(360px, 1fr)` 在 343px 宽的容器里会撑出
- * 360px 的轨道——页面横向溢出。`auto-fit` 会折叠多余的空轨道，所以宽屏上仍是
- * "几个子项就几列、各占等分"。
+ * 两张网格都用 `minmax(min(<列宽>, 100%), 1fr)`：`100%` 那一项让最小轨道宽度不超过
+ * 容器，窄屏自动落成一列。双列承载表格与表单，最小列宽取 560px——半宽面板里塞
+ * 七列表格只能靠压缩换行，落成一列后由表格自己横向滚动。`auto-fit` 会折叠多余的
+ * 空轨道，所以宽屏上仍是"几个子项就几列、各占等分"。
  */
 .grid {
   display: grid;
@@ -239,9 +239,9 @@
 }
 
 .grid-2 {
-  grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(var(--grid-2-min), 100%), 1fr));
 }
 
 .grid-3 {
-  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(var(--grid-3-min), 100%), 1fr));
 }
