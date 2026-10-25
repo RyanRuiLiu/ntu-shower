@@ -70,16 +70,31 @@ function closeFreelist() {
   report('freelistResult', '', 'info')
 }
 
-/** 命令与调试通道都只作用于"当前设备"，所以它们要能感知选择变化。 */
-function renderCurrent() {
+/** 只更新“当前设备”标签与可用性；设备清单刷新时用，不能清掉正在看的命令输出。 */
+function updateCurrentDevice() {
   const device = store.devices.find((item) => item.device_id === store.deviceId)
   $('currentDevice').textContent = device ? `${device.name || device.device_id}（${device.online ? '在线' : '离线'}）` : '未选择'
   const usable = Boolean(device)
-  for (const id of ['btnClockSet', 'btnFreelist', 'btnRestart', 'btnBathRestart', 'btnReboot', 'btnExec', 'btnBridgeOpen', 'btnBridgeClose', 'btnBridgeStatus']) {
+  for (const id of [
+    'btnClockSet',
+    'btnFreelist',
+    'btnRestart',
+    'btnBathRestart',
+    'btnReboot',
+    'btnExec',
+    'btnBridgeOpen',
+    'btnBridgeClose',
+    'btnBridgeStatus',
+    'btnLoadLog',
+    'btnLoadLogLive',
+  ]) {
     $(id).disabled = !usable
   }
-  // 换了设备，上一条连接命令、上一份名单与上一批状态都不再属于眼前这台：收起来，
-  // 免得照着旧端口去连、或者对着另一台的名单按保存
+}
+
+/** 命令与调试通道都只作用于"当前设备"，切换设备时连同上一台的状态一起收起来。 */
+function renderCurrent() {
+  updateCurrentDevice()
   $('bridgeSteps').hidden = true
   $('bridgeHint').hidden = false
   $('execOutput').hidden = true
@@ -515,6 +530,9 @@ export const devicesView = {
     dispose = disposer()
     dispose.add(subscribe('runtime', renderTable))
     dispose.add(subscribe('device', renderCurrent))
+    // 设备清单刷新时更新标签与按钮；设备已选中时 refreshDevices 不会再发 device，
+    // 只靠它会让页面停在初始的“未选择”
+    dispose.add(subscribe('devices', updateCurrentDevice))
     dispose.add(subscribe('view', (id) => { if (id !== 'devices') dispose.dispose() }))
 
     dispose.add(
