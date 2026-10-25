@@ -428,7 +428,7 @@ export const devicesView = {
           <span class="panel-title">设备日志</span>
           <span class="panel-note" id="logStatus">在线可现读最新；离线时看上次上送</span>
           <div class="panel-tools">
-            <select id="inLogKind" class="input-sm">
+            <select id="inLogKind">
               <option value="device">device.log</option>
               <option value="crash">crash.log</option>
               <option value="ota">ota-install.log</option>

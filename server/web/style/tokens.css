@@ -65,6 +65,17 @@
   --radius-sm: 6px;
   --bar-height: 40px;
 
+  /* 深色画布与浮层：检视页的纯黑画布、暗色条纹、遮罩与白字 */
+  --canvas-bg: #000;
+  --canvas-stripe-a: #111;
+  --canvas-stripe-b: #1a1a1a;
+  --on-strong: #fff;
+  --overlay-strong: rgb(0 0 0 / 85%);
+  --outline-soft: rgb(255 255 255 / 25%);
+  --outline-strong: rgb(255 255 255 / 60%);
+  --shadow-overlay: 0 10px 28px rgb(0 0 0 / 45%);
+  --shadow-panel: 0 8px 24px rgb(0 0 0 / 40%);
+
   /* 过渡时长 */
   --transition: 0.15s ease;
 }

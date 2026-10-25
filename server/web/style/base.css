@@ -122,6 +122,13 @@ label {
   color: var(--muted);
 }
 
+/* 控件或表格后的补充说明：单独一行，靠上留 4px。 */
+.hint {
+  margin-top: var(--sp-1);
+  color: var(--muted);
+  font-size: var(--fs-small);
+}
+
 .empty {
   padding: var(--sp-5);
   color: var(--muted);
