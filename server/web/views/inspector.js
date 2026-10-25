@@ -688,16 +688,16 @@ export const inspectorView = {
             <div class="prop-header">属性</div>
             <div class="prop-section">
               <div class="prop-section-title">基本信息</div>
-              <div class="prop-row"><span class="prop-key">Class</span><span class="prop-val" id="propClass">-</span></div>
-              <div class="prop-row"><span class="prop-key">ResId</span><span class="prop-val" id="propRid">-</span></div>
-              <div class="prop-row"><span class="prop-key">Text</span><span class="prop-val" id="propText">-</span></div>
-              <div class="prop-row"><span class="prop-key">Desc</span><span class="prop-val" id="propDesc">-</span></div>
+              <div class="kv is-compact"><span class="k">Class</span><span class="v" id="propClass">-</span></div>
+              <div class="kv is-compact"><span class="k">ResId</span><span class="v" id="propRid">-</span></div>
+              <div class="kv is-compact"><span class="k">Text</span><span class="v" id="propText">-</span></div>
+              <div class="kv is-compact"><span class="k">Desc</span><span class="v" id="propDesc">-</span></div>
             </div>
             <div class="prop-section">
               <div class="prop-section-title">布局信息</div>
-              <div class="prop-row"><span class="prop-key">Bounds</span><span class="prop-val" id="propBounds">-</span></div>
-              <div class="prop-row"><span class="prop-key">Size</span><span class="prop-val" id="propSize">-</span></div>
-              <div class="prop-row"><span class="prop-key">Center</span><span class="prop-val" id="propCoords">-</span></div>
+              <div class="kv is-compact"><span class="k">Bounds</span><span class="v" id="propBounds">-</span></div>
+              <div class="kv is-compact"><span class="k">Size</span><span class="v" id="propSize">-</span></div>
+              <div class="kv is-compact"><span class="k">Center</span><span class="v" id="propCoords">-</span></div>
             </div>
             <div class="prop-section">
               <div class="prop-section-title">交互状态</div>
