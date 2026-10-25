@@ -149,6 +149,9 @@ object ConfigDefaults {
     /** 每日上电时刻 */
     const val POWER_ON_AT = "10:55"
 
+    /** 等待浴室提示结束 */
+    const val VOICE_BATH_WAIT_MAX_MS = 15000L
+
     /** 全部默认值拼成一个对象，供 `RuntimeConfig.resetToDefaults` 复位用。 */
     fun asJson(): JSONObject = JSONObject()
         .put("heartbeat_interval_s", HEARTBEAT_INTERVAL_S)
@@ -196,4 +199,5 @@ object ConfigDefaults {
         .put("bath_db_archive_threshold_mb", BATH_DB_ARCHIVE_THRESHOLD_MB)
         .put("power_off_at", POWER_OFF_AT)
         .put("power_on_at", POWER_ON_AT)
+        .put("voice_bath_wait_max_ms", VOICE_BATH_WAIT_MAX_MS)
 }

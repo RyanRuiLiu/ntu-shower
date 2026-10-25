@@ -257,8 +257,8 @@ ssh <deploy-host> 'curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.1
 1. **规则是否匹配**：设备、学号两个维度各自具体或「全部」（`*`），具体压过通配
    （先设备、后学号维度）；「全部学号」的规则可能把这个学号放进了排除名单；规则
    停用或没有规则就不会下发。看 `/api/v1/voice/deliveries` 有没有对应记录。
-2. **事件是否过期**：`voice_event_max_age_s` 默认 60 秒，离线积压或延迟过长会跳过；
-   投递状态为 `skipped`。
+2. **事件是否过期**：`voice_event_max_age_s` 默认 60 秒，离线积压或音频准备耗时过长
+   会跳过；投递状态为 `skipped`。
 3. **命令是否到达设备**：审计页看 `voice.play` / `voice.prepare` 的 status 与
    reason_code；离线是 `device.offline`，旧 APK 是 `device.unsupported_action`。
 4. **音频是否就绪**：`/api/v1/voice/status`；规则保存 503 时先按上一节补 Piper/模型。
@@ -268,11 +268,11 @@ ssh <deploy-host> 'curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.1
 6. **设备是否真的在播**：设备 `device.log` 看 `audio.played` / `audio.play-failed` /
    `audio.volume-restored`；音量恢复失败会保留待恢复标记，下次启动或播放前再试。
    规则行的「推送」按钮可不等事件、立即在指定设备上真播一遍，用于现场验证。
-7. **和浴室 App 的结算提示重叠**：调该规则的 `delay_ms`（从事件时刻算起；页面按秒输入）。
-   网页「最近推送」的阶段耗时列（音频准备 / 事件到下发 / 下发到播完 / 现场下载还是
-   命中设备缓存）就是为这一定值准备的；来源列区分自动触发与手动推送，后者不经过
-   延迟窗口。结合设备日志对照，现场实测后落值。语速整体偏快偏慢
-   调全局配置 `voice_speech_rate`，改完试听即时生效。
+7. **和浴室 App 的提示音重叠**：设备播放前会自动检测 `STREAM_MUSIC` 上的浴室提示音，
+   等它结束再播，不需要逐条配延迟。看设备日志 `audio.bath-wait` 的 `waited_ms`；
+   出现 `audio.bath-wait-timeout` 说明等待超过 `voice_bath_wait_max_ms`（默认 15 秒），
+   检查浴室 App 是否卡在循环播放。网页「最近推送」的阶段耗时列（音频准备 / 事件到
+   下发 / 下发到播完 / 现场下载还是命中设备缓存）用于区分链路慢还是设备播放慢。
 
 ### 调试通道（ADB 桥）
 

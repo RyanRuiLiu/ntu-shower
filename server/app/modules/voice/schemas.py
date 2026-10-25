@@ -26,10 +26,6 @@ from app.modules.doors.schemas import DoorState, state_label
 
 # ── 边界 ──
 
-DELAY_MIN_MS = 0
-DELAY_MAX_MS = 10_000
-DELAY_DEFAULT_MS = 0
-
 VOLUME_MIN = 0
 VOLUME_MAX = 5
 VOLUME_DEFAULT = 3
@@ -175,17 +171,10 @@ class VoiceBoundView(BaseModel):
     default: int
 
 
-class VoiceDelayView(BaseModel):
-    minimum_ms: int
-    maximum_ms: int
-    default_ms: int
-
-
 class VoiceSpecView(BaseModel):
     events: list[VoiceEventView]
     placeholders: list[VoicePlaceholderView]
     voices: list[VoiceInfoView]
-    delay: VoiceDelayView
     volume: VoiceBoundView
 
 
@@ -213,7 +202,6 @@ class VoiceRuleCreate(BaseModel):
     certs: list[str] = Field(min_length=1, max_length=MAX_CERT_TARGETS_PER_CREATE)
     events: list[DoorEventKind] = Field(min_length=1)
     text: str = Field(min_length=1, max_length=120)
-    delay_ms: int = Field(default=DELAY_DEFAULT_MS, ge=DELAY_MIN_MS, le=DELAY_MAX_MS)
     volume: int = Field(default=VOLUME_DEFAULT, ge=VOLUME_MIN, le=VOLUME_MAX)
     enabled: bool = True
     exempt_cert_nos: list[str] = Field(default_factory=list, max_length=MAX_EXEMPT_PER_RULE)
@@ -227,7 +215,6 @@ class VoiceRuleUpdate(BaseModel):
     certs: list[str] = Field(min_length=1, max_length=MAX_CERT_TARGETS_PER_CREATE)
     events: list[DoorEventKind] = Field(min_length=1)
     text: str = Field(min_length=1, max_length=120)
-    delay_ms: int = Field(default=DELAY_DEFAULT_MS, ge=DELAY_MIN_MS, le=DELAY_MAX_MS)
     volume: int = Field(default=VOLUME_DEFAULT, ge=VOLUME_MIN, le=VOLUME_MAX)
     enabled: bool = True
     exempt_cert_nos: list[str] = Field(default_factory=list, max_length=MAX_EXEMPT_PER_RULE)
@@ -268,7 +255,6 @@ class VoiceRuleView(BaseModel):
     exempt: list[str]
     events: list[DoorEventKind]
     text: str
-    delay_ms: int
     volume: int
     enabled: bool
     voice: str
@@ -291,11 +277,11 @@ class VoiceStatusView(BaseModel):
 
 
 class VoiceDeliveryView(BaseModel):
-    """一次播报投递：时刻之外带各阶段耗时，现场据此调延迟与语速。
+    """一次播报投递：时刻之外带各阶段耗时，现场据此看链路与播放。
 
     - `clip_ms`：认领之后备齐音频的耗时（含等待合成锁与缓存检查；命中缓存时接近 0）。
     - `dispatch_offset_ms`：事件发生 → 下发 `voice.play`。
-    - `finish_offset_ms`：下发 → 设备收尾（含下载与播放；未下发即为 None）。
+    - `finish_offset_ms`：下发 → 设备收尾（含等待浴室提示音、下载与播放；未下发即为 None）。
     - `downloaded`：设备是否现场下载（False 表示命中设备缓存）。
     - `source`：触发来源。`auto` 是事件自动触发，`manual` 是管理台手动推送。
     """
@@ -308,7 +294,6 @@ class VoiceDeliveryView(BaseModel):
     event: DoorEventKind
     door_no: int
     text: str
-    delay_ms: int
     occurred_at: str
     dispatched_at: str
     done_at: str

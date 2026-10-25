@@ -5,9 +5,9 @@
  * 已暂停 / 淋浴中 / 空闲。具体规则压过通配规则：先比设备维度，再比学号维度；
  * 一个「设备 × 学号 × 事件」只有一条规则，覆盖切换靠停用具体规则让通配顶上。
  *
- * 延迟从事件发生时刻算起：浴室 App 自己会播结算提示，延迟用来错开它。延迟窗口
- * 同时用于设备端预下载音频；「最近推送」带各阶段耗时（音频准备 / 事件到下发 /
- * 下发到播完），现场按它调延迟与语速。投递来源分自动触发与手动推送。
+ * 浴室 App 自己会在分配/结算时播提示音；设备在播放前检测它是否还在播，等它结束
+ * 再开口（`audio.bath-wait`）。「最近推送」带各阶段耗时（音频准备 / 事件到下发 /
+ * 下发到播完），现场按它看链路与语速。投递来源分自动触发与手动推送。
  *
  * 页面只经 core/api.js 出网，不直接 fetch；表单与表格沿用项目已有的
  * panel / field / table / badge / btn 结构，设备选择与身份页共用 core/device-scope.js。
@@ -40,11 +40,6 @@ let dispose = disposer()
 
 function eventItem(value) {
   return events.find((item) => item.value === value) || { value, label: value, description: '' }
-}
-
-function fmtDelay(ms) {
-  const seconds = Number(ms || 0) / 1000
-  return `${seconds % 1 === 0 ? seconds : seconds.toFixed(1)} 秒`
 }
 
 function fmtMs(ms) {
@@ -114,7 +109,7 @@ function renderStatus() {
     .join('')
   $('voiceStatus').innerHTML = `<div class="btn-row">${ffmpeg}<span class="badge badge-blue">音频 ${esc(String(status.clip_count))} 个</span></div>
     <div class="table-wrap"><table class="table"><thead><tr><th>音色</th><th>说明</th><th>状态</th><th class="col-actions">操作</th></tr></thead><tbody>${rows}</tbody></table></div>
-    <div class="hint">音色在每条规则上单独选；具体规则压过通配（先设备、后学号维度），延迟从事件发生时刻算起，窗口内设备并行预下载。</div>`
+    <div class="hint">音色在每条规则上单独选；具体规则压过通配（先设备、后学号维度）。播放前设备会等浴室 App 的提示音结束再开口。</div>`
 }
 
 /** 边界一律来自 /voice/spec：输入范围与标签文字都由它渲染，页面不抄第二份。 */
@@ -157,12 +152,6 @@ function renderSpec() {
   $('voicePlaceholders').innerHTML = `${chips.join(" ")}
     <div class="hint">点一下插到模板光标处，说明悬停可见；音效与停顿只响不读。</div>`
   if (!spec) return
-  const delayMin = spec.delay.minimum_ms / 1000
-  const delayMax = spec.delay.maximum_ms / 1000
-  $('voiceDelayLabel').textContent = `触发延迟（${delayMin}–${delayMax} 秒）`
-  $('voiceDelay').min = String(delayMin)
-  $('voiceDelay').max = String(delayMax)
-  $('voiceDelay').step = '0.5'
   $('voiceVolumeLabel').textContent = `音量（${spec.volume.minimum}–${spec.volume.maximum}）`
   $('voiceVolume').min = String(spec.volume.minimum)
   $('voiceVolume').max = String(spec.volume.maximum)
@@ -292,7 +281,7 @@ function renderTable() {
         <td>${certCell(rule)}</td>
         <td>${eventBadges}</td>
         <td><div title="${esc(rule.text)}">${esc(rule.text)}</div></td>
-        <td class="mono">延迟 ${esc(fmtDelay(rule.delay_ms))} · 音量 ${esc(String(rule.volume))} · ${esc(rule.voice)}</td>
+        <td class="mono">音量 ${esc(String(rule.volume))} · ${esc(rule.voice)}</td>
         <td>${rule.enabled ? '<span class="badge badge-green">启用</span>' : '<span class="badge">停用</span>'}</td>
         <td class="col-actions">
           <div class="btn-row">
@@ -368,14 +357,13 @@ function renderDeliveries() {
         <td><span class="badge badge-blue" title="${esc(event.description)}">${esc(event.label)}</span></td>
         <td class="mono">${esc(String(item.door_no))}</td>
         <td><div title="${esc(item.text || '')}">${esc(item.text || PLACEHOLDER)}</div></td>
-        <td class="mono">${esc(fmtDelay(item.delay_ms))}</td>
         <td>${stageCell(item)}</td>
         <td><span title="${esc(item.detail || '')}">${deliveryBadge(item.status)}</span></td>
       </tr>`
     })
     .join('')
   $('voiceDeliveryTable').innerHTML = `<table class="table"><thead><tr>
-      <th>下发时刻</th><th>来源</th><th>设备</th><th>学号</th><th>事件</th><th>喷头</th><th>播报内容</th><th>延迟</th><th>耗时</th><th>状态</th>
+      <th>下发时刻</th><th>来源</th><th>设备</th><th>学号</th><th>事件</th><th>喷头</th><th>播报内容</th><th>耗时</th><th>状态</th>
     </tr></thead><tbody>${rows}</tbody></table>`
 }
 
@@ -405,7 +393,6 @@ function clearForm() {
   $('voiceEvents').innerHTML = eventChecksHtml([])
   renderVoiceOptions('melo')
   $('voiceText').value = ''
-  $('voiceDelay').value = spec ? String(spec.delay.default_ms / 1000) : '0'
   $('voiceVolume').value = spec ? String(spec.volume.default) : '3'
   $('voiceEnabled').checked = true
   $('voiceSample').hidden = true
@@ -423,7 +410,6 @@ function fillForm(rule) {
   $('voiceEvents').innerHTML = eventChecksHtml(rule.events)
   renderVoiceOptions(rule.voice)
   $('voiceText').value = rule.text
-  $('voiceDelay').value = String(rule.delay_ms / 1000)
   $('voiceVolume').value = String(rule.volume)
   $('voiceEnabled').checked = rule.enabled
   applyFormMode()
@@ -461,7 +447,6 @@ function readForm() {
   if (!text) return report('voiceResult', '失败 · 请填写播报内容', 'err')
   const common = {
     text,
-    delay_ms: Math.round(Number($('voiceDelay').value) * 1000),
     volume: Number($('voiceVolume').value),
     enabled: $('voiceEnabled').checked,
     exempt_cert_nos: exempt,
@@ -767,11 +752,6 @@ export const voiceView = {
             <label for="voiceText">播报内容（模板）</label>
             <input id="voiceText" type="text" placeholder="例如：{event}，{door_no} 号喷头">
             <div id="voicePlaceholders"></div>
-          </div>
-          <div class="field">
-            <label for="voiceDelay" id="voiceDelayLabel">触发延迟</label>
-            <input id="voiceDelay" type="number" min="0" max="10" step="0.5" value="0">
-            <div class="muted">从事件发生时刻算起；浴室 App 自己的语音提示结束后再播，现场实测后调整。窗口内设备会先预下载音频。</div>
           </div>
           <div class="field">
             <label for="voiceVolume" id="voiceVolumeLabel">音量</label>

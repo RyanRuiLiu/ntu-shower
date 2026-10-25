@@ -1,9 +1,10 @@
 """语音播报三张表的 SQL 集中管理。
 
 `voice_clip` 是内容层（按最终文本合成，多个规则共用），`voice_rule` 是配置层
-（文本是模板，带延迟），`voice_delivery` 是投递层（事件 key 去重 + 现场调延迟用的
-时刻与各阶段耗时）。规则删除不删音频与历史投递。`voice_delivery` 没有清理机制是
-故意的：它与统计表同一取向，是"谁在何时被播报了什么"的现场痕迹。
+（文本是模板），`voice_delivery` 是投递层（事件 key 去重 + 各阶段时刻与耗时）。
+规则删除不删音频与历史投递。`voice_delivery` 没有清理机制是故意的：它与统计表同一
+取向，是"谁在何时被播报了什么"的现场痕迹。`delay_ms` 两列保留只为历史数据；新规则
+不再读写它，新投递恒写 0，等待浴室提示音改由设备端自动完成。
 
 `voice_rule` 的目标维度允许 `*`（设备=全部设备、学号=全部学号），`exempt` 是
 「全部学号」规则的排除名单（JSON 数组文本，匹配在 service 层做集合判断）。「设备 ×
@@ -114,7 +115,6 @@ def insert_rule(
     events: str,
     exempt: str,
     text: str,
-    delay_ms: int,
     volume: int,
     enabled: bool,
     voice: str,
@@ -123,9 +123,9 @@ def insert_rule(
     """插入一条逻辑规则：目标（设备/学号）与事件都以创建时的作用域整体存储。"""
     cursor = write(
         "INSERT INTO voice_rule"
-        " (devices, certs, events, exempt, text, delay_ms, volume, enabled, voice, created_at, updated_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-        (devices, certs, events, exempt, text, delay_ms, volume, int(enabled), voice, now, now),
+        " (devices, certs, events, exempt, text, volume, enabled, voice, created_at, updated_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (devices, certs, events, exempt, text, volume, int(enabled), voice, now, now),
     )
     return int(cursor.lastrowid or 0)
 
@@ -137,16 +137,15 @@ def update_rule(
     events: str,
     exempt: str,
     text: str,
-    delay_ms: int,
     volume: int,
     enabled: bool,
     voice: str,
     now: str,
 ) -> int:
     cursor = write(
-        "UPDATE voice_rule SET devices=?, certs=?, events=?, exempt=?, text=?, delay_ms=?,"
+        "UPDATE voice_rule SET devices=?, certs=?, events=?, exempt=?, text=?,"
         " volume=?, enabled=?, voice=?, updated_at=? WHERE id=?",
-        (devices, certs, events, exempt, text, delay_ms, volume, int(enabled), voice, now, rule_id),
+        (devices, certs, events, exempt, text, volume, int(enabled), voice, now, rule_id),
     )
     return cursor.rowcount
 
@@ -311,11 +310,11 @@ def claim_delivery(
     occurred_at: str,
     trace_id: str,
     now: str,
-    delay_ms: int | None = None,
 ) -> bool:
     """认领一次事件；同一 `event_key` 只成功一次。
 
-    `delay_ms` 省略时取规则上的值；手动推送不经过延迟窗口，显式传 0。
+    `delay_ms` 列只为历史记录保留，新投递恒写 0；等待提示音的时长由设备日志
+    `audio.bath-wait` 记录。
     """
     cursor = write(
         "INSERT OR IGNORE INTO voice_delivery"
@@ -331,7 +330,7 @@ def claim_delivery(
             event.kind.value,
             text,
             clip_id,
-            int(rule["delay_ms"]) if delay_ms is None else delay_ms,
+            0,
             occurred_at,
             "pending",
             trace_id,
@@ -366,7 +365,7 @@ def list_deliveries(limit: int) -> list[Row]:
     return (
         get_conn()
         .execute(
-            "SELECT id, event_key, rule_id, device_id, cert_no, event, door_no, text, delay_ms,"
+            "SELECT id, event_key, rule_id, device_id, cert_no, event, door_no, text,"
             " occurred_at, dispatched_at, prepared_at, done_at, clip_ms, downloaded,"
             " status, detail"
             " FROM voice_delivery ORDER BY id DESC LIMIT ?",

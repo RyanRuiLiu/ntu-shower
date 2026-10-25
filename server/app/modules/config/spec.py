@@ -156,6 +156,7 @@ GROUPS: tuple[GroupSpec, ...] = (
     GroupSpec("doors", "喷头状态采集", "device"),
     GroupSpec("ui", "界面操作", "device"),
     GroupSpec("automation", "自动化流程", "device"),
+    GroupSpec("voice", "播报时序", "device"),
     GroupSpec("bath_db", "浴室 App 数据库", "device"),
     GroupSpec("gateway", "链路与心跳", "device"),
     GroupSpec("guard", "崩溃守护", "device"),
@@ -1021,6 +1022,20 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "每日上电时刻",
         "设备 MCU 每日定时上电的时刻。重布 MCU 时与「每日断电时刻」成对使用：开机延时从断电时刻起算，到这个时刻上电",
         group="power",
+    ),
+    ConfigSpec(
+        "voice_bath_wait_max_ms",
+        INT,
+        DEVICE,
+        15000,
+        "等待浴室提示结束",
+        "设备播放语音前检测浴室 App 的提示音是否还在播（它走 STREAM_MUSIC）："
+        "正在播就等它结束再播我们的。超过这个毫秒数仍未结束就照常播放，并在设备日志记一条"
+        " audio.bath-wait-timeout。设得比提示音时长（约 2–3 秒）长即可",
+        minimum=3000,
+        maximum=30000,
+        unit="毫秒",
+        group="voice",
     ),
 )
 
