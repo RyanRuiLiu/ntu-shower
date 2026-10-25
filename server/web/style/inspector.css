@@ -113,12 +113,14 @@
   background: var(--canvas-bg);
 }
 
-/* `object-fit: contain` 配合两个 max-* 保证画面按原始比例落在面板里，
-   既不裁切也不拉伸——坐标换算依赖显示尺寸与原始尺寸的线性关系 */
+/* 画面框由 JS 按面板可用空间与设备宽高比算好（--screen-w / --screen-h），
+   图片填满框；框与图片同尺寸，覆盖层与坐标换算才对得上。
+   只给 img 写 max-* 不够：screen-frame 是 inline-block，百分比会绕回图片自身
+   的固有宽度，面板缩小时图片会溢出并被 overflow:hidden 裁掉。 */
 .screen-panel img {
   display: block;
-  max-width: 100%;
-  max-height: 100%;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
   user-select: none;
 }
@@ -148,6 +150,8 @@
 .screen-frame {
   position: relative;
   display: inline-block;
+  width: var(--screen-w, auto);
+  height: var(--screen-h, auto);
   line-height: 0;
 }
 
