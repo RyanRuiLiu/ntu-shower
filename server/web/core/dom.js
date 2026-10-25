@@ -47,9 +47,9 @@ export function esc(value) {
  * 返回解绑函数是为了让视图的 `unmount` 能干净收尾——轮询与全局监听忘记解绑会
  * 在视图反复切换后累积，表现为越用越卡。
  */
-export function listen(target, type, handler) {
-  target.addEventListener(type, handler)
-  return () => target.removeEventListener(type, handler)
+export function listen(target, type, handler, options) {
+  target.addEventListener(type, handler, options)
+  return () => target.removeEventListener(type, handler, options)
 }
 
 /** 把一组「解绑函数」收集起来，视图卸载时一次性调用。 */
