@@ -293,6 +293,22 @@ function bindTopbar() {
 
   listen($('devicePicker'), 'change', (event) => selectDevice(event.target.value))
 
+  // 鼠标滚轮切设备：原生 select 只在展开时滚选项，收起时滚轮会带动整页。
+  // 收起状态下直接循环 selectedIndex；展开时滚轮事件由系统弹层接管。
+  listen(
+    $('devicePicker'),
+    'wheel',
+    (event) => {
+      const select = event.currentTarget
+      if (select.disabled || select.options.length < 2 || event.deltaY === 0) return
+      event.preventDefault()
+      const step = event.deltaY > 0 ? 1 : -1
+      select.selectedIndex = (select.selectedIndex + step + select.options.length) % select.options.length
+      select.dispatchEvent(new Event('change'))
+    },
+    { passive: false },
+  )
+
   listen($('btnDeviceInfo'), 'click', (event) => {
     // 不冒泡到 document，否则紧接着的"点外部关闭"会立刻把它收回去
     event.stopPropagation()
