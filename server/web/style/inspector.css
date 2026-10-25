@@ -634,26 +634,6 @@
   text-transform: uppercase;
 }
 
-.prop-row {
-  display: flex;
-  padding: 2px 0;
-  font-size: var(--fs-chip);
-  line-height: 17px;
-}
-
-.prop-key {
-  width: 54px;
-  flex-shrink: 0;
-  color: var(--muted);
-  font-size: var(--fs-micro);
-}
-
-.prop-val {
-  overflow-wrap: anywhere;
-  color: var(--dim);
-  font: 10px var(--font-mono);
-}
-
 .prop-tags {
   display: flex;
   flex-wrap: wrap;

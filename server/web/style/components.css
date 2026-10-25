@@ -228,6 +228,31 @@
   white-space: nowrap;
 }
 
+/* 检视页属性列表：同一个标签值结构的紧凑左对齐变体（长值折行，不省略） */
+.kv.is-compact {
+  justify-content: flex-start;
+  gap: var(--sp-2);
+  padding: 2px 0;
+  font-size: var(--fs-chip);
+  line-height: 17px;
+}
+
+.kv.is-compact .k {
+  width: 6ch;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+}
+
+.kv.is-compact .v {
+  overflow: visible;
+  color: var(--dim);
+  font: var(--fs-micro) var(--font-mono);
+  text-align: left;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 /* ── 配置页：小卡片分模块网格 + 页签 ───────────────── */
 
 /* 页签组：一个 panel-head 里有两组（顶层的分区、设备分区里的编辑目标），

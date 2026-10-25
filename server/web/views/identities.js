@@ -100,7 +100,7 @@ function render(list) {
     })
     .join('')
   $('identityTable').innerHTML = `<table class="table"><thead><tr>
-      <th>身份标识</th><th>来源</th><th>能力位</th><th>设备作用域</th><th>备注</th><th></th>
+      <th>身份标识</th><th>来源</th><th>能力位</th><th>设备作用域</th><th>备注</th><th>操作</th>
     </tr></thead><tbody>${rows}</tbody></table>`
 }
 
