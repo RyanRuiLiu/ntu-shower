@@ -1,8 +1,10 @@
-"""门域状态迁移事件：只表达「刚刚发生了什么」，供 voice 等下游消费。
+"""门域可播报事件，供 voice 等下游消费。
 
-事件的身份是状态迁移本身，不是当前状态：
-- `assigned` / `released` 以会话 id 为身份（一场会话各一次）；
-- 其余三个以本帧 `door_state_event` 的行 id 为身份。
+- `assigned` / `released` 是**会话生命周期事实**：以会话 id 为身份（一场会话各一次）。
+  `assigned` 随新会话建立产生，`startup`/盲区帧只要 `open_time` 可平移也会补发，
+  用真实分配时刻而不是观测时刻。
+- `shower_started` / `paused` / `resumed` 是**观测到的状态迁移**：以本帧
+  `door_state_event` 的行 id 为身份；盲区/全貌帧不编造迁移。
 
 `doors` 不依赖 `voice`；这里只产出门域事实，是否播报由 voice 决定。
 """
