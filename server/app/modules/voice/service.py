@@ -59,6 +59,9 @@ PREPARE_GRACE_S = 30.0
 PLAY_TIMEOUT_MIN_S = 30.0
 PLAY_TIMEOUT_MAX_S = 120.0
 
+#: 手动推送的投递事件键前缀。来源不另存一列：事件键已经是「这条投递由谁发起」的身份。
+MANUAL_EVENT_PREFIX = "manual:"
+
 #: 规则保存/试听的 TTS 串行锁。Piper 一次只跑一个，避免并发子进程抢 CPU。
 _clip_lock = threading.Lock()
 
@@ -622,7 +625,7 @@ async def push_to_device(rule_id: int, device_id: str) -> schemas.VoicePushView:
 
     渲染、合成、下发参数与真实事件走同一条路径：同模板、同样例值、同音色、同音量、
     同播放超时。与真实事件只差两处：不等 delay_ms（那是给浴室 App 语音让路的，
-    手动验证不需要）；投递记录以 manual:* 事件键落一条，现场在「最近播报」对照。
+    手动验证不需要）；投递记录以 manual:* 事件键落一条，现场在「最近推送」对照。
     """
     row = repository.get_rule(rule_id)
     if row is None:
@@ -650,9 +653,9 @@ async def push_to_device(rule_id: int, device_id: str) -> schemas.VoicePushView:
         cert_no=cert_no,
         session_id=0,
         occurred_at=now,
-        event_key=f"manual:{rule_id}:{uuid.uuid4().hex[:12]}",
+        event_key=f"{MANUAL_EVENT_PREFIX}{rule_id}:{uuid.uuid4().hex[:12]}",
     )
-    repository.claim_delivery(event, row, rendered_text, clip.clip_id, now, trace_id_var.get(), now)
+    repository.claim_delivery(event, row, rendered_text, clip.clip_id, now, trace_id_var.get(), now, delay_ms=0)
     outcome = await sessions_service.send_command_and_wait(
         device_id,
         actions.VOICE_PLAY,
@@ -881,6 +884,7 @@ def list_deliveries(limit: int) -> list[schemas.VoiceDeliveryView]:
     return [
         schemas.VoiceDeliveryView(
             id=int(row["id"]),
+            source="manual" if str(row["event_key"]).startswith(MANUAL_EVENT_PREFIX) else "auto",
             rule_id=int(row["rule_id"]),
             device_id=str(row["device_id"]),
             cert_no=str(row["cert_no"]),

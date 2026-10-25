@@ -48,6 +48,12 @@ object AppConfig {
     /** 本应用在共享存储上的工作目录（OTA 下载、崩溃日志）。 */
     const val WORK_DIR = "/sdcard/ntu-shower"
 
+    /** 未捕获异常堆栈：崩溃处理器写入，重连后随 device/crash 一起上送。 */
+    const val CRASH_LOG_NAME = "crash.log"
+
+    /** OTA 脱手安装脚本的原始输出（`pm install` 的结论只在这里）。 */
+    const val OTA_INSTALL_LOG_NAME = "ota-install.log"
+
     /** 播报音频缓存：文件名是 clip_id（内容身份），服务端只下发 id。 */
     const val VOICE_DIR = "$WORK_DIR/voice"
 

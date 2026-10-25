@@ -23,9 +23,10 @@
               "type": "string",
               "enum": [
                 "device",
-                "crash"
+                "crash",
+                "ota"
               ],
-              "description": "日志种类：device=device.log（运行事件），crash=crash.log（未捕获异常现场）。"
+              "description": "日志种类：device=device.log（运行事件），crash=crash.log（未捕获异常现场），ota=ota-install.log（安装脚本原始输出）。"
             },
             "content": {
               "type": "string",

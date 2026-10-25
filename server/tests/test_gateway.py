@@ -526,6 +526,7 @@ def test_device_log_upload_is_stored_and_queryable(
     with helpers.trusted_online(client, "dev-log-upload", admin_headers) as ws:
         ws.send_text(helpers.frame("device.log_upload", {"kind": "device", "content": "line1\nline2\n"}))
         ws.send_text(helpers.frame("device.log_upload", {"kind": "crash", "content": "boom\n"}))
+        ws.send_text(helpers.frame("device.log_upload", {"kind": "ota", "content": "Success\n"}))
         ws.send_text(helpers.frame("link.ping", {"sender_time": now_rfc3339()}))
         helpers.recv_until(ws, "link.pong")
 
@@ -538,6 +539,10 @@ def test_device_log_upload_is_stored_and_queryable(
     r = client.get(f"/api/v1/devices/{device}/logs?kind=crash", headers=admin_headers)
     assert r.status_code == 200
     assert r.json()["content"] == "boom\n"
+
+    r = client.get(f"/api/v1/devices/{device}/logs?kind=ota", headers=admin_headers)
+    assert r.status_code == 200
+    assert r.json()["content"] == "Success\n"
 
 
 def test_device_log_upload_requires_trusted_and_valid_kind(

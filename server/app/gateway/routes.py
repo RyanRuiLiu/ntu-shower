@@ -256,7 +256,7 @@ async def _handle_frame(
             return
         kind = text_of(payload, "kind")
         content = payload.get("content")
-        if kind not in ("device", "crash") or not isinstance(content, str):
+        if kind not in ("device", "crash", "ota") or not isinstance(content, str):
             await ws.send_text(protocol.error(reason_codes.BAD_JSON.code, "日志上送形状不对", reply_to=frame_id))
             return
         # 落库即回执（无需回帧）：失败回执反而让设备重发同一份大内容；真失败时下一轮

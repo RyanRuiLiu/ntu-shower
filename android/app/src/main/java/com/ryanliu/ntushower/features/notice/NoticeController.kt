@@ -137,6 +137,8 @@ class NoticeController(context: Context, private val deviceLog: DeviceLog, priva
         text = RuntimeConfig.noticeText,
         textSizeSp = RuntimeConfig.noticeTextSizeSp,
         textColor = RuntimeConfig.noticeTextColor,
+        align = RuntimeConfig.noticeAlign,
+        centerOffsetDp = RuntimeConfig.noticeCenterOffsetDp,
         xDp = RuntimeConfig.noticeXDp,
         yDp = RuntimeConfig.noticeYDp,
         timeEnabled = RuntimeConfig.noticeTimeEnabled,

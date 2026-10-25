@@ -28,6 +28,7 @@ object SupportedActions {
 
     // ── 设备自身 ──
     const val DEVICE_EXEC = "device.exec"
+    const val DEVICE_LOG_TAIL = "device.log_tail"
     const val DEVICE_REBOOT = "device.reboot"
 
     // ── app ──
@@ -68,6 +69,7 @@ object SupportedActions {
         CAMERA_CAPTURE,
         SCREEN_CAPTURE,
         DEVICE_EXEC,
+        DEVICE_LOG_TAIL,
         DEVICE_REBOOT,
         APP_RESTART,
         BATH_RESTART,

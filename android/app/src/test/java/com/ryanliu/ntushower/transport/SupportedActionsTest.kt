@@ -22,6 +22,7 @@ class SupportedActionsTest {
             "camera.capture",
             "screen.capture",
             "device.exec",
+            "device.log_tail",
             "device.reboot",
             "app.restart",
             "bath.restart",
@@ -51,6 +52,7 @@ class SupportedActionsTest {
         assertTrue(SupportedActions.CAMERA_CAPTURE in SupportedActions.ALL)
         assertTrue(SupportedActions.SCREEN_CAPTURE in SupportedActions.ALL)
         assertTrue(SupportedActions.DEVICE_EXEC in SupportedActions.ALL)
+        assertTrue(SupportedActions.DEVICE_LOG_TAIL in SupportedActions.ALL)
         assertTrue(SupportedActions.DEVICE_REBOOT in SupportedActions.ALL)
         assertTrue(SupportedActions.APP_RESTART in SupportedActions.ALL)
         assertTrue(SupportedActions.BRIDGE_OPEN in SupportedActions.ALL)

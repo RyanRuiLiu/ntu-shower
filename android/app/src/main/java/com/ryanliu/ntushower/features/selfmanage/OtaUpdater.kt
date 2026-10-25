@@ -200,7 +200,7 @@ class OtaUpdater(
      * 为止。失败也没关系，重试本来就要重下。
      */
     private fun installDetached(apk: File, version: String) {
-        val log = File(AppConfig.WORK_DIR, INSTALL_LOG_NAME).absolutePath
+        val log = File(AppConfig.WORK_DIR, AppConfig.OTA_INSTALL_LOG_NAME).absolutePath
         val pkg = BuildConfig.APPLICATION_ID
         val myPid = android.os.Process.myPid()
         // 步骤事实同步进 device.log（脱手脚本自身无法回调，这里记"已发起"）；
@@ -290,9 +290,6 @@ class OtaUpdater(
 
     companion object {
         private const val TAG = "OtaUpdater"
-
-        /** 安装日志文件名（位于 `AppConfig.WORK_DIR`）。安装是脱手执行的，成败只在这里留痕。 */
-        private const val INSTALL_LOG_NAME = "ota-install.log"
 
         /** 同一版本安装尝试的退避窗口：窗口内不重复下载与安装。 */
         private const val RETRY_BACKOFF_MS = 5 * 60_000L

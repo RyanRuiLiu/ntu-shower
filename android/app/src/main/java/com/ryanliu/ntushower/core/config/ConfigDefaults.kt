@@ -59,7 +59,13 @@ object ConfigDefaults {
     /** 提示文字颜色 */
     const val NOTICE_TEXT_COLOR = "#d94f16"
 
-    /** 提示左边距 */
+    /** 提示水平对齐 */
+    const val NOTICE_ALIGN = "左对齐"
+
+    /** 提示居中偏移 */
+    const val NOTICE_CENTER_OFFSET_DP = 0L
+
+    /** 提示水平边距 */
     const val NOTICE_X_DP = 40L
 
     /** 提示上边距 */
@@ -160,6 +166,8 @@ object ConfigDefaults {
         .put("notice_text", NOTICE_TEXT)
         .put("notice_text_size_sp", NOTICE_TEXT_SIZE_SP)
         .put("notice_text_color", NOTICE_TEXT_COLOR)
+        .put("notice_align", NOTICE_ALIGN)
+        .put("notice_center_offset_dp", NOTICE_CENTER_OFFSET_DP)
         .put("notice_x_dp", NOTICE_X_DP)
         .put("notice_y_dp", NOTICE_Y_DP)
         .put("notice_time_enabled", NOTICE_TIME_ENABLED)

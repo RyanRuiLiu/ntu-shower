@@ -24,6 +24,8 @@ class NoticeRuleTest {
         text = text,
         textSizeSp = 48,
         textColor = "#d94f16",
+        align = NoticeAlign.LEFT,
+        centerOffsetDp = 0,
         xDp = 40,
         yDp = 40,
         timeEnabled = timeEnabled,
