@@ -19,6 +19,7 @@ SET_PROP = re.compile(r"\.style\.setProperty\(\s*[\"'](?!--)")
 #: 颜色只能出现在 tokens.css；CSS 选择器里的 #id 不匹配 3–8 位十六进制。
 COLOR = re.compile(r"(?<![\w-])#[0-9a-fA-F]{3,8}\b|rgba?\(")
 BLANK_HEADER = re.compile(r"<th>\s*</th>")
+BARE_ACTION_HEADER = re.compile(r"<th>操作</th>")
 FONT_SIZE = re.compile(r"font-size:\s*(?![^\n]*var\(--fs-)")
 RADIUS = re.compile(r"border-radius:\s*(?![^\n]*var\(--radius)")
 TRANSITION = re.compile(r"transition:\s*(?![^\n]*var\(--transition)")
@@ -55,9 +56,11 @@ def _style_sources() -> Iterator[Path]:
 
 
 def test_tables_have_labeled_action_headers() -> None:
-    """表格的动作列也必须写表头，不留空 <th>。"""
-    offenders = _offenders(BLANK_HEADER, (WEB / "views" / path.name for path in (WEB / "views").glob("*.js")))
-    assert not offenders, "表格存在无表头的列：\n" + "\n".join(offenders)
+    """表格的动作列也必须写表头，不留空 <th>，并用 col-actions 收窄列宽。"""
+    sources = (WEB / "views" / path.name for path in (WEB / "views").glob("*.js"))
+    offenders = _offenders(BLANK_HEADER, sources)
+    offenders += _offenders(BARE_ACTION_HEADER, (WEB / "views" / path.name for path in (WEB / "views").glob("*.js")))
+    assert not offenders, "表格存在无表头或未收窄的动作列：\n" + "\n".join(offenders)
 
 
 def test_colors_live_only_in_tokens() -> None:

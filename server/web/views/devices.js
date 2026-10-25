@@ -42,7 +42,7 @@ function renderTable() {
         <td class="mono" title="${esc((device.capabilities || []).join(', '))}">${esc(
           (device.capabilities || []).length > 0 ? device.capabilities.length : '未声明',
         )}</td>
-        <td>
+        <td class="col-actions">
           <div class="btn-row">
             <button type="button" class="btn btn-ghost btn-sm" data-act="up" title="上移" ${index === 0 ? 'disabled' : ''}>↑</button>
             <button type="button" class="btn btn-ghost btn-sm" data-act="down" title="下移" ${index === store.runtime.length - 1 ? 'disabled' : ''}>↓</button>
@@ -54,7 +54,7 @@ function renderTable() {
     )
     .join('')
   $('deviceTable').innerHTML = `<table class="table"><thead><tr>
-      <th>设备</th><th>应用版本</th><th>系统版本</th><th>状态</th><th>信任</th><th>能力位</th><th>顺序</th><th>操作</th>
+      <th>设备</th><th>应用版本</th><th>系统版本</th><th>状态</th><th>信任</th><th>能力位</th><th>顺序</th><th class="col-actions">操作</th>
     </tr></thead><tbody>${rows}</tbody></table>`
 }
 
