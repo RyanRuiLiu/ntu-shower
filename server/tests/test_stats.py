@@ -274,18 +274,25 @@ def test_timezone_moves_the_buckets(client: TestClient, seeded: dict[str, str]) 
 
     **不能断言"总量不变"**：服务时段 11–24 时是**本地**概念，换了偏移就是换了另一段
     绝对时间，落进时段内的占用秒数与分母都会变。能断言的只有分桶结果确实变了。
+
+    种子会话按"此刻往前"生成，而热力图只收 11–23 时；在上午跑测试时它们会全部落在
+    服务时段外。这里单独补一场昨天 20:30 的会话，并直接断言它落在东八区 20 点格、
+    UTC 12 点格——与运行时刻无关。
     """
+    now = to_local(now_rfc3339(), TZ)
+    assert now is not None
+    yesterday_evening = (now - timedelta(days=1)).replace(hour=20, minute=30, second=0, microsecond=0)
+    _session(7, "2200000006", int((now - yesterday_evening).total_seconds()), 600)
+
     east = client.get(f"/api/v1/stats/devices/{DEVICE}?days=90&tz_offset_minutes=480", headers=seeded).json()
     utc = client.get(f"/api/v1/stats/devices/{DEVICE}?days=90&tz_offset_minutes=0", headers=seeded).json()
 
     assert east["tz_offset_minutes"] == 480
     assert utc["tz_offset_minutes"] == 0
     assert east["heat"] != utc["heat"]
-
-    def peak_column(cells: list[list[float]]) -> int:
-        return max(range(len(cells[0])), key=lambda column: sum(row[column] for row in cells))
-
-    assert peak_column(east["heat"]) != peak_column(utc["heat"])
+    weekday = yesterday_evening.weekday()
+    assert east["heat"][weekday][20 - spec.HOUR_START] > 0
+    assert utc["heat"][weekday][12 - spec.HOUR_START] > 0
 
 
 def test_sessions_across_a_blind_spot_stay_out_of_occupancy_metrics(client: TestClient, seeded: dict[str, str]) -> None:
