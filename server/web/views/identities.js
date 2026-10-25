@@ -90,7 +90,7 @@ function render(list) {
         <td>${capabilityBadges(item.capabilities)}</td>
         <td title="${esc((item.device_scope || []).join(', '))}">${esc(scopeText(item.device_scope))}</td>
         <td>${esc(item.label || PLACEHOLDER)}</td>
-        <td>
+        <td class="col-actions">
           <div class="btn-row">
             <button type="button" class="btn btn-ghost btn-sm" data-act="edit">编辑</button>
             <button type="button" class="btn btn-danger btn-sm" data-act="revoke">撤销</button>
@@ -100,7 +100,7 @@ function render(list) {
     })
     .join('')
   $('identityTable').innerHTML = `<table class="table"><thead><tr>
-      <th>身份标识</th><th>来源</th><th>能力位</th><th>设备作用域</th><th>备注</th><th>操作</th>
+      <th>身份标识</th><th>来源</th><th>能力位</th><th>设备作用域</th><th>备注</th><th class="col-actions">操作</th>
     </tr></thead><tbody>${rows}</tbody></table>`
 }
 

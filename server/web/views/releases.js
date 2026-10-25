@@ -34,7 +34,7 @@ function render(list) {
         <td>${esc(item.target)}</td>
         <td class="mono muted" title="${esc(item.sha256)}">${esc(item.sha256.slice(0, 12))}…</td>
         <td class="mono">${esc(fmtFullDateTime(item.created_at))}</td>
-        <td>
+        <td class="col-actions">
           <div class="btn-row">
             <button type="button" class="btn btn-ghost btn-sm" data-act="rearm">重新推送</button>
             <button type="button" class="btn btn-danger btn-sm" data-act="delete">下架</button>
@@ -44,7 +44,7 @@ function render(list) {
     )
     .join('')
   $('releaseTable').innerHTML = `<table class="table"><thead><tr>
-      <th>版本名</th><th>版本号</th><th>标记</th><th>目标</th><th>摘要</th><th>发布时间</th><th>操作</th>
+      <th>版本名</th><th>版本号</th><th>标记</th><th>目标</th><th>摘要</th><th>发布时间</th><th class="col-actions">操作</th>
     </tr></thead><tbody>${rows}</tbody></table>`
 }
 

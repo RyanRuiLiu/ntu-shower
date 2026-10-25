@@ -102,12 +102,12 @@ function renderStatus() {
         <td class="mono">${esc(item.key)}</td>
         <td>${esc(item.note)}</td>
         <td>${item.available ? '<span class="badge badge-green">可用</span>' : '<span class="badge badge-red">缺失</span>'}</td>
-        <td><div class="btn-row"><button type="button" class="btn btn-ghost btn-sm" data-act="audition" ${item.available ? '' : 'disabled'}>试听</button></div></td>
+        <td class="col-actions"><div class="btn-row"><button type="button" class="btn btn-ghost btn-sm" data-act="audition" ${item.available ? '' : 'disabled'}>试听</button></div></td>
       </tr>`,
     )
     .join('')
   $('voiceStatus').innerHTML = `<div class="btn-row">${ffmpeg}<span class="badge badge-blue">音频 ${esc(String(status.clip_count))} 个</span></div>
-    <div class="table-wrap"><table class="table"><thead><tr><th>音色</th><th>说明</th><th>状态</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="table-wrap"><table class="table"><thead><tr><th>音色</th><th>说明</th><th>状态</th><th class="col-actions">操作</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="hint">音色在每条规则上单独选；具体规则压过通配（先设备、后学号维度），延迟从事件发生时刻算起，窗口内设备并行预下载。</div>`
 }
 
@@ -175,7 +175,7 @@ function renderEffects() {
         <td>${esc(item.name)}</td>
         <td class="mono">${esc(fmtMs(item.duration_ms))}</td>
         <td class="mono">${esc(String(Math.round(item.size_bytes / 1024)))} KB</td>
-        <td>
+        <td class="col-actions">
           <div class="btn-row">
             <button type="button" class="btn btn-ghost btn-sm" data-act="audition">试听</button>
             <button type="button" class="btn btn-ghost btn-sm" data-act="rename">改名</button>
@@ -186,7 +186,7 @@ function renderEffects() {
     )
     .join('')
   $('voiceEffectTable').innerHTML = `<table class="table"><thead><tr>
-      <th>名称</th><th>时长</th><th>大小</th><th>操作</th>
+      <th>名称</th><th>时长</th><th>大小</th><th class="col-actions">操作</th>
     </tr></thead><tbody>${rows}</tbody></table>`
 }
 
@@ -288,7 +288,7 @@ function renderTable() {
         <td><div title="${esc(rule.text)}">${esc(rule.text)}</div></td>
         <td class="mono">延迟 ${esc(fmtDelay(rule.delay_ms))} · 音量 ${esc(String(rule.volume))} · ${esc(rule.voice)}</td>
         <td>${rule.enabled ? '<span class="badge badge-green">启用</span>' : '<span class="badge">停用</span>'}</td>
-        <td>
+        <td class="col-actions">
           <div class="btn-row">
             <button type="button" class="btn btn-ghost btn-sm" data-act="toggle">${rule.enabled ? '停用' : '启用'}</button>
             <button type="button" class="btn btn-ghost btn-sm" data-act="edit">编辑</button>
@@ -301,7 +301,7 @@ function renderTable() {
     })
     .join('')
   $('voiceTable').innerHTML = `<table class="table"><thead><tr>
-      <th>设备</th><th>学号</th><th>事件</th><th>播报内容</th><th>参数</th><th>启用</th><th>操作</th>
+      <th>设备</th><th>学号</th><th>事件</th><th>播报内容</th><th>参数</th><th>启用</th><th class="col-actions">操作</th>
     </tr></thead><tbody>${rows}</tbody></table>`
 }
 
