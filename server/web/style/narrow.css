@@ -97,6 +97,12 @@
     min-width: var(--table-min-width);
   }
 
+  /* 列表 + 编辑表单：窄屏各自独占一行 */
+  .grid-list-form > :first-child,
+  .grid-list-form > :last-child {
+    flex-basis: 100%;
+  }
+
   /* ── 审计：上下堆叠，各自限高 ───────────────────────────── */
 
   .audit-split {
@@ -156,17 +162,6 @@
   }
 
   .btn-sm {
-    padding: 8px 12px;
-    font-size: var(--fs-small);
-  }
-
-  .tb button {
-    padding: 8px 10px;
-    font-size: var(--fs-small);
-  }
-
-  .input-bar button,
-  .input-channel button {
     padding: 8px 12px;
     font-size: var(--fs-small);
   }

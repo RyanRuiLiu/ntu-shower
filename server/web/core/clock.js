@@ -59,7 +59,8 @@ export function fmtServerTimeNow() {
  * 而秒是这类信息的精度——"最后上报 3 秒前"与"1 分钟前"对判断链路还活着没有是
  * 两回事。
  *
- * 需要年份的地方（审计流水、发布记录）用 [fmtFullDateTime]。
+ * 只用于现态面板（最后上报、上次使用、任务倒计时）。表格里的历史记录一律用
+ * [fmtFullDateTime]：同一张表要跨月甚至跨年比对，没有年份就看不出先后。
  */
 export function fmtDateTime(value) {
   if (!value) return PLACEHOLDER
@@ -74,9 +75,9 @@ export function fmtDateTime(value) {
 /**
  * RFC 3339 转 `YYYY-MM-DD HH:MM:SS`；缺值或解析不出来时给占位符。
  *
- * 与 [fmtDateTime] 的差别只有年份：审计流水与发布记录要跨月甚至跨年比对，没有年份
- * 就排不出先后。不用 `toLocaleString`：那会随浏览器的区域设置变化，同一份记录在不同
- * 机器上显示成不同样子，而这里要的正是可比对。
+ * 与 [fmtDateTime] 的差别只有年份：表格（审计、发布、播报投递）要跨月甚至跨年比对，
+ * 没有年份就排不出先后。不用 `toLocaleString`：那会随浏览器的区域设置变化，同一份记录
+ * 在不同机器上显示成不同样子，而这里要的正是可比对。
  */
 export function fmtFullDateTime(value) {
   if (!value) return PLACEHOLDER

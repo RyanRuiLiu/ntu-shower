@@ -8,6 +8,7 @@
  * 数据取 GET /doors，管理面写操作同域。
  */
 import { api } from '../core/api.js'
+import { deviceCell } from '../core/cells.js'
 import { elapsedSince, fmtDateTime, fmtDuration, fmtTime, serverNowMs } from '../core/clock.js'
 import { DOOR_STATES } from '../core/contract.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
@@ -321,13 +322,10 @@ function refreshTaskCountdowns() {
  *
  * 只报告状态、不做判断：判据在服务端只有一处出处，这里把它显示出来。排定的动作按
  * 功能归到各自的任务段；extend_hours 不走调度器，它自己的现状是"拨快状态 + MCU
- * 武装的截止 + 恢复条件逐项"。设备名沿用审计页做法：从共享的 store.devices 映射，
- * 悬停看 id。倒计时是这块的锚点——每秒走字，其余一切安静。
+ * 武装的截止 + 恢复条件逐项"。设备名用全站同一种单元格（悬停看 id），任务板只额外
+ * 加粗。倒计时是这块的锚点——每秒走字，其余一切安静。
  */
 function renderTaskBoard(data) {
-  const names = new Map(store.devices.map((device) => [device.device_id, device.name]))
-  const deviceCell = (id) => `<span class="task-dev" title="${esc(id)}">${esc(names.get(id) || id)}</span>`
-
   const scheduledByFeature = {}
   for (const row of data.scheduled) (scheduledByFeature[row.feature] ||= []).push(row)
 
@@ -364,7 +362,7 @@ function renderTaskBoard(data) {
                 return `
                 <div class="task-entry">
                   <div class="task-line">
-                    ${deviceCell(shift.device_id)}
+                    ${deviceCell(shift.device_id, 'task-dev')}
                     <span class="muted">钟已拨快 ${shift.shift_minutes} 分钟（${esc(fmtDateTime(shift.shifted_at))}）</span>
                     <span class="task-next">滚动续写每 ${Math.round(shift.rearm_interval_s / 60)} 分钟</span>
                   </div>
@@ -393,7 +391,7 @@ function renderTaskBoard(data) {
               return `
               <div class="task-entry">
                 <div class="task-line">
-                  ${deviceCell(row.device_id)}
+                  ${deviceCell(row.device_id, 'task-dev')}
                   <span>#${esc(row.door_no)}</span>
                   <span class="mono">${esc(row.cert_no || PLACEHOLDER)}</span>
                   <span class="task-at">下次动手 ${esc(fmtDateTime(row.at))}</span>

@@ -122,6 +122,10 @@ label {
   color: var(--muted);
 }
 
+.nowrap {
+  white-space: nowrap;
+}
+
 /* 控件或表格后的补充说明：单独一行，靠上留 4px。 */
 .hint {
   margin-top: var(--sp-1);
