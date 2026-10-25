@@ -556,6 +556,12 @@ tr.audit-row.is-selected td {
   background: var(--elevated);
 }
 
+/* 动作列按内容收窄，剩余宽度留给主数据列；1% 是表格 auto 布局的收敛写法 */
+.table .col-actions {
+  width: 1%;
+  white-space: nowrap;
+}
+
 /* 行尾动作保持一行：窄屏让表格整体横向滚动，不把按钮逐个挤成竖排 */
 .table .btn-row {
   flex-wrap: nowrap;
