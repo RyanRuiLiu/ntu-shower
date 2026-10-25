@@ -20,9 +20,14 @@ SET_PROP = re.compile(r"\.style\.setProperty\(\s*[\"'](?!--)")
 COLOR = re.compile(r"(?<![\w-])#[0-9a-fA-F]{3,8}\b|rgba?\(")
 BLANK_HEADER = re.compile(r"<th>\s*</th>")
 BARE_ACTION_HEADER = re.compile(r"<th>操作</th>")
+BUTTON_TAG = re.compile(r"<button\b[^>]*>")
+BUTTON_CLASSES = ("btn", "ph-chip", "tree-restore")
 FONT_SIZE = re.compile(r"font-size:\s*(?![^\n]*var\(--fs-)")
-RADIUS = re.compile(r"border-radius:\s*(?![^\n]*var\(--radius)")
+RADIUS = re.compile(r"border-radius:\s*(?![^\n]*(?:var\(--radius|\b0\b))")
 TRANSITION = re.compile(r"transition:\s*(?![^\n]*var\(--transition)")
+FMT_SHORT_TIME = re.compile(r"\bfmtDateTime\(")
+LOCAL_DEVICE_CELL = re.compile(r"(?:function|const)\s+deviceCell\b")
+CERT_AS_MONO = re.compile(r"mono\([^)\n]*\bcert_no\b")
 
 
 def _web_sources() -> Iterator[Path]:
@@ -61,6 +66,52 @@ def test_tables_have_labeled_action_headers() -> None:
     offenders = _offenders(BLANK_HEADER, sources)
     offenders += _offenders(BARE_ACTION_HEADER, (WEB / "views" / path.name for path in (WEB / "views").glob("*.js")))
     assert not offenders, "表格存在无表头或未收窄的动作列：\n" + "\n".join(offenders)
+
+
+def test_buttons_use_shared_classes() -> None:
+    """按钮只能复用 .btn 体系；插入片与树恢复把手是两个已登记的特例。"""
+    offenders: list[str] = []
+    for path in (WEB / "views").glob("*.js"):
+        text = path.read_text(encoding="utf-8")
+        for tag in BUTTON_TAG.findall(text):
+            if not any(name in tag for name in BUTTON_CLASSES):
+                offenders.append(f"{path.name}: {tag[:100]}")
+    assert not offenders, "按钮没有使用共享类：\n" + "\n".join(offenders)
+
+
+def test_action_columns_scroll_with_the_table() -> None:
+    """动作列不固定：固定列在表格溢出容器时会压住相邻数据列，按钮越多盖得越宽。"""
+    offenders: list[str] = []
+    for path in _style_sources():
+        text = path.read_text(encoding="utf-8")
+        for match in re.finditer(r"([^{}]*\.col-actions[^{}]*)\{([^}]*)\}", text):
+            if "position: sticky" in match.group(2):
+                offenders.append(f"{path.name}: {match.group(1).strip()}")
+    assert not offenders, "动作列不能固定覆盖数据列：\n" + "\n".join(offenders)
+
+
+def test_table_timestamps_include_year() -> None:
+    """表格里的时刻是历史记录：一律带年份，不用只给月日的现态格式。"""
+    offenders: list[str] = []
+    for path in (WEB / "views").glob("*.js"):
+        text = path.read_text(encoding="utf-8")
+        if "<table" not in text:
+            continue
+        for number, line in enumerate(text.splitlines(), start=1):
+            if FMT_SHORT_TIME.search(line):
+                offenders.append(f"{path.name}:{number} {line.strip()}")
+    assert not offenders, "表格时刻必须用 fmtFullDateTime：\n" + "\n".join(offenders)
+
+
+def test_device_and_cert_cells_have_single_implementation() -> None:
+    """设备名与学号跨视图同义：只允许 core/cells.js 提供，视图里不再各写一份。"""
+    offenders: list[str] = []
+    for path in (WEB / "views").glob("*.js"):
+        text = path.read_text(encoding="utf-8")
+        for number, line in enumerate(text.splitlines(), start=1):
+            if LOCAL_DEVICE_CELL.search(line) or CERT_AS_MONO.search(line):
+                offenders.append(f"{path.name}:{number} {line.strip()}")
+    assert not offenders, "设备名 / 学号请复用 core/cells.js：\n" + "\n".join(offenders)
 
 
 def test_colors_live_only_in_tokens() -> None:

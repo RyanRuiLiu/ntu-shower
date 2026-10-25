@@ -14,7 +14,8 @@
  * 占位符说明是可点击的片：点一下插到模板光标处。
  */
 import { api, hasIdentity } from '../core/api.js'
-import { fmtDateTime } from '../core/clock.js'
+import { codeCell, deviceCell } from '../core/cells.js'
+import { fmtFullDateTime } from '../core/clock.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
 import { bindScopeToggle, readScopeEditor, scopeEditorHtml } from '../core/device-scope.js'
 import { problemText, report, statusBadgeClass, statusLabel } from '../core/outcome.js'
@@ -57,10 +58,10 @@ function deliveryBadge(value) {
   return `<span class="badge ${statusBadgeClass(value)}">${esc(statusLabel(value))}</span>`
 }
 
-/** 设备/学号单元格：通配给徽标，具体给名字/学号。 */
-function deviceCell(deviceId) {
+/** 规则目标：通配给徽标，具体设备给统一的设备名单元格。 */
+function deviceTargetCell(deviceId) {
   if (deviceId === WILDCARD) return '<span class="badge badge-blue">全部设备</span>'
-  return esc(deviceName(deviceId))
+  return deviceCell(deviceId)
 }
 
 /** 投递来源：自动触发是事件派生，手动推送是管理台按规则真播一遍。 */
@@ -78,7 +79,7 @@ function certCell(rule) {
     }
     return badge
   }
-  return rule.certs.map((cert) => `<code>${esc(cert)}</code>`).join('、')
+  return rule.certs.map((cert) => codeCell(cert)).join('、')
 }
 
 /** 通配目标的纯文本写法（确认框、提示里用，不带 HTML）。 */
@@ -279,7 +280,7 @@ function renderTable() {
         .join(' ')
       const devices = rule.devices.includes(WILDCARD)
         ? '<span class="badge badge-blue">全部设备</span>'
-        : esc(rule.devices.map(deviceName).join('、'))
+        : rule.devices.map((deviceId) => deviceTargetCell(deviceId)).join('、')
       const selected = editingId === rule.id ? ' class="is-selected"' : ''
       return `<tr${selected} data-id="${esc(String(rule.id))}">
         <td>${devices}</td>
@@ -352,14 +353,14 @@ function renderDeliveries() {
       const event = eventItem(item.event)
       const dispatched = Boolean(item.dispatched_at)
       const timeCell = dispatched
-        ? esc(fmtDateTime(item.dispatched_at))
-        : `<span class="muted" title="事件时刻（未下发）">${esc(fmtDateTime(item.occurred_at))}</span>`
+        ? esc(fmtFullDateTime(item.dispatched_at))
+        : `<span class="muted" title="事件时刻（未下发）">${esc(fmtFullDateTime(item.occurred_at))}</span>`
       return `<tr>
         <td class="mono">${timeCell}</td>
         <td>${sourceBadge(item.source)}</td>
         <td>${deviceCell(item.device_id)}</td>
         <td>${certCell({ certs: [item.cert_no], exempt: [] })}</td>
-        <td><div>${esc(event.label)}</div></td>
+        <td><span class="badge badge-blue" title="${esc(event.description)}">${esc(event.label)}</span></td>
         <td class="mono">${esc(String(item.door_no))}</td>
         <td><div title="${esc(item.text || '')}">${esc(item.text || PLACEHOLDER)}</div></td>
         <td class="mono">${esc(fmtDelay(item.delay_ms))}</td>
@@ -708,7 +709,7 @@ export const voiceView = {
       </section>
       </div>
 
-      <div class="grid grid-2">
+      <div class="grid-list-form">
       <section class="panel">
         <div class="panel-head">
           <span class="panel-title">语音规则</span>

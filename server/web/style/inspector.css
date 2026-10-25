@@ -40,48 +40,6 @@
   border-bottom: 1px solid var(--border);
 }
 
-.tb button {
-  padding: 4px 9px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xs);
-  background: var(--elevated);
-  color: var(--dim);
-  font: var(--fs-chip) var(--font-ui);
-  white-space: nowrap;
-  cursor: pointer;
-  transition: all var(--transition);
-}
-
-.tb button:hover {
-  color: var(--text);
-  border-color: var(--muted);
-  background: var(--bg);
-}
-
-.tb button:active {
-  color: var(--on-strong);
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-.tb button.primary {
-  color: var(--green);
-  border-color: var(--green);
-}
-
-.tb button.primary:hover {
-  background: var(--green-bg);
-}
-
-.tb button.danger {
-  color: var(--red);
-  border-color: var(--red);
-}
-
-.tb button.danger:hover {
-  background: var(--red-bg);
-}
-
 /* 方向键那组连成一个整体 */
 .tb .grp {
   display: flex;
@@ -402,21 +360,6 @@
   gap: 2px;
 }
 
-.panel-header .actions button {
-  padding: 2px 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xs);
-  background: transparent;
-  color: var(--muted);
-  font: 10px var(--font-mono);
-  cursor: pointer;
-}
-
-.panel-header .actions button:hover {
-  color: var(--text);
-  border-color: var(--muted);
-}
-
 .tree-search {
   flex-shrink: 0;
   width: calc(100% - 16px);
@@ -655,30 +598,6 @@
   color: var(--green);
 }
 
-.prop-tap {
-  width: 100%;
-  padding: 5px;
-  border: 1px solid var(--green);
-  border-radius: var(--radius-sm);
-  background: var(--green-bg);
-  color: var(--green);
-  font: 600 var(--fs-chip) var(--font-ui);
-  cursor: pointer;
-  transition: all var(--transition);
-}
-
-.prop-tap:disabled {
-  border-color: var(--border);
-  background: transparent;
-  color: var(--muted);
-  cursor: not-allowed;
-}
-
-.prop-tap:not(:disabled):hover {
-  background: var(--green);
-  color: var(--on-strong);
-}
-
 /* ── 输入栏：在右列底部 ─────────────────────────────────── */
 
 .input-bar {
@@ -690,58 +609,14 @@
   border-top: 1px solid var(--border);
 }
 
-/* 文本注入通道：两条并列通路的选择器，点谁用谁（粘贴支持中文 / 按键无空格仅 ASCII） */
-.input-channel {
-  display: flex;
-  flex-shrink: 0;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-
-.input-channel button {
-  padding: 5px 9px;
-  border: none;
-  background: var(--elevated);
-  color: var(--dim);
-  font: var(--fs-chip) var(--font-ui);
-  cursor: pointer;
-  transition: all var(--transition);
-}
-
-.input-channel button + button {
-  border-left: 1px solid var(--border);
-}
-
-.input-channel button.is-active {
-  background: var(--accent-bg-strong);
-  color: var(--accent);
-  font-weight: 600;
-}
-
+/* 文本注入通道：分段按钮组，点谁用谁（粘贴支持中文 / 按键无空格仅 ASCII） */
 .input-bar input {
   flex: 1;
   min-width: 0;
-  padding: 6px 10px;
-  font: var(--fs-small) var(--font-ui);
-  border-radius: var(--radius-sm);
 }
 
-.input-bar button {
+.input-bar .btn {
   flex-shrink: 0;
-  padding: 5px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--elevated);
-  color: var(--dim);
-  font: var(--fs-chip) var(--font-ui);
-  cursor: pointer;
-  transition: all var(--transition);
-}
-
-.input-bar button:hover {
-  color: var(--text);
-  border-color: var(--muted);
 }
 
 /* ── 右键菜单 ───────────────────────────────────────────── */

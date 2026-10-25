@@ -11,6 +11,7 @@
  */
 import { api } from '../core/api.js'
 import { hasIdentity } from '../core/api.js'
+import { codeCell } from '../core/cells.js'
 import { fmtFullDateTime } from '../core/clock.js'
 import { promptClockSet, restartBathApp } from '../core/device-actions.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
@@ -33,7 +34,7 @@ function renderTable() {
       <tr data-id="${esc(device.device_id)}">
         <td>
           <div>${esc(device.name || PLACEHOLDER)}</div>
-          <code>${esc(device.device_id)}</code>
+          ${codeCell(device.device_id)}
         </td>
         <td class="mono">${esc(device.app_version)} <span class="muted">(${esc(device.version_code)})</span></td>
         <td class="mono">${esc(device.os_version)}</td>
@@ -42,6 +43,7 @@ function renderTable() {
         <td class="mono" title="${esc((device.capabilities || []).join(', '))}">${esc(
           (device.capabilities || []).length > 0 ? device.capabilities.length : '未声明',
         )}</td>
+        <td class="mono">${index + 1}</td>
         <td class="col-actions">
           <div class="btn-row">
             <button type="button" class="btn btn-ghost btn-sm" data-act="up" title="上移" ${index === 0 ? 'disabled' : ''}>↑</button>
