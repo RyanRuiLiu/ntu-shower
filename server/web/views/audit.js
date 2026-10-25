@@ -14,10 +14,11 @@
  * 去日志里搜（`background-task.settled`、`feature=renew_wait`），翻译成中文反而搜不到。
  */
 import { api } from '../core/api.js'
+import { codeCell, deviceCell } from '../core/cells.js'
 import { fmtFullDateTime } from '../core/clock.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
 import { problemText, report, statusBadgeClass, statusLabel } from '../core/outcome.js'
-import { store, subscribe } from '../core/store.js'
+import { deviceName, store, subscribe } from '../core/store.js'
 import { toast } from '../core/toast.js'
 
 function statusBadge(status) {
@@ -64,12 +65,6 @@ function renderDetail(row, title) {
 const mono = (text) => `<span class="mono">${esc(text ?? '')}</span>`
 const muted = (text) => `<span class="muted">${esc(text ?? PLACEHOLDER)}</span>`
 
-/** 设备列：三张表都一样，所以只写这一份。 */
-function deviceCell(deviceId, names) {
-  const name = deviceId ? names.get(deviceId) || deviceId : PLACEHOLDER
-  return `<span title="${esc(deviceId || '')}">${esc(name)}</span>`
-}
-
 /**
  * 三种审计的差异，**只在这里**。内容以原值为主（见模块注释），所以这里不做中文映射。
  *
@@ -82,14 +77,14 @@ const TABS = {
     kind: 'calls',
     time: (row) => row.requested_at,
     headers: ['类别', '调用方', '设备', '请求', '状态', '耗时', '问题'],
-    cells: (row, names) => [
+    cells: (row) => [
       row.kind === 'gateway'
         ? `<span class="badge badge-blue">网关${row.status_code === 0 ? '连接' : '断开'}</span>`
         : esc(row.method),
       `${mono(row.actor_kind)}${
         row.client_ip ? `<div class="muted" title="来源 IP">${esc(row.client_ip)}</div>` : ''
       }`,
-      deviceCell(row.device_id, names),
+      deviceCell(row.device_id),
       `${mono(`${row.method} ${row.path}`)}${
         row.query ? `<span class="muted">?${esc(row.query)}</span>` : ''
       }`,
@@ -104,8 +99,8 @@ const TABS = {
     kind: 'commands',
     time: (row) => row.created_at,
     headers: ['设备', '动作', '状态', '原因', '耗时'],
-    cells: (row, names) => [
-      deviceCell(row.device_id, names),
+    cells: (row) => [
+      deviceCell(row.device_id),
       mono(row.action),
       statusBadge(row.status),
       muted(row.reason_code),
@@ -118,10 +113,10 @@ const TABS = {
     kind: 'background-task-runs',
     time: (row) => row.occurred_at,
     headers: ['设备', '喷头', '学号', '功能', '动作', '结果', '阈值', '原因'],
-    cells: (row, names) => [
-      deviceCell(row.device_id, names),
+    cells: (row) => [
+      deviceCell(row.device_id),
       mono(row.door_no),
-      mono(row.cert_no),
+      codeCell(row.cert_no),
       mono(row.feature),
       mono(row.action),
       mono(row.outcome),
@@ -135,9 +130,6 @@ const TABS = {
 
 const state = { tab: 'api', rows: {}, selected: {} }
 
-/** device_id → 设备名。数据来自 store.devices（顶栏每 30 秒刷新的共享状态）。 */
-const deviceNames = new Map()
-
 function renderRows() {
   const tab = TABS[state.tab]
   const rows = state.rows[state.tab] || []
@@ -146,7 +138,7 @@ function renderRows() {
   const body = rows
     .map((row, index) => {
       const cells = tab
-        .cells(row, deviceNames)
+        .cells(row)
         .map((html) => `<td>${html}</td>`)
         .join('')
       const selected = index === state.selected[state.tab] ? ' is-selected' : ''
@@ -165,14 +157,8 @@ function selectRow(index) {
   state.selected[state.tab] = index
   rerenderTable()
   const row = (state.rows[state.tab] || [])[index]
-  const deviceSuffix = row?.device_id ? ` · ${deviceNames.get(row.device_id) || row.device_id}` : ''
+  const deviceSuffix = row?.device_id ? ` · ${deviceName(row.device_id)}` : ''
   renderDetail(row, `${TABS[state.tab].label}详情${deviceSuffix}`)
-}
-
-/** 从共享状态重建设备名映射。store.devices 由顶栏每 30 秒刷新——这里只读它。 */
-function refreshDeviceNames() {
-  deviceNames.clear()
-  for (const device of store.devices) deviceNames.set(device.device_id, device.name)
 }
 
 async function reload() {
@@ -185,7 +171,6 @@ async function reload() {
     const loaded = await Promise.all(
       keys.map((key) => api.audit(TABS[key].kind, { device_id: deviceId, limit })),
     )
-    refreshDeviceNames()
     keys.forEach((key, index) => {
       state.rows[key] = loaded[index]
       state.selected[key] = -1
@@ -287,18 +272,12 @@ export const auditView = {
     dispose.add(listen($('inLimit'), 'change', reload))
 
     // 设备清单是共享状态，由顶栏异步刷新——本视图切入时它可能还没到（刷新页面
-    // 直接落在审计页时尤甚）。订阅它：清单一到/一变就更新名字映射并重渲染，
-    // 否则名字时有时无取决于加载时序。
-    dispose.add(
-      subscribe('devices', () => {
-        refreshDeviceNames()
-        rerenderTable()
-      }),
-    )
+    // 直接落在审计页时尤甚）。订阅它：清单一到/一变就重渲染，否则设备名时有时无
+    // 取决于加载时序。
+    dispose.add(subscribe('devices', rerenderTable))
 
     dispose.add(subscribe('view', (id) => { if (id !== 'audit') dispose.dispose() }))
 
-    refreshDeviceNames()
     reload()
   },
 

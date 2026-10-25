@@ -62,6 +62,33 @@
   gap: var(--sp-2);
 }
 
+/* 分段按钮组：一组互斥选项连成一个整体 */
+.btn-group {
+  display: inline-flex;
+  flex-shrink: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.btn-group .btn {
+  border: none;
+  border-radius: 0;
+}
+
+.btn-group .btn + .btn {
+  border-left: 1px solid var(--border);
+}
+
+.btn-group .btn.is-active {
+  background: var(--accent-bg-strong);
+  color: var(--accent);
+}
+
+.btn-block {
+  width: 100%;
+}
+
 /* 按钮行后面直接跟一个字段（如「渲染效果」区）时，按钮与字段标题贴在一起；
    字段自身只有下边距，这里补上这一种相邻关系的上间距 */
 .panel-body .btn-row + .field {
@@ -149,6 +176,7 @@
 
 .badge {
   display: inline-block;
+  white-space: nowrap;
   padding: 1px 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
@@ -556,10 +584,26 @@ tr.audit-row.is-selected td {
   background: var(--elevated);
 }
 
-/* 动作列按内容收窄，剩余宽度留给主数据列；1% 是表格 auto 布局的收敛写法 */
+/* 动作列按内容收窄，剩余宽度留给主数据列；1% 是表格 auto 布局的收敛写法。
+   不固定在右侧：固定列会在表格溢出容器时压住相邻的数据列（半宽面板与手机都会
+   发生），而且动作按钮越多盖得越宽。动作随表格一起横向滚动，数据优先可见。 */
 .table .col-actions {
   width: 1%;
   white-space: nowrap;
+  background: var(--surface);
+}
+
+.table th.col-actions {
+  background: var(--elevated);
+}
+
+.table tbody tr:hover td.col-actions {
+  background: var(--elevated);
+}
+
+.table tbody tr.is-selected td.col-actions {
+  background-color: var(--surface);
+  background-image: linear-gradient(var(--accent-bg-strong), var(--accent-bg-strong));
 }
 
 /* 行尾动作保持一行：窄屏让表格整体横向滚动，不把按钮逐个挤成竖排 */
@@ -582,6 +626,12 @@ tr.audit-row.is-selected td {
   font-family: var(--font-mono);
   font-size: var(--fs-chip);
   color: var(--dim);
+  white-space: nowrap;
+}
+
+/* 数字、时间、ID 等单值单元格不换行；窄屏由表格整体横向滚动 */
+.table .mono {
+  white-space: nowrap;
 }
 
 /* ── 代码块：命令输出、配置 JSON ────────────────────────── */

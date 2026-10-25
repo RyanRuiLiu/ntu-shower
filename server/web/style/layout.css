@@ -245,3 +245,24 @@
 .grid-3 {
   grid-template-columns: repeat(auto-fit, minmax(min(var(--grid-3-min), 100%), 1fr));
 }
+
+/*
+ * 列表 + 编辑表单：列表要放多列表格，表单只需一列。
+ * 两块的基准宽度之和放不下时整行换行，列表独占一行、表格自己横向滚动。
+ */
+.grid-list-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+  align-items: flex-start;
+}
+
+.grid-list-form > :first-child {
+  flex: 2 0 var(--list-form-list-min);
+  min-width: 0;
+}
+
+.grid-list-form > :last-child {
+  flex: 1 0 var(--list-form-form-min);
+  min-width: 0;
+}
