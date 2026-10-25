@@ -200,7 +200,7 @@ function renderTree() {
     ].join('')
 
     lines.push(
-      `<div class="${classes.join(' ')}" data-index="${index}" style="padding-left:${node.depth * 12 + 4}px">
+      `<div class="${classes.join(' ')}" data-index="${index}" data-depth="${node.depth}">
         <span class="node-toggle" data-toggle="${index}">${kids.length > 0 ? (isCollapsed ? '▶' : '▼') : '·'}</span>
         <span class="node-label">${label}</span>
       </div>`,
@@ -210,6 +210,10 @@ function renderTree() {
   for (const root of children.get(-1) || []) walk(root)
 
   $('treeContent').innerHTML = lines.join('') || '<div class="empty">暂无节点</div>'
+  // 缩进是运行时几何值：只写深度变量，间距公式留在 CSS 令牌里
+  for (const row of $('treeContent').querySelectorAll('.node[data-depth]')) {
+    row.style.setProperty('--depth', row.dataset.depth)
+  }
   $('treeCount').textContent = filtering ? `${hit.size} / ${nodes.length}` : `${nodes.length} 个节点`
 }
 
@@ -271,7 +275,12 @@ function highlight(index) {
   const top = (box.top / deviceHeight) * 100
   const width = ((box.right - box.left) / deviceWidth) * 100
   const height = ((box.bottom - box.top) / deviceHeight) * 100
-  $('overlay').innerHTML = `<div class="highlight" style="left:${left}%;top:${top}%;width:${width}%;height:${height}%"></div>`
+  $('overlay').innerHTML = '<div class="highlight"></div>'
+  const boxEl = $('overlay').querySelector('.highlight')
+  boxEl.style.setProperty('--left', `${left}%`)
+  boxEl.style.setProperty('--top', `${top}%`)
+  boxEl.style.setProperty('--width', `${width}%`)
+  boxEl.style.setProperty('--height', `${height}%`)
 }
 
 function selectNode(index) {
@@ -444,16 +453,18 @@ function pressIndicator(at) {
   ring.setAttribute('class', 'press-ring')
   ring.setAttribute('width', size)
   ring.setAttribute('height', size)
-  ring.style.left = `${(at.cx / at.rect.width) * 100}%`
-  ring.style.top = `${(at.cy / at.rect.height) * 100}%`
+  const x = `${(at.cx / at.rect.width) * 100}%`
+  const y = `${(at.cy / at.rect.height) * 100}%`
+  ring.style.setProperty('--x', x)
+  ring.style.setProperty('--y', y)
   ring.innerHTML =
     `<circle cx="${size / 2}" cy="${size / 2}" r="${radius}" ` +
     `stroke-dasharray="${circumference}" stroke-dashoffset="${circumference}"/>`
 
   const label = document.createElement('div')
   label.className = 'press-label'
-  label.style.left = `${(at.cx / at.rect.width) * 100}%`
-  label.style.top = `${(at.cy / at.rect.height) * 100}%`
+  label.style.setProperty('--x', x)
+  label.style.setProperty('--y', y)
 
   layer.append(ring, label)
   const circle = ring.querySelector('circle')
@@ -488,9 +499,9 @@ let pressIndicatorRef = null
 function ripple(at, color) {
   const dot = document.createElement('div')
   dot.className = 'ripple'
-  dot.style.left = `${(at.cx / at.rect.width) * 100}%`
-  dot.style.top = `${(at.cy / at.rect.height) * 100}%`
-  dot.style.borderColor = color
+  dot.style.setProperty('--x', `${(at.cx / at.rect.width) * 100}%`)
+  dot.style.setProperty('--y', `${(at.cy / at.rect.height) * 100}%`)
+  dot.style.setProperty('--tone', color)
   $('overlay').appendChild(dot)
   setTimeout(() => dot.remove(), 500)
 }
@@ -556,8 +567,8 @@ function showContextMenu(clientX, clientY, index) {
   ctxIndex = index
   const menu = $('ctxMenu')
   menu.hidden = false
-  menu.style.left = `${Math.min(clientX, window.innerWidth - 190)}px`
-  menu.style.top = `${Math.min(clientY, window.innerHeight - 90)}px`
+  menu.style.setProperty('--x', `${Math.min(clientX, window.innerWidth - menu.offsetWidth)}px`)
+  menu.style.setProperty('--y', `${Math.min(clientY, window.innerHeight - menu.offsetHeight)}px`)
 }
 
 function hideContextMenu() {
@@ -692,7 +703,7 @@ export const inspectorView = {
               <div class="prop-section-title">交互状态</div>
               <div class="prop-tags" id="propTags"></div>
             </div>
-            <div class="prop-section" style="padding-bottom:10px">
+            <div class="prop-section">
               <button type="button" class="prop-tap" id="propTap" disabled>点击所选元素</button>
             </div>
           </div>
@@ -963,9 +974,9 @@ export const inspectorView = {
         const tipW = tip.offsetWidth
         const tipH = tip.offsetHeight
         const overflowRight = at.cx + 16 + tipW > at.rect.width
-        tip.style.left = `${overflowRight ? at.cx - 16 - tipW : at.cx + 16}px`
+        tip.style.setProperty('--x', `${overflowRight ? at.cx - 16 - tipW : at.cx + 16}px`)
         const overflowTop = at.cy - tipH - 8 < 0
-        tip.style.top = `${overflowTop ? at.cy + 18 : at.cy - tipH - 8}px`
+        tip.style.setProperty('--y', `${overflowTop ? at.cy + 18 : at.cy - tipH - 8}px`)
 
         // 按住后移动超过阈值：这一下不再是点击/长按，转为滑动
         if (pressStart) {

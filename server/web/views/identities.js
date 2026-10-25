@@ -62,15 +62,16 @@ function readCapabilityChecks(container) {
 
 /** 能力位勾选组（登记与编辑共用）。 */
 function capabilityChecksHtml(selected) {
-  return capabilities
+  const checks = capabilities
     .map((cap) => {
       const on = selected.includes(cap.key)
-      return `<label class="field-row" style="margin:0 8px 0 0">
+      return `<label class="field-row">
           <input type="checkbox" data-cap="${esc(cap.key)}" ${on ? 'checked' : ''}>
           <span>${esc(cap.label)}</span>
         </label>`
     })
     .join('')
+  return `<div class="btn-row">${checks}</div>`
 }
 
 function render(list) {
@@ -307,11 +308,11 @@ export const identitiesView = {
           <div class="field" id="kindField">
             <label>来源类型</label>
             <div class="btn-row">
-              <label class="field-row" style="margin:0 12px 0 0">
+              <label class="field-row">
                 <input type="radio" name="identityKind" id="inKindWeb" value="web" checked>
                 <span>网页用户（标识可自定义或由服务端生成）</span>
               </label>
-              <label class="field-row" style="margin:0">
+              <label class="field-row">
                 <input type="radio" name="identityKind" id="inKindOpenid" value="openid">
                 <span>小程序用户（登记 openid）</span>
               </label>
@@ -353,7 +354,7 @@ export const identitiesView = {
               <input id="issuedValue" class="mono" type="text" readonly>
               <button type="button" class="btn btn-ghost btn-sm" id="btnCopyIssued">复制</button>
             </div>
-            <div class="btn-row" style="margin-top:6px">
+            <div class="btn-row">
               <button type="button" class="btn btn-sm" id="btnIssuedSaved">确认已保存</button>
             </div>
           </div>

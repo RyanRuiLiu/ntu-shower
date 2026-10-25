@@ -107,8 +107,8 @@ function renderStatus() {
     )
     .join('')
   $('voiceStatus').innerHTML = `<div class="btn-row">${ffmpeg}<span class="badge badge-blue">音频 ${esc(String(status.clip_count))} 个</span></div>
-    <table class="table" style="margin-top:var(--sp-2)"><thead><tr><th>音色</th><th>说明</th><th>状态</th><th></th></tr></thead><tbody>${rows}</tbody></table>
-    <div class="muted" style="margin-top:var(--sp-2)">音色在每条规则上单独选；具体规则压过通配（先设备、后学号维度），延迟从事件发生时刻算起，窗口内设备并行预下载。</div>`
+    <table class="table"><thead><tr><th>音色</th><th>说明</th><th>状态</th><th></th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="hint">音色在每条规则上单独选；具体规则压过通配（先设备、后学号维度），延迟从事件发生时刻算起，窗口内设备并行预下载。</div>`
 }
 
 /** 边界一律来自 /voice/spec：输入范围与标签文字都由它渲染，页面不抄第二份。 */
@@ -119,13 +119,13 @@ function eventChecksHtml(selected) {
       const boxes = events
         .filter((item) => (item.phase || '其它') === phase)
         .map(
-          (item) => `<label class="field-row" style="margin:0 var(--sp-3) 0 0">
+          (item) => `<label class="field-row">
               <input type="checkbox" data-event="${esc(item.value)}" ${selected.includes(item.value) ? 'checked' : ''}>
               <span title="${esc(item.description)}">${esc(item.label)}</span>
             </label>`,
         )
         .join('')
-      return `<div style="margin-bottom:var(--sp-1)"><span class="muted">${esc(phase)}</span><div class="btn-row">${boxes}</div></div>`
+      return `<div class="check-group"><span class="muted">${esc(phase)}</span><div class="btn-row">${boxes}</div></div>`
     })
     .join('')
 }
@@ -149,7 +149,7 @@ function renderSpec() {
     '<button type="button" class="ph-chip" data-ph="pause:500" title="在该位置插入 0.5 秒静音；数字可改成 100–5000 的毫秒数">（停顿0.5秒）</button>',
   ]
   $('voicePlaceholders').innerHTML = `${chips.join(" ")}
-    <div class="muted" style="margin-top:var(--sp-1)">点一下插到模板光标处，说明悬停可见；音效与停顿只响不读。</div>`
+    <div class="hint">点一下插到模板光标处，说明悬停可见；音效与停顿只响不读。</div>`
   if (!spec) return
   const delayMin = spec.delay.minimum_ms / 1000
   const delayMax = spec.delay.maximum_ms / 1000
@@ -697,7 +697,7 @@ export const voiceView = {
           <div class="field">
             <label for="voiceEffectName">上传音效（mp3/wav/ogg/m4a/aac/flac 等常见格式，按内容校验并统一转换，时长 ≤ 10 秒）</label>
             <div class="btn-row" >
-              <input id="voiceEffectName" type="text" placeholder="名称（如：叮）" style="width:140px">
+              <input id="voiceEffectName" type="text" placeholder="名称（如：叮）">
               <input id="voiceEffectFile" type="file" accept="audio/*">
               <button type="button" class="btn btn-sm" id="btnVoiceEffectUpload">上传</button>
             </div>
@@ -714,7 +714,7 @@ export const voiceView = {
           <span class="panel-title">语音规则</span>
           <span class="panel-note" id="voiceCount"></span>
           <div class="panel-tools">
-            <select id="voiceFilterDevice" style="width:auto"></select>
+            <select id="voiceFilterDevice"></select>
             <button type="button" class="btn btn-ghost btn-sm" id="btnVoiceReload">刷新</button>
           </div>
         </div>
@@ -732,7 +732,7 @@ export const voiceView = {
           </div>
           <div class="field">
             <label>学号</label>
-            <label class="field-row" style="margin-bottom:var(--sp-1)">
+            <label class="field-row">
               <input type="checkbox" id="voiceCertWildcard">
               <span>全部学号（不限学号；下方名单变成排除名单）</span>
             </label>
@@ -764,7 +764,7 @@ export const voiceView = {
             <div class="muted">0 为静音；播放结束后恢复设备原音量。</div>
           </div>
           <div class="field">
-            <label class="field-row" style="margin:0">
+            <label class="field-row">
               <input id="voiceEnabled" type="checkbox" checked>
               <span>启用</span>
             </label>

@@ -229,7 +229,7 @@ export const auditView = {
                 <option value="all">全部设备</option>
                 <option value="device">当前设备</option>
               </select>
-              <input id="inLimit" type="number" min="1" max="500" value="50" style="width:90px">
+              <input id="inLimit" type="number" min="1" max="500" value="50">
               <button type="button" class="btn btn-ghost btn-sm" id="btnReload">刷新</button>
             </div>
           </div>
@@ -240,7 +240,7 @@ export const auditView = {
           <div class="empty">点击左侧任一行，此处显示其详情</div>
         </section>
       </div>
-      <div class="result" id="auditResult" style="padding:0 4px"></div>`
+      <div class="panel-body"><div class="result" id="auditResult"></div></div>`
 
     dispose = disposer()
 
