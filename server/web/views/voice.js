@@ -107,7 +107,7 @@ function renderStatus() {
     )
     .join('')
   $('voiceStatus').innerHTML = `<div class="btn-row">${ffmpeg}<span class="badge badge-blue">音频 ${esc(String(status.clip_count))} 个</span></div>
-    <table class="table"><thead><tr><th>音色</th><th>说明</th><th>状态</th><th></th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="table-wrap"><table class="table"><thead><tr><th>音色</th><th>说明</th><th>状态</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="hint">音色在每条规则上单独选；具体规则压过通配（先设备、后学号维度），延迟从事件发生时刻算起，窗口内设备并行预下载。</div>`
 }
 
@@ -703,7 +703,7 @@ export const voiceView = {
             </div>
             <div class="result" id="voiceEffectResult"></div>
           </div>
-          <div id="voiceEffectTable"></div>
+          <div class="table-wrap" id="voiceEffectTable"></div>
         </div>
       </section>
       </div>
