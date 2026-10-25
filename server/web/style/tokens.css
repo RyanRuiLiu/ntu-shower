@@ -47,7 +47,8 @@
   --font-ui: -apple-system, blinkmacsystemfont, 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'SF Mono', 'Cascadia Code', Consolas, Monaco, monospace;
 
-  /* 字号：11 徽标 / 12 次要 / 13 正文 / 15 面板标题 / 24 KPI */
+  /* 字号：10 微型 / 11 徽标 / 12 次要 / 13 正文 / 15 面板标题 / 26 KPI */
+  --fs-micro: 10px;
   --fs-chip: 11px;
   --fs-small: 12px;
   --fs-body: 13px;
@@ -61,8 +62,11 @@
   --sp-4: 16px;
   --sp-5: 24px;
 
+  --radius-pill: 10px;
   --radius: 8px;
   --radius-sm: 6px;
+  --radius-xs: 4px;
+  --radius-circle: 50%;
   --bar-height: 40px;
 
   /* 深色画布与浮层：检视页的纯黑画布、暗色条纹、遮罩与白字 */
@@ -78,4 +82,5 @@
 
   /* 过渡时长 */
   --transition: 0.15s ease;
+  --transition-slow: 0.4s ease;
 }
