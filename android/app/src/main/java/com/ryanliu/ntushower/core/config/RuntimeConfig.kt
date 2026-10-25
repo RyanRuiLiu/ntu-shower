@@ -169,6 +169,10 @@ object RuntimeConfig {
     @Volatile var uiSwipeDurationMs = ConfigDefaults.UI_SWIPE_DURATION_MS
         private set
 
+    // 播报前等浴室 App 提示音结束的最长时间；见 VoicePlayer。
+    @Volatile var voiceBathWaitMaxMs = ConfigDefaults.VOICE_BATH_WAIT_MAX_MS
+        private set
+
     // device.exec 单次回传的最大字节数，超出即截断。
     @Volatile var deviceExecMaxOutputBytes = ConfigDefaults.DEVICE_EXEC_MAX_OUTPUT_BYTES
         private set
@@ -288,6 +292,8 @@ object RuntimeConfig {
             { c, key -> uiDumpMaxNodes = atLeastOne(c.optLong(key, uiDumpMaxNodes)) },
         "ui_swipe_duration_ms" to
             { c, key -> uiSwipeDurationMs = atLeastOne(c.optLong(key, uiSwipeDurationMs)) },
+        "voice_bath_wait_max_ms" to
+            { c, key -> voiceBathWaitMaxMs = atLeastOne(c.optLong(key, voiceBathWaitMaxMs)) },
         "device_exec_max_output_bytes" to
             { c, key -> deviceExecMaxOutputBytes = atLeastOne(c.optLong(key, deviceExecMaxOutputBytes)) },
         "ota_check_interval_s" to

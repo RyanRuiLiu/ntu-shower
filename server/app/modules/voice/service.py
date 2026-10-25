@@ -2,7 +2,7 @@
 
 ## 唯一判定链
 
-`handle_events` 只做一次「时效 → 匹配 → 渲染 → 认领 → 生成/取缓存 → 延迟 → 下发」。
+`handle_events` 只做一次「时效 → 匹配 → 渲染 → 认领 → 生成/取缓存 → 下发」。
 事件来自 `doors` 的帧派生；规则按「设备/学号两维度各自具体或通配」匹配，具体压过
 通配；同一事件只认领一次。
 
@@ -13,12 +13,12 @@
 时再合成，之后命中缓存。时长占位符每场取值都不同，含它们的模板每次都现场合成——
 `voice_delivery.clip_ms` 记录的就是这段耗时。缓存按最近使用淘汰，不会无限增长。
 
-## 延迟与预热
+## 与浴室 App 提示音的时序
 
-`delay_ms` 从事件发生时刻算起，用来错开浴室 App 自己的结算语音。延迟窗口用于两件
-重叠的事：音频合成（服务端）与音频下载（设备端）——合成完成后若窗口还有剩余，先发
-`voice.prepare` 让设备把音频拉下来，`voice.play` 到达即命中设备缓存，下载不再排到
-延迟之后。实际下发时刻与各阶段耗时写入 `voice_delivery`，现场按该记录与设备日志调整。
+服务端合成完就下发 `voice.play`，不再按规则等固定延迟。设备在播放前检测浴室 App
+的提示音（`STREAM_MUSIC`）是否还在播，等它结束再开口；等待时长写入设备日志
+`audio.bath-wait`。实际下发时刻与各阶段耗时仍写入 `voice_delivery`，现场按该记录与
+设备日志看链路。静态模板的预热仍在保存/启用时进行。
 """
 
 import asyncio
@@ -53,9 +53,6 @@ from app.modules.sessions.schemas import CommandOutcome
 from . import render, repository, schemas, tts
 
 VOICE_PREPARE_TIMEOUT_S = 60.0
-#: 延迟窗口内预热的超时 = 剩余窗口 + 这段宽限：窗口本身很短时下载还能在宽限里完成，
-#: voice.play 会在设备的串行 voice 通道上排在它后面，总时序不受影响。
-PREPARE_GRACE_S = 30.0
 PLAY_TIMEOUT_MIN_S = 30.0
 PLAY_TIMEOUT_MAX_S = 120.0
 
@@ -115,7 +112,6 @@ def _rule_view(row: Row) -> schemas.VoiceRuleView:
         exempt=json.loads(str(row["exempt"])),
         events=[DoorEventKind(value) for value in event_values],
         text=str(row["text"]),
-        delay_ms=int(row["delay_ms"]),
         volume=int(row["volume"]),
         enabled=bool(row["enabled"]),
         voice=str(row["voice"]),
@@ -158,11 +154,6 @@ def spec() -> schemas.VoiceSpecView:
             schemas.VoicePlaceholderView(key=item.key, label=item.label, description=item.description)
             for item in schemas.PLACEHOLDERS
         ],
-        delay=schemas.VoiceDelayView(
-            minimum_ms=schemas.DELAY_MIN_MS,
-            maximum_ms=schemas.DELAY_MAX_MS,
-            default_ms=schemas.DELAY_DEFAULT_MS,
-        ),
         volume=schemas.VoiceBoundView(
             minimum=schemas.VOLUME_MIN,
             maximum=schemas.VOLUME_MAX,
@@ -253,7 +244,6 @@ def create_rule(req: schemas.VoiceRuleCreate) -> schemas.VoiceRuleView:
         json.dumps(events, ensure_ascii=False),
         exempt,
         req.text,
-        req.delay_ms,
         req.volume,
         req.enabled,
         req.voice,
@@ -287,7 +277,6 @@ def update_rule(rule_id: int, req: schemas.VoiceRuleUpdate) -> schemas.VoiceRule
             json.dumps(events, ensure_ascii=False),
             exempt,
             req.text,
-            req.delay_ms,
             req.volume,
             req.enabled,
             req.voice,
@@ -571,20 +560,12 @@ async def _dispatch_event(event: DoorEvent, max_age: int) -> None:
         return
     repository.mark_clip_ready(event.event_key, now_rfc3339(), clip_ms)
 
-    delay_ms = int(rule["delay_ms"])
-    remaining_s = delay_ms / 1000 - _elapsed_s(event.occurred_at)
-    if remaining_s > 0:
-        # 延迟窗口还有剩余：先让设备把音频拉下来，voice.play 到达即命中设备缓存，
-        # 下载不再排到延迟之后。不等它完成——设备串行 voice 通道自然排队，晚到的
-        # play 排在它后面，先后顺序不变。
-        _spawn_prepare(event.device_id, clip, remaining_s + PREPARE_GRACE_S)
-        await asyncio.sleep(remaining_s)
     if max_age > 0 and _elapsed_s(event.occurred_at) > max_age:
-        repository.finish_delivery(event.event_key, "", "skipped", "事件已超过时效", now_rfc3339(), False)
+        repository.finish_delivery(event.event_key, "", "skipped", "音频准备后事件已超过时效", now_rfc3339(), False)
         log_event(
             "INFO",
             "voice.event-stale",
-            "语音事件在延迟期间超过时效，跳过",
+            "语音事件在音频准备后超过时效，跳过",
             device_id=event.device_id,
             event=event.kind.value,
         )
@@ -614,7 +595,6 @@ async def _dispatch_event(event: DoorEvent, max_age: int) -> None:
         event=event.kind.value,
         status=str(outcome["status"]),
         reason_code=str(outcome["reason_code"] or "-"),
-        delay_ms=delay_ms,
         clip_ms=clip_ms,
         downloaded=downloaded,
     )
@@ -624,8 +604,7 @@ async def push_to_device(rule_id: int, device_id: str) -> schemas.VoicePushView:
     """把一条规则的播报立即推到指定设备真播一遍（试听的真机版）。
 
     渲染、合成、下发参数与真实事件走同一条路径：同模板、同样例值、同音色、同音量、
-    同播放超时。与真实事件只差两处：不等 delay_ms（那是给浴室 App 语音让路的，
-    手动验证不需要）；投递记录以 manual:* 事件键落一条，现场在「最近推送」对照。
+    同播放超时。投递记录以 manual:* 事件键落一条，现场在「最近推送」对照。
     """
     row = repository.get_rule(rule_id)
     if row is None:
@@ -655,7 +634,7 @@ async def push_to_device(rule_id: int, device_id: str) -> schemas.VoicePushView:
         occurred_at=now,
         event_key=f"{MANUAL_EVENT_PREFIX}{rule_id}:{uuid.uuid4().hex[:12]}",
     )
-    repository.claim_delivery(event, row, rendered_text, clip.clip_id, now, trace_id_var.get(), now, delay_ms=0)
+    repository.claim_delivery(event, row, rendered_text, clip.clip_id, now, trace_id_var.get(), now)
     outcome = await sessions_service.send_command_and_wait(
         device_id,
         actions.VOICE_PLAY,
@@ -891,7 +870,6 @@ def list_deliveries(limit: int) -> list[schemas.VoiceDeliveryView]:
             event=DoorEventKind(str(row["event"])),
             door_no=int(row["door_no"]),
             text=str(row["text"]),
-            delay_ms=int(row["delay_ms"]),
             occurred_at=str(row["occurred_at"]),
             dispatched_at=str(row["dispatched_at"]),
             done_at=str(row["done_at"]),

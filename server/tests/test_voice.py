@@ -51,7 +51,6 @@ def _payload(**overrides: object) -> dict[str, object]:
         "events": ["assigned"],
         "text": "欢迎使用，{door_no} 号喷头",
         "voice": "melo",
-        "delay_ms": 0,
         "volume": 3,
         "enabled": True,
     }
@@ -73,7 +72,6 @@ def _update_body(**overrides: object) -> dict[str, object]:
         "certs": ["C1"],
         "events": ["assigned"],
         "text": "固定内容",
-        "delay_ms": 0,
         "volume": 3,
         "enabled": True,
     }
@@ -158,8 +156,8 @@ def test_spec_uses_canonical_event_names(client: TestClient, admin_headers: dict
         "cert_no:4",
         "event",
     ]
-    assert spec["delay"] == {"minimum_ms": 0, "maximum_ms": 10_000, "default_ms": 0}
     assert spec["volume"] == {"minimum": 0, "maximum": 5, "default": 3}
+    assert "delay" not in spec
     assert "priority" not in spec
     assert next(item["key"] for item in spec["voices"]) == "melo"
 
@@ -175,7 +173,6 @@ def test_rule_crud_preview_and_clip(
     assert created["devices"] == [DEVICE_ID]
     assert created["certs"] == ["C1"]
     assert created["events"] == ["assigned"]
-    assert created["delay_ms"] == 0
 
     listed = client.get("/api/v1/voice/rules", headers=admin_headers).json()
     assert [item["id"] for item in listed] == [rule_id]
@@ -205,11 +202,10 @@ def test_rule_crud_preview_and_clip(
     updated = client.put(
         f"/api/v1/voice/rules/{rule_id}",
         headers=admin_headers,
-        json=_update_body(delay_ms=3000, volume=4, enabled=False),
+        json=_update_body(volume=4, enabled=False),
     )
     assert updated.status_code == 200
     assert updated.json()["text"] == "固定内容"
-    assert updated.json()["delay_ms"] == 3000
     assert updated.json()["enabled"] is False
 
     patched = client.patch(f"/api/v1/voice/rules/{rule_id}", headers=admin_headers, json={"enabled": True})
@@ -232,7 +228,6 @@ def test_rule_crud_preview_and_clip(
         {"devices": []},
         {"devices": ["*", DEVICE_ID]},
         {"certs": ["*", "C1"]},
-        {"delay_ms": 10_001},
         {"volume": 6},
         {"events": ["bogus"]},
         {"events": []},
@@ -458,7 +453,6 @@ def test_wildcard_rule_exemptions(
             "certs": ["*"],
             "events": ["assigned"],
             "text": "全场通用",
-            "delay_ms": 0,
             "volume": 4,
             "enabled": True,
             "exempt_cert_nos": [],
@@ -753,7 +747,7 @@ def test_handle_events_delivers_once_and_records_stage_timings(
     asyncio.run(service.handle_events((event,)))
     asyncio.run(service.handle_events((event,)))
 
-    # delay_ms=0：没有延迟窗口，不发预热，只有一次播放
+    # 服务端只下发一次播放；等待浴室提示音在设备端完成
     assert [action for action, _params in calls] == ["voice.play"]
     _action, params = calls[0]
     assert params["volume"] == 3
@@ -765,7 +759,7 @@ def test_handle_events_delivers_once_and_records_stage_timings(
     assert delivery["text"] == "空闲或已选中，转为等待开阀，5 号喷头已就绪"
     assert delivery["status"] == "ok"
     assert delivery["source"] == "auto"
-    assert delivery["delay_ms"] == 0
+    assert "delay_ms" not in delivery
     assert delivery["dispatched_at"]
     assert delivery["done_at"]
     assert delivery["clip_ms"] >= 0
@@ -774,25 +768,6 @@ def test_handle_events_delivers_once_and_records_stage_timings(
     assert delivery["finish_offset_ms"] is not None
     assert delivery["finish_offset_ms"] >= 0
     assert delivery["downloaded"] is False
-
-
-def test_handle_events_preloads_clip_inside_delay_window(
-    client: TestClient,
-    admin_headers: dict[str, str],
-    voice_device: None,
-    fake_tts: None,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _create(client, admin_headers, delay_ms=50)
-    calls: list[tuple[str, dict[str, object]]] = []
-    monkeypatch.setattr(sessions_service, "send_command_and_wait", _fake_send_collector(calls))
-
-    asyncio.run(service.handle_events((_event(now_rfc3339()),)))
-
-    # 延迟窗口内先预热（不带 volume），窗口到点再播放；顺序固定
-    assert [action for action, _params in calls] == ["voice.prepare", "voice.play"]
-    assert "volume" not in calls[0][1]
-    assert calls[1][1]["volume"] == 3
 
 
 def test_handle_events_skips_stale_and_no_rule(
@@ -1065,18 +1040,18 @@ def test_task_done_logs_exception() -> None:
     asyncio.run(run())
 
 
-def test_stale_after_delay(
+def test_stale_after_preparation(
     client: TestClient,
     admin_headers: dict[str, str],
     voice_device: None,
     fake_tts: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _create(client, admin_headers, delay_ms=0)
+    _create(client, admin_headers)
     calls: list[tuple[str, dict[str, object]]] = []
     monkeypatch.setattr(sessions_service, "send_command_and_wait", _fake_send_collector(calls))
-    # 三次读时：事件时效初检（未超）→ 算剩余延迟（为 0）→ 延迟后再查时效（超了）
-    elapsed = [0.0, 0.0, 100.0]
+    # 两次读时：事件时效初检（未超）→ 音频准备后再查（超了）
+    elapsed = [0.0, 100.0]
 
     def fake_elapsed(_value: str) -> float:
         return elapsed.pop(0) if elapsed else 100.0
@@ -1240,11 +1215,11 @@ def test_rule_push_plays_on_selected_device(
     assert [action for action, _params in calls] == ["voice.play"]
     assert calls[0][1]["volume"] == 3
 
-    # 最近推送里以 manual:* 落一条：来源可区分，且不记规则的延迟（手动推送不等窗口）
+    # 最近推送里以 manual:* 落一条：来源可区分
     deliveries = client.get("/api/v1/voice/deliveries", headers=admin_headers).json()
     assert deliveries[0]["status"] == "ok"
     assert deliveries[0]["source"] == "manual"
-    assert deliveries[0]["delay_ms"] == 0
+    assert "delay_ms" not in deliveries[0]
     assert deliveries[0]["detail"].startswith("手动推送")
 
 
