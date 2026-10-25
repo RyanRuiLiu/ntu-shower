@@ -281,7 +281,7 @@ def test_timezone_moves_the_buckets(client: TestClient, seeded: dict[str, str]) 
     """
     now = to_local(now_rfc3339(), TZ)
     assert now is not None
-    yesterday_evening = (now - timedelta(days=1)).replace(hour=20, minute=30, second=0, microsecond=0)
+    yesterday_evening = (now - timedelta(days=2)).replace(hour=20, minute=30, second=0, microsecond=0)
     _session(7, "2200000006", int((now - yesterday_evening).total_seconds()), 600)
 
     east = client.get(f"/api/v1/stats/devices/{DEVICE}?days=90&tz_offset_minutes=480", headers=seeded).json()
