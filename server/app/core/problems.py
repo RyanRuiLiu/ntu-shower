@@ -23,6 +23,7 @@ class Problem:
 # 里同码的那几条措辞一致：同一件事在 HTTP 层与命令回报层应当是同一句话。
 DEVICE_NOT_FOUND = Problem("device-not-found", 404, "找不到设备")
 DEVICE_OFFLINE = Problem("device-offline", 409, "设备离线")
+DEVICE_LOG_READ_FAILED = Problem("device-log-read-failed", 502, "设备日志读取失败")
 SERVER_OVERLOADED = Problem("server-overloaded", 409, "服务端同时处理的命令过多，请稍后再试")
 DOOR_NOT_FOUND = Problem("door-not-found", 404, "找不到喷头")
 DOOR_NOT_FREE = Problem("door-not-free", 409, "喷头不是空闲状态")
@@ -62,6 +63,7 @@ VALIDATION_FAILED = Problem("validation-failed", 422, "提交的内容有误")
 REGISTRY: tuple[Problem, ...] = (
     DEVICE_NOT_FOUND,
     DEVICE_OFFLINE,
+    DEVICE_LOG_READ_FAILED,
     SERVER_OVERLOADED,
     DOOR_NOT_FOUND,
     DOOR_NOT_FREE,

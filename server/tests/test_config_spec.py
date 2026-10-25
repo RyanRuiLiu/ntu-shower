@@ -131,6 +131,13 @@ def test_defaults_are_within_declared_bounds() -> None:
         assert spec.minimum <= default <= (spec.maximum or default), f"{spec.key} 的默认值不在范围内"
 
 
+def test_text_choices_default_is_declared() -> None:
+    """声明了封闭取值集的键，默认值必须就是其中一个取值。"""
+    for spec in SPECS_BY_KEY.values():
+        if spec.choices is not None:
+            assert spec.default in spec.choices, f"{spec.key} 的默认值不在 choices 里：{spec.default!r}"
+
+
 def test_weekday_default_is_canonical() -> None:
     """星期键的默认值必须是规范形式，且能被解析成七天。"""
     spec = SPECS_BY_KEY["notice_weekdays"]
@@ -151,7 +158,7 @@ def test_parse_weekdays_normalizes_and_rejects() -> None:
 
 
 def test_text_choices_machinery_rejects_unknown_value() -> None:
-    """文本键的封闭取值集校验机制（当前无使用方，机制留给下一个枚举键）。"""
+    """文本键的封闭取值集校验机制（`notice_align` 使用）。"""
     from app.modules.config.spec import ConfigKind
     from app.modules.config.store import _check_value
 

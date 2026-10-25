@@ -19,11 +19,13 @@ import com.ryanliu.ntushower.core.a11y.A11yRuntime
 import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.config.RuntimeConfig
+import com.ryanliu.ntushower.core.log.DeviceLog
 import com.ryanliu.ntushower.core.shell.RootShell
 import com.ryanliu.ntushower.core.threading.MainThread
 import com.ryanliu.ntushower.features.automation.BathAppGuard
 import com.ryanliu.ntushower.features.automation.BathAppPage
 import com.ryanliu.ntushower.features.automation.ContentEvent
+import java.io.File
 
 /**
  * 无障碍服务实体：UI 操作原语与页面事件流。
@@ -44,9 +46,12 @@ class A11yService :
     AccessibilityService(),
     A11yNodeSource {
 
+    private val deviceLog = DeviceLog(File(AppConfig.WORK_DIR))
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         A11yRuntime.bind(this)
+        deviceLog.lifecycle("a11y.connected", "component=A11yService")
         Log.i(TAG, "connected")
         enableViewIdReporting()
         A11yRuntime.bathAppInForeground = isBathAppInForeground()
@@ -142,6 +147,7 @@ class A11yService :
 
     override fun onDestroy() {
         A11yRuntime.unbind()
+        deviceLog.lifecycle("a11y.disconnected", "component=A11yService")
         // 自动化完全依赖本服务，服务销毁时它不可能还在跑。不复位的话这个标志会停在 true，
         // 而 BathAppGuard 据此不再拉起浴室 App——那正是界面能力的自举锚点，
         // 一次服务重绑就会让设备从此不再自愈。

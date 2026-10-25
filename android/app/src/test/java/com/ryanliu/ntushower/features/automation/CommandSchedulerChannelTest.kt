@@ -36,6 +36,7 @@ class CommandSchedulerChannelTest {
     /** 服务端归入 maintenance 通道的动作：设备端不进任何队列，即时执行。 */
     private val maintenance = setOf(
         SupportedActions.DEVICE_EXEC,
+        SupportedActions.DEVICE_LOG_TAIL,
         SupportedActions.DEVICE_REBOOT,
         SupportedActions.APP_RESTART,
         SupportedActions.BATH_RESTART,

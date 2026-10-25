@@ -93,7 +93,7 @@ class RuntimeConfigTest {
     fun supportedKeys_hasExpectedCount() {
         // 真正的键集合对账在服务端（server/tests/test_config_spec.py，按名字比对）。
         // 这里只守住数量：设备端键凭空变少或变多都该是有意的改动。
-        assertEquals(43, RuntimeConfig.supportedKeys.size)
+        assertEquals(45, RuntimeConfig.supportedKeys.size)
     }
 
     @Test
@@ -104,6 +104,8 @@ class RuntimeConfigTest {
                 .put("notice_text", "测试提示")
                 .put("notice_text_size_sp", 60)
                 .put("notice_text_color", "#112233")
+                .put("notice_align", "居中")
+                .put("notice_center_offset_dp", 60)
                 .put("notice_x_dp", 120)
                 .put("notice_y_dp", 240)
                 .put("notice_time_enabled", true)
@@ -119,6 +121,8 @@ class RuntimeConfigTest {
         assertEquals("测试提示", RuntimeConfig.noticeText)
         assertEquals(60, RuntimeConfig.noticeTextSizeSp)
         assertEquals("#112233", RuntimeConfig.noticeTextColor)
+        assertEquals("居中", RuntimeConfig.noticeAlign)
+        assertEquals(60, RuntimeConfig.noticeCenterOffsetDp)
         assertEquals(120, RuntimeConfig.noticeXDp)
         assertEquals(240, RuntimeConfig.noticeYDp)
         assertEquals(true, RuntimeConfig.noticeTimeEnabled)
@@ -131,18 +135,20 @@ class RuntimeConfigTest {
     }
 
     @Test
-    fun apply_clampsNoticeSizeButKeepsZeroPosition() {
-        // 字号 0 会让文字不可见；x/y 与占用下限的 0 是合法值，不得被抬走。
+    fun apply_keepsNegativeCenterOffsetButClampsPositions() {
+        // 字号 0 会让文字不可见；居中偏移可为负（向左），而 x/y 左边距/上边距仍非负。
         RuntimeConfig.apply(
             JSONObject()
                 .put("notice_text_size_sp", 0)
-                .put("notice_x_dp", 0)
-                .put("notice_y_dp", 0)
+                .put("notice_center_offset_dp", -40)
+                .put("notice_x_dp", -120)
+                .put("notice_y_dp", -40)
                 .put("notice_occupancy_min", 0)
                 .put("notice_occupancy_max", 0),
         )
 
         assertEquals(1, RuntimeConfig.noticeTextSizeSp)
+        assertEquals(-40, RuntimeConfig.noticeCenterOffsetDp)
         assertEquals(0, RuntimeConfig.noticeXDp)
         assertEquals(0, RuntimeConfig.noticeYDp)
         assertEquals(0, RuntimeConfig.noticeOccupancyMin)
@@ -204,7 +210,7 @@ class RuntimeConfigTest {
                 RuntimeConfig.apply(JSONObject().put(key, value))
             }
         }
-        assertEquals(43, RuntimeConfig.supportedKeys.size)
+        assertEquals(45, RuntimeConfig.supportedKeys.size)
     }
 
     @Test

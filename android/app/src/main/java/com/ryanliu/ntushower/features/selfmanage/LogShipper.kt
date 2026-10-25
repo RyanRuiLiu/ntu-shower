@@ -9,18 +9,21 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * 设备日志上送：每次握手成功后，把 device.log 与 crash.log 的**尾部**送到服务端。
+ * 设备日志上送：device.log / crash.log / ota-install.log 三份尾部。
  *
- * 解决的问题：设备离线期间发生的事只存在于设备上（服务端只有 on/off 时刻，没有
- * 原因），而离线中恰恰拿不到设备——2026-10-07 的 5F 就是这一类：掉线原因写在
- * device.log 里，却没有远程通道取它。上送让证据在回连那一刻自动到位，现场不再
- * 需要读文件。
+ * ## 何时送
+ *
+ * - 每次握手成功强制送一次：离线期间发生的事随回连到服务端；
+ * - 关键事件（DeviceLog.warn/error）后由周期任务在 1 分钟内送一次；
+ * - 普通变化按周期（默认 5 分钟）送，文件没变就不发；另每 30 分钟写一条健康记录，
+ *   保证"设备一直安静"与"上送链路坏了"可以区分。
+ *
+ * 要此刻设备上的原文时走 `device.log_tail` 现读，不等上送；上送的是离线时留下的副本。
  *
  * ## 有界
  *
- * 每份至多取尾部 [TAIL_BYTES]（device.log 本身 256KB 封顶，取尾足够覆盖最近的
- * 故障现场）；服务端按（设备，种类）只留最近几份。上送是现态读数不是队列：
- * 重发无害，失败也无需重试——下一次握手会带着更新的日志再来。
+ * 每份至多取尾部 [TAIL_BYTES]；服务端按（设备，种类）只留最近几份。重发无害，
+ * 失败也无需重试——下一轮会带着更新内容再来。
  */
 object LogShipper {
 
@@ -29,35 +32,71 @@ object LogShipper {
     /** 单份上送的尾部大小（字节）。 */
     const val TAIL_BYTES = 64 * 1024
 
-    /**
-     * 握手成功（trusted）后调一次。每类日志一份 `device.log_upload`；文件不存在或
-     * 为空就跳过——空日志不值得占一条消息与服务端一行记录。
-     */
+    private data class Stamp(val length: Long, val modified: Long)
+
+    private val files = mapOf(
+        "device" to File(AppConfig.WORK_DIR, DeviceLog.FILE_NAME),
+        "crash" to File(AppConfig.WORK_DIR, AppConfig.CRASH_LOG_NAME),
+        "ota" to File(AppConfig.WORK_DIR, AppConfig.OTA_INSTALL_LOG_NAME),
+    )
+    private val last = mutableMapOf<String, Stamp>()
+
+    /** 握手后强制送三份；文件不存在/为空就跳过。 */
+    @Synchronized
     fun ship(client: GatewayClient) {
-        ship(client, "device", File(AppConfig.WORK_DIR, DeviceLog.FILE_NAME))
-        ship(client, "crash", File(AppConfig.WORK_DIR, "crash.log"))
+        shipChanged(client, force = true)
     }
 
-    private fun ship(client: GatewayClient, kind: String, file: File) {
+    /**
+     * 按变化送：返回是否至少发了一份。
+     *
+     * `force=true` 用于关键事件与握手：即使文件戳没变也重发一次。
+     * 文件戳用长度 + mtime；CappedLogFile 裁剪后长度会变小，同样是变化。
+     */
+    @Synchronized
+    fun shipChanged(client: GatewayClient, force: Boolean = false): Boolean {
+        var sent = false
+        for ((kind, file) in files) {
+            if (shipKind(client, kind, file, force)) sent = true
+        }
+        return sent
+    }
+
+    private fun shipKind(client: GatewayClient, kind: String, file: File, force: Boolean): Boolean {
+        val stamp = stampOf(file)
+        if (!force && last[kind] == stamp) return false
         val content = try {
             tail(file)
         } catch (e: Exception) {
             Log.w(TAG, "read $kind log failed: ${e.message}")
-            return
+            return false
         }
-        if (content.isBlank()) return
-        val sent = client.send(
+        if (content.isBlank()) {
+            last[kind] = stamp
+            return false
+        }
+        client.send(
             MessageTypes.DEVICE_LOG_UPLOAD,
             JSONObject().put("kind", kind).put("content", content),
         )
-        Log.i(TAG, "$kind log shipped ($sent, ${content.length} chars)")
+        last[kind] = stamp
+        Log.i(TAG, "$kind log shipped (${content.length} chars)")
+        return true
     }
+
+    private fun stampOf(file: File): Stamp = if (file.isFile) Stamp(file.length(), file.lastModified()) else Stamp(0, 0)
 
     /** 读文件尾部至多 [TAIL_BYTES] 字节；文件不存在返回空串。 */
     internal fun tail(file: File): String {
         if (!file.exists()) return ""
         val bytes = file.readBytes()
-        val start = if (bytes.size <= TAIL_BYTES) 0 else bytes.size - TAIL_BYTES
+        var start = if (bytes.size <= TAIL_BYTES) 0 else bytes.size - TAIL_BYTES
+        if (start > 0) {
+            // 不从一个汉字/一条 JSON 的中间开始
+            var newline = start
+            while (newline < bytes.size && bytes[newline] != '\n'.code.toByte()) newline++
+            if (newline < bytes.size) start = newline + 1
+        }
         return String(bytes, start, bytes.size - start, Charsets.UTF_8)
     }
 }

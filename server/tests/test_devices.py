@@ -281,6 +281,126 @@ def test_action_endpoints_dispatch_registered_actions(
     assert ready["device_id"] == DEVICE_ID
 
 
+def test_live_log_reads_from_device(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """现读日志走独立动作，返回原文、存在性与截断标记；缺失文件不是错误。"""
+    helpers.register_trusted_device(DEVICE_ID)
+    monkeypatch.setattr(manager, "_connections", {DEVICE_ID: object()})
+    captured: dict[str, Any] = {}
+
+    async def fake_send(device_id: str, action: str, params: dict[str, Any], timeout_s: float = 0.0) -> dict[str, Any]:
+        captured.update(device_id=device_id, action=action, params=params)
+        return {
+            "status": "ok",
+            "reason_code": "",
+            "terminal_message": "",
+            "data": {
+                "content": "line-1\nline-2",
+                "kind": "device",
+                "lines": 2,
+                "truncated": True,
+                "present": True,
+                "size_bytes": 4096,
+            },
+        }
+
+    monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
+    r = client.get(f"/api/v1/devices/{DEVICE_ID}/logs/live?kind=device&lines=2", headers=admin_headers)
+
+    assert r.status_code == 200
+    assert captured["action"] == actions.DEVICE_LOG_TAIL
+    assert captured["params"] == {"kind": "device", "lines": 2}
+    body = r.json()
+    assert body["content"] == "line-1\nline-2"
+    assert body["truncated"] is True
+    assert body["present"] is True
+    assert body["size_bytes"] == 4096
+    assert body["read_at"]
+
+
+def test_live_log_absent_file_is_not_an_error(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """crash.log 只在该设备真正崩溃后才存在；present=false 要能正常返回。"""
+    helpers.register_trusted_device(DEVICE_ID)
+    monkeypatch.setattr(manager, "_connections", {DEVICE_ID: object()})
+
+    async def fake_send(device_id: str, action: str, params: dict[str, Any], timeout_s: float = 0.0) -> dict[str, Any]:
+        return {
+            "status": "ok",
+            "reason_code": "",
+            "terminal_message": "",
+            "data": {
+                "content": "",
+                "kind": "crash",
+                "lines": 0,
+                "truncated": False,
+                "present": False,
+                "size_bytes": 0,
+            },
+        }
+
+    monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
+    r = client.get(f"/api/v1/devices/{DEVICE_ID}/logs/live?kind=crash", headers=admin_headers)
+
+    assert r.status_code == 200
+    assert r.json()["present"] is False
+    assert r.json()["content"] == ""
+
+
+def test_live_log_rejects_unknown_kind(client: TestClient, admin_headers: dict[str, str]) -> None:
+    r = client.get(f"/api/v1/devices/{DEVICE_ID}/logs/live?kind=whatever", headers=admin_headers)
+
+    assert r.status_code == 422
+
+
+def test_live_log_maps_device_failure_to_problem(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    helpers.register_trusted_device(DEVICE_ID)
+    monkeypatch.setattr(manager, "_connections", {DEVICE_ID: object()})
+
+    async def fake_send(device_id: str, action: str, params: dict[str, Any], timeout_s: float = 0.0) -> dict[str, Any]:
+        return {
+            "status": "failed",
+            "reason_code": "device.internal_error",
+            "terminal_message": "读文件失败",
+            "data": None,
+        }
+
+    monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
+    r = client.get(f"/api/v1/devices/{DEVICE_ID}/logs/live?kind=device", headers=admin_headers)
+
+    assert r.status_code == 502
+    assert r.json()["type"].endswith("/problems/device-log-read-failed")
+    assert "读文件失败" in r.json()["detail"]
+
+
+def test_live_log_rejects_empty_result_data(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    helpers.register_trusted_device(DEVICE_ID)
+    monkeypatch.setattr(manager, "_connections", {DEVICE_ID: object()})
+
+    async def fake_send(device_id: str, action: str, params: dict[str, Any], timeout_s: float = 0.0) -> dict[str, Any]:
+        return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
+
+    monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
+    r = client.get(f"/api/v1/devices/{DEVICE_ID}/logs/live?kind=device", headers=admin_headers)
+
+    assert r.status_code == 502
+    assert r.json()["type"].endswith("/problems/device-log-read-failed")
+
+
 def test_clock_set_rejects_malformed_datetime(client: TestClient, admin_headers: dict[str, str]) -> None:
     """datetime 形状在 HTTP 边界即拦（422），不发给设备。"""
     r = client.post("/api/v1/devices/ghost/clock/set", headers=admin_headers, json={"datetime": "nope"})

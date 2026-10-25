@@ -33,7 +33,7 @@ class ShowerApp : Application() {
             // 写失败由 CappedLogFile 内部吞掉，不能阻碍后续的重启流程。
             val dir = File(AppConfig.WORK_DIR).apply { mkdirs() }
             CappedLogFile.append(
-                File(dir, CRASH_LOG_NAME),
+                File(dir, AppConfig.CRASH_LOG_NAME),
                 "\n==== ${Clock.wallClockRfc3339()} ====\n" + Log.getStackTraceString(throwable) + "\n",
                 CappedLogFile.DEFAULT_MAX_BYTES,
             )
@@ -61,9 +61,6 @@ class ShowerApp : Application() {
 
     companion object {
         private const val TAG = "ShowerApp"
-
-        /** 崩溃堆栈落在这个文件里，管理台 `device.exec` 直接 cat 取回。 */
-        private const val CRASH_LOG_NAME = "crash.log"
 
         /** 崩溃到重启之间的间隔：留一点时间让系统把进程收干净。 */
         private const val RESTART_DELAY_MS = 1_000L

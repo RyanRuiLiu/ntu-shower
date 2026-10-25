@@ -11,6 +11,7 @@
  */
 import { api } from '../core/api.js'
 import { hasIdentity } from '../core/api.js'
+import { fmtFullDateTime } from '../core/clock.js'
 import { promptClockSet, restartBathApp } from '../core/device-actions.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
 import { outcomeText, problemText, report } from '../core/outcome.js'
@@ -142,17 +143,70 @@ function recallHistory(step) {
   $('inCommand').value = historyIndex < 0 ? '' : execHistory[execHistory.length - 1 - historyIndex]
 }
 
+function logKindLabel(kind) {
+  if (kind === 'crash') return 'crash.log（未捕获异常）'
+  if (kind === 'ota') return 'ota-install.log（安装脚本输出）'
+  return 'device.log（运行事件）'
+}
+
+function logAbsentText(kind) {
+  if (kind === 'crash') return '设备上暂无 crash.log：该设备自上次安装以来没有崩溃过'
+  if (kind === 'ota') return '设备上暂无 ota-install.log：还没有发起过安装'
+  return '设备上暂无 device.log'
+}
+
+function setLogStatus(text) {
+  $('logStatus').textContent = text
+}
+
+/** 日志是追加写的，默认看最新：换内容后滚到底部。 */
+function showLogContent(text) {
+  const view = $('deviceLogView')
+  view.textContent = text || '(空)'
+  requestAnimationFrame(() => {
+    view.scrollTop = view.scrollHeight
+  })
+}
+
 /** 拉取设备最近一次上送的日志（种类取选择框）。404 = 该类日志还没有上送过。 */
-async function loadDeviceLog() {
+async function loadStoredLog() {
   const kind = $('inLogKind').value
-  report('logResult', '正在读取…', 'info')
+  setLogStatus('正在读取上次上送…')
   try {
     const result = await api.deviceLogs(store.deviceId, kind)
-    $('deviceLogView').textContent = result.content || '(空)'
-    report('logResult', `上送于 ${result.uploaded_at}`, 'info')
+    showLogContent(result.content)
+    setLogStatus(`上次上送于 ${fmtFullDateTime(result.uploaded_at)}`)
   } catch (error) {
     $('deviceLogView').textContent = ''
-    report('logResult', problemText(error), 'err')
+    setLogStatus(`${logKindLabel(kind)} 尚无上送记录：${problemText(error)}`)
+  }
+}
+
+/** 从设备现读最新尾部；离线或命令失败时退回上次上送，但不伪装成实时。 */
+async function loadLiveLog() {
+  const kind = $('inLogKind').value
+  setLogStatus('正在从设备读取最新日志…')
+  try {
+    const result = await api.deviceLogLive(store.deviceId, kind)
+    if (!result.present) {
+      $('deviceLogView').textContent = ''
+      setLogStatus(logAbsentText(kind))
+      return
+    }
+    showLogContent(result.content)
+    const suffix = result.truncated ? ` · 仅显示最近 ${result.lines} 行` : ''
+    setLogStatus(`设备实时 · ${fmtFullDateTime(result.read_at)}${suffix}`)
+  } catch (error) {
+    try {
+      const stored = await api.deviceLogs(store.deviceId, kind)
+      showLogContent(stored.content)
+      setLogStatus(
+        `实时读取失败：${problemText(error)}；显示上次上送（${fmtFullDateTime(stored.uploaded_at)}）`,
+      )
+    } catch (storedError) {
+      $('deviceLogView').textContent = ''
+      setLogStatus(`实时读取失败：${problemText(error)}；也没有上送记录：${problemText(storedError)}`)
+    }
   }
 }
 
@@ -357,18 +411,19 @@ export const devicesView = {
       <section class="panel">
         <div class="panel-head">
           <span class="panel-title">设备日志</span>
-          <span class="panel-note">设备每次上线自动上送尾部；离线期间的故障现场在这里看</span>
+          <span class="panel-note" id="logStatus">在线可现读最新；离线时看上次上送</span>
           <div class="panel-tools">
             <select id="inLogKind" class="input-sm">
               <option value="device">device.log</option>
               <option value="crash">crash.log</option>
+              <option value="ota">ota-install.log</option>
             </select>
-            <button type="button" class="btn btn-ghost btn-sm" id="btnLoadLog">加载</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="btnLoadLog">上次上送</button>
+            <button type="button" class="btn btn-sm" id="btnLoadLogLive">拉取最新</button>
           </div>
         </div>
-        <div class="panel-body flush">
-          <pre class="code" id="deviceLogView" style="max-height:420px;overflow:auto"></pre>
-          <div class="result" id="logResult" style="padding:0 4px"></div>
+        <div class="panel-body">
+          <pre class="code" id="deviceLogView"></pre>
         </div>
       </section>
 
@@ -472,8 +527,9 @@ export const devicesView = {
           .catch((error) => toast(problemText(error)))
       }),
     )
-    dispose.add(listen($('btnLoadLog'), 'click', loadDeviceLog))
-    dispose.add(listen($('inLogKind'), 'change', loadDeviceLog))
+    dispose.add(listen($('btnLoadLog'), 'click', loadStoredLog))
+    dispose.add(listen($('btnLoadLogLive'), 'click', loadLiveLog))
+    dispose.add(listen($('inLogKind'), 'change', loadStoredLog))
     dispose.add(listen($('btnExec'), 'click', runExec))
     dispose.add(listen($('btnClockSet'), 'click', () => promptClockSet(store.deviceId, sayMaint)))
     dispose.add(listen($('btnFreelist'), 'click', openFreelist))

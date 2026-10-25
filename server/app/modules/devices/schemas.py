@@ -92,6 +92,18 @@ class DeviceLogView(BaseModel):
     uploaded_at: str
 
 
+class DeviceLogLiveView(BaseModel):
+    """从设备现读的日志尾部；`present=false` 表示文件尚未产生（例如从未崩溃）。"""
+
+    content: str
+    kind: str
+    lines: int
+    truncated: bool
+    present: bool
+    size_bytes: int
+    read_at: str
+
+
 class DeviceOrderResponse(BaseModel):
     """重排后的完整设备顺序（device_id 列表，含未出现在请求里的设备）。"""
 

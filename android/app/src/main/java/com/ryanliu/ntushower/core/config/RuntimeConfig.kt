@@ -92,6 +92,12 @@ object RuntimeConfig {
     @Volatile var noticeTextColor = ConfigDefaults.NOTICE_TEXT_COLOR
         private set
 
+    @Volatile var noticeAlign = ConfigDefaults.NOTICE_ALIGN
+        private set
+
+    @Volatile var noticeCenterOffsetDp = ConfigDefaults.NOTICE_CENTER_OFFSET_DP.toInt()
+        private set
+
     // x/y 与占用上下限的 0 是合法值，只挡住负数；字号则至少为 1。
     @Volatile var noticeXDp = ConfigDefaults.NOTICE_X_DP.toInt()
         private set
@@ -248,6 +254,9 @@ object RuntimeConfig {
         "notice_text_size_sp" to
             { c, key -> noticeTextSizeSp = atLeastOne(c.optInt(key, noticeTextSizeSp)) },
         "notice_text_color" to { c, key -> noticeTextColor = c.optString(key, noticeTextColor) },
+        "notice_align" to { c, key -> noticeAlign = c.optString(key, noticeAlign) },
+        "notice_center_offset_dp" to
+            { c, key -> noticeCenterOffsetDp = c.optInt(key, noticeCenterOffsetDp) },
         "notice_x_dp" to { c, key -> noticeXDp = c.optInt(key, noticeXDp).coerceAtLeast(0) },
         "notice_y_dp" to { c, key -> noticeYDp = c.optInt(key, noticeYDp).coerceAtLeast(0) },
         "notice_time_enabled" to
