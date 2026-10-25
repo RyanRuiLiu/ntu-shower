@@ -617,31 +617,31 @@ export const inspectorView = {
   mount(root) {
     root.innerHTML = `
       <div class="tb">
-        <button type="button" class="primary" data-act="capture">截图</button>
-        <button type="button" data-act="tree">界面树</button>
+        <button type="button" class="btn btn-sm" data-act="capture">截图</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-act="tree">界面树</button>
         <span class="sep"></span>
         <span class="grp">
-          <button type="button" data-key="home">主页</button>
-          <button type="button" data-key="back">返回</button>
-          <button type="button" data-key="recents">最近任务</button>
-          <button type="button" data-key="notifications">通知栏</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-key="home">主页</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-key="back">返回</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-key="recents">最近任务</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-key="notifications">通知栏</button>
         </span>
         <span class="sep"></span>
         <span class="grp">
-          <button type="button" data-key="dpad_up" title="焦点上移">▲</button>
-          <button type="button" data-key="dpad_down" title="焦点下移">▼</button>
-          <button type="button" data-key="dpad_left" title="焦点左移">◀</button>
-          <button type="button" data-key="dpad_right" title="焦点右移">▶</button>
-          <button type="button" data-key="dpad_center" title="按下焦点控件">确认</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-key="dpad_up" title="焦点上移">▲</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-key="dpad_down" title="焦点下移">▼</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-key="dpad_left" title="焦点左移">◀</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-key="dpad_right" title="焦点右移">▶</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-key="dpad_center" title="按下焦点控件">确认</button>
         </span>
         <span class="sep"></span>
         <span class="grp">
-          <button type="button" data-key="enter">回车</button>
-          <button type="button" data-key="del">删除</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-key="enter">回车</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-key="del">删除</button>
         </span>
         <span class="sep"></span>
         <span class="grp">
-          <button type="button" class="danger" data-act="reboot" title="重启整机；设备会离线一段时间，进行中的会话会中断">重启设备</button>
+          <button type="button" class="btn btn-danger btn-sm" data-act="reboot" title="重启整机；设备会离线一段时间，进行中的会话会中断">重启设备</button>
         </span>
         <div class="tb-right">
           <label class="tb-toggle" title="操作后自动重截画面">
@@ -676,8 +676,8 @@ export const inspectorView = {
             <span class="panel-title-btn" id="panelCollapse" title="收起右侧面板，画面占满整行">界面树</span>
             <span class="count" id="treeCount"></span>
             <span class="actions">
-              <button type="button" data-act="collapse" title="折叠选中节点的子树">[-]</button>
-              <button type="button" data-act="expand" title="展开全部">[+]</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-act="collapse" title="折叠选中节点的子树">[-]</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-act="expand" title="展开全部">[+]</button>
             </span>
           </div>
           <input type="text" class="tree-search" id="treeSearch" placeholder="搜索  class:Button  text:确认  id:btn  …">
@@ -704,17 +704,17 @@ export const inspectorView = {
               <div class="prop-tags" id="propTags"></div>
             </div>
             <div class="prop-section">
-              <button type="button" class="prop-tap" id="propTap" disabled>点击所选元素</button>
+              <button type="button" class="btn btn-sm btn-block" id="propTap" disabled>点击所选元素</button>
             </div>
           </div>
 
           <div class="input-bar">
-            <span class="input-channel" id="inputChannel">
-              <button type="button" data-channel="clipboard" title="剪贴板粘贴：支持中文；同一字段第二次插入会多一个空格（ROM 行为）">粘贴</button>
-              <button type="button" data-channel="keys" title="按键注入：无多余空格问题，仅支持英文、数字与符号">按键</button>
+            <span class="btn-group" id="inputChannel">
+              <button type="button" class="btn btn-ghost btn-sm" data-channel="clipboard" title="剪贴板粘贴：支持中文；同一字段第二次插入会多一个空格（ROM 行为）">粘贴</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-channel="keys" title="按键注入：无多余空格问题，仅支持英文、数字与符号">按键</button>
             </span>
             <input type="text" id="textInput" placeholder="输入文本后按回车发送">
-            <button type="button" data-act="send">发送</button>
+            <button type="button" class="btn btn-sm" data-act="send">发送</button>
           </div>
         </div>
       </div>

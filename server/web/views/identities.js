@@ -26,6 +26,7 @@
  * 需显式确认已保存）与 openid（登记小程序用户的 openid）。
  */
 import { api } from '../core/api.js'
+import { codeCell } from '../core/cells.js'
 import { problemText, report } from '../core/outcome.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
 import { bindScopeToggle, readScopeEditor, scopeEditorHtml } from '../core/device-scope.js'
@@ -85,7 +86,7 @@ function render(list) {
       // 正在编辑的行标出选中态：只换背景色，不动结构，列宽与行高保持不变
       const selected = editingIdentity === item.identity ? ' class="is-selected"' : ''
       return `<tr${selected} data-id="${esc(item.identity)}">
-        <td><code>${esc(item.identity)}</code></td>
+        <td>${codeCell(item.identity)}</td>
         <td>${esc(KIND_LABEL[item.kind] || item.kind)}</td>
         <td>${capabilityBadges(item.capabilities)}</td>
         <td title="${esc((item.device_scope || []).join(', '))}">${esc(scopeText(item.device_scope))}</td>
