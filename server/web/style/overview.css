@@ -43,15 +43,15 @@
   margin-top: 4px;
   overflow: hidden;
   background: var(--elevated);
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
 }
 
 .kpi-fill {
   width: var(--ratio, 0);
   height: 100%;
   background: var(--tone, var(--muted));
-  border-radius: 2px;
-  transition: width 0.4s;
+  border-radius: var(--radius-xs);
+  transition: width var(--transition-slow);
 }
 
 .kpi-card.tone-green {
@@ -152,7 +152,7 @@
 /* 状态标签：浅底 + 同色文字，与 KPI 用同一套色 */
 .door-tag {
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-pill);
   font-size: var(--fs-chip);
   font-weight: 600;
 }
@@ -325,8 +325,8 @@
 
 .task-board .task-chip {
   padding: 0 6px;
-  font-size: 12px;
-  border-radius: 3px;
+  font-size: var(--fs-small);
+  border-radius: var(--radius-xs);
 }
 
 .task-board .task-chip.on {
@@ -340,13 +340,13 @@
 }
 
 .task-board .task-meta {
-  font-size: 13px;
+  font-size: var(--fs-body);
   color: var(--muted);
 }
 
 .task-board .task-next {
   margin-left: auto;
-  font-size: 13px;
+  font-size: var(--fs-body);
   color: var(--muted);
 }
 
@@ -374,7 +374,7 @@
 .task-board .task-line .task-countdown {
   margin-left: auto;
   font-family: var(--font-mono);
-  font-size: 15px;
+  font-size: var(--fs-title);
   color: var(--amber);
 }
 
@@ -384,7 +384,7 @@
   gap: 2px 14px;
   margin-top: 2px;
   padding-bottom: 6px;
-  font-size: 12px;
+  font-size: var(--fs-small);
   color: var(--muted);
 }
 
@@ -402,7 +402,7 @@
 
 .task-board .task-hint {
   padding: 2px 0 8px;
-  font-size: 13px;
+  font-size: var(--fs-body);
   color: var(--muted);
 }
 
