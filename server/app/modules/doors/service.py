@@ -54,8 +54,9 @@ selected > free。"有人" = `cardno ≠ 0` **或** `accno` 既非空串也非 `
 ## 首帧与两条帧结构规则
 
 首次见到某个门时没有前态：占用态就开会话（`assigned_at` 由 [_assigned_at] 给出，
-能平移就是真实分配时刻，否则是观测下界），空闲态不动。**首帧不记事件**——没有"从哪来"，
-记一条来源不明的 `from_state` 会污染转换统计。
+能平移就是真实分配时刻，否则是观测下界），空闲态不动。**首帧不记 `door_state_event`**
+——没有"从哪来"，记一条来源不明的 `from_state` 会污染转换统计。语音的 `assigned`
+是会话生命周期事实：首帧/全貌帧/盲区帧只要有可平移的 `open_time`，仍会补发。
 
 - 同一帧内重复门号取**最后一条**（见 `_clean` 的调用点）；
 - 门在后续帧里消失时**保留原状态**，不判成空闲——漏报一个门不等于那个门空了。
@@ -557,9 +558,29 @@ def _derive_snapshot(device_id: str, source: str, raw_doors: list[JsonObject], o
         # 先派生、再落现态：后台任务要读**上一帧**的状态与时刻，而 `upsert_door_live`
         # 会把它们覆盖掉。全貌帧同样要派生——它挡住的只是事件流水（见 SOURCE_STARTUP），
         # 会话跟着一起跳过就会丢掉重连时正在进行的那一场。
-        door_events = _maintain_session(device_id, door_no, state, door, occurred_at, old, event_id)
+        door_events = _maintain_session(
+            device_id,
+            door_no,
+            state,
+            door,
+            occurred_at,
+            old,
+            event_id,
+            startup=source == SOURCE_STARTUP,
+        )
         if voice_eligible:
             collected.extend(door_events)
+        elif source == SOURCE_STARTUP:
+            # 全貌帧不记状态迁移，但会话生命周期（分配/释放）不依赖某一帧的迁移：
+            # open_time 可平移的 assigned、以及上一帧仍占用而本帧已空的释放，都补发。
+            # 盲区里的收尾已在 _maintain_session 里标 gap 并跳过，不会在这里漏成假事件。
+            lifecycle = {
+                DoorEventKind.ASSIGNED,
+                DoorEventKind.RELEASED_UNUSED,
+                DoorEventKind.RELEASED_AFTER_SHOWER,
+                DoorEventKind.RELEASED_WHILE_PAUSED,
+            }
+            collected.extend(event for event in door_events if event.kind in lifecycle)
 
         # 现态对外的三个时间字段是**服务端轴**的：设备那口钟的读数只保留在原始帧里
         # （为什么对外不能出现设备轴，见 DECISIONS 的「两条时间轴」）。
@@ -741,6 +762,7 @@ def _maintain_session(
     at: str,
     previous: Row | None,
     event_id: int | None,
+    startup: bool,
 ) -> list[DoorEvent]:
     """维护会话与段：开、推进、收尾，并产出本帧的可播报事件。
 
@@ -750,7 +772,8 @@ def _maintain_session(
     **先看盲区**：相邻两帧隔得超过一次占用的物理上限（[SESSION_MAX_S]）时，盲区前后
     的状态不能当成连续。前一场在我们**最后看见它的时刻**收尾，本帧若仍占着就另起一场
     ——否则库里的陈旧占用（浴室 App 停了、人早走了）会被当成"它还被占着"，那场会话永不
-    结束、起点还落在几小时前。盲区前后都不产出播报事件：中间发生过什么没有证据。
+    结束、起点还落在几小时前。盲区里的状态迁移不产出播报事件：中间发生过什么没有证据；
+    但新会话的 `assigned` 是生命周期事实，`open_time` 可平移时仍补发。
 
     事件的产出边界（与 voice 的事件目录一一对应）：
     - 新会话 / 换人 → `assigned`；换人不为旧学号产出 `released`；
@@ -802,7 +825,10 @@ def _maintain_session(
     if open_session is None:
         assigned, source = _assigned_at(door, at, device_id, previous)
         session_id = repository.open_session(device_id, door_no, card_no, cert_no, assigned, source)
-        if not blind and cert_no:
+        # assigned 是会话生命周期事实，不是一次观测到的状态迁移：新会话一建立就产出。
+        # 盲区/全貌帧里如果 open_time 能平移（source=inferred），用真实分配时刻补发；
+        # 没有 open_time 的观测下界不补——不知道是什么时候分配的，补了就是编时刻。
+        if cert_no and (source == SESSION_ASSIGNED_INFERRED or (not blind and not startup)):
             out.append(
                 _door_event(
                     DoorEventKind.ASSIGNED,
@@ -810,7 +836,7 @@ def _maintain_session(
                     door_no,
                     cert_no,
                     session_id,
-                    at,
+                    assigned,
                     f"session:{session_id}:assigned",
                 )
             )
@@ -823,7 +849,7 @@ def _maintain_session(
         _close(open_session, door, at, False)
         assigned, source = _assigned_at(door, at, device_id, previous)
         session_id = repository.open_session(device_id, door_no, card_no, cert_no, assigned, source)
-        if not blind and cert_no:
+        if cert_no and (source == SESSION_ASSIGNED_INFERRED or (not blind and not startup)):
             out.append(
                 _door_event(
                     DoorEventKind.ASSIGNED,
@@ -831,7 +857,7 @@ def _maintain_session(
                     door_no,
                     cert_no,
                     session_id,
-                    at,
+                    assigned,
                     f"session:{session_id}:assigned",
                 )
             )

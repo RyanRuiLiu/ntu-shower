@@ -6,6 +6,7 @@
 import uuid
 from typing import Any
 
+from app.core import device_clock
 from app.modules.doors import service
 from app.modules.doors.events import DoorEvent, DoorEventKind
 
@@ -176,11 +177,84 @@ def test_occupant_change_announces_new_only(fresh_db: str) -> None:
     assert events[0].cert_no == "C2"
 
 
-def test_startup_and_import_emit_nothing(fresh_db: str) -> None:
+def test_startup_and_import_emit_nothing_without_open_time(fresh_db: str) -> None:
+    """没有 open_time 时只有观测下界；startup/import 都不补 assigned。"""
     device_id = "voice-event-source"
     _process(device_id, [_door(1)], T0)
     assert _process(device_id, [_occupied()], T1, source=service.SOURCE_STARTUP) == ()
     assert _process(device_id, [_occupied()], T2, source=service.SOURCE_IMPORT) == ()
+
+
+def test_startup_waiting_with_open_time_emits_assigned(fresh_db: str) -> None:
+    """重连全貌帧看到仍在等待开阀、open_time 可平移：补一条真实分配时刻的 assigned。"""
+    device_id = "voice-event-startup-waiting"
+    device_clock.load(device_id, 0.0)
+    _process(device_id, [_door(1)], T0)
+    events = _process(device_id, [_occupied(open_time=T1)], T2, source=service.SOURCE_STARTUP)
+
+    assert [event.kind for event in events] == [DoorEventKind.ASSIGNED]
+    assert events[0].cert_no == "C1"
+    assert events[0].occurred_at == T1
+    assert events[0].event_key == f"session:{events[0].session_id}:assigned"
+
+
+def test_startup_bathing_with_open_time_emits_assigned(fresh_db: str) -> None:
+    """重连时已经在淋浴也一样：会话是新发现的，分配事实仍成立。"""
+    device_id = "voice-event-startup-bathing"
+    device_clock.load(device_id, 0.0)
+    _process(device_id, [_door(1)], T0)
+    events = _process(device_id, [_bathing()], T1, source=service.SOURCE_STARTUP)
+
+    assert [event.kind for event in events] == [DoorEventKind.ASSIGNED]
+    assert events[0].occurred_at == T0
+
+
+def test_gap_with_open_time_emits_assigned(fresh_db: str) -> None:
+    """跨盲区另起一场时，只要 open_time 可平移，仍补 assigned；释放仍不补。"""
+    device_id = "voice-event-gap-assigned"
+    device_clock.load(device_id, 0.0)
+    _process(device_id, [_door(1)], T0)
+    _process(device_id, [_occupied("C1")], T1)
+    events = _process(
+        device_id,
+        [_occupied("C2", open_time="2026-09-30T12:20:00.000Z")],
+        "2026-09-30T12:21:00.000Z",
+    )
+
+    assert [event.kind for event in events] == [DoorEventKind.ASSIGNED]
+    assert events[0].cert_no == "C2"
+    assert events[0].occurred_at == "2026-09-30T12:20:00.000Z"
+
+
+def test_import_with_open_time_emits_nothing(fresh_db: str) -> None:
+    """历史重放只回放数据，不补播。"""
+    device_id = "voice-event-import-open-time"
+    device_clock.load(device_id, 0.0)
+    _process(device_id, [_door(1)], T0)
+    assert _process(device_id, [_occupied(open_time=T1)], T2, source=service.SOURCE_IMPORT) == ()
+
+
+def test_startup_release_without_gap_emits_release(fresh_db: str) -> None:
+    """重连全貌帧发现上一帧还占着、这一帧空了，且间隔未超上限：释放仍是有效生命周期事实。"""
+    device_id = "voice-event-startup-release"
+    _process(device_id, [_door(1)], T0)
+    _process(device_id, [_occupied()], T1)
+    events = _process(device_id, [_door(1)], T2, source=service.SOURCE_STARTUP)
+
+    assert [event.kind for event in events] == [DoorEventKind.RELEASED_UNUSED]
+    assert events[0].cert_no == "C1"
+    assert events[0].occurred_at == T2
+
+
+def test_startup_assigned_is_not_repeated_by_next_db_watch(fresh_db: str) -> None:
+    device_id = "voice-event-startup-once"
+    device_clock.load(device_id, 0.0)
+    _process(device_id, [_door(1)], T0)
+    first = _process(device_id, [_occupied(open_time=T1)], T2, source=service.SOURCE_STARTUP)
+    second = _process(device_id, [_occupied(open_time=T1)], T3)
+
+    assert [event.kind for event in first] == [DoorEventKind.ASSIGNED]
+    assert second == ()
 
 
 def test_gap_suppresses_release_and_new_assignment(fresh_db: str) -> None:
