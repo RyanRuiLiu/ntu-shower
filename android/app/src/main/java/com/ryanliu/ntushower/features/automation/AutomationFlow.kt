@@ -24,7 +24,7 @@ data class FlowError(val reasonCode: String, val message: String)
  * 分配/结算共用流程模板（8 步，真机验证过的顺序）：
  *
  * 1 回首页 → 2 遮盖层 → 3 命令动作（可插拔）→ 4 等验证页
- * → 5 输入凭证 → 6 等浴室服务器响应（终点页捕获）→ 7 等回首页 → 8 撤遮盖+清选中态
+ * → 5 输入凭证 → 6 等浴室服务器响应（终点页捕获）→ 7 等回首页 → 8 撤遮盖（分配时清选中态）
  *
  * 步骤 3 由具体动作（AssignAction/SettleAction）提供；
  * 失败返回 [FlowError]（reason_code 为结构化协议字段）。
@@ -114,21 +114,25 @@ object AutomationFlow {
     }
 
     /**
-     * 流程收尾：等回首页 → 撤遮盖 → input tap 清除网格选中态。在结果回报之后调用。
+     * 流程收尾：等回首页 → 撤遮盖；[clearGrid] 时再用 input tap 清除网格选中态。
+     * 在结果回报之后调用。
      *
-     * `input tap` 走 root shell 注入，`exec` 返回只代表事件已注入，不代表浴室 App
-     * 已经处理完。下一条自动化命令在这之后立刻出队；这里在 tap 后等一个 UI 静默
-     * 窗口，把“上一条的收尾动作”和“下一条流程”隔开。
+     * 只有分配会选中网格项，结算不选；把 tap 限定在分配后，避免结算的收尾动作
+     * 撞上下一条补分配。分配后的 tap 走 root shell 注入，`exec` 返回只代表事件
+     * 已注入，不代表浴室 App 已经处理完；这里在 tap 后等一个 UI 静默窗口，把
+     * “上一条的收尾动作”和“下一条流程”隔开。
      */
-    fun finish(a11y: A11yNodeSource, overlay: CoverOverlay) {
+    fun finish(a11y: A11yNodeSource, overlay: CoverOverlay, clearGrid: Boolean) {
         try {
             BathAppNavigator.waitForPage(a11y, PageState.HOME, 10_000L)
         } finally {
             overlay.hide()
-            val center = BathAppNavigator.getDateViewCenter(a11y)
-            if (center != null) {
-                RootShell.control.exec("input tap ${center.first} ${center.second}")
-                awaitUiQuiet(uiSettleMs(), FINISH_SETTLE_TIMEOUT_MS)
+            if (clearGrid) {
+                val center = BathAppNavigator.getDateViewCenter(a11y)
+                if (center != null) {
+                    RootShell.control.exec("input tap ${center.first} ${center.second}")
+                    awaitUiQuiet(uiSettleMs(), FINISH_SETTLE_TIMEOUT_MS)
+                }
             }
         }
     }
