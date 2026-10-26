@@ -113,7 +113,13 @@ object AutomationFlow {
         }
     }
 
-    /** 流程收尾：等回首页 → 撤遮盖 → input tap 清除网格选中态。在结果回报之后调用。 */
+    /**
+     * 流程收尾：等回首页 → 撤遮盖 → input tap 清除网格选中态。在结果回报之后调用。
+     *
+     * `input tap` 走 root shell 注入，`exec` 返回只代表事件已注入，不代表浴室 App
+     * 已经处理完。下一条自动化命令在这之后立刻出队；这里在 tap 后等一个 UI 静默
+     * 窗口，把“上一条的收尾动作”和“下一条流程”隔开。
+     */
     fun finish(a11y: A11yNodeSource, overlay: CoverOverlay) {
         try {
             BathAppNavigator.waitForPage(a11y, PageState.HOME, 10_000L)
@@ -122,9 +128,32 @@ object AutomationFlow {
             val center = BathAppNavigator.getDateViewCenter(a11y)
             if (center != null) {
                 RootShell.control.exec("input tap ${center.first} ${center.second}")
+                awaitUiQuiet(uiSettleMs(), FINISH_SETTLE_TIMEOUT_MS)
             }
         }
     }
+
+    /**
+     * 收尾静默窗口：连续 [quietMs] 没有页面重算才算稳定，最多等 [timeoutMs]。
+     * 页面一直在变时不要把下一条命令放出去。
+     */
+    private fun awaitUiQuiet(quietMs: Long, timeoutMs: Long) {
+        var mark = A11yRuntime.pageChangeMark()
+        val deadline = Uptime.nowMs() + timeoutMs
+        while (true) {
+            val left = deadline - Uptime.nowMs()
+            if (left <= 0) return
+            A11yRuntime.awaitPageChange(minOf(left, quietMs))
+            val next = A11yRuntime.pageChangeMark()
+            if (next == mark) return
+            mark = next
+        }
+    }
+
+    /** 点击后的静默窗口。`ui_click_delay_ms` 允许为 0，此时用轮询间隔兜住最小等待。 */
+    internal fun uiSettleMs(): Long = RuntimeConfig.uiClickDelayMs.takeIf { it > 0 } ?: RuntimeConfig.pollIntervalMs
+
+    private const val FINISH_SETTLE_TIMEOUT_MS = 2_000L
 
     private data class Terminal(val reached: Boolean, val message: String = "")
 
