@@ -45,17 +45,19 @@ async def create_asset(
     name: Annotated[str, Form()],
     file: Annotated[UploadFile, File()],
     digit: Annotated[str, Form()] = "",
+    unit: Annotated[str, Form()] = "",
 ) -> schemas.VoiceAssetView:
-    """上传固定音频；可选 0–9 标记为数字素材。"""
+    """上传固定音频；可选 0–9 标记为数字素材，或十/百/千/万标记为单位素材。"""
     if digit.strip():
         if not digit.strip().isdigit() or not (0 <= int(digit) <= 9):
             raise ApiProblemError(INVALID_VOICE_ASSET, "数字标记只能是 0–9")
         digit_value: int | None = int(digit)
     else:
         digit_value = None
+    unit_value = unit.strip() or None
     data = await file.read()
     try:
-        return await run_in_threadpool(service.create_asset, name, data, digit_value)
+        return await run_in_threadpool(service.create_asset, name, data, digit_value, unit_value)
     except service.InvalidVoiceAssetError as exc:
         raise ApiProblemError(INVALID_VOICE_ASSET, str(exc)) from exc
 

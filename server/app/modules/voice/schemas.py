@@ -129,6 +129,7 @@ class VoiceAssetView(BaseModel):
     asset_id: str
     name: str
     digit: int | None
+    unit: str | None
     duration_ms: int
     size_bytes: int
     sha256: str
@@ -143,6 +144,7 @@ class VoiceAssetRename(BaseModel):
 class VoiceStatusView(BaseModel):
     asset_count: int
     digits: list[int]
+    units: list[str]
     ffmpeg_available: bool
 
 

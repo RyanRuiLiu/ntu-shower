@@ -37,7 +37,7 @@ from app.modules.doors.events import DoorEvent, DoorEventKind
 from app.modules.sessions import service as sessions_service
 from app.modules.sessions.schemas import CommandOutcome
 
-from . import audio, repository, schemas
+from . import audio, numbers, repository, schemas
 from . import time_windows as time_rules
 
 #: 预下载命令只让设备排入后台队列，不等待实际下载。预留 0.1 Mbps 链路下
@@ -119,10 +119,12 @@ def asset_url(asset_id: str) -> str:
 
 def _asset_view(row: Row) -> schemas.VoiceAssetView:
     asset_id = str(row["asset_id"])
+    unit_row = repository.get_unit_by_asset(asset_id)
     return schemas.VoiceAssetView(
         asset_id=asset_id,
         name=str(row["name"]),
         digit=int(row["digit"]) if row["digit"] is not None else None,
+        unit=str(unit_row["unit"]) if unit_row is not None else None,
         duration_ms=int(row["duration_ms"]),
         size_bytes=int(row["size_bytes"]),
         sha256=asset_id,
@@ -147,10 +149,20 @@ def _digit_set() -> list[int]:
     return sorted(_digit_rows())
 
 
+def _unit_rows() -> dict[str, Row]:
+    return repository.unit_rows()
+
+
+def _unit_set() -> list[str]:
+    present = set(_unit_rows())
+    return [unit for unit in numbers.unit_chars() if unit in present]
+
+
 def status() -> schemas.VoiceStatusView:
     return schemas.VoiceStatusView(
         asset_count=len(repository.list_assets()),
         digits=_digit_set(),
+        units=_unit_set(),
         ffmpeg_available=shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None,
     )
 
@@ -178,12 +190,16 @@ def spec() -> schemas.VoiceSpecView:
     )
 
 
-def create_asset(name: str, data: bytes, digit: int | None) -> schemas.VoiceAssetView:
+def create_asset(name: str, data: bytes, digit: int | None, unit: str | None) -> schemas.VoiceAssetView:
     clean = name.strip()
     if not clean or len(clean) > schemas.MAX_NAME_LENGTH:
         _reject_asset(f"名称必须为 1–{schemas.MAX_NAME_LENGTH} 个字符")
     if digit is not None and not (0 <= digit <= 9):
         _reject_asset("数字标记只能是 0–9")
+    if unit is not None and unit not in numbers.unit_chars():
+        _reject_asset("单位只能是 十、百、千、万")
+    if digit is not None and unit is not None:
+        _reject_asset("一个素材不能同时是数字和单位")
     if len(data) == 0:
         _reject_asset("文件为空")
     if len(data) > MAX_UPLOAD_BYTES:
@@ -192,6 +208,8 @@ def create_asset(name: str, data: bytes, digit: int | None) -> schemas.VoiceAsse
         _reject_asset(f"素材名称已存在：{clean}")
     if digit is not None and repository.get_asset_by_digit(digit) is not None:
         _reject_asset(f"数字 {digit} 已有素材")
+    if unit is not None and unit in _unit_rows():
+        _reject_asset(f"单位「{unit}」已有素材")
 
     source = audio.tmp_dir() / f"upload-{uuid.uuid4().hex}.src"
     target = audio.tmp_dir() / f"upload-{uuid.uuid4().hex}.mp3"
@@ -210,7 +228,11 @@ def create_asset(name: str, data: bytes, digit: int | None) -> schemas.VoiceAsse
             target.replace(final)
         try:
             repository.insert_asset(asset_id, clean, digit, duration_ms, final.stat().st_size, now_rfc3339())
+            if unit is not None:
+                repository.insert_unit(unit, asset_id)
         except Exception:
+            repository.delete_unit(asset_id)
+            repository.delete_asset(asset_id)
             if created_final:
                 final.unlink(missing_ok=True)
             raise
@@ -243,12 +265,16 @@ def rename_asset(asset_id: str, name: str) -> schemas.VoiceAssetView:
     return _asset_view(row)
 
 
-def _rules_using_asset(asset_id: str, digit: int | None) -> bool:
+def _rules_using_asset(asset_id: str, digit: int | None, unit: str | None) -> bool:
     for row in repository.list_rules():
         for item in json.loads(str(row["segments"])):
             if item.get("kind") == "asset" and item.get("asset_id") == asset_id:
                 return True
-            if item.get("kind") == "digits" and digit is not None:
+            if item.get("kind") != "digits":
+                continue
+            if digit is not None:
+                return True
+            if unit is not None and item.get("source") == "door_no":
                 return True
     return False
 
@@ -258,8 +284,11 @@ def delete_asset(asset_id: str) -> None:
     if row is None:
         raise ApiProblemError(VOICE_ASSET_NOT_FOUND, asset_id)
     digit = int(row["digit"]) if row["digit"] is not None else None
-    if _rules_using_asset(asset_id, digit):
+    unit_row = repository.get_unit_by_asset(asset_id)
+    unit = str(unit_row["unit"]) if unit_row is not None else None
+    if _rules_using_asset(asset_id, digit, unit):
         raise ApiProblemError(VOICE_ASSET_IN_USE, f"「{row['name']}」正在被规则使用")
+    repository.delete_unit(asset_id)
     repository.delete_asset(asset_id)
     audio.asset_path(asset_id).unlink(missing_ok=True)
 
@@ -302,6 +331,10 @@ def _validate_segments(segments: list[schemas.Segment]) -> None:
         missing_digits = [digit for digit in range(10) if digit not in _digit_rows()]
         if missing_digits:
             _reject("数字素材不全，缺：" + "、".join(str(digit) for digit in missing_digits))
+    if any(isinstance(segment, schemas.DigitsSegment) and segment.source == "door_no" for segment in segments):
+        missing_units = [unit for unit in numbers.unit_chars() if unit not in _unit_rows()]
+        if missing_units:
+            _reject("单位素材不全，缺：" + "、".join(missing_units))
 
 
 def _segments_json(segments: list[schemas.Segment]) -> str:
@@ -553,6 +586,7 @@ def _resolve(segments: list[schemas.Segment], door_no: int, cert_no: str) -> lis
         [segment.asset_id for segment in segments if isinstance(segment, schemas.AssetSegment)]
     )
     digits = _digit_rows()
+    units = _unit_rows()
 
     def clip(row: Row) -> ClipPlan:
         asset_id = str(row["asset_id"])
@@ -570,15 +604,29 @@ def _resolve(segments: list[schemas.Segment], door_no: int, cert_no: str) -> lis
                 _reject(f"素材不存在：{segment.asset_id}")
             plan.append(clip(row))
         elif isinstance(segment, schemas.DigitsSegment):
-            raw = str(door_no) if segment.source == "door_no" else str(cert_no)
-            chars = [char for char in raw if char.isdigit()]
-            if segment.length is not None:
-                chars = chars[-segment.length :]
-            for char in chars:
-                row = digits.get(int(char))
-                if row is None:
-                    _reject(f"数字素材缺失：{char}")
-                plan.append(clip(row))
+            if segment.source == "door_no":
+                try:
+                    symbols = numbers.cardinal_chars(door_no)
+                except ValueError as exc:
+                    _reject(str(exc))
+                for symbol in symbols:
+                    row = (
+                        digits.get(numbers.digit_value(symbol))
+                        if symbol in numbers.DIGIT_SYMBOLS
+                        else units.get(symbol)
+                    )
+                    if row is None:
+                        _reject(f"数字/单位素材缺失：{symbol}")
+                    plan.append(clip(row))
+            else:
+                chars = numbers.digit_chars(str(cert_no))
+                if segment.length is not None:
+                    chars = chars[-segment.length :]
+                for char in chars:
+                    row = digits.get(int(char))
+                    if row is None:
+                        _reject(f"数字素材缺失：{char}")
+                    plan.append(clip(row))
         else:
             plan.append(PausePlan(ms=segment.ms))
     return plan
@@ -716,8 +764,11 @@ async def push_to_device(rule_id: int, device_id: str) -> schemas.VoicePushView:
 def _clips_for_rule(row: Row) -> list[dict[str, object]]:
     segments = [_segment_from_dict(value) for value in json.loads(str(row["segments"]))]
     asset_ids = {segment.asset_id for segment in segments if isinstance(segment, schemas.AssetSegment)}
-    if any(isinstance(segment, schemas.DigitsSegment) for segment in segments):
+    digit_segments = [segment for segment in segments if isinstance(segment, schemas.DigitsSegment)]
+    if digit_segments:
         asset_ids.update(str(digit_row["asset_id"]) for digit_row in _digit_rows().values())
+    if any(segment.source == "door_no" for segment in digit_segments):
+        asset_ids.update(str(unit_row["asset_id"]) for unit_row in _unit_rows().values())
     rows = repository.asset_rows_by_ids(sorted(asset_ids))
     return [
         {

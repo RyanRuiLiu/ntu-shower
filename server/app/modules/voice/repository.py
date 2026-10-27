@@ -38,6 +38,11 @@ CREATE TABLE IF NOT EXISTS voice_asset (
     created_at  TEXT    NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS voice_unit (
+    unit     TEXT PRIMARY KEY,
+    asset_id TEXT NOT NULL UNIQUE
+);
+
 CREATE TABLE IF NOT EXISTS voice_rule (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     devices      TEXT    NOT NULL,
@@ -217,6 +222,27 @@ def get_asset_by_name(name: str) -> Row | None:
 
 def get_asset_by_digit(digit: int) -> Row | None:
     return read_one("SELECT * FROM voice_asset WHERE digit=?", (digit,))
+
+
+def unit_rows() -> dict[str, Row]:
+    return {
+        str(row["unit"]): row
+        for row in get_conn().execute(
+            "SELECT a.*, u.unit FROM voice_unit u JOIN voice_asset a ON a.asset_id = u.asset_id"
+        )
+    }
+
+
+def get_unit_by_asset(asset_id: str) -> Row | None:
+    return read_one("SELECT * FROM voice_unit WHERE asset_id=?", (asset_id,))
+
+
+def insert_unit(unit: str, asset_id: str) -> None:
+    write("INSERT INTO voice_unit(unit, asset_id) VALUES (?,?)", (unit, asset_id))
+
+
+def delete_unit(asset_id: str) -> None:
+    write("DELETE FROM voice_unit WHERE asset_id=?", (asset_id,))
 
 
 def insert_asset(asset_id: str, name: str, digit: int | None, duration_ms: int, size_bytes: int, now: str) -> None:

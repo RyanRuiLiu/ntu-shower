@@ -38,8 +38,8 @@ android {
         applicationId = "com.ryanliu.ntushower"
         minSdk = 19          // 设备 ROM 固定 Android 4.4，运行时下限不可动
         targetSdk = 19       // 目标设备冻结在 4.4，无升级路径
-        versionCode = 102
-        versionName = "0.5.1"
+        versionCode = 103
+        versionName = "0.5.2"
         buildConfigField("String", "SERVER_DOMAIN", "\"${providers.gradleProperty("serverDomain").get()}\"")
         buildConfigField("String", "APP_VERSION", "\"$versionName\"")
         buildConfigField("int", "VERSION_CODE", "$versionCode")
@@ -140,6 +140,9 @@ val frameworkBoundClasses = listOf(
     // AudioManager、SharedPreferences；参数、音量计划、缓存淘汰已抽为纯逻辑并纳入覆盖
     "**/features/voice/VoiceClipStore*",
     "**/features/voice/VoicePlayer*",
+    // MediaCodec/MediaExtractor 解码外壳；纯拼流、静音、淡入与格式校验由
+    // VoicePcmAssemblerTest 覆盖
+    "**/features/voice/VoicePcmDecoder*",
     "**/features/voice/VoicePrefetch*",
     "**/features/voice/VoiceVolumeGuard*",
     // 纯数据载体：只有编译器生成的方法；业务逻辑在 VoiceClipSpec/VoiceVolume/

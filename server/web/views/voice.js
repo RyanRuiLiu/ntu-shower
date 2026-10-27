@@ -74,13 +74,18 @@ function segmentsSummary(items) {
 
 /** 数字变量只读数字字符；模板提示里明确这一点。 */
 function segmentHint() {
-  const hasDigits = segments.some((item) => item.kind === 'digits')
-  if (!hasDigits) return '数字变量会把喷头号/学号逐位念出；非数字字符不会发音。'
+  const hasDoor = segments.some((item) => item.kind === 'digits' && item.source === 'door_no')
+  const hasCert = segments.some((item) => item.kind === 'digits' && item.source === 'cert_no')
+  if (!hasDoor && !hasCert) return '喷头号按数值念；学号逐位念，结尾字母不发音。'
   const digits = new Set((status?.digits || []).map(Number))
-  const missing = [...Array(10).keys()].filter((digit) => !digits.has(digit))
-  return missing.length === 0
-    ? '数字素材齐全；数字变量会把喷头号/学号逐位念出，非数字字符不会发音。'
-    : `数字素材缺 ${missing.join('、')}；保存含数字变量的规则前请先上传。`
+  const missingDigits = [...Array(10).keys()].filter((digit) => !digits.has(digit))
+  if (missingDigits.length) return `数字素材缺 ${missingDigits.join('、')}；保存前请先上传。`
+  if (hasDoor) {
+    const units = new Set(status?.units || [])
+    const missingUnits = ['十', '百', '千', '万'].filter((unit) => !units.has(unit))
+    if (missingUnits.length) return `单位素材缺 ${missingUnits.join('、')}；喷头号按数值念需要这些单位。`
+  }
+  return '喷头号按数值念；学号逐位念，结尾字母不发音。'
 }
 
 function renderStatus() {
@@ -96,7 +101,12 @@ function renderStatus() {
     digits.length === 10
       ? '<span class="badge badge-green">数字素材齐全</span>'
       : `<span class="badge badge-amber">数字素材缺 ${10 - digits.length} 个</span>`
-  $('voiceStatus').innerHTML = `<div class="btn-row">${ffmpeg}${digitBadge}<span class="badge badge-blue">素材 ${esc(
+  const units = status.units || []
+  const unitBadge =
+    units.length === 4
+      ? '<span class="badge badge-green">单位素材齐全</span>'
+      : `<span class="badge badge-amber">单位素材缺 ${4 - units.length} 个</span>`
+  $('voiceStatus').innerHTML = `<div class="btn-row">${ffmpeg}${digitBadge}${unitBadge}<span class="badge badge-blue">素材 ${esc(
     String(status.asset_count),
   )} 个</span></div>`
   $('voiceAssetCount').textContent = status.asset_count > 0 ? `共 ${status.asset_count} 个` : ''
@@ -113,6 +123,17 @@ function renderDigitOptions() {
   $('voiceAssetDigit').innerHTML = options.join('')
 }
 
+function renderUnitOptions() {
+  const used = new Set(assets.filter((item) => item.unit).map((item) => item.unit))
+  const options = ['<option value="">不作为单位</option>']
+  for (const unit of ['十', '百', '千', '万']) {
+    const disabled = used.has(unit) ? ' disabled' : ''
+    const note = used.has(unit) ? '（已有）' : ''
+    options.push(`<option value="${unit}"${disabled}>${unit}${note}</option>`)
+  }
+  $('voiceAssetUnit').innerHTML = options.join('')
+}
+
 function renderAssets() {
   if (assets.length === 0) {
     $('voiceAssetTable').innerHTML = '<div class="empty">还没有素材；先上传一段固定音频。</div>'
@@ -122,7 +143,13 @@ function renderAssets() {
     .map(
       (asset) => `<tr data-id="${esc(asset.asset_id)}">
         <td>${esc(asset.name)}</td>
-        <td>${asset.digit === null ? PLACEHOLDER : `<span class="badge badge-blue">数字 ${asset.digit}</span>`}</td>
+        <td>${
+          asset.digit !== null
+            ? `<span class="badge badge-blue">数字 ${asset.digit}</span>`
+            : asset.unit
+              ? `<span class="badge badge-purple">单位 ${esc(asset.unit)}</span>`
+              : PLACEHOLDER
+        }</td>
         <td class="mono">${esc(fmtMs(asset.duration_ms))}</td>
         <td class="mono">${esc(fmtSize(asset.size_bytes))}</td>
         <td class="col-actions">
@@ -136,7 +163,7 @@ function renderAssets() {
     )
     .join('')
   $('voiceAssetTable').innerHTML = `<table class="table"><thead><tr>
-      <th>名称</th><th>数字</th><th>时长</th><th>大小</th><th class="col-actions">操作</th>
+      <th>名称</th><th>数字 / 单位</th><th>时长</th><th>大小</th><th class="col-actions">操作</th>
     </tr></thead><tbody>${rows}</tbody></table>`
 }
 
@@ -286,8 +313,8 @@ function renderSegments() {
         controls.push(`<span class="seg-kind">数字</span>`)
         controls.push(
           `<select data-seg-field="source" data-index="${index}">
-            <option value="door_no"${segment.source === 'door_no' ? ' selected' : ''}>喷头号</option>
-            <option value="cert_no"${segment.source === 'cert_no' ? ' selected' : ''}>学号</option>
+            <option value="door_no"${segment.source === 'door_no' ? ' selected' : ''}>喷头号（按数值）</option>
+            <option value="cert_no"${segment.source === 'cert_no' ? ' selected' : ''}>学号（逐位）</option>
           </select>`,
         )
         if (segment.source === 'cert_no') {
@@ -297,7 +324,7 @@ function renderSegments() {
             }" placeholder="全部位数">`,
           )
         } else {
-          controls.push('<span class="muted">逐位</span>')
+          controls.push('<span class="muted">按数值</span>')
         }
       } else {
         controls.push(`<span class="seg-kind">停顿</span>`)
@@ -692,12 +719,14 @@ async function uploadAsset() {
   form.append('name', name)
   form.append('file', file)
   form.append('digit', $('voiceAssetDigit').value)
+  form.append('unit', $('voiceAssetUnit').value)
   assetResult('正在上传并转换…')
   try {
     await api.uploadVoiceAsset(form)
     $('voiceAssetName').value = ''
     $('voiceAssetFile').value = ''
     $('voiceAssetDigit').value = ''
+    $('voiceAssetUnit').value = ''
     await reload()
     assetResult('素材已入库；创建规则后在线设备会预下载。', 'ok')
   } catch (error) {
@@ -759,6 +788,7 @@ async function reload() {
     deliveries = deliveryList
     renderStatus()
     renderDigitOptions()
+    renderUnitOptions()
     renderAssets()
     renderFilter()
     renderRules()
@@ -807,6 +837,7 @@ export const voiceView = {
               <div class="btn-row">
                 <input id="voiceAssetFile" type="file" accept="audio/*">
                 <select id="voiceAssetDigit"></select>
+                <select id="voiceAssetUnit"></select>
                 <button type="submit" class="btn btn-sm" id="btnVoiceAssetUpload">上传</button>
               </div>
               <div class="hint">数字素材用于规则里的「喷头号/学号」；0–9 各一段。上传后可改名，被规则引用时不能删除。</div>
@@ -922,6 +953,16 @@ export const voiceView = {
         $('voiceAssetName').value = file.name.replace(/\.[^.]+$/, '')
       }
     }))
+    dispose.add(
+      listen($('voiceAssetDigit'), 'change', () => {
+        if ($('voiceAssetDigit').value) $('voiceAssetUnit').value = ''
+      }),
+    )
+    dispose.add(
+      listen($('voiceAssetUnit'), 'change', () => {
+        if ($('voiceAssetUnit').value) $('voiceAssetDigit').value = ''
+      }),
+    )
     dispose.add(listen($('voiceTimeUnlimited'), 'change', updateTimeWindowState))
     dispose.add(listen($('btnVoiceAddWindow'), 'click', () => addTimeWindowRow()))
     dispose.add(
