@@ -309,10 +309,8 @@ class CommandScheduler(
                 onOutcome(outcome) // 结果先回报
                 reported = true
                 if (needsFinish) { // 再做慢速收尾
-                    // 只有分配会选中网格项；结算不要 tap，避免收尾动作撞上下一条补分配
-                    A11yRuntime.source?.let {
-                        AutomationFlow.finish(it, overlay, clearGrid = command is Command.Assign)
-                    }
+                    // 分配和结算都会留下网格选中态，收尾统一 tap 清掉
+                    A11yRuntime.source?.let { AutomationFlow.finish(it, overlay) }
                 }
             } catch (e: Throwable) {
                 if (reported) {
