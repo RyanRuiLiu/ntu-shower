@@ -65,7 +65,7 @@
 | doors | 喷头现态与实时推送（door.update 数据承载，直接应用） |
 | sessions | 会话操作，目标设备在路径里 |
 | config | 全局配置、登记表、单台覆盖 |
-| voice | 语音规则 / 模板预览 / 事件投递记录 / 音频下载；设备面 `/voice/clips/{id}.mp3` |
+| voice | 固定音频素材库 / 分段规则 / 事件投递记录 / 素材下载；设备面 `/voice/assets/{id}.mp3` |
 | identities | 身份域读模型与签发/编辑/撤销 |
 | ota | 版本清单 / 下载 / 发布管理 |
 | audit | 接口调用与命令级审计，以 trace_id 关联 |

@@ -111,23 +111,28 @@ FREELIST_WRITE = "freelist.write"
 """
 
 # ── 语音播报 ──
-# 服务端按「设备 + 学号 + 事件」匹配规则，合成音频后下发。设备只负责把指定的
-# 音频按指定音量播出来，并在结束后恢复原音量；不保存规则、不判断事件。
+# 服务端按「设备 + 学号 + 事件」匹配规则，把规则分段解析成播放清单后下发。规则里只有
+# 固定音频、喷头号/学号数字与停顿，不做文本合成；设备只负责按清单顺序播放并在结束后
+# 恢复原音量，不保存规则、不判断事件。
 #
 # 独立 voice 通道：播放不占用自动化队列（分配/结算），也不占用采集队列。
 
 VOICE_PLAY = "voice.play"
-"""播放一段已合成的音频。
+"""按顺序播放一段播放清单。
 
-params 是 clip_id / sha256 / size_bytes / duration_ms / volume；设备按 clip_id 推出
-`/voice/clips/{clip_id}.mp3`，下载校验后播放。音频不随命令内联，设备缓存按内容复用。
+params 是 segments、volume 与 download_budget_ms：segments 的元素为
+`{kind:"clip", clip_id, sha256, size_bytes, duration_ms}` 或 `{kind:"pause", ms}`。
+设备按 clip_id 推出 `/voice/assets/{clip_id}.mp3`，逐段下载校验后顺序播放；音频不随
+命令内联，设备缓存按内容哈希复用。volume 是整条播报的目标音量，结束后恢复设备原音量；
+download_budget_ms 是下载缺失素材的总预算，超时即失败返回，不无限占住语音队列。
 """
 
 VOICE_PREPARE = "voice.prepare"
-"""只下载/校验一段音频，不播放。
+"""把播放清单里的音频排入设备的低优先级预下载队列。
 
-参数与 `voice.play` 相同但不含 volume。规则保存时对静态模板做一次预热；带占位符的
-规则不预热，首次事件时按最终文本生成并下载。
+params 是 `{clips: [{clip_id, sha256, size_bytes, duration_ms}, ...]}`。设备立即返回，
+实际下载在独立后台线程进行；播放开始时暂停预下载并让出带宽，结束后再继续。规则保存后
+向在线目标设备发一次，让事件到来时尽量直接命中设备缓存。
 """
 
 # ── 调试通道 ──
@@ -207,8 +212,8 @@ ALL_ACTIONS: tuple[str, ...] = (
 )
 
 # ── 执行通道 ──
-# 设备端把命令分到四条互不阻塞的路径（自动化队列、采集执行器、维护执行器、
-# 语音队列），
+# 设备端把命令分到五条互不阻塞的路径（自动化队列、采集执行器、维护执行器、
+# 语音播放队列、语音预下载队列），
 # 服务端按同一划分排队限流：同一通道内每台设备串行，跨通道并行。两侧划分必须
 # 一致，否则服务端会拒掉设备明明做得了的事。
 
@@ -222,7 +227,10 @@ CHANNEL_MAINTENANCE = "maintenance"
 """设备自身维护：执行命令、重启本程序、重启整机、开关调试桥、读写免费名单。设备端即时执行，不进队列。"""
 
 CHANNEL_VOICE = "voice"
-"""语音播报：下载/播放音频。设备端单线程串行，与自动化、采集、维护互不阻塞。"""
+"""语音播放：下载/播放音频。设备端单线程串行，与自动化、采集、维护互不阻塞。"""
+
+CHANNEL_PREFETCH = "prefetch"
+"""语音素材预下载：只把素材排入设备后台队列，不播放。与播放及自动化、采集、维护互不阻塞。"""
 
 #: 动作 → 执行通道。每个动作恰好属于一个通道。
 ACTION_CHANNELS: dict[str, str] = {
@@ -236,7 +244,7 @@ ACTION_CHANNELS: dict[str, str] = {
     CAMERA_CAPTURE: CHANNEL_CAPTURE,
     SCREEN_CAPTURE: CHANNEL_CAPTURE,
     VOICE_PLAY: CHANNEL_VOICE,
-    VOICE_PREPARE: CHANNEL_VOICE,
+    VOICE_PREPARE: CHANNEL_PREFETCH,
     DEVICE_EXEC: CHANNEL_MAINTENANCE,
     DEVICE_LOG_TAIL: CHANNEL_MAINTENANCE,
     DEVICE_REBOOT: CHANNEL_MAINTENANCE,
