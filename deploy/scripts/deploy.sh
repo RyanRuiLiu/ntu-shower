@@ -136,6 +136,15 @@ log_info "[3/5] 替换代码（保留 .venv／data／ota_releases／.env）..."
 wipe_code
 tar xzf "$NT_TARBALL" -C "$SERVER_DIR"
 
+# 数据与备份含身份标识、用户记录与审计：只允许 root 读取
+chmod 700 "$SERVER_DIR/data" "$BACKUP_DIR" 2>/dev/null || true
+if [[ -d "$SERVER_DIR/data" ]]; then
+    find "$SERVER_DIR/data" -maxdepth 1 -type f \( -name '*.db' -o -name '*.db-wal' -o -name '*.db-shm' \) -exec chmod 600 {} +
+fi
+if [[ -d "$BACKUP_DIR" ]]; then
+    find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.db*' -exec chmod 600 {} +
+fi
+
 # ---- 4. 依赖 ----
 if [[ $NEED_PIP -eq 1 ]]; then
     log_info "[4/5] 安装依赖..."

@@ -47,7 +47,7 @@ ssh root@iseekdream.com "systemctl daemon-reload && systemctl restart ntu-shower
 
 scp deploy/backup/ntu-shower-backup.sh root@iseekdream.com:/opt/ntu-shower-backup/ntu-shower-backup.sh
 scp deploy/backup/ntu-shower-backup.service deploy/backup/ntu-shower-backup.timer root@iseekdream.com:/etc/systemd/system/
-ssh root@iseekdream.com "chmod +x /opt/ntu-shower-backup/ntu-shower-backup.sh && systemctl daemon-reload && systemctl enable --now ntu-shower-backup.timer"
+ssh root@iseekdream.com "chmod 700 /opt/ntu-shower-backup/ntu-shower-backup.sh && systemctl daemon-reload && systemctl enable --now ntu-shower-backup.timer"
 ```
 
 ## 要点（改配置前先读）
