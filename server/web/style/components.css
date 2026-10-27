@@ -673,6 +673,15 @@ tr.audit-row.is-selected td {
 
 /* ── 语音分段编辑器 ─────────────────────────────────────── */
 
+/* 素材多时只在面板内滚动，第一行不随素材数量无限变长；上传区按自身内容高 */
+.voice-top {
+  align-items: start;
+}
+
+.voice-asset-table {
+  max-height: var(--list-max-height);
+}
+
 .seg-editor {
   display: flex;
   flex-direction: column;

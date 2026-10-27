@@ -708,7 +708,7 @@ export const voiceView = {
 
   mount(root) {
     root.innerHTML = `
-      <div class="grid grid-2">
+      <div class="grid grid-2 voice-top">
         <section class="panel">
           <div class="panel-head">
             <span class="panel-title">音频素材</span>
@@ -716,6 +716,13 @@ export const voiceView = {
             <div class="panel-tools">
               <button type="button" class="btn btn-ghost btn-sm" id="btnVoiceReload">刷新</button>
             </div>
+          </div>
+          <div class="panel-body flush voice-asset-table" id="voiceAssetTable"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <span class="panel-title">上传素材</span>
           </div>
           <div class="panel-body">
             <div class="btn-row" id="voiceStatus"></div>
@@ -731,15 +738,6 @@ export const voiceView = {
             </form>
             <div class="result" id="voiceAssetResult"></div>
           </div>
-          <div class="panel-body flush" id="voiceAssetTable"></div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head">
-            <span class="panel-title">最近推送</span>
-            <span class="panel-note" id="voiceDeliveryCount"></span>
-          </div>
-          <div class="panel-body flush" id="voiceDeliveryTable"></div>
         </section>
       </div>
 
@@ -808,7 +806,15 @@ export const voiceView = {
             <div class="result" id="voiceResult"></div>
           </div>
         </section>
-      </div>`
+      </div>
+
+      <section class="panel">
+        <div class="panel-head">
+          <span class="panel-title">最近推送</span>
+          <span class="panel-note" id="voiceDeliveryCount"></span>
+        </div>
+        <div class="panel-body flush" id="voiceDeliveryTable"></div>
+      </section>`
 
     dispose = disposer()
     formReady = false
