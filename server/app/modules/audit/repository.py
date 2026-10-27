@@ -30,6 +30,7 @@
 
 from typing import cast
 
+from app.core import outcomes, reason_codes
 from app.core.clock import now_rfc3339
 from app.core.db import get_conn, write
 
@@ -125,6 +126,19 @@ def finish(command_id: str, status: str, reason_code: str, terminal_message: str
         " WHERE command_id = ?",
         (now_rfc3339(), status, reason_code, terminal_message, data, command_id),
     )
+
+
+def abort_pending(now: str) -> int:
+    """启动时收尾上一进程留下的 pending 命令。
+
+    单进程内命令的 await 一定在进程生命周期结束前收尾；启动时仍为 NULL 的行只可能
+    来自硬退出/部署重启。审计页不能永远显示「进行中」，统一置为中断。
+    """
+    return write(
+        "UPDATE command_audit SET finished_at = ?, status = ?, reason_code = ?, terminal_message = ?"
+        " WHERE status IS NULL",
+        (now, outcomes.FAILED.value, reason_codes.COMMAND_ABORTED.code, "服务重启，命令未收尾"),
+    ).rowcount
 
 
 def list_commands(device_id: str | None = None, limit: int = 50) -> list[CommandAuditRecord]:
