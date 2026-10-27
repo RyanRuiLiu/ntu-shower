@@ -3,7 +3,8 @@
 ## 唯一判定链
 
 `handle_events` 只做一次「时效 → 匹配 → 解析分段 → 认领 → 下发」。规则按
-「设备/学号两维度各自具体或通配」匹配，具体压过通配；同一事件只认领一次。
+「设备/学号/时段」匹配：前两维具体压过通配，时段只在前面完全相同时参与，
+且更短的时段更紧；同一事件只认领一次。
 
 规则不再保存文本或音色：`segments` 是素材片段、喷头号/学号数字变量与停顿的序列。
 服务端按事件值解析成设备可顺序播放的片段清单，设备只负责下载缓存、等浴室提示音
@@ -20,7 +21,7 @@ from sqlite3 import Row
 from typing import NoReturn
 
 from app.core import actions
-from app.core.clock import now_rfc3339, parse_rfc3339
+from app.core.clock import now_rfc3339, parse_rfc3339, to_local
 from app.core.logging import log_event, trace_id_var
 from app.core.problems import (
     DEVICE_NOT_FOUND,
@@ -37,6 +38,7 @@ from app.modules.sessions import service as sessions_service
 from app.modules.sessions.schemas import CommandOutcome
 
 from . import audio, repository, schemas
+from . import time_windows as time_rules
 
 #: 预下载命令只让设备排入后台队列，不等待实际下载。预留 0.1 Mbps 链路下
 #: 命令帧与回执的往返时间；它走独立通道，超时只影响后续预下载，不阻塞播放。
@@ -170,6 +172,7 @@ def spec() -> schemas.VoiceSpecView:
         digits=_digit_set(),
         asset_count=len(repository.list_assets()),
         max_segments=schemas.MAX_SEGMENTS_PER_RULE,
+        max_time_windows=time_rules.MAX_TIME_WINDOWS_PER_RULE,
         max_pause_ms=schemas.MAX_PAUSE_MS,
         min_pause_ms=schemas.MIN_PAUSE_MS,
     )
@@ -325,14 +328,29 @@ def _rule_view(row: Row) -> schemas.VoiceRuleView:
     segments = [_segment_from_dict(value) for value in json.loads(str(row["segments"]))]
     asset_ids = [segment.asset_id for segment in segments if isinstance(segment, schemas.AssetSegment)]
     assets = repository.asset_rows_by_ids(asset_ids)
+    try:
+        windows = time_rules.parse_json(str(row["time_windows"]))
+    except ValueError as exc:
+        log_event(
+            "ERROR",
+            "voice.rule-time-invalid",
+            "规则时段格式非法",
+            rule_id=int(row["id"]),
+            error=str(exc),
+        )
+        windows = []
     return schemas.VoiceRuleView(
         id=int(row["id"]),
         devices=json.loads(str(row["devices"])),
         certs=json.loads(str(row["certs"])),
         exempt=json.loads(str(row["exempt"])),
         events=[DoorEventKind(value) for value in json.loads(str(row["events"]))],
+        time_windows=[
+            schemas.TimeWindow(days=list(window.days), start=window.start, end=window.end) for window in windows
+        ],
         segments=segments,
         summary=_segment_summary(segments, assets),
+        time_summary=time_rules.summary(windows),
         volume=int(row["volume"]),
         enabled=bool(row["enabled"]),
         created_at=str(row["created_at"]),
@@ -376,16 +394,23 @@ def _require_known_devices(device_ids: list[str]) -> None:
             raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {device_id} 不在档案里")
 
 
-def _duplicate_rule(devices: list[str], certs: list[str], events: list[DoorEventKind], exclude_id: int | None) -> None:
+def _duplicate_rule(
+    devices: list[str],
+    certs: list[str],
+    events: list[DoorEventKind],
+    time_windows: list[schemas.TimeWindow],
+    exclude_id: int | None,
+) -> None:
     """同优先级规则命中同一目标时没有确定胜者，必须在保存时拒绝。
 
     范围更小的规则优先级更高，所以目标重叠但优先级不同可以共存；只有优先级完全相同
-    才无法判定该播哪一条。规则 id 不是优先级，不参与决胜。
+    且时段有交集才无法判定该播哪一条。规则 id 不是优先级，不参与决胜。
     """
     target_devices = set(devices)
     target_certs = set(certs)
     target_events = {event.value for event in events}
-    priority = repository.rule_priority(devices, certs)
+    target_windows = [window.to_window() for window in time_windows]
+    priority = repository.rule_priority(devices, certs, target_windows)
     for row in repository.list_rules():
         if exclude_id is not None and int(row["id"]) == exclude_id:
             continue
@@ -397,18 +422,34 @@ def _duplicate_rule(devices: list[str], certs: list[str], events: list[DoorEvent
         cert_overlap = "*" in target_certs or "*" in row_certs or bool(target_certs & row_certs)
         if not (device_overlap and cert_overlap):
             continue
-        if repository.rule_priority(sorted(row_devices), sorted(row_certs)) == priority:
+        try:
+            row_windows = time_rules.parse_json(str(row["time_windows"]))
+        except ValueError as exc:
+            log_event(
+                "ERROR",
+                "voice.rule-time-invalid",
+                "已有规则时段格式非法，跳过重名检查",
+                rule_id=int(row["id"]),
+                error=str(exc),
+            )
+            continue
+        if repository.rule_priority(sorted(row_devices), sorted(row_certs), row_windows) != priority:
+            continue
+        if not target_windows and not row_windows:
             _reject("同优先级的规则目标重叠，请调整设备或学号范围")
+        if target_windows and row_windows and time_rules.overlap(target_windows, row_windows):
+            _reject("同优先级的规则目标与生效时段重叠，请调整设备、学号或时段")
 
 
 def _normalize_rule(
     devices: list[str],
     certs: list[str],
     events: list[DoorEventKind],
+    time_windows: list[schemas.TimeWindow],
     segments: list[schemas.Segment],
     exempt_cert_nos: list[str],
     exclude_id: int | None,
-) -> tuple[list[str], list[str], list[DoorEventKind], list[schemas.Segment], str]:
+) -> tuple[list[str], list[str], list[DoorEventKind], str, list[schemas.Segment], str]:
     normalized_devices = _normalized_targets(devices, "设备")
     normalized_certs = _normalized_targets(certs, "学号")
     _require_known_devices(normalized_devices)
@@ -418,18 +459,20 @@ def _normalize_rule(
     _validate_segments(segments)
     exemptions = _normalized_exemptions(exempt_cert_nos)
     exempt = _exempt_json(normalized_certs, exemptions)
-    _duplicate_rule(normalized_devices, normalized_certs, normalized_events, exclude_id)
-    return normalized_devices, normalized_certs, normalized_events, segments, exempt
+    _duplicate_rule(normalized_devices, normalized_certs, normalized_events, time_windows, exclude_id)
+    windows_json = time_rules.dump([window.to_window() for window in time_windows])
+    return normalized_devices, normalized_certs, normalized_events, windows_json, segments, exempt
 
 
 def create_rule(req: schemas.VoiceRuleCreate) -> schemas.VoiceRuleView:
-    devices, certs, events, segments, exempt = _normalize_rule(
-        req.devices, req.certs, req.events, req.segments, req.exempt_cert_nos, None
+    devices, certs, events, windows_json, segments, exempt = _normalize_rule(
+        req.devices, req.certs, req.events, req.time_windows, req.segments, req.exempt_cert_nos, None
     )
     rule_id = repository.insert_rule(
         json.dumps(devices, ensure_ascii=False),
         json.dumps(certs, ensure_ascii=False),
         json.dumps([event.value for event in events], ensure_ascii=False),
+        windows_json,
         exempt,
         _segments_json(segments),
         req.volume,
@@ -445,8 +488,8 @@ def create_rule(req: schemas.VoiceRuleCreate) -> schemas.VoiceRuleView:
 def update_rule(rule_id: int, req: schemas.VoiceRuleUpdate) -> schemas.VoiceRuleView:
     if repository.get_rule(rule_id) is None:
         raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
-    devices, certs, events, segments, exempt = _normalize_rule(
-        req.devices, req.certs, req.events, req.segments, req.exempt_cert_nos, rule_id
+    devices, certs, events, windows_json, segments, exempt = _normalize_rule(
+        req.devices, req.certs, req.events, req.time_windows, req.segments, req.exempt_cert_nos, rule_id
     )
     if (
         repository.update_rule(
@@ -454,6 +497,7 @@ def update_rule(rule_id: int, req: schemas.VoiceRuleUpdate) -> schemas.VoiceRule
             json.dumps(devices, ensure_ascii=False),
             json.dumps(certs, ensure_ascii=False),
             json.dumps([event.value for event in events], ensure_ascii=False),
+            windows_json,
             exempt,
             _segments_json(segments),
             req.volume,
@@ -798,7 +842,20 @@ async def _dispatch_event(event: DoorEvent, max_age: int) -> None:
         return
     if not event.cert_no:
         return
-    matched = repository.matching_rules(event.device_id, event.cert_no, event.kind.value)
+    zone_offset = config_store.global_effective()["extend_hours_zone_offset_minutes"]
+    if not isinstance(zone_offset, int):
+        log_event(
+            "ERROR",
+            "voice.zone-offset-invalid",
+            "时区偏移配置不是整数，跳过语音匹配",
+            value=str(zone_offset),
+        )
+        return
+    local = to_local(now_rfc3339(), zone_offset)
+    if local is None:
+        log_event("ERROR", "voice.local-time-invalid", "无法换算服务端当地时间，跳过语音匹配")
+        return
+    matched = repository.matching_rules(event.device_id, event.cert_no, event.kind.value, local)
     rule = matched[0] if matched else None
     if rule is None:
         log_event(
@@ -807,6 +864,7 @@ async def _dispatch_event(event: DoorEvent, max_age: int) -> None:
             "没有匹配的语音规则",
             device_id=event.device_id,
             event=event.kind.value,
+            local_time=local.isoformat(timespec="minutes"),
         )
         return
     segments = [_segment_from_dict(value) for value in json.loads(str(rule["segments"]))]
