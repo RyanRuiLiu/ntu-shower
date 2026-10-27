@@ -38,6 +38,7 @@ PYTHON="${VENV_DIR}/bin/python"
 SERVICE="ntu-shower"
 HEALTH_URL="http://127.0.0.1:8001/healthz"
 BACKUP_DIR="/opt/ntu-shower/backups"
+DATA_BACKUP_DIR="/opt/ntu-shower-backup"
 BACKUP_KEEP=5
 CHECK_DIR="/tmp/ntu-shower-deploy-check"
 NT_TARBALL="${NT_TARBALL:-/tmp/server_deploy.tar.gz}"
@@ -137,12 +138,12 @@ wipe_code
 tar xzf "$NT_TARBALL" -C "$SERVER_DIR"
 
 # 数据与备份含身份标识、用户记录与审计：只允许 root 读取
-chmod 700 "$SERVER_DIR/data" "$BACKUP_DIR" 2>/dev/null || true
+chmod 700 "$SERVER_DIR/data" "$BACKUP_DIR" "$DATA_BACKUP_DIR" 2>/dev/null || true
 if [[ -d "$SERVER_DIR/data" ]]; then
     find "$SERVER_DIR/data" -maxdepth 1 -type f \( -name '*.db' -o -name '*.db-wal' -o -name '*.db-shm' \) -exec chmod 600 {} +
 fi
-if [[ -d "$BACKUP_DIR" ]]; then
-    find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.db*' -exec chmod 600 {} +
+if [[ -d "$DATA_BACKUP_DIR" ]]; then
+    find "$DATA_BACKUP_DIR" -maxdepth 1 -type f -name '*.db*' -exec chmod 600 {} +
 fi
 
 # ---- 4. 依赖 ----
