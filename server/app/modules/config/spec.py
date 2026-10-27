@@ -109,7 +109,7 @@ class ConfigSpec:
     unit: str = ""
     group: str = "misc"
     choices: tuple[str, ...] | None = None
-    """TEXT 的封闭取值集（如音色名）。界面据此渲染下拉，校验据此拒绝未知值；
+    """TEXT 的封闭取值集。界面据此渲染下拉，校验据此拒绝未知值；
     None 表示普通自由文本。"""
 
 

@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     db_path: str = "data/ntu-shower.db"
     max_ota_bytes: int = 50 * 1024 * 1024  # OTA 上传/存储的单文件上限
     ota_dir: str = "ota_releases"  # APK 发布文件目录（相对 server 工作目录）
-    voice_dir: str = "data/voice"  # 语音模型与合成音频目录（部署保留 data/）
+    voice_dir: str = "data/voice"  # 固定音频素材目录（assets/，随 data/ 保留）
 
     # ── 日志 ──
     # 应用日志级别（DEBUG/INFO/WARNING/ERROR）；uvicorn 的访问日志级别另由

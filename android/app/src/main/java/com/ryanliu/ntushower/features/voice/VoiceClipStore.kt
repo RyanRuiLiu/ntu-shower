@@ -4,78 +4,135 @@ import android.util.Log
 import com.ryanliu.ntushower.BuildConfig
 import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.transport.ReasonCodes
+import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+import java.io.IOException
 import java.io.InputStream
 import java.security.MessageDigest
 
 /**
- * 播报音频缓存/下载。
+ * 固定音频缓存/下载。
  *
- * URL 由 clip_id 推出（`https://SERVER_DOMAIN/voice/clips/{id}.mp3`），服务端不能借
- * 参数让设备去下载任意地址。按声明长度精确收字节、校验 SHA-256，命中缓存时也校验，
- * 损坏就重下。目录超上限时按最后修改时刻淘汰，当前文件永远保留。
+ * 缓存放在**应用私有目录**（`filesDir/voice`），不进共享存储；服务端只下发内容
+ * 哈希，URL 由 `clip_id` 推出（`/voice/assets/{id}.mp3`），设备不能借参数下载任意
+ * 地址。按声明长度精确收字节、校验 SHA-256，命中缓存时也校验，损坏就重下。
+ *
+ * 旧版本把缓存放在 `/sdcard/ntu-shower/voice`。新实例初始化时删除旧目录，并清掉
+ * 私有目录里上次中断留下的 `.part` 文件；文件超上限时按最后修改时刻淘汰。
  */
-class VoiceClipStore(private val client: OkHttpClient) {
+class VoiceClipStore(private val client: OkHttpClient, private val dir: File) {
 
     sealed class ClipFetch {
         data class Ready(val file: File, val downloaded: Boolean) : ClipFetch()
 
         data class Failed(val reasonCode: String, val message: String) : ClipFetch()
+
+        /** 调用方（播放优先/服务停止）要求中止；这不是下载失败，不应从预下载队列移除。 */
+        data object Canceled : ClipFetch()
     }
 
-    fun ensure(spec: VoiceClipSpec): ClipFetch {
-        val dir = File(AppConfig.VOICE_DIR).apply { mkdirs() }
+    @Volatile
+    private var activeCall: Call? = null
+
+    /** 取消正在进行的下载；播放开始或服务停止时调用，避免后台预下载占住带宽。 */
+    fun cancelActiveDownload() {
+        activeCall?.cancel()
+    }
+
+    init {
+        dir.mkdirs()
+        dir.listFiles { file -> file.isFile && file.name.endsWith(".part") }?.forEach { it.delete() }
+        prune(dir, emptySet())
+        // 旧公共缓存可能有大量文件；删目录放后台，不阻塞服务启动。
+        Thread({ removeLegacyCache() }, "voice-legacy-cleanup").apply { isDaemon = true }.start()
+    }
+
+    private fun removeLegacyCache() {
+        val legacy = File(AppConfig.VOICE_DIR)
+        if (legacy.exists() && !legacy.deleteRecursively()) {
+            Log.w(TAG, "legacy voice cache not fully removed: ${legacy.absolutePath}")
+        }
+    }
+
+    /**
+     * 取一段音频；[keep] 是本条播放清单的全部文件名，淘汰时整组保留。
+     *
+     * [shouldAbort] 在开头、每个读取块与落盘前检查：预下载被播放抢占时能立刻让出带宽。
+     * 同一时刻只允许一个下载（方法同步），所以播放与预下载不会互相写坏临时文件。
+     */
+    @Synchronized
+    fun ensure(
+        spec: VoiceClipSpec,
+        keep: Set<String> = emptySet(),
+        shouldAbort: () -> Boolean = { false },
+    ): ClipFetch {
+        dir.mkdirs()
         val target = File(dir, "${spec.clipId}.mp3")
+        val keepNames = keep + target.name
         if (target.isFile && target.length() == spec.sizeBytes && sha256Of(target) == spec.sha256) {
-            prune(dir, target.name)
+            if (!shouldAbort()) prune(dir, keepNames)
             return ClipFetch.Ready(target, downloaded = false)
         }
+        if (shouldAbort()) return ClipFetch.Canceled
         target.delete()
 
         // 下载失败立即再试一次：播报事件不会重现，一次网络抖动就是丢一条播报，而
         // 重下的代价只是几秒。校验失败同样重下——重新拿到的字节与缓存损坏无关。
-        // 不加等待：等只会吃掉命令的超时预算，抖动在毫秒级过去，重试要趁当时。
         var last: ClipFetch.Failed? = null
         repeat(DOWNLOAD_ATTEMPTS) {
-            when (val result = downloadFresh(dir, spec)) {
+            if (shouldAbort()) return ClipFetch.Canceled
+            when (val result = downloadFresh(spec, shouldAbort)) {
                 is ClipFetch.Ready -> {
-                    prune(dir, result.file.name)
+                    if (!shouldAbort()) prune(dir, keepNames)
                     return result
                 }
 
                 is ClipFetch.Failed -> last = result
+
+                ClipFetch.Canceled -> return ClipFetch.Canceled
             }
         }
         return last!!
     }
 
     /** 一次全新的下载（临时文件 → 校验 → 原子落盘）；只返回失败，成功走 [ensure] 的返回。 */
-    private fun downloadFresh(dir: File, spec: VoiceClipSpec): ClipFetch {
+    private fun downloadFresh(spec: VoiceClipSpec, shouldAbort: () -> Boolean): ClipFetch {
         val target = File(dir, "${spec.clipId}.mp3")
         val temp = File(dir, "${spec.clipId}.part")
         temp.delete()
-        val url = "https://${BuildConfig.SERVER_DOMAIN}/voice/clips/${spec.clipId}.mp3"
+        val url = "https://${BuildConfig.SERVER_DOMAIN}/voice/assets/${spec.clipId}.mp3"
+        val call = client.newCall(Request.Builder().url(url).build())
+        activeCall = call
         try {
-            val request = Request.Builder().url(url).build()
-            client.newCall(request).execute().use { response ->
-                val body = response.body()
-                    ?: return ClipFetch.Failed(ReasonCodes.VOICE_CLIP_DOWNLOAD_FAILED, "响应为空")
+            call.execute().use { response ->
+                val body = response.body() ?: return ClipFetch.Failed(ReasonCodes.VOICE_CLIP_DOWNLOAD_FAILED, "响应为空")
                 if (!response.isSuccessful) {
-                    return ClipFetch.Failed(
-                        ReasonCodes.VOICE_CLIP_DOWNLOAD_FAILED,
-                        "HTTP ${response.code()}",
-                    )
+                    return ClipFetch.Failed(ReasonCodes.VOICE_CLIP_DOWNLOAD_FAILED, "HTTP ${response.code()}")
                 }
-                copyExactly(body.byteStream(), temp, spec.sizeBytes)
+                copyExactly(body.byteStream(), temp, spec.sizeBytes, shouldAbort)
             }
+        } catch (_: DownloadCanceled) {
+            temp.delete()
+            return ClipFetch.Canceled
+        } catch (e: IOException) {
+            temp.delete()
+            if (shouldAbort()) return ClipFetch.Canceled
+            Log.w(TAG, "voice clip download failed", e)
+            return ClipFetch.Failed(ReasonCodes.VOICE_CLIP_DOWNLOAD_FAILED, e.message ?: "下载失败")
         } catch (e: Exception) {
             temp.delete()
             Log.w(TAG, "voice clip download failed", e)
             return ClipFetch.Failed(ReasonCodes.VOICE_CLIP_DOWNLOAD_FAILED, e.message ?: "下载失败")
+        } finally {
+            if (activeCall === call) activeCall = null
         }
 
+        if (shouldAbort()) {
+            temp.delete()
+            return ClipFetch.Canceled
+        }
         if (sha256Of(temp) != spec.sha256) {
             temp.delete()
             return ClipFetch.Failed(ReasonCodes.VOICE_CLIP_INVALID, "音频校验失败")
@@ -87,11 +144,12 @@ class VoiceClipStore(private val client: OkHttpClient) {
         return ClipFetch.Ready(target, downloaded = true)
     }
 
-    private fun copyExactly(input: InputStream, target: File, expectedSize: Long) {
+    private fun copyExactly(input: InputStream, target: File, expectedSize: Long, shouldAbort: () -> Boolean) {
         var written = 0L
         target.outputStream().use { out ->
             val buffer = ByteArray(COPY_BUFFER_SIZE)
             while (true) {
+                checkAbort(shouldAbort)
                 val read = input.read(buffer)
                 if (read < 0) break
                 written += read
@@ -99,8 +157,15 @@ class VoiceClipStore(private val client: OkHttpClient) {
                 out.write(buffer, 0, read)
             }
         }
+        checkAbort(shouldAbort)
         if (written != expectedSize) throw IllegalStateException("音频长度不符")
     }
+
+    private fun checkAbort(shouldAbort: () -> Boolean) {
+        if (shouldAbort()) throw DownloadCanceled()
+    }
+
+    private class DownloadCanceled : IOException("下载已取消")
 
     private fun sha256Of(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256")
@@ -115,7 +180,7 @@ class VoiceClipStore(private val client: OkHttpClient) {
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
-    private fun prune(dir: File, keep: String) {
+    private fun prune(dir: File, keep: Set<String>) {
         val files = dir.listFiles { file -> file.isFile && file.name.endsWith(".mp3") } ?: return
         val entries = files.map { VoiceClipFile(it.name, it.length(), it.lastModified()) }
         for (name in VoiceClipCachePolicy.filesToDelete(entries, MAX_CACHE_BYTES, keep)) {

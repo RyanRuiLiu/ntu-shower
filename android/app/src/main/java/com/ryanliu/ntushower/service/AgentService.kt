@@ -138,9 +138,13 @@ class AgentService : Service() {
             sender = DoorSnapshotSender(this) { reading -> notice.onReading(reading) }
             voicePlayer = VoicePlayer(
                 this,
-                // callTimeout 60s 与服务端 voice.prepare 的等待窗同源：下载是音频缓存里
-                // 唯一可能长时间挂住的环节，必须有整体上限，不能只靠 readTimeout
-                VoiceClipStore(HttpClientFactory.create(this, readTimeoutSeconds = 30, callTimeoutSeconds = 60)),
+                // 单段下载 callTimeout 60s：播放命令另有总下载预算，预下载在独立后台线程，
+                // 不占 voice 命令槽。缓存放应用私有 filesDir，不进 /sdcard；旧公共缓存由
+                // store 初始化时删除。
+                VoiceClipStore(
+                    HttpClientFactory.create(this, readTimeoutSeconds = 30, callTimeoutSeconds = 60),
+                    File(filesDir, "voice"),
+                ),
                 deviceLog,
             )
             scheduler = CommandScheduler(overlay, voicePlayer, onOutcome = { outcome -> sendOutcome(outcome) })
@@ -162,6 +166,7 @@ class AgentService : Service() {
     private val callback = object : GatewayClient.Callback {
         override fun onConnected(trusted: Boolean, config: JSONObject, upgrade: JSONObject?, serverTime: String) {
             this@AgentService.trusted = trusted
+            voicePlayer.setPrefetchAllowed(trusted)
             deviceLog.gateway(connected = true, detail = "trusted=$trusted")
             Log.i(TAG, "gateway connected, trusted=$trusted")
             // hello_ack 里的配置已经由 GatewayClient 写进 RuntimeConfig，这里做两件事：
@@ -193,6 +198,7 @@ class AgentService : Service() {
 
         override fun onDisconnected(reason: String) {
             trusted = false
+            voicePlayer.setPrefetchAllowed(false)
             deviceLog.gateway(connected = false, detail = reason)
             Log.w(TAG, "gateway disconnected: $reason")
         }

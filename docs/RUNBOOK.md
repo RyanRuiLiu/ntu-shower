@@ -125,25 +125,21 @@ ssh iseekdream.com 'sudo NT_ROLLBACK=/opt/ntu-shower/backups/server-<时间戳>.
 
 ### 语音播报前置（voice，启用时一次性）
 
-服务端只在规则保存/试听时调用 Piper；模型、`espeak-ng`、`ffmpeg` 不随代码包发布。
-首次启用语音或补齐另一个音色后执行一次（脚本按登记表下载**全部音色**并校验）：
+服务端不再合成语音：规则只是一串固定音频、数字变量与停顿。上传的音频由服务端用
+ffmpeg 统一转成 MP3，因此只需系统有 `ffmpeg` 与 `ffprobe`（需带 libmp3lame）：
 
 ```bash
-# requirements.txt 已由 deploy.sh 安装；确认生产解释器能导入 Piper
-ssh iseekdream.com '/opt/ntu-shower/server/.venv/bin/python -c "import piper; print(1)"'
-# 系统依赖：espeak-ng（Piper 的运行依赖其共享库）与 ffmpeg（MP3 编码，需带 libmp3lame）
-ssh iseekdream.com 'command -v espeak-ng || apt-get install -y espeak-ng; ffmpeg -hide_banner -encoders | grep libmp3lame'
-# 模型（约 63MB，落在 data/voice/models；按内置的字节数与 SHA-256 校验，可重复执行）
-ssh iseekdream.com 'cd /opt/ntu-shower/server && .venv/bin/python -m tools.fetch_voice_model'
-# 合成状态（admin 身份）
+# 系统依赖：ffmpeg / ffprobe（MP3 编码）
+ssh iseekdream.com 'ffmpeg -hide_banner -encoders | grep libmp3lame; command -v ffprobe'
+# 素材与数字状态（admin 身份）
 ssh iseekdream.com 'curl -sS -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/voice/status'
 ```
 
-`ready=true` 才是四项（模型 / Piper / espeak-ng / ffmpeg）都齐；任一缺失时规则保存与
-试听会失败。磁盘占用：模型约 63 MB，合成音频缓存按最近使用淘汰、上限 200 MB
-（`data/voice/clips/`），都在 `data/` 下、随部署保留。设备端无需任何配置，音频经
-`/voice/clips/{clip_id}.mp3` 拉取。规则保存返回 `voice-synthesis-failed` 时，先查这个
-接口与 `journalctl -u ntu-shower`，不要在页面上反复重试。
+`ffmpeg_available=true` 才能上传素材；`digits` 列出已标记的 0–9 数字素材，含数字变量的
+规则要求 0–9 齐全。素材文件在 `data/voice/assets/`，按内容哈希命名，随 `data/` 保留。
+旧版本的音效会在首次启动新代码时一次性导入素材库，旧规则/投递/合成缓存表被删除，
+旧 TTS 片段目录 `data/voice/clips/` 随之清理；旧音效源文件保留在 `data/voice/effects/`。
+规则保存返回 `invalid-voice-rule` 时，先看返回的缺失素材或缺失数字，不要在页面上反复重试。
 
 ## 4. 备份与恢复
 
@@ -255,24 +251,28 @@ ssh iseekdream.com 'curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.
 ### 语音播报不响
 
 1. **规则是否匹配**：设备、学号两个维度各自具体或「全部」（`*`），具体压过通配
-   （先设备、后学号维度）；「全部学号」的规则可能把这个学号放进了排除名单；规则
-   停用或没有规则就不会下发。看 `/api/v1/voice/deliveries` 有没有对应记录。
-2. **事件是否过期**：`voice_event_max_age_s` 默认 60 秒，离线积压或音频准备耗时过长
-   会跳过；投递状态为 `skipped`。
+   （先设备、后学号维度），同档内设备集合更小者优先、再比学号集合；「全部学号」的规则可能把这个学号
+   放进了排除名单；规则停用或没有规则就不会下发。看 `/api/v1/voice/deliveries`
+   有没有对应记录。
+2. **事件是否过期**：`voice_event_max_age_s` 默认 60 秒，离线积压导致过期会跳过；
+   规则保存后的预下载失败只让首次播放现场下载；设备日志看 `audio.prepared` /
+   `audio.prefetch-failed`，页面「最近推送」的 `downloaded` 表示本次播放是否走了下载。
 3. **命令是否到达设备**：审计页看 `voice.play` / `voice.prepare` 的 status 与
    reason_code；离线是 `device.offline`，旧 APK 是 `device.unsupported_action`。
-4. **音频是否就绪**：`/api/v1/voice/status`；规则保存 503 时先按上一节补 Piper/模型。
-5. **音效是否就绪**：模板里 `{fx:名称}` 引用的音效先看「音效库」里还在不在（被引用
-   的音效删不掉、改不了名；若库被外部动过，保存规则时会点名缺失）。上传支持常见格式，
-   服务端统一转换，时长上限 10 秒；`{pause:毫秒}` 是纯静音，不查库。
+4. **素材是否就绪**：`/api/v1/voice/status` 看 `ffmpeg_available` 与 `digits`；含数字
+   变量的规则要求 0–9 齐全。
+5. **规则引用是否完整**：被规则引用的素材删不掉；若库被外部动过，事件解析会失败并在
+   服务端日志记 `voice.rule-invalid`，页面「最近推送」不会有该事件的成功记录。
 6. **设备是否真的在播**：设备 `device.log` 看 `audio.played` / `audio.play-failed` /
    `audio.volume-restored`；音量恢复失败会保留待恢复标记，下次启动或播放前再试。
    规则行的「推送」按钮可不等事件、立即在指定设备上真播一遍，用于现场验证。
+   `voice.clip_download_failed` 多出现在规则刚保存、预下载还没完成时——播放自身只有
+   60 秒下载预算；等后台预下载完成后重试，或减少单条规则引用的素材。
 7. **和浴室 App 的提示音重叠**：设备播放前会自动检测 `STREAM_MUSIC` 上的浴室提示音，
    等它结束再播，不需要逐条配延迟。看设备日志 `audio.bath-wait` 的 `waited_ms`；
    出现 `audio.bath-wait-timeout` 说明等待超过 `voice_bath_wait_max_ms`（默认 15 秒），
-   检查浴室 App 是否卡在循环播放。网页「最近推送」的阶段耗时列（音频准备 / 事件到
-   下发 / 下发到播完 / 现场下载还是命中设备缓存）用于区分链路慢还是设备播放慢。
+   检查浴室 App 是否卡在循环播放。网页「最近推送」的下发/完成时刻、分段与
+   `downloaded` 用于区分链路慢、现场下载还是设备播放慢。
 
 ### 调试通道（ADB 桥）
 

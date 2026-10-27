@@ -1,17 +1,11 @@
 /**
- * 语音播报：规则按「设备 × 学号 × 事件」匹配，两个目标维度各自可选「全部」。
+ * 语音播报：固定音频素材库 + 自定义分段规则。
  *
- * 事件中文名取喷头状态的正名（`DoorState` 的目标状态）：等待开阀 / 淋浴中 /
- * 已暂停 / 淋浴中 / 空闲。具体规则压过通配规则：先比设备维度，再比学号维度；
- * 一个「设备 × 学号 × 事件」只有一条规则，覆盖切换靠停用具体规则让通配顶上。
+ * 规则不再保存文本/音色，而是一串「音频片段 / 喷头号或学号数字 / 停顿」。服务端沿用
+ * 「设备 × 学号 × 事件，具体压过通配」匹配，按事件值把分段解析成播放清单；设备按
+ * 顺序播放。规则保存后在线设备会预下载用到的素材。
  *
- * 浴室 App 自己会在分配/结算时播提示音；设备在播放前检测它是否还在播，等它结束
- * 再开口（`audio.bath-wait`）。「最近推送」带各阶段耗时（音频准备 / 事件到下发 /
- * 下发到播完），现场按它看链路与语速。投递来源分自动触发与手动推送。
- *
- * 页面只经 core/api.js 出网，不直接 fetch；表单与表格沿用项目已有的
- * panel / field / table / badge / btn 结构，设备选择与身份页共用 core/device-scope.js。
- * 占位符说明是可点击的片：点一下插到模板光标处。
+ * 页面只经 core/api.js 出网；表单与表格沿用项目 panel / field / table / badge / btn。
  */
 import { api, hasIdentity } from '../core/api.js'
 import { codeCell, deviceCell } from '../core/cells.js'
@@ -23,23 +17,34 @@ import { deviceName, refreshDevices, store } from '../core/store.js'
 import { toast } from '../core/toast.js'
 
 const WILDCARD = '*'
-const ANY_PLACEHOLDER = /\{(fx:|pause:|[a-z_])/
+/** 「全部学号」试听时用的示例学号：数字变量需要能念出内容，不能传非数字串。 */
+const SAMPLE_CERT_NO = '2530110057'
 
 let spec = null
 let events = []
-let placeholders = []
 let rules = []
 let deliveries = []
 let status = null
-let effects = []
+let assets = []
 let editingId = null
-let previewAudio = null
-/** 规则表的设备筛选：'' 全部、'*' 通配规则、否则某台设备。 */
 let filterDevice = ''
+let segments = []
+let formReady = false
+let previewAudio = null
+let previewToken = 0
 let dispose = disposer()
 
 function eventItem(value) {
   return events.find((item) => item.value === value) || { value, label: value, description: '' }
+}
+
+function assetItem(assetId) {
+  return assets.find((item) => item.asset_id === assetId) || null
+}
+
+function assetName(assetId) {
+  const asset = assetItem(assetId)
+  return asset ? asset.name : '缺失素材'
 }
 
 function fmtMs(ms) {
@@ -47,23 +52,92 @@ function fmtMs(ms) {
   return value < 1000 ? `${Math.round(value)} 毫秒` : `${(value / 1000).toFixed(1)} 秒`
 }
 
-function deliveryBadge(value) {
-  if (value === 'skipped') return '<span class="badge badge-amber">跳过</span>'
-  if (value === 'pending') return '<span class="badge badge-amber">进行中</span>'
-  return `<span class="badge ${statusBadgeClass(value)}">${esc(statusLabel(value))}</span>`
+function fmtSize(bytes) {
+  const value = Number(bytes || 0)
+  return value < 1024 * 1024 ? `${Math.max(1, Math.round(value / 1024))} KB` : `${(value / (1024 * 1024)).toFixed(1)} MB`
 }
 
-/** 规则目标：通配给徽标，具体设备给统一的设备名单元格。 */
-function deviceTargetCell(deviceId) {
-  if (deviceId === WILDCARD) return '<span class="badge badge-blue">全部设备</span>'
-  return deviceCell(deviceId)
+function sampleCert(certs) {
+  return certs.includes(WILDCARD) ? SAMPLE_CERT_NO : certs[0]
 }
 
-/** 投递来源：自动触发是事件派生，手动推送是管理台按规则真播一遍。 */
-function sourceBadge(source) {
-  return source === 'manual'
-    ? '<span class="badge badge-blue">手动推送</span>'
-    : '<span class="badge">自动触发</span>'
+function segmentsSummary(items) {
+  return items
+    .map((item) => {
+      if (item.kind === 'asset') return assetName(item.asset_id)
+      if (item.kind === 'pause') return `停顿 ${fmtMs(item.ms)}`
+      const label = item.source === 'door_no' ? '喷头号' : '学号'
+      return item.length ? `${label}后 ${item.length} 位` : label
+    })
+    .join(' · ')
+}
+
+/** 数字变量只读数字字符；模板提示里明确这一点。 */
+function segmentHint() {
+  const hasDigits = segments.some((item) => item.kind === 'digits')
+  if (!hasDigits) return '数字变量会把喷头号/学号逐位念出；非数字字符不会发音。'
+  const digits = new Set((status?.digits || []).map(Number))
+  const missing = [...Array(10).keys()].filter((digit) => !digits.has(digit))
+  return missing.length === 0
+    ? '数字素材齐全；数字变量会把喷头号/学号逐位念出，非数字字符不会发音。'
+    : `数字素材缺 ${missing.join('、')}；保存含数字变量的规则前请先上传。`
+}
+
+function renderStatus() {
+  if (!status) {
+    $('voiceStatus').innerHTML = '<div class="empty">还没有读到素材状态</div>'
+    return
+  }
+  const ffmpeg = status.ffmpeg_available
+    ? '<span class="badge badge-green">ffmpeg 已就绪</span>'
+    : '<span class="badge badge-red">ffmpeg 缺失</span>'
+  const digits = status.digits || []
+  const digitBadge =
+    digits.length === 10
+      ? '<span class="badge badge-green">数字素材齐全</span>'
+      : `<span class="badge badge-amber">数字素材缺 ${10 - digits.length} 个</span>`
+  $('voiceStatus').innerHTML = `<div class="btn-row">${ffmpeg}${digitBadge}<span class="badge badge-blue">素材 ${esc(
+    String(status.asset_count),
+  )} 个</span></div>`
+  $('voiceAssetCount').textContent = status.asset_count > 0 ? `共 ${status.asset_count} 个` : ''
+}
+
+function renderDigitOptions() {
+  const used = new Set(assets.filter((item) => item.digit !== null).map((item) => Number(item.digit)))
+  const options = ['<option value="">不作为数字</option>']
+  for (let digit = 0; digit <= 9; digit += 1) {
+    const disabled = used.has(digit) ? ' disabled' : ''
+    const note = used.has(digit) ? '（已有）' : ''
+    options.push(`<option value="${digit}"${disabled}>${digit}${note}</option>`)
+  }
+  $('voiceAssetDigit').innerHTML = options.join('')
+}
+
+function renderAssets() {
+  if (assets.length === 0) {
+    $('voiceAssetTable').innerHTML = '<div class="empty">还没有素材；先上传一段固定音频。</div>'
+    return
+  }
+  const rows = assets
+    .map(
+      (asset) => `<tr data-id="${esc(asset.asset_id)}">
+        <td>${esc(asset.name)}</td>
+        <td>${asset.digit === null ? PLACEHOLDER : `<span class="badge badge-blue">数字 ${asset.digit}</span>`}</td>
+        <td class="mono">${esc(fmtMs(asset.duration_ms))}</td>
+        <td class="mono">${esc(fmtSize(asset.size_bytes))}</td>
+        <td class="col-actions">
+          <div class="btn-row">
+            <button type="button" class="btn btn-ghost btn-sm" data-act="audition">试听</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-act="rename">改名</button>
+            <button type="button" class="btn btn-danger btn-sm" data-act="delete">删除</button>
+          </div>
+        </td>
+      </tr>`,
+    )
+    .join('')
+  $('voiceAssetTable').innerHTML = `<table class="table"><thead><tr>
+      <th>名称</th><th>数字</th><th>时长</th><th>大小</th><th class="col-actions">操作</th>
+    </tr></thead><tbody>${rows}</tbody></table>`
 }
 
 function certCell(rule) {
@@ -77,42 +151,186 @@ function certCell(rule) {
   return rule.certs.map((cert) => codeCell(cert)).join('、')
 }
 
-/** 预览用的示例学号：通配规则取样例，具体规则取第一个。 */
-function sampleCert(certs) {
-  return certs.includes(WILDCARD) ? '示例学号' : certs[0]
+/** 设备清单异步到达后重画作用域；保留用户已选，空选择回到当前设备。 */
+function renderScope() {
+  const container = $('voiceScope')
+  const selected = readScopeEditor(container)
+  container.innerHTML = scopeEditorHtml(store.devices, selected === null ? [store.deviceId || WILDCARD] : selected)
 }
 
-/** 通配目标的纯文本写法（确认框、提示里用，不带 HTML）。 */
-function targetText(rule) {
-  const devices = rule.devices.includes(WILDCARD) ? '全部设备' : rule.devices.map(deviceName).join('、')
-  const certs = rule.certs.includes(WILDCARD) ? '全部学号' : rule.certs.join('、')
-  return `设备：${devices}；学号：${certs}`
+function renderFilter() {
+  const options = [
+    ['', '全部规则'],
+    [WILDCARD, '仅全部设备（通配）'],
+    ...store.devices.map((device) => [device.device_id, deviceName(device.device_id)]),
+  ]
+  if (!options.some(([value]) => value === filterDevice)) filterDevice = ''
+  $('voiceFilterDevice').innerHTML = options
+    .map(([value, label]) => `<option value="${esc(value)}">${esc(label)}</option>`)
+    .join('')
+  $('voiceFilterDevice').value = filterDevice
 }
 
-function renderStatus() {
-  if (!status) {
-    $('voiceStatus').innerHTML = '<div class="empty">还没有读到语音合成状态</div>'
+function visibleRules() {
+  if (!filterDevice) return rules
+  if (filterDevice === WILDCARD) return rules.filter((rule) => rule.devices.includes(WILDCARD))
+  return rules.filter((rule) => rule.devices.includes(filterDevice))
+}
+
+function renderRules() {
+  const list = visibleRules()
+  $('voiceCount').textContent = rules.length > 0 ? `共 ${rules.length} 条` : ''
+  if (list.length === 0) {
+    $('voiceTable').innerHTML = '<div class="empty">暂无匹配的语音规则</div>'
     return
   }
-  const ffmpeg = status.ffmpeg_available
-    ? '<span class="badge badge-green">ffmpeg 已就绪</span>'
-    : '<span class="badge badge-red">ffmpeg 缺失</span>'
-  const rows = (status.voices || [])
-    .map(
-      (item) => `<tr data-voice="${esc(item.key)}">
-        <td class="mono">${esc(item.key)}</td>
-        <td>${esc(item.note)}</td>
-        <td>${item.available ? '<span class="badge badge-green">可用</span>' : '<span class="badge badge-red">缺失</span>'}</td>
-        <td class="col-actions"><div class="btn-row"><button type="button" class="btn btn-ghost btn-sm" data-act="audition" ${item.available ? '' : 'disabled'}>试听</button></div></td>
-      </tr>`,
-    )
+  const rows = list
+    .map((rule) => {
+      const devices = rule.devices.includes(WILDCARD)
+        ? '<span class="badge badge-blue">全部设备</span>'
+        : rule.devices.map((deviceId) => deviceCell(deviceId)).join('、')
+      const eventBadges = rule.events
+        .map((value) => {
+          const item = eventItem(value)
+          return `<span class="badge badge-blue" title="${esc(item.description)}">${esc(item.label)}</span>`
+        })
+        .join(' ')
+      const summary = rule.summary || segmentsSummary(rule.segments)
+      const selected = editingId === rule.id ? ' class="is-selected"' : ''
+      return `<tr${selected} data-id="${esc(String(rule.id))}">
+        <td>${devices}</td>
+        <td>${certCell(rule)}</td>
+        <td>${eventBadges}</td>
+        <td><div class="muted" title="${esc(summary)}">${esc(summary)}</div></td>
+        <td class="mono">音量 ${esc(String(rule.volume))}</td>
+        <td>${rule.enabled ? '<span class="badge badge-green">启用</span>' : '<span class="badge">停用</span>'}</td>
+        <td class="col-actions">
+          <div class="btn-row">
+            <button type="button" class="btn btn-ghost btn-sm" data-act="toggle">${rule.enabled ? '停用' : '启用'}</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-act="edit">编辑</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-act="preview">预览</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-act="push">推送</button>
+            <button type="button" class="btn btn-danger btn-sm" data-act="delete">删除</button>
+          </div>
+        </td>
+      </tr>`
+    })
     .join('')
-  $('voiceStatus').innerHTML = `<div class="btn-row">${ffmpeg}<span class="badge badge-blue">音频 ${esc(String(status.clip_count))} 个</span></div>
-    <div class="table-wrap"><table class="table"><thead><tr><th>音色</th><th>说明</th><th>状态</th><th class="col-actions">操作</th></tr></thead><tbody>${rows}</tbody></table></div>
-    <div class="hint">音色在每条规则上单独选；具体规则压过通配（先设备、后学号维度）。播放前设备会等浴室 App 的提示音结束再开口。</div>`
+  $('voiceTable').innerHTML = `<table class="table"><thead><tr>
+      <th>设备</th><th>学号</th><th>事件</th><th>分段</th><th>音量</th><th>启用</th><th class="col-actions">操作</th>
+    </tr></thead><tbody>${rows}</tbody></table>`
 }
 
-/** 边界一律来自 /voice/spec：输入范围与标签文字都由它渲染，页面不抄第二份。 */
+function deliveryBadge(value) {
+  if (value === 'skipped') return '<span class="badge badge-amber">跳过</span>'
+  if (value === 'pending') return '<span class="badge badge-amber">进行中</span>'
+  return `<span class="badge ${statusBadgeClass(value)}">${esc(statusLabel(value))}</span>`
+}
+
+function renderDeliveries() {
+  $('voiceDeliveryCount').textContent = deliveries.length > 0 ? `最近 ${deliveries.length} 条` : ''
+  if (deliveries.length === 0) {
+    $('voiceDeliveryTable').innerHTML = '<div class="empty">暂无播报记录</div>'
+    return
+  }
+  const rows = deliveries
+    .map((item) => {
+      const event = eventItem(item.event)
+      return `<tr>
+        <td class="mono">${esc(fmtFullDateTime(item.occurred_at))}</td>
+        <td>${item.source === 'manual' ? '<span class="badge badge-blue">手动推送</span>' : '<span class="badge">自动触发</span>'}</td>
+        <td>${deviceCell(item.device_id)}</td>
+        <td>${codeCell(item.cert_no)}</td>
+        <td><span class="badge badge-blue" title="${esc(event.description)}">${esc(event.label)}</span></td>
+        <td class="mono">${esc(String(item.door_no))}</td>
+        <td><div class="muted" title="${esc(item.segments)}">${esc(item.segments)}</div></td>
+        <td class="mono">${esc(fmtMs(item.duration_ms))}</td>
+        <td><span title="${esc(item.detail || '')}">${deliveryBadge(item.status)}</span></td>
+      </tr>`
+    })
+    .join('')
+  $('voiceDeliveryTable').innerHTML = `<table class="table"><thead><tr>
+      <th>下发时刻</th><th>来源</th><th>设备</th><th>学号</th><th>事件</th><th>喷头</th><th>分段</th><th>时长</th><th>状态</th>
+    </tr></thead><tbody>${rows}</tbody></table>`
+}
+
+function segmentLimitReached() {
+  if (!spec || segments.length < spec.max_segments) return false
+  report('voiceResult', `失败 · 分段最多 ${spec.max_segments} 个`, 'err')
+  return true
+}
+
+function renderSegments() {
+  if (segments.length === 0) {
+    $('voiceSegments').innerHTML = '<div class="empty">还没有分段；用下方按钮添加音频、数字或停顿。</div>'
+    $('voiceSegmentHint').textContent = segmentHint()
+    return
+  }
+  const rows = segments
+    .map((segment, index) => {
+      const controls = []
+      if (segment.kind === 'asset') {
+        const options = assets
+          .map(
+            (asset) =>
+              `<option value="${esc(asset.asset_id)}"${asset.asset_id === segment.asset_id ? ' selected' : ''}>${esc(
+                asset.name,
+              )}</option>`,
+          )
+          .join('')
+        controls.push(`<span class="seg-kind">音频</span>`)
+        controls.push(
+          `<select data-seg-field="asset" data-index="${index}">${options}</select>`,
+        )
+      } else if (segment.kind === 'digits') {
+        controls.push(`<span class="seg-kind">数字</span>`)
+        controls.push(
+          `<select data-seg-field="source" data-index="${index}">
+            <option value="door_no"${segment.source === 'door_no' ? ' selected' : ''}>喷头号</option>
+            <option value="cert_no"${segment.source === 'cert_no' ? ' selected' : ''}>学号</option>
+          </select>`,
+        )
+        if (segment.source === 'cert_no') {
+          controls.push(
+            `<input type="number" min="1" max="10" data-seg-field="length" data-index="${index}" value="${
+              segment.length || ''
+            }" placeholder="全部位数">`,
+          )
+        } else {
+          controls.push('<span class="muted">逐位</span>')
+        }
+      } else {
+        controls.push(`<span class="seg-kind">停顿</span>`)
+        controls.push(
+          `<input type="number" min="100" max="5000" step="100" data-seg-field="pause" data-index="${index}" value="${segment.ms}">`,
+        )
+        controls.push('<span class="muted">毫秒</span>')
+      }
+      controls.push(`<div class="btn-row">
+        <button type="button" class="btn btn-ghost btn-sm" data-seg-act="up" data-index="${index}" ${
+          index === 0 ? 'disabled' : ''
+        }>↑</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-seg-act="down" data-index="${index}" ${
+          index === segments.length - 1 ? 'disabled' : ''
+        }>↓</button>
+        <button type="button" class="btn btn-danger btn-sm" data-seg-act="remove" data-index="${index}">移除</button>
+      </div>`)
+      return `<div class="seg-row">${controls.join('')}</div>`
+    })
+    .join('')
+  $('voiceSegments').innerHTML = rows
+  $('voiceSegmentHint').textContent = segmentHint()
+}
+
+function renderSpec() {
+  const volume = spec ? spec.volume : { minimum: 0, maximum: 5, default: 3 }
+  $('voiceVolumeLabel').textContent = `音量（${volume.minimum}–${volume.maximum}）`
+  $('voiceVolume').min = String(volume.minimum)
+  $('voiceVolume').max = String(volume.maximum)
+  if (!spec) return
+  $('voiceVolume').value = String(volume.default)
+}
+
 function eventChecksHtml(selected) {
   const phases = [...new Set(events.map((item) => item.phase || '其它'))]
   return phases
@@ -131,240 +349,12 @@ function eventChecksHtml(selected) {
     .join('')
 }
 
+function renderEventChoices(selected) {
+  $('voiceEvents').innerHTML = eventChecksHtml(selected)
+}
+
 function readEventSelection() {
-  return [...document.querySelectorAll('input[data-event]:checked')].map((input) => input.dataset.event)
-}
-
-function renderSpec() {
-  // 占位符是可点击的片：正文只留名字，完整说明放 title；点一下插到光标处。
-  // 音效片来自音效库（{fx:名称}），停顿片插 {pause:毫秒}
-  const chips = [
-    ...placeholders.map(
-      (item) =>
-        `<button type="button" class="ph-chip" data-ph="${esc(item.key)}" title="${esc(item.description)}">{${esc(item.key)}} ${esc(item.label)}</button>`,
-    ),
-    ...effects.map(
-      (item) =>
-        `<button type="button" class="ph-chip" data-ph="fx:${esc(item.name)}" title="在该位置插入音效「${esc(item.name)}》（${esc(fmtMs(item.duration_ms))}），只响不读">♪${esc(item.name)}</button>`,
-    ),
-    '<button type="button" class="ph-chip" data-ph="pause:500" title="在该位置插入 0.5 秒静音；数字可改成 100–5000 的毫秒数">（停顿0.5秒）</button>',
-  ]
-  $('voicePlaceholders').innerHTML = `${chips.join(" ")}
-    <div class="hint">点一下插到模板光标处，说明悬停可见；音效与停顿只响不读。</div>`
-  if (!spec) return
-  $('voiceVolumeLabel').textContent = `音量（${spec.volume.minimum}–${spec.volume.maximum}）`
-  $('voiceVolume').min = String(spec.volume.minimum)
-  $('voiceVolume').max = String(spec.volume.maximum)
-}
-
-function renderEffects() {
-  $('voiceEffectCount').textContent = effects.length > 0 ? `共 ${effects.length} 个` : ''
-  if (effects.length === 0) {
-    $('voiceEffectTable').innerHTML =
-      '<div class="empty">还没有上传音效；支持常见音频格式，会统一转换，时长不超过 10 秒。</div>'
-    return
-  }
-  const rows = effects
-    .map(
-      (item) => `<tr data-id="${esc(item.effect_id)}">
-        <td>${esc(item.name)}</td>
-        <td class="mono">${esc(fmtMs(item.duration_ms))}</td>
-        <td class="mono">${esc(String(Math.round(item.size_bytes / 1024)))} KB</td>
-        <td class="col-actions">
-          <div class="btn-row">
-            <button type="button" class="btn btn-ghost btn-sm" data-act="audition">试听</button>
-            <button type="button" class="btn btn-ghost btn-sm" data-act="rename">改名</button>
-            <button type="button" class="btn btn-danger btn-sm" data-act="delete">删除</button>
-          </div>
-        </td>
-      </tr>`,
-    )
-    .join('')
-  $('voiceEffectTable').innerHTML = `<table class="table"><thead><tr>
-      <th>名称</th><th>时长</th><th>大小</th><th class="col-actions">操作</th>
-    </tr></thead><tbody>${rows}</tbody></table>`
-}
-
-async function uploadEffect() {
-  const name = $('voiceEffectName').value.trim()
-  const file = $('voiceEffectFile').files[0]
-  if (!file) return report('voiceEffectResult', '失败 · 请选择音频文件', 'err')
-  if (!name) return report('voiceEffectResult', '失败 · 请填写音效名称', 'err')
-  const form = new FormData()
-  form.append('name', name)
-  form.append('file', file)
-  report('voiceEffectResult', '正在上传并转换…', 'info')
-  try {
-    await api.uploadVoiceEffect(form)
-    $('voiceEffectName').value = ''
-    $('voiceEffectFile').value = ''
-    await reload()
-    report('voiceEffectResult', '音效已入库；规则的「前奏音效」里就能选到它。', 'ok')
-  } catch (error) {
-    report('voiceEffectResult', problemText(error), 'err')
-  }
-}
-
-async function renameEffect(effect) {
-  const name = window.prompt('新的音效名称（规则模板里的 {fx:…} 会一并改写）', effect.name)
-  if (name === null) return
-  const trimmed = name.trim()
-  if (!trimmed || trimmed === effect.name) return
-  try {
-    await api.renameVoiceEffect(effect.effect_id, trimmed)
-    await reload()
-    toast('已改名')
-  } catch (error) {
-    report('voiceEffectResult', problemText(error), 'err')
-  }
-}
-
-async function deleteEffect(effect) {
-  if (!window.confirm(`删除音效「${effect.name}」？`)) return
-  try {
-    await api.deleteVoiceEffect(effect.effect_id)
-    await reload()
-    toast('已删除')
-  } catch (error) {
-    report('voiceEffectResult', problemText(error), 'err')
-  }
-}
-
-/** 规则表单的音色下拉（spec.voices 驱动，展示名 + 说明）。 */
-function renderVoiceOptions(selected) {
-  const options = (spec && spec.voices ? spec.voices : []).map((item) => [
-    item.key,
-    `${item.key}（${item.note}）`,
-  ])
-  if (selected !== undefined && !options.some(([value]) => value === selected)) selected = 'melo'
-  $('voiceVoice').innerHTML = options
-    .map(([value, label]) => `<option value="${esc(value)}">${esc(label)}</option>`)
-    .join('')
-  $('voiceVoice').value = selected === undefined ? $('voiceVoice').value : selected
-}
-
-/** 规则表的设备筛选下拉：全部 / 通配 / 每台设备。 */
-function renderFilter() {
-  const options = [
-    ['', '全部规则'],
-    [WILDCARD, '仅全部设备（通配）'],
-    ...store.devices.map((device) => [device.device_id, deviceName(device.device_id)]),
-  ]
-  // 筛选指向的设备已从档案消失时回到全部，不让下拉停在第一项而语义还是旧值
-  if (!options.some(([value]) => value === filterDevice)) filterDevice = ''
-  $('voiceFilterDevice').innerHTML = options
-    .map(([value, label]) => `<option value="${esc(value)}">${esc(label)}</option>`)
-    .join('')
-  $('voiceFilterDevice').value = filterDevice
-}
-
-function renderTable() {
-  $('voiceCount').textContent = rules.length > 0 ? `共 ${rules.length} 条` : ''
-  if (rules.length === 0) {
-    $('voiceTable').innerHTML = '<div class="empty">暂无语音规则</div>'
-    return
-  }
-  const rows = rules
-    .map((rule) => {
-      const eventBadges = rule.events
-        .map((value) => {
-          const item = eventItem(value)
-          return `<span class="badge badge-blue" title="${esc(item.description)}">${esc(item.label)}</span>`
-        })
-        .join(' ')
-      const devices = rule.devices.includes(WILDCARD)
-        ? '<span class="badge badge-blue">全部设备</span>'
-        : rule.devices.map((deviceId) => deviceTargetCell(deviceId)).join('、')
-      const selected = editingId === rule.id ? ' class="is-selected"' : ''
-      return `<tr${selected} data-id="${esc(String(rule.id))}">
-        <td>${devices}</td>
-        <td>${certCell(rule)}</td>
-        <td>${eventBadges}</td>
-        <td><div title="${esc(rule.text)}">${esc(rule.text)}</div></td>
-        <td class="mono">音量 ${esc(String(rule.volume))} · ${esc(rule.voice)}</td>
-        <td>${rule.enabled ? '<span class="badge badge-green">启用</span>' : '<span class="badge">停用</span>'}</td>
-        <td class="col-actions">
-          <div class="btn-row">
-            <button type="button" class="btn btn-ghost btn-sm" data-act="toggle">${rule.enabled ? '停用' : '启用'}</button>
-            <button type="button" class="btn btn-ghost btn-sm" data-act="edit">编辑</button>
-            <button type="button" class="btn btn-ghost btn-sm" data-act="preview">试听</button>
-            <button type="button" class="btn btn-ghost btn-sm" data-act="push">推送</button>
-            <button type="button" class="btn btn-danger btn-sm" data-act="delete">删除</button>
-          </div>
-        </td>
-      </tr>`
-    })
-    .join('')
-  $('voiceTable').innerHTML = `<table class="table"><thead><tr>
-      <th>设备</th><th>学号</th><th>事件</th><th>播报内容</th><th>参数</th><th>启用</th><th class="col-actions">操作</th>
-    </tr></thead><tbody>${rows}</tbody></table>`
-}
-
-/**
- * 各阶段耗时：备音频（含排队）、事件→下发、下发→收尾。
- * 未下发的投递没有「发/完」，也不谈设备缓存——缓存徽标只在真播过时才有意义。
- */
-function stageCell(item) {
-  const dispatched = item.dispatch_offset_ms !== null && item.dispatch_offset_ms !== undefined
-  const parts = []
-  // 单元格只放数字，语义全部进悬停提示
-  if (item.status === 'failed' && !dispatched) {
-    parts.push('准备失败')
-  } else {
-    parts.push(fmtMs(item.clip_ms))
-  }
-  if (dispatched) parts.push(fmtMs(item.dispatch_offset_ms))
-  if (item.finish_offset_ms !== null && item.finish_offset_ms !== undefined) {
-    parts.push(fmtMs(item.finish_offset_ms))
-  }
-  let cache = ''
-  if (dispatched) {
-    cache = item.downloaded
-      ? ' <span class="badge badge-amber">现场下载</span>'
-      : ' <span class="badge badge-green">设备缓存</span>'
-  }
-  const tooltip = [
-    `音频准备 ${fmtMs(item.clip_ms)}：事件认领后备齐音频，含排队等待`,
-    dispatched ? `事件到下发 ${fmtMs(item.dispatch_offset_ms)}：从事件发生到向设备发出播放命令` : '',
-    item.finish_offset_ms !== null && item.finish_offset_ms !== undefined
-      ? `下发到播完 ${fmtMs(item.finish_offset_ms)}：从下发到设备播完收尾，含下载与播放`
-      : '',
-    dispatched ? (item.downloaded ? '设备现场下载了音频' : '设备命中本地缓存，未下载') : '',
-  ]
-    .filter(Boolean)
-    .join('\n')
-  return `<div class="mono" title="${esc(tooltip)}">${esc(parts.join(' · '))}${cache}</div>`
-}
-
-function renderDeliveries() {
-  $('voiceDeliveryCount').textContent = deliveries.length > 0 ? `最近 ${deliveries.length} 条` : ''
-  if (deliveries.length === 0) {
-    $('voiceDeliveryTable').innerHTML = '<div class="empty">暂无播报记录</div>'
-    return
-  }
-  const rows = deliveries
-    .map((item) => {
-      const event = eventItem(item.event)
-      const dispatched = Boolean(item.dispatched_at)
-      const timeCell = dispatched
-        ? esc(fmtFullDateTime(item.dispatched_at))
-        : `<span class="muted" title="事件时刻（未下发）">${esc(fmtFullDateTime(item.occurred_at))}</span>`
-      return `<tr>
-        <td class="mono">${timeCell}</td>
-        <td>${sourceBadge(item.source)}</td>
-        <td>${deviceCell(item.device_id)}</td>
-        <td>${certCell({ certs: [item.cert_no], exempt: [] })}</td>
-        <td><span class="badge badge-blue" title="${esc(event.description)}">${esc(event.label)}</span></td>
-        <td class="mono">${esc(String(item.door_no))}</td>
-        <td><div title="${esc(item.text || '')}">${esc(item.text || PLACEHOLDER)}</div></td>
-        <td>${stageCell(item)}</td>
-        <td><span title="${esc(item.detail || '')}">${deliveryBadge(item.status)}</span></td>
-      </tr>`
-    })
-    .join('')
-  $('voiceDeliveryTable').innerHTML = `<table class="table"><thead><tr>
-      <th>下发时刻</th><th>来源</th><th>设备</th><th>学号</th><th>事件</th><th>喷头</th><th>播报内容</th><th>耗时</th><th>状态</th>
-    </tr></thead><tbody>${rows}</tbody></table>`
+  return [...document.querySelectorAll('#voiceEvents input[data-event]:checked')].map((input) => input.dataset.event)
 }
 
 function applyFormMode() {
@@ -372,47 +362,45 @@ function applyFormMode() {
   $('voiceFormTitle').textContent = editing ? '编辑语音规则' : '新增语音规则'
   $('btnVoiceSave').textContent = editing ? '保存修改' : '新增'
   $('btnVoiceCancel').hidden = !editing
-  updateCertHint()
-}
-
-/** 学号框的提示随模式变：勾「全部学号」时框里填的是排除名单，否则是目标名单。 */
-function updateCertHint() {
-  if ($('voiceCertWildcard').checked) {
-    $('voiceCertHint').textContent = '排除名单：一行一个学号，这些人不播这条规则（可能命中其它规则）。'
-    return
-  }
-  $('voiceCertHint').textContent = '一行一个学号；这些学号都会播这条规则。'
 }
 
 function clearForm() {
+  editingId = null
   $('voiceScope').innerHTML = scopeEditorHtml(store.devices, [store.deviceId || WILDCARD])
   $('voiceCertWildcard').checked = false
   $('voiceCert').disabled = false
   $('voiceCert').value = ''
-  // 默认一个事件都不勾：等待开阀最常用，但「默认就响」不该替人决定
-  $('voiceEvents').innerHTML = eventChecksHtml([])
-  renderVoiceOptions('melo')
-  $('voiceText').value = ''
-  $('voiceVolume').value = spec ? String(spec.volume.default) : '3'
+  updateCertHint()
+  renderEventChoices([])
+  segments = []
+  renderSegments()
+  renderSpec()
   $('voiceEnabled').checked = true
-  $('voiceSample').hidden = true
-  $('voiceSampleText').textContent = ''
+  $('voiceResult').textContent = ''
   applyFormMode()
 }
 
 function fillForm(rule) {
+  editingId = rule.id
   $('voiceScope').innerHTML = scopeEditorHtml(store.devices, rule.devices)
   const wildcard = rule.certs.includes(WILDCARD)
   $('voiceCertWildcard').checked = wildcard
   $('voiceCert').disabled = false
-  // 勾「全部学号」时框里展示的是排除名单；不勾则是目标学号列表
   $('voiceCert').value = wildcard ? (rule.exempt || []).join('\n') : rule.certs.join('\n')
-  $('voiceEvents').innerHTML = eventChecksHtml(rule.events)
-  renderVoiceOptions(rule.voice)
-  $('voiceText').value = rule.text
+  updateCertHint()
+  renderEventChoices(rule.events)
+  segments = rule.segments.map((item) => ({ ...item }))
+  renderSegments()
   $('voiceVolume').value = String(rule.volume)
   $('voiceEnabled').checked = rule.enabled
   applyFormMode()
+  $('voiceFormPanel').scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+function exitEdit() {
+  editingId = null
+  clearForm()
+  renderRules()
 }
 
 /** 学号框按空白与常见分隔符切分（「一行一个」是主形状，贴进逗号分隔也能认）。 */
@@ -429,110 +417,98 @@ function readCertLines() {
   return lines
 }
 
-/** 一个框两种含义：勾「全部学号」时行是排除名单，否则是目标名单。 */
+function updateCertHint() {
+  $('voiceCertHint').textContent = $('voiceCertWildcard').checked
+    ? '排除名单：一行一个学号，这些人不播这条规则（可能命中其它规则）。'
+    : '一行一个学号；这些学号都会播这条规则。'
+}
+
 function readTargets() {
-  if ($('voiceCertWildcard').checked) return { cert_nos: ['*'], exempt: readCertLines() }
-  return { cert_nos: readCertLines(), exempt: [] }
+  if ($('voiceCertWildcard').checked) return { certs: [WILDCARD], exempt: readCertLines() }
+  return { certs: readCertLines(), exempt: [] }
 }
 
 function readForm() {
   const deviceIds = readScopeEditor($('voiceScope'))
-  if (deviceIds === null) return report('voiceResult', '失败 · 请选择设备（或勾选全部设备）', 'err')
-  const { cert_nos: certTargets, exempt } = readTargets()
-  const wildcardCert = $('voiceCertWildcard').checked
-  if (certTargets.length === 0) return report('voiceResult', '失败 · 请填写学号（或勾选全部学号）', 'err')
+  if (deviceIds === null) {
+    report('voiceResult', '失败 · 请选择设备（或勾选全部设备）', 'err')
+    return null
+  }
+  const { certs, exempt } = readTargets()
+  if (certs.length === 0) {
+    report('voiceResult', '失败 · 请填写学号（或勾选全部学号）', 'err')
+    return null
+  }
   const selectedEvents = readEventSelection()
-  if (selectedEvents.length === 0) return report('voiceResult', '失败 · 请勾选至少一个事件', 'err')
-  const text = $('voiceText').value.trim()
-  if (!text) return report('voiceResult', '失败 · 请填写播报内容', 'err')
-  const common = {
-    text,
+  if (selectedEvents.length === 0) {
+    report('voiceResult', '失败 · 请勾选至少一个事件', 'err')
+    return null
+  }
+  if (segments.length === 0) {
+    report('voiceResult', '失败 · 请至少添加一个分段', 'err')
+    return null
+  }
+  return {
+    devices: deviceIds,
+    certs,
+    events: selectedEvents,
+    segments: segments.map((item) => ({ ...item })),
     volume: Number($('voiceVolume').value),
     enabled: $('voiceEnabled').checked,
     exempt_cert_nos: exempt,
-    voice: $('voiceVoice') ? $('voiceVoice').value : 'melo',
   }
-  return { devices: deviceIds, certs: certTargets, events: selectedEvents, ...common }
-}
-
-/** 渲染效果区：用示例值展示模板渲染后的样子，引号与说明把它和真实播报区分开。 */
-function showSample(text) {
-  if (!text) return
-  $('voiceSampleText').textContent = text
-  $('voiceSample').hidden = false
-}
-
-/** 把占位符插到模板输入框的光标处（无光标时追加到末尾），插完光标落在占位符后。 */
-function insertPlaceholder(key) {
-  const input = $('voiceText')
-  const token = `{${key}}`
-  const start = input.selectionStart ?? input.value.length
-  const end = input.selectionEnd ?? start
-  input.value = input.value.slice(0, start) + token + input.value.slice(end)
-  const caret = start + token.length
-  input.focus()
-  input.setSelectionRange(caret, caret)
-}
-
-function playPreview(url) {
-  stopPreview()
-  if (!url) return
-  previewAudio = new Audio(url)
-  previewAudio.play().catch((error) => toast(`试听失败：${error.message}`))
 }
 
 function stopPreview() {
+  previewToken += 1
   if (previewAudio) {
     previewAudio.pause()
     previewAudio = null
   }
 }
 
-async function pushRule(rule) {
-  // 规则的目标设备取交集：通配规则即全部设备。多台在线时由现场选，只有一台才直推
-  const allowed = rule.devices.includes(WILDCARD)
-    ? store.devices
-    : store.devices.filter((device) => rule.devices.includes(device.device_id))
-  const online = allowed.filter((device) => device.online)
-  if (online.length === 0) return report('voiceResult', '失败 · 没有在线设备可推送', 'err')
-  let deviceId = online.length === 1 ? online[0].device_id : ''
-  if (!deviceId) {
-    const list = online.map((device, index) => `${index + 1}. ${device.name || device.device_id}`).join('\n')
-    const picked = window.prompt(`这条规则作用于多台设备。推送到哪台？输入序号：\n${list}`, '1')
-    if (picked === null) return
-    const chosen = online[Number(picked) - 1]
-    if (!chosen) return report('voiceResult', '失败 · 序号无效', 'err')
-    deviceId = chosen.device_id
-  }
-  report('voiceResult', `正在推送到 ${deviceName(deviceId)} 播放…`, 'info')
-  try {
-    const result = await api.pushVoiceRule(rule.id, deviceId)
-    showSample(result.rendered_text)
-    const ok = result.status === 'ok'
-    report('voiceResult', ok ? `已在 ${deviceName(deviceId)} 上播放。` : `设备返回：${result.detail || result.status}`, ok ? 'ok' : 'err')
-    await reload()
-  } catch (error) {
-    report('voiceResult', problemText(error), 'err')
+function playUrl(url, token) {
+  return new Promise((resolve) => {
+    if (!url || token !== previewToken) return resolve()
+    const audio = new Audio(url)
+    previewAudio = audio
+    audio.onended = () => resolve()
+    audio.onerror = () => {
+      toast('试听失败')
+      resolve()
+    }
+    audio.play().catch(() => resolve())
+  })
+}
+
+function pause(ms, token) {
+  return new Promise((resolve) => {
+    window.setTimeout(() => resolve(token !== previewToken), ms)
+  })
+}
+
+async function playResolved(list) {
+  stopPreview()
+  const token = ++previewToken
+  for (const segment of list) {
+    if (token !== previewToken) return
+    if (segment.kind === 'pause') {
+      await pause(segment.ms, token)
+    } else if (segment.clip) {
+      await playUrl(segment.clip.url, token)
+    }
   }
 }
 
-/**
- * 预览一条播报。入参是已经选定的文本 / 事件 / 学号 / 音色——不要求完整规则形状，
- * 规则行、表单、音色样三处都走这一份。
- */
-async function previewRule({ text, event, cert, voice, pending = '正在合成试听…' }) {
-  report('voiceResult', pending, 'info')
+async function previewSegments(items, event, cert, doorNo = 1) {
+  if (!items || items.length === 0) {
+    report('voiceResult', '失败 · 请至少添加一个分段', 'err')
+    return
+  }
   try {
-    const result = await api.previewVoiceRule({
-      text,
-      event,
-      cert_no: cert,
-      door_no: 1,
-      voice: voice || 'melo',
-    })
-    showSample(result.rendered_text)
-    playPreview(result.clip_url)
-    report('voiceResult', '试听已生成；实际播报按事件发生时的值渲染。', 'ok')
+    const result = await api.previewVoiceRule({ segments: items, event, cert_no: cert, door_no: doorNo })
+    report('voiceResult', `预览：${result.summary}（共 ${fmtMs(result.total_ms)}）`, 'info')
+    await playResolved(result.segments)
   } catch (error) {
     report('voiceResult', problemText(error), 'err')
   }
@@ -541,34 +517,31 @@ async function previewRule({ text, event, cert, voice, pending = '正在合成�
 async function previewForm() {
   const payload = readForm()
   if (!payload) return
-  await previewRule({
-    text: payload.text,
-    event: payload.events[0],
-    cert: sampleCert(payload.certs),
-    voice: payload.voice,
-  })
+  await previewSegments(payload.segments, payload.events[0], sampleCert(payload.certs))
+}
+
+async function previewRule(rule) {
+  await previewSegments(rule.segments, rule.events[0], sampleCert(rule.certs))
 }
 
 async function submitForm() {
   const payload = readForm()
   if (!payload) return
   report('voiceResult', '正在保存…', 'info')
+  const editing = editingId !== null
   try {
-    if (editingId !== null) {
+    if (editing) {
       await api.updateVoiceRule(editingId, payload)
-      const warmNote = ANY_PLACEHOLDER.test(payload.text)
-        ? '带占位符的文本在首次播报时渲染生成。'
-        : '固定文本的音频已重新预热。'
-      report('voiceResult', `已保存；${warmNote}`, 'ok')
     } else {
       await api.createVoiceRule(payload)
-      const warmNote = ANY_PLACEHOLDER.test(payload.text)
-        ? '带占位符的文本在首次播报时渲染生成'
-        : '固定文本的音频已开始预热到设备'
-      report('voiceResult', `已新建规则；${warmNote}。`, 'ok')
     }
-    editingId = null
+    clearForm()
     await reload()
+    report(
+      'voiceResult',
+      editing ? '已保存；在线目标设备已排入素材预下载。' : '已新建；在线目标设备已排入素材预下载。',
+      'ok',
+    )
   } catch (error) {
     report('voiceResult', problemText(error), 'err')
   }
@@ -577,98 +550,153 @@ async function submitForm() {
 async function toggleRule(rule) {
   try {
     await api.patchVoiceRule(rule.id, { enabled: !rule.enabled })
-    await loadRules()
-    toast(rule.enabled ? '已停用' : '已启用')
+    await reload()
   } catch (error) {
     report('voiceResult', problemText(error), 'err')
   }
 }
 
 async function deleteRule(rule) {
-  if (!window.confirm(`删除这条规则？\n${targetText(rule)}`)) return
+  if (!window.confirm(`删除这条规则？\n${rule.summary}`)) return
   try {
     await api.deleteVoiceRule(rule.id)
-    if (editingId === rule.id) {
-      editingId = null
-      clearForm()
-    }
-    await loadRules()
+    if (editingId === rule.id) exitEdit()
+    await reload()
     toast('已删除')
   } catch (error) {
     report('voiceResult', problemText(error), 'err')
   }
 }
 
-function enterEdit(rule) {
-  editingId = rule.id
-  fillForm(rule)
-  renderTable()
-  report('voiceResult', '', 'info')
-  $('voiceFormPanel').scrollIntoView({ behavior: 'smooth', block: 'start' })
-}
-
-function exitEdit() {
-  editingId = null
-  clearForm()
-  renderTable()
-}
-
-/** 只重拉规则表（筛选切换、行内启停用后），其余面板不动。 */
-async function loadRules() {
-  try {
-    rules = await api.voiceRules(filterDevice || undefined)
-    renderTable()
-    if (editingId !== null) {
-      const rule = rules.find((item) => item.id === editingId)
-      if (rule) fillForm(rule)
-      else exitEdit()
+async function pushRule(rule) {
+  const allowed = rule.devices.includes(WILDCARD)
+    ? store.devices
+    : store.devices.filter((device) => rule.devices.includes(device.device_id))
+  const online = allowed.filter((device) => device.online)
+  if (online.length === 0) {
+    report('voiceResult', '失败 · 没有在线设备可推送', 'err')
+    return
+  }
+  let deviceId = online.length === 1 ? online[0].device_id : ''
+  if (!deviceId) {
+    const list = online.map((device, index) => `${index + 1}. ${device.name || device.device_id}`).join('\n')
+    const picked = window.prompt(`这条规则作用于多台设备。推送到哪台？输入序号：\n${list}`, '1')
+    if (picked === null) return
+    const chosen = online[Number(picked) - 1]
+    if (!chosen) {
+      report('voiceResult', '失败 · 序号无效', 'err')
+      return
     }
+    deviceId = chosen.device_id
+  }
+  report('voiceResult', `正在推送到 ${deviceName(deviceId)} 播放…`, 'info')
+  try {
+    const result = await api.pushVoiceRule(rule.id, deviceId)
+    const ok = result.status === 'ok'
+    report(
+      'voiceResult',
+      ok ? `已在 ${deviceName(deviceId)} 上播放（${result.segment_count} 段）。` : `设备返回：${result.detail || result.status}`,
+      ok ? 'ok' : 'err',
+    )
+    await reload()
   } catch (error) {
     report('voiceResult', problemText(error), 'err')
   }
 }
 
+function assetResult(message, level = 'info') {
+  report('voiceAssetResult', message, level)
+}
+
+async function uploadAsset() {
+  const name = $('voiceAssetName').value.trim()
+  const file = $('voiceAssetFile').files[0]
+  if (!name) return assetResult('失败 · 请填写素材名称', 'err')
+  if (!file) return assetResult('失败 · 请选择音频文件', 'err')
+  const form = new FormData()
+  form.append('name', name)
+  form.append('file', file)
+  form.append('digit', $('voiceAssetDigit').value)
+  assetResult('正在上传并转换…')
+  try {
+    await api.uploadVoiceAsset(form)
+    $('voiceAssetName').value = ''
+    $('voiceAssetFile').value = ''
+    $('voiceAssetDigit').value = ''
+    await reload()
+    assetResult('素材已入库；创建规则后在线设备会预下载。', 'ok')
+  } catch (error) {
+    assetResult(problemText(error), 'err')
+  }
+}
+
+async function renameAsset(asset) {
+  const name = window.prompt('新的素材名称', asset.name)
+  if (name === null) return
+  const trimmed = name.trim()
+  if (!trimmed || trimmed === asset.name) return
+  try {
+    await api.renameVoiceAsset(asset.asset_id, trimmed)
+    await reload()
+    toast('已改名')
+  } catch (error) {
+    assetResult(problemText(error), 'err')
+  }
+}
+
+async function deleteAsset(asset) {
+  if (!window.confirm(`删除素材「${asset.name}」？`)) return
+  try {
+    await api.deleteVoiceAsset(asset.asset_id)
+    segments = segments.filter((item) => item.kind !== 'asset' || item.asset_id !== asset.asset_id)
+    await reload()
+    toast('已删除')
+  } catch (error) {
+    assetResult(problemText(error), 'err')
+  }
+}
+
 async function reload() {
   if (!hasIdentity()) {
-    $('voiceStatus').innerHTML = '<div class="empty">语音规则需要管理身份，请在顶栏填写身份标识</div>'
+    $('voiceStatus').innerHTML = '<div class="empty">语音素材与规则需要管理身份，请在顶栏填写身份标识</div>'
+    $('voiceAssetTable').innerHTML = ''
     $('voiceTable').innerHTML = ''
     $('voiceDeliveryTable').innerHTML = ''
-    $('voiceEffectTable').innerHTML = '<div class="empty">音效管理需要管理身份</div>'
-    $('voiceCount').textContent = ''
+    $('voiceAssetCount').textContent = ''
     $('voiceDeliveryCount').textContent = ''
-    $('voiceEffectCount').textContent = ''
+    $('voiceCount').textContent = ''
     return
   }
   try {
-    const [specResult, ruleList, statusResult, deliveryList, effectList] = await Promise.all([
+    const [specResult, statusResult, assetList, ruleList, deliveryList] = await Promise.all([
       api.voiceSpec(),
-      api.voiceRules(filterDevice || undefined),
       api.voiceStatus(),
+      api.voiceAssets(),
+      api.voiceRules(),
       api.voiceDeliveries(),
-      api.voiceEffects(),
-      // 第六路是设备清单：进 store（作用域编辑器与 deviceName 都读它），不必接返回值
       refreshDevices(),
     ])
     spec = specResult
     events = specResult.events || []
-    placeholders = specResult.placeholders || []
     status = statusResult
+    assets = assetList
     rules = ruleList
     deliveries = deliveryList
-    effects = effectList
-    renderSpec()
     renderStatus()
+    renderDigitOptions()
+    renderAssets()
     renderFilter()
-    renderEffects()
-    renderTable()
+    renderRules()
     renderDeliveries()
-    if (editingId !== null) {
-      const rule = rules.find((item) => item.id === editingId)
-      if (rule) fillForm(rule)
-      else exitEdit()
-    } else {
+    if (!formReady) {
+      formReady = true
       clearForm()
+    } else {
+      renderScope()
+      renderEventChoices(readEventSelection())
     }
+    renderSegments()
+    if (editingId !== null && !rules.some((item) => item.id === editingId)) exitEdit()
   } catch (error) {
     report('voiceResult', problemText(error), 'err')
   }
@@ -681,197 +709,209 @@ export const voiceView = {
   mount(root) {
     root.innerHTML = `
       <div class="grid grid-2">
-      <section class="panel">
-        <div class="panel-head">
-          <span class="panel-title">合成状态</span>
-        </div>
-        <div class="panel-body" id="voiceStatus"></div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-head">
-          <span class="panel-title">音效库</span>
-          <span class="panel-note" id="voiceEffectCount"></span>
-        </div>
-        <div class="panel-body">
-          <div class="field">
-            <label for="voiceEffectName">上传音效（mp3/wav/ogg/m4a/aac/flac 等常见格式，按内容校验并统一转换，时长 ≤ 10 秒）</label>
-            <div class="btn-row" >
-              <input id="voiceEffectName" type="text" placeholder="名称（如：叮）">
-              <input id="voiceEffectFile" type="file" accept="audio/*">
-              <button type="button" class="btn btn-sm" id="btnVoiceEffectUpload">上传</button>
+        <section class="panel">
+          <div class="panel-head">
+            <span class="panel-title">音频素材</span>
+            <span class="panel-note" id="voiceAssetCount"></span>
+            <div class="panel-tools">
+              <button type="button" class="btn btn-ghost btn-sm" id="btnVoiceReload">刷新</button>
             </div>
-            <div class="result" id="voiceEffectResult"></div>
           </div>
-          <div class="table-wrap" id="voiceEffectTable"></div>
-        </div>
-      </section>
+          <div class="panel-body">
+            <div class="btn-row" id="voiceStatus"></div>
+            <form id="voiceAssetForm" class="field">
+              <label for="voiceAssetName">上传固定音频（MP3/WAV/OGG/M4A 等，服务端统一转 MP3）</label>
+              <input id="voiceAssetName" type="text" maxlength="40" placeholder="素材名称，例如：请使用">
+              <div class="btn-row">
+                <input id="voiceAssetFile" type="file" accept="audio/*">
+                <select id="voiceAssetDigit"></select>
+                <button type="submit" class="btn btn-sm" id="btnVoiceAssetUpload">上传</button>
+              </div>
+              <div class="hint">数字素材用于规则里的「喷头号/学号」；0–9 各一段。上传后可改名，被规则引用时不能删除。</div>
+            </form>
+            <div class="result" id="voiceAssetResult"></div>
+          </div>
+          <div class="panel-body flush" id="voiceAssetTable"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <span class="panel-title">最近推送</span>
+            <span class="panel-note" id="voiceDeliveryCount"></span>
+          </div>
+          <div class="panel-body flush" id="voiceDeliveryTable"></div>
+        </section>
       </div>
 
       <div class="grid-list-form">
-      <section class="panel">
-        <div class="panel-head">
-          <span class="panel-title">语音规则</span>
-          <span class="panel-note" id="voiceCount"></span>
-          <div class="panel-tools">
-            <select id="voiceFilterDevice"></select>
-            <button type="button" class="btn btn-ghost btn-sm" id="btnVoiceReload">刷新</button>
+        <section class="panel">
+          <div class="panel-head">
+            <span class="panel-title">语音规则</span>
+            <span class="panel-note" id="voiceCount"></span>
+            <div class="panel-tools">
+              <select id="voiceFilterDevice"></select>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnVoiceReloadRules">刷新</button>
+            </div>
           </div>
-        </div>
-        <div class="panel-body flush" id="voiceTable"></div>
-      </section>
+          <div class="panel-body flush" id="voiceTable"></div>
+        </section>
 
-      <section class="panel" id="voiceFormPanel">
-        <div class="panel-head">
-          <span class="panel-title" id="voiceFormTitle">新增语音规则</span>
-        </div>
-        <div class="panel-body">
-          <div class="field">
-            <label>设备</label>
-            <div id="voiceScope"></div>
+        <section class="panel" id="voiceFormPanel">
+          <div class="panel-head">
+            <span class="panel-title" id="voiceFormTitle">新增语音规则</span>
           </div>
-          <div class="field">
-            <label>学号</label>
-            <label class="field-row">
-              <input type="checkbox" id="voiceCertWildcard">
-              <span>全部学号（不限学号；下方名单变成排除名单）</span>
-            </label>
-            <textarea id="voiceCert" rows="3" spellcheck="false" placeholder="一行一个学号"></textarea>
-            <div class="muted" id="voiceCertHint"></div>
+          <div class="panel-body">
+            <div class="field">
+              <label>设备</label>
+              <div id="voiceScope"></div>
+            </div>
+            <div class="field">
+              <label for="voiceCert">学号</label>
+              <label class="field-row">
+                <input id="voiceCertWildcard" type="checkbox">
+                <span>全部学号（不限学号；下方名单变成排除名单）</span>
+              </label>
+              <textarea id="voiceCert" rows="3" placeholder="一行一个学号"></textarea>
+              <div class="hint" id="voiceCertHint">一行一个学号；这些学号都会播这条规则。</div>
+            </div>
+            <div class="field">
+              <label>事件（可勾多个）</label>
+              <div id="voiceEvents"></div>
+            </div>
+            <div class="hint">匹配优先级：设备具体 → 学号具体 → 同档集合更小。完全同优先级且目标重叠的规则不能保存。</div>
+            <div class="field">
+              <label>播报分段</label>
+              <div class="seg-editor" id="voiceSegments"></div>
+              <div class="btn-row">
+                <button type="button" class="btn btn-ghost btn-sm" id="btnAddAsset">加音频</button>
+                <button type="button" class="btn btn-ghost btn-sm" id="btnAddDigits">加数字</button>
+                <button type="button" class="btn btn-ghost btn-sm" id="btnAddPause">加停顿</button>
+              </div>
+              <div class="hint" id="voiceSegmentHint"></div>
+            </div>
+            <div class="field">
+              <label for="voiceVolume" id="voiceVolumeLabel">音量</label>
+              <input id="voiceVolume" type="number" min="0" max="5" step="1" value="3">
+              <div class="muted">0 为静音；播放结束后恢复设备原音量。</div>
+            </div>
+            <div class="field">
+              <label class="field-row">
+                <input id="voiceEnabled" type="checkbox" checked>
+                <span>启用</span>
+              </label>
+            </div>
+            <div class="btn-row">
+              <button type="button" class="btn btn-sm" id="btnVoiceSave">新增</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnVoiceCancel" hidden>取消编辑</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnVoicePreview">预览</button>
+            </div>
+            <div class="result" id="voiceResult"></div>
           </div>
-          <div class="field">
-            <label>事件（可勾多个，都在这条规则里生效）</label>
-            <div id="voiceEvents"></div>
-          </div>
-          <div class="field">
-            <label for="voiceVoice">音色</label>
-            <select id="voiceVoice"></select>
-            <div class="muted">每条规则单独选；上方「合成状态」里可逐个试听。</div>
-          </div>
-          <div class="field">
-            <label for="voiceText">播报内容（模板）</label>
-            <input id="voiceText" type="text" placeholder="例如：{event}，{door_no} 号喷头">
-            <div id="voicePlaceholders"></div>
-          </div>
-          <div class="field">
-            <label for="voiceVolume" id="voiceVolumeLabel">音量</label>
-            <input id="voiceVolume" type="number" min="0" max="5" step="1" value="3">
-            <div class="muted">0 为静音；播放结束后恢复设备原音量。</div>
-          </div>
-          <div class="field">
-            <label class="field-row">
-              <input id="voiceEnabled" type="checkbox" checked>
-              <span>启用</span>
-            </label>
-          </div>
-          <div class="btn-row">
-            <button type="button" class="btn btn-sm" id="btnVoiceSave">新增</button>
-            <button type="button" class="btn btn-ghost btn-sm" id="btnVoiceCancel" hidden>取消编辑</button>
-            <button type="button" class="btn btn-ghost btn-sm" id="btnVoicePreview">试听示例</button>
-          </div>
-          <div class="field" id="voiceSample" hidden>
-            <label>渲染效果（示例值）</label>
-            <div>「<span id="voiceSampleText"></span>」</div>
-            <div class="muted">1 号喷头、示例学号等是占位用的示例值；实际播报按事件发生时的真实值渲染。</div>
-          </div>
-          <div class="result" id="voiceResult"></div>
-        </div>
-      </section>
-      </div>
-
-      <section class="panel">
-        <div class="panel-head">
-          <span class="panel-title">最近推送</span>
-          <span class="panel-note" id="voiceDeliveryCount"></span>
-        </div>
-        <div class="panel-body flush" id="voiceDeliveryTable"></div>
-      </section>`
+        </section>
+      </div>`
 
     dispose = disposer()
+    formReady = false
+    dispose.add(bindScopeToggle(root))
     dispose.add(listen($('btnVoiceReload'), 'click', reload))
-    dispose.add(listen($('btnVoiceEffectUpload'), 'click', uploadEffect))
-    dispose.add(
-      listen($('voiceEffectFile'), 'change', () => {
-        const file = $('voiceEffectFile').files[0]
-        // 名称自动取文件名（去扩展名），仍可手改
-        if (file) $('voiceEffectName').value = file.name.replace(/\.[^.]+$/, '')
-      }),
-    )
-    dispose.add(
-      listen($('voiceEffectTable'), 'click', async (event) => {
-        const button = event.target.closest('button[data-act]')
-        if (!button) return
-        const id = button.closest('[data-id]')?.dataset.id
-        const effect = effects.find((item) => item.effect_id === id)
-        if (!effect) return
-        if (button.dataset.act === 'audition') {
-          stopPreview()
-          previewAudio = new Audio(`/voice/effects/${id}.wav`)
-          previewAudio.play().catch((error) => toast(`试听失败：${error.message}`))
-        }
-        if (button.dataset.act === 'delete') await deleteEffect(effect)
-        if (button.dataset.act === 'rename') await renameEffect(effect)
-      }),
-    )
+    dispose.add(listen($('btnVoiceReloadRules'), 'click', reload))
+    dispose.add(listen($('voiceFilterDevice'), 'change', (event) => {
+      filterDevice = event.target.value
+      renderRules()
+    }))
+    dispose.add(listen($('voiceAssetForm'), 'submit', (event) => {
+      event.preventDefault()
+      uploadAsset()
+    }))
+    dispose.add(listen($('voiceAssetFile'), 'change', () => {
+      const file = $('voiceAssetFile').files[0]
+      if (file && !$('voiceAssetName').value.trim()) {
+        $('voiceAssetName').value = file.name.replace(/\.[^.]+$/, '')
+      }
+    }))
+    dispose.add(listen($('voiceAssetTable'), 'click', (event) => {
+      const button = event.target.closest('button[data-act]')
+      if (!button) return
+      const asset = assetItem(button.closest('[data-id]')?.dataset.id)
+      if (!asset) return
+      if (button.dataset.act === 'audition') {
+        stopPreview()
+        const audio = new Audio(asset.url)
+        previewAudio = audio
+        audio.play().catch(() => toast('试听失败'))
+      }
+      if (button.dataset.act === 'rename') renameAsset(asset)
+      if (button.dataset.act === 'delete') deleteAsset(asset)
+    }))
+    dispose.add(listen($('voiceSegments'), 'click', (event) => {
+      const button = event.target.closest('button[data-seg-act]')
+      if (!button) return
+      const index = Number(button.dataset.index)
+      const action = button.dataset.segAct
+      if (action === 'up' && index > 0) {
+        ;[segments[index - 1], segments[index]] = [segments[index], segments[index - 1]]
+      } else if (action === 'down' && index < segments.length - 1) {
+        ;[segments[index + 1], segments[index]] = [segments[index], segments[index + 1]]
+      } else if (action === 'remove') {
+        segments.splice(index, 1)
+      }
+      renderSegments()
+    }))
+    dispose.add(listen($('voiceSegments'), 'change', (event) => {
+      const field = event.target.dataset.segField
+      if (!field) return
+      const index = Number(event.target.dataset.index)
+      const segment = segments[index]
+      if (!segment) return
+      if (field === 'asset') segment.asset_id = event.target.value
+      if (field === 'source') {
+        segment.source = event.target.value
+        segment.length = null
+        renderSegments()
+        return
+      }
+      if (field === 'length') segment.length = event.target.value ? Number(event.target.value) : null
+      if (field === 'pause') segment.ms = Number(event.target.value)
+      $('voiceSegmentHint').textContent = segmentHint()
+    }))
+    dispose.add(listen($('btnAddAsset'), 'click', () => {
+      if (segmentLimitReached()) return
+      if (assets.length === 0) {
+        assetResult('失败 · 先在「音频素材」里上传音频', 'err')
+        return
+      }
+      segments.push({ kind: 'asset', asset_id: assets[0].asset_id })
+      renderSegments()
+    }))
+    dispose.add(listen($('btnAddDigits'), 'click', () => {
+      if (segmentLimitReached()) return
+      segments.push({ kind: 'digits', source: 'door_no', length: null })
+      renderSegments()
+    }))
+    dispose.add(listen($('btnAddPause'), 'click', () => {
+      if (segmentLimitReached()) return
+      segments.push({ kind: 'pause', ms: 500 })
+      renderSegments()
+    }))
+    dispose.add(listen($('voiceTable'), 'click', async (event) => {
+      const button = event.target.closest('button[data-act]')
+      if (!button) return
+      const id = Number(button.closest('[data-id]')?.dataset.id)
+      const rule = rules.find((item) => item.id === id)
+      if (!rule) return
+      if (button.dataset.act === 'edit') fillForm(rule)
+      if (button.dataset.act === 'toggle') await toggleRule(rule)
+      if (button.dataset.act === 'preview') await previewRule(rule)
+      if (button.dataset.act === 'push') await pushRule(rule)
+      if (button.dataset.act === 'delete') await deleteRule(rule)
+    }))
+    dispose.add(listen($('voiceCertWildcard'), 'change', () => {
+      $('voiceCert').value = ''
+      updateCertHint()
+    }))
     dispose.add(listen($('btnVoiceSave'), 'click', submitForm))
     dispose.add(listen($('btnVoicePreview'), 'click', previewForm))
     dispose.add(listen($('btnVoiceCancel'), 'click', exitEdit))
-    dispose.add(bindScopeToggle(root))
-    dispose.add(
-      listen($('voicePlaceholders'), 'click', (event) => {
-        const chip = event.target.closest('button[data-ph]')
-        if (chip) insertPlaceholder(chip.dataset.ph)
-      }),
-    )
-    dispose.add(
-      listen($('voiceCertWildcard'), 'change', (event) => {
-        // 同一个框换含义：切换时清空，避免目标名单被当成排除名单
-        $('voiceCert').value = ''
-        updateCertHint()
-      }),
-    )
-    dispose.add(
-      listen($('voiceFilterDevice'), 'change', (event) => {
-        filterDevice = event.target.value
-        loadRules()
-      }),
-    )
-    dispose.add(
-      listen($('voiceStatus'), 'click', async (event) => {
-        const button = event.target.closest('button[data-act="audition"]')
-        if (!button) return
-        const voice = button.closest('tr').dataset.voice
-        await previewRule({
-          text: '二五三零一一零零五七 号同学，请到 5 号喷头准备就浴',
-          event: events[0] ? events[0].value : 'assigned',
-          cert: '示例学号',
-          voice,
-          pending: `正在合成 ${voice} 的音色样本…`,
-        })
-      }),
-    )
-    dispose.add(
-      listen($('voiceTable'), 'click', async (event) => {
-        const button = event.target.closest('button[data-act]')
-        if (!button) return
-        const id = Number(button.closest('[data-id]')?.dataset.id)
-        const rule = rules.find((item) => item.id === id)
-        if (!rule) return
-        if (button.dataset.act === 'edit') enterEdit(rule)
-        if (button.dataset.act === 'toggle') await toggleRule(rule)
-        if (button.dataset.act === 'preview') {
-          await previewRule({
-            text: rule.text,
-            event: rule.events[0],
-            cert: sampleCert(rule.certs),
-            voice: rule.voice,
-          })
-        }
-        if (button.dataset.act === 'push') await pushRule(rule)
-        if (button.dataset.act === 'delete') await deleteRule(rule)
-      }),
-    )
-
     exitEdit()
     reload()
   },
