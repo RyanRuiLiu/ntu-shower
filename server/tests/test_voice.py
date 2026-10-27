@@ -28,6 +28,7 @@ DEVICE_ID = "dev-voice"
 OTHER_DEVICE_ID = "dev-voice-other"
 
 DIGIT_NAMES = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九"]
+UNIT_NAMES = ["十", "百", "千", "万"]
 MATCH_LOCAL = datetime(2026, 1, 5, 12, 0)
 
 
@@ -57,6 +58,8 @@ def assets(
     result: dict[str, str] = {}
     for digit, name in enumerate(DIGIT_NAMES):
         result[name] = _upload(client, admin_headers, name, f"digit-{digit}".encode(), str(digit))["asset_id"]
+    for name in UNIT_NAMES:
+        result[name] = _upload(client, admin_headers, name, f"unit-{name}".encode(), unit=name)["asset_id"]
     result["请到"] = _upload(client, admin_headers, "请到", b"please")["asset_id"]
     result["欢迎"] = _upload(client, admin_headers, "欢迎", b"welcome")["asset_id"]
     return result
@@ -68,11 +71,12 @@ def _upload(
     name: str,
     payload: bytes = b"x",
     digit: str = "",
+    unit: str = "",
 ) -> dict[str, Any]:
     response = client.post(
         "/api/v1/voice/assets",
         headers=headers,
-        data={"name": name, "digit": digit},
+        data={"name": name, "digit": digit, "unit": unit},
         files={"file": ("input.wav", payload, "audio/wav")},
     )
     assert response.status_code == 200, response.text
@@ -172,7 +176,7 @@ def test_spec_and_status(
     assert spec["max_pause_ms"] == schemas.MAX_PAUSE_MS
 
     status = client.get("/api/v1/voice/status", headers=admin_headers).json()
-    assert status == {"asset_count": 0, "digits": [], "ffmpeg_available": True}
+    assert status == {"asset_count": 0, "digits": [], "units": [], "ffmpeg_available": True}
 
     created = _upload(client, admin_headers, "五", b"five", "5")
     assert created["digit"] == 5
@@ -766,8 +770,8 @@ def test_preview_resolves_digits_pauses_and_truncation(
     assert response.status_code == 200, response.text
     body = response.json()
     names = [item["clip"]["name"] if item["kind"] == "clip" else "pause" for item in body["segments"]]
-    assert names == ["请到", "一", "零", "五", "pause", "零", "零", "五", "七"]
-    assert body["segments"][4] == {"kind": "pause", "clip": None, "ms": 500}
+    assert names == ["请到", "一", "百", "零", "五", "pause", "零", "零", "五", "七"]
+    assert body["segments"][5] == {"kind": "pause", "clip": None, "ms": 500}
     clip = body["segments"][0]["clip"]
     assert clip["asset_id"] == assets["请到"]
     assert clip["url"] == f"/voice/assets/{assets['请到']}.mp3"
@@ -775,7 +779,7 @@ def test_preview_resolves_digits_pauses_and_truncation(
     assert body["total_ms"] == sum(
         item["clip"]["duration_ms"] if item["kind"] == "clip" else item["ms"] for item in body["segments"]
     )
-    assert body["summary"].startswith("请到 · 一 · 零 · 五 · 停顿 0.5 秒")
+    assert body["summary"].startswith("请到 · 一 · 百 · 零 · 五 · 停顿 0.5 秒")
 
 
 def test_preview_guards(
@@ -970,7 +974,7 @@ def test_schedule_rule_prepare_targets_online_devices(
         segments=[{"kind": "digits", "source": "door_no"}],
     )
     clips = {clip["clip_id"] for clip in spawned[0][1]}
-    assert clips == {assets[name] for name in DIGIT_NAMES}
+    assert clips == {assets[name] for name in DIGIT_NAMES + UNIT_NAMES}
 
 
 def test_prepare_worker_sends_clips_and_swallows_failure(
@@ -1385,7 +1389,7 @@ def test_asset_insert_and_readback_failures_leave_no_file(
 
     monkeypatch.setattr(audio, "normalize_to_mp3", normalize)
     with pytest.raises(service.InvalidVoiceAssetError, match="0–9"):
-        service.create_asset("数字越界", b"x", 10)
+        service.create_asset("数字越界", b"x", 10, None)
 
     original_insert = repository.insert_asset
 
@@ -1395,19 +1399,19 @@ def test_asset_insert_and_readback_failures_leave_no_file(
 
     monkeypatch.setattr(repository, "insert_asset", fail_insert)
     with pytest.raises(RuntimeError, match="db"):
-        service.create_asset("写库失败", b"fail", None)
+        service.create_asset("写库失败", b"fail", None, None)
     assert list(audio.assets_dir().glob("*.mp3")) == []
 
     monkeypatch.setattr(repository, "insert_asset", original_insert)
     original_get = repository.get_asset
     monkeypatch.setattr(repository, "get_asset", lambda _asset_id: None)
     with pytest.raises(service.InvalidVoiceAssetError, match="读不到"):
-        service.create_asset("读回失败", b"missing", None)
+        service.create_asset("读回失败", b"missing", None, None)
     assert list(audio.assets_dir().glob("*.mp3")) == []
     assert repository.list_assets() == []
 
     monkeypatch.setattr(repository, "get_asset", original_get)
-    created = service.create_asset("正常", b"ok", None)
+    created = service.create_asset("正常", b"ok", None, None)
     monkeypatch.setattr(repository, "get_asset", lambda _asset_id: None)
     with pytest.raises(ApiProblemError) as error:
         service.rename_asset(created.asset_id, "改名")
@@ -1656,3 +1660,53 @@ def test_rule_schema_reset_rebuilds_with_time_windows(fresh_db: str) -> None:
     columns = [str(row["name"]) for row in conn.execute("PRAGMA table_info(voice_rule)").fetchall()]
     assert "time_windows" in columns
     assert repository.list_rules() == []
+
+
+def test_unit_assets_are_marked_and_used_for_door_numbers(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    assets: dict[str, str],
+) -> None:
+    status = client.get("/api/v1/voice/status", headers=admin_headers).json()
+    assert status["units"] == UNIT_NAMES
+    listed = {item["name"]: item for item in client.get("/api/v1/voice/assets", headers=admin_headers).json()}
+    assert listed["十"]["unit"] == "十"
+    assert listed["十"]["digit"] is None
+
+    rule = _create(
+        client,
+        admin_headers,
+        assets["请到"],
+        segments=[{"kind": "digits", "source": "door_no"}],
+    )
+    preview = client.post(
+        "/api/v1/voice/preview",
+        headers=admin_headers,
+        json={"segments": rule["segments"], "event": "assigned", "door_no": 12, "cert_no": "C1"},
+    )
+    assert preview.status_code == 200, preview.text
+    names = [item["clip"]["name"] if item["kind"] == "clip" else "pause" for item in preview.json()["segments"]]
+    assert names == ["十", "二"]
+
+    blocked = client.delete(f"/api/v1/voice/assets/{assets['十']}", headers=admin_headers)
+    assert blocked.status_code == 409
+
+
+def test_door_number_requires_all_units(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    voice_devices: None,
+    fake_normalize: None,
+) -> None:
+    for digit, name in enumerate(DIGIT_NAMES):
+        _upload(client, admin_headers, name, f"digit-{digit}".encode(), str(digit))
+    response = client.post(
+        "/api/v1/voice/rules",
+        headers=admin_headers,
+        json=_payload(
+            _upload(client, admin_headers, "请到", b"please")["asset_id"],
+            segments=[{"kind": "digits", "source": "door_no"}],
+        ),
+    )
+    assert response.status_code == 422
+    assert "单位素材不全" in response.json()["detail"]
