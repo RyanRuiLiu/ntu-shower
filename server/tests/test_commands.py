@@ -353,3 +353,25 @@ def test_rejected_command_uses_registry_wording(fresh_db: str, monkeypatch: pyte
     """过载拒绝的 terminal_message 用登记表措辞，不暴露内部通道名。"""
     assert reason_codes.SERVER_OVERLOADED.code == "server.overloaded"
     assert outcomes.REJECTED.value == "rejected"
+
+
+def test_abort_pending_closes_previous_process_commands(fresh_db: str) -> None:
+    """启动时把上一进程的 pending 收尾，审计页不再永久显示进行中。"""
+    command_audit.insert_command("cmd-pending", "dev-startup", "clock.set")
+    assert command_audit.abort_pending("2026-10-28T00:00:00.000Z") == 1
+    row = command_audit.list_commands(device_id="dev-startup")[0]
+    assert row["finished_at"] == "2026-10-28T00:00:00.000Z"
+    assert row["status"] == outcomes.FAILED.value
+    assert row["reason_code"] == reason_codes.COMMAND_ABORTED.code
+    assert row["terminal_message"] == "服务重启，命令未收尾"
+    assert command_audit.abort_pending("2026-10-28T00:00:01.000Z") == 0
+
+
+def test_init_schema_aborts_pending_commands(fresh_db: str) -> None:
+    from app.main import init_schema
+
+    command_audit.insert_command("cmd-pending-boot", "dev-boot", "clock.set")
+    init_schema()
+    row = command_audit.list_commands(device_id="dev-boot")[0]
+    assert row["status"] == outcomes.FAILED.value
+    assert row["reason_code"] == reason_codes.COMMAND_ABORTED.code
