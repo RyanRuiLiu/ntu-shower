@@ -103,6 +103,15 @@
     flex-basis: 100%;
   }
 
+  /* 素材与上传落成一列：列表恢复按内容定高，限高保持不变 */
+  .voice-top {
+    grid-template-columns: 1fr;
+  }
+
+  .voice-top > .panel:first-child {
+    contain: none;
+  }
+
   /* ── 审计：上下堆叠，各自限高 ───────────────────────────── */
 
   .audit-split {
