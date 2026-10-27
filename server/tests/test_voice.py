@@ -1710,3 +1710,33 @@ def test_door_number_requires_all_units(
     )
     assert response.status_code == 422
     assert "单位素材不全" in response.json()["detail"]
+
+
+def test_unit_asset_upload_guards(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    voice_devices: None,
+    fake_normalize: None,
+) -> None:
+    _upload(client, admin_headers, "十", b"unit", unit="十")
+    duplicate = client.post(
+        "/api/v1/voice/assets",
+        headers=admin_headers,
+        data={"name": "另一个十", "unit": "十"},
+        files={"file": ("input.wav", b"other", "audio/wav")},
+    )
+    assert duplicate.status_code == 422
+    both = client.post(
+        "/api/v1/voice/assets",
+        headers=admin_headers,
+        data={"name": "混合", "digit": "1", "unit": "百"},
+        files={"file": ("input.wav", b"both", "audio/wav")},
+    )
+    assert both.status_code == 422
+    invalid = client.post(
+        "/api/v1/voice/assets",
+        headers=admin_headers,
+        data={"name": "非法单位", "unit": "亿"},
+        files={"file": ("input.wav", b"invalid", "audio/wav")},
+    )
+    assert invalid.status_code == 422
