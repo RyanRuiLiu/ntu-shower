@@ -34,9 +34,10 @@ from fastapi.staticfiles import StaticFiles
 from typing_extensions import TypedDict
 
 from .core import audit, db
+from .core.clock import now_rfc3339
 from .core.config import settings
 from .core.errors import install_error_handlers
-from .core.logging import configure_logging
+from .core.logging import configure_logging, log_event
 from .core.version import APP_VERSION
 from .gateway.routes import router as gateway_router
 from .modules.access import repository as access_repository
@@ -94,6 +95,9 @@ def init_schema() -> None:
     config_store.init_tables()
     audit.init_tables()
     command_audit_repository.init_tables()
+    aborted = command_audit_repository.abort_pending(now_rfc3339())
+    if aborted:
+        log_event("WARNING", "command.aborted-on-startup", "启动时收尾未完成命令", count=aborted)
     extend_hours_repository.init_tables()
     voice_repository.init_tables()
 
