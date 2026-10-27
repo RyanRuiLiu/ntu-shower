@@ -6,6 +6,7 @@ MP3 字节；`audio.py` 自身的外部命令边界另有单元测试（test_voi
 
 import asyncio
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,7 @@ DEVICE_ID = "dev-voice"
 OTHER_DEVICE_ID = "dev-voice-other"
 
 DIGIT_NAMES = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九"]
+MATCH_LOCAL = datetime(2026, 1, 5, 12, 0)
 
 
 @pytest.fixture
@@ -479,8 +481,10 @@ def test_scope_priority_prefers_narrower_rules(
         certs=["C1"],
     )
     narrow_device = _create(client, admin_headers, asset_id, certs=["C1"])
-    assert int(repository.matching_rules(DEVICE_ID, "C1", "assigned")[0]["id"]) == narrow_device["id"]
-    assert int(repository.matching_rules(OTHER_DEVICE_ID, "C1", "assigned")[0]["id"]) == broad_devices["id"]
+    assert int(repository.matching_rules(DEVICE_ID, "C1", "assigned", MATCH_LOCAL)[0]["id"]) == narrow_device["id"]
+    assert (
+        int(repository.matching_rules(OTHER_DEVICE_ID, "C1", "assigned", MATCH_LOCAL)[0]["id"]) == broad_devices["id"]
+    )
 
     # 学号维度：同一设备下，学号集合更小者优先
     broad_certs = _create(
@@ -491,8 +495,8 @@ def test_scope_priority_prefers_narrower_rules(
         events=["resumed"],
     )
     narrow_cert = _create(client, admin_headers, asset_id, certs=["C1"], events=["resumed"])
-    assert int(repository.matching_rules(DEVICE_ID, "C1", "resumed")[0]["id"]) == narrow_cert["id"]
-    assert int(repository.matching_rules(DEVICE_ID, "C2", "resumed")[0]["id"]) == broad_certs["id"]
+    assert int(repository.matching_rules(DEVICE_ID, "C1", "resumed", MATCH_LOCAL)[0]["id"]) == narrow_cert["id"]
+    assert int(repository.matching_rules(DEVICE_ID, "C2", "resumed", MATCH_LOCAL)[0]["id"]) == broad_certs["id"]
 
     # 优先级完全相同且目标相交：没有确定胜者，保存时拒绝
     _create(client, admin_headers, asset_id, certs=["C1", "C2"], events=["shower_started"])
@@ -514,8 +518,156 @@ def test_scope_priority_prefers_narrower_rules(
         events=["released_unused"],
     )
     specific = _create(client, admin_headers, asset_id, certs=["C1"], events=["released_unused"])
-    assert int(repository.matching_rules(DEVICE_ID, "C1", "released_unused")[0]["id"]) == specific["id"]
-    assert int(repository.matching_rules(OTHER_DEVICE_ID, "C1", "released_unused")[0]["id"]) == wildcard["id"]
+    assert int(repository.matching_rules(DEVICE_ID, "C1", "released_unused", MATCH_LOCAL)[0]["id"]) == specific["id"]
+    assert (
+        int(repository.matching_rules(OTHER_DEVICE_ID, "C1", "released_unused", MATCH_LOCAL)[0]["id"]) == wildcard["id"]
+    )
+
+
+def test_time_window_filters_and_priority(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    voice_devices: None,
+    fake_normalize: None,
+) -> None:
+    asset_id = _upload(client, admin_headers, "请到", b"hello")["asset_id"]
+    general = _create(client, admin_headers, asset_id, devices=["*"], certs=["*"], events=["assigned"])
+    night = _create(
+        client,
+        admin_headers,
+        asset_id,
+        devices=["*"],
+        certs=["*"],
+        events=["assigned"],
+        time_windows=[{"days": [1, 2, 3, 4, 5, 6, 7], "start": "22:00", "end": "06:00"}],
+    )
+    assert night["time_windows"] == [{"days": [1, 2, 3, 4, 5, 6, 7], "start": "22:00", "end": "06:00"}]
+    assert night["time_summary"] == "每天 22:00–次日 06:00"
+
+    noon = datetime(2026, 1, 5, 12, 0)
+    late = datetime(2026, 1, 5, 23, 0)
+    dawn = datetime(2026, 1, 6, 5, 59)
+    boundary = datetime(2026, 1, 6, 6, 0)
+    assert int(repository.matching_rules(DEVICE_ID, "C1", "assigned", noon)[0]["id"]) == general["id"]
+    assert int(repository.matching_rules(DEVICE_ID, "C1", "assigned", late)[0]["id"]) == night["id"]
+    assert int(repository.matching_rules(DEVICE_ID, "C1", "assigned", dawn)[0]["id"]) == night["id"]
+    assert int(repository.matching_rules(DEVICE_ID, "C1", "assigned", boundary)[0]["id"]) == general["id"]
+
+    # 原有优先级不变：设备更具体的全天规则仍压过全局夜间规则
+    specific = _create(client, admin_headers, asset_id, certs=["C1"], events=["paused"])
+    global_night = _create(
+        client,
+        admin_headers,
+        asset_id,
+        devices=["*"],
+        certs=["*"],
+        events=["paused"],
+        time_windows=[{"days": [1, 2, 3, 4, 5, 6, 7], "start": "22:00", "end": "06:00"}],
+    )
+    assert int(repository.matching_rules(DEVICE_ID, "C1", "paused", late)[0]["id"]) == specific["id"]
+    assert int(repository.matching_rules(OTHER_DEVICE_ID, "C1", "paused", late)[0]["id"]) == global_night["id"]
+
+
+def test_time_window_cross_midnight_and_duplicate_overlap(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    voice_devices: None,
+    fake_normalize: None,
+) -> None:
+    asset_id = _upload(client, admin_headers, "请到", b"hello")["asset_id"]
+    friday_night = _create(
+        client,
+        admin_headers,
+        asset_id,
+        certs=["C1"],
+        events=["paused"],
+        time_windows=[{"days": [5], "start": "22:00", "end": "02:00"}],
+    )
+    assert friday_night["time_summary"] == "周五 22:00–次日 02:00"
+    friday_late = datetime(2026, 1, 9, 23, 0)
+    saturday_dawn = datetime(2026, 1, 10, 1, 0)
+    saturday_end = datetime(2026, 1, 10, 2, 0)
+    friday_early = datetime(2026, 1, 9, 21, 0)
+    assert repository.matching_rules(DEVICE_ID, "C1", "paused", friday_late)
+    assert repository.matching_rules(DEVICE_ID, "C1", "paused", saturday_dawn)
+    assert not repository.matching_rules(DEVICE_ID, "C1", "paused", saturday_end)
+    assert not repository.matching_rules(DEVICE_ID, "C1", "paused", friday_early)
+
+    # 同为 1 小时、同一目标、时段重叠：没有确定胜者，保存时拒绝
+    _create(
+        client,
+        admin_headers,
+        asset_id,
+        certs=["C2"],
+        events=["resumed"],
+        time_windows=[{"days": [1], "start": "22:00", "end": "23:00"}],
+    )
+    overlap = client.post(
+        "/api/v1/voice/rules",
+        headers=admin_headers,
+        json=_payload(
+            asset_id,
+            certs=["C2"],
+            events=["resumed"],
+            time_windows=[{"days": [1], "start": "22:30", "end": "23:30"}],
+        ),
+    )
+    assert overlap.status_code == 422, overlap.text
+    assert "时段" in overlap.json()["detail"]
+
+    # 不重叠的同等时段可以共存
+    disjoint = client.post(
+        "/api/v1/voice/rules",
+        headers=admin_headers,
+        json=_payload(
+            asset_id,
+            certs=["C2"],
+            events=["resumed"],
+            time_windows=[{"days": [1], "start": "23:00", "end": "00:00"}],
+        ),
+    )
+    assert disjoint.status_code == 200, disjoint.text
+
+    # 时段更短者优先：22:00–23:00 压过 22:00–06:00
+    broad = _create(
+        client,
+        admin_headers,
+        asset_id,
+        certs=["C3"],
+        events=["shower_started"],
+        time_windows=[{"days": [1], "start": "22:00", "end": "06:00"}],
+    )
+    narrow = _create(
+        client,
+        admin_headers,
+        asset_id,
+        certs=["C3"],
+        events=["shower_started"],
+        time_windows=[{"days": [1], "start": "22:00", "end": "23:00"}],
+    )
+    monday_late = datetime(2026, 1, 5, 22, 30)
+    monday_later = datetime(2026, 1, 5, 23, 30)
+    assert int(repository.matching_rules(DEVICE_ID, "C3", "shower_started", monday_late)[0]["id"]) == narrow["id"]
+    assert int(repository.matching_rules(DEVICE_ID, "C3", "shower_started", monday_later)[0]["id"]) == broad["id"]
+
+
+def test_time_window_validation(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    assets: dict[str, str],
+) -> None:
+    for windows in (
+        [{"days": [], "start": "22:00", "end": "06:00"}],
+        [{"days": [8], "start": "22:00", "end": "06:00"}],
+        [{"days": [1], "start": "22:00", "end": "22:00"}],
+        [{"days": [1], "start": "9:00", "end": "10:00"}],
+    ):
+        response = client.post(
+            "/api/v1/voice/rules",
+            headers=admin_headers,
+            json=_payload(assets["请到"], time_windows=windows),
+        )
+        assert response.status_code == 422, (windows, response.text)
 
 
 def test_wildcard_rule_and_exemptions(
@@ -575,6 +727,7 @@ def test_ambiguous_rules_are_not_picked_by_id(
         json.dumps(["assigned"]),
         "[]",
         "[]",
+        "[]",
         3,
         True,
         now,
@@ -585,11 +738,12 @@ def test_ambiguous_rules_are_not_picked_by_id(
         json.dumps(["assigned"]),
         "[]",
         "[]",
+        "[]",
         3,
         True,
         now,
     )
-    assert repository.matching_rules(DEVICE_ID, "C1", "assigned") == []
+    assert repository.matching_rules(DEVICE_ID, "C1", "assigned", MATCH_LOCAL) == []
     assert errors == [("voice.rule-ambiguous", first, second)]
 
 
@@ -673,6 +827,7 @@ def test_push_records_manual_delivery(
             _asset_segment(assets["请到"]),
             {"kind": "digits", "source": "door_no"},
         ],
+        time_windows=[{"days": [1], "start": "03:00", "end": "03:01"}],
     )
     calls: list[tuple[str, dict[str, object]]] = []
     monkeypatch.setattr(sessions_service, "send_command_and_wait", _collector(calls))
@@ -1059,6 +1214,7 @@ def test_dispatch_event_handles_malformed_rule(
         str(row["devices"]),
         str(row["certs"]),
         str(row["events"]),
+        str(row["time_windows"]),
         str(row["exempt"]),
         json.dumps([{"kind": "asset", "asset_id": "f" * 64}]),
         int(row["volume"]),
@@ -1279,7 +1435,9 @@ def test_segment_and_target_normalization_guards(fresh_db: str) -> None:
         service._normalized_targets([" "], "设备")
 
     with pytest.raises(service.InvalidVoiceRuleError, match="至少选择一个事件"):
-        service._normalize_rule([schemas.WILDCARD], ["C1"], [], [schemas.PauseSegment(kind="pause", ms=500)], [], None)
+        service._normalize_rule(
+            [schemas.WILDCARD], ["C1"], [], [], [schemas.PauseSegment(kind="pause", ms=500)], [], None
+        )
 
 
 def test_rule_repository_races(
@@ -1352,8 +1510,10 @@ def test_schedule_and_preview_edge_cases(
             certs=["C1"],
             exempt=[],
             events=[DoorEventKind.ASSIGNED],
+            time_windows=[],
             segments=[schemas.AssetSegment(kind="asset", asset_id=assets["请到"])],
             summary="请到",
+            time_summary="不限",
             volume=3,
             enabled=True,
             created_at=now_rfc3339(),
@@ -1392,6 +1552,7 @@ def test_push_rejects_malformed_rule(
         str(row["devices"]),
         str(row["certs"]),
         str(row["events"]),
+        str(row["time_windows"]),
         str(row["exempt"]),
         json.dumps([{"kind": "asset", "asset_id": "f" * 64}]),
         int(row["volume"]),
@@ -1465,3 +1626,33 @@ def _door_payload(**overrides: object) -> dict[str, object]:
     }
     door.update(overrides)
     return door
+
+
+def test_dispatch_uses_server_local_time(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """时段按服务端当地时间判断：设备钟被拨快也不参与。"""
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(service, "now_rfc3339", lambda: "2026-01-05T14:00:00.000Z")
+
+    def capture(_device_id: str, _cert_no: str, _event: str, local: object) -> list[object]:
+        captured["local"] = local
+        return []
+
+    monkeypatch.setattr(repository, "matching_rules", capture)
+    asyncio.run(service._dispatch_event(_event("2026-01-05T14:00:00.000Z"), 0))
+    local = captured["local"]
+    assert getattr(local, "hour", None) == 22
+    assert getattr(local, "minute", None) == 0
+
+
+def test_rule_schema_reset_rebuilds_with_time_windows(fresh_db: str) -> None:
+    conn = get_conn()
+    conn.execute("DROP TABLE IF EXISTS voice_rule")
+    conn.execute("CREATE TABLE voice_rule (id INTEGER PRIMARY KEY, segments TEXT NOT NULL)")
+    conn.execute("INSERT INTO voice_rule(id, segments) VALUES (1, '[]')")
+    conn.commit()
+
+    repository.init_tables()
+
+    columns = [str(row["name"]) for row in conn.execute("PRAGMA table_info(voice_rule)").fetchall()]
+    assert "time_windows" in columns
+    assert repository.list_rules() == []

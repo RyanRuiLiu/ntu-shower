@@ -5,16 +5,19 @@
 - `digits`：把事件里的喷头号/学号拆成数字，逐位取素材库标记过的 0–9 素材；
 - `pause`：静音停顿。
 
-事件目录仍是七个状态迁移；匹配沿用「设备 × 学号 × 事件，具体压过通配」。
+事件目录仍是七个状态迁移；匹配沿用「设备 × 学号 × 事件，具体压过通配」，并新增
+每周重复的生效时段。
 """
 
 from dataclasses import dataclass
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.modules.doors.events import DoorEventKind
 from app.modules.doors.schemas import DoorState, state_label
+
+from . import time_windows as time_rules
 
 # ── 边界 ──
 
@@ -146,10 +149,37 @@ class VoiceStatusView(BaseModel):
 # ── 规则 ──
 
 
+class TimeWindow(BaseModel):
+    """每周重复的生效时段；`days` 指开始日，`start > end` 表示跨天。"""
+
+    days: list[int] = Field(min_length=1, max_length=7)
+    start: str = Field(pattern=time_rules.TIME_PATTERN)
+    end: str = Field(pattern=time_rules.TIME_PATTERN)
+
+    @field_validator("days")
+    @classmethod
+    def _normalize_days(cls, value: list[int]) -> list[int]:
+        return list(time_rules.normalize_days(value))
+
+    @model_validator(mode="after")
+    def _check_span(self) -> "TimeWindow":
+        if time_rules.parse_time(self.start) == time_rules.parse_time(self.end):
+            raise ValueError(time_rules.ERR_SPAN)
+        return self
+
+    def to_window(self) -> time_rules.Window:
+        return time_rules.Window(
+            days=tuple(self.days),
+            start_minute=time_rules.parse_time(self.start),
+            end_minute=time_rules.parse_time(self.end),
+        )
+
+
 class VoiceRuleCreate(BaseModel):
     devices: list[str] = Field(min_length=1, max_length=MAX_DEVICE_TARGETS_PER_CREATE)
     certs: list[str] = Field(min_length=1, max_length=MAX_CERT_TARGETS_PER_CREATE)
     events: list[DoorEventKind] = Field(min_length=1)
+    time_windows: list[TimeWindow] = Field(default_factory=list, max_length=time_rules.MAX_TIME_WINDOWS_PER_RULE)
     segments: list[Segment] = Field(min_length=1, max_length=MAX_SEGMENTS_PER_RULE)
     volume: int = Field(default=VOLUME_DEFAULT, ge=VOLUME_MIN, le=VOLUME_MAX)
     enabled: bool = True
@@ -160,6 +190,7 @@ class VoiceRuleUpdate(BaseModel):
     devices: list[str] = Field(min_length=1, max_length=MAX_DEVICE_TARGETS_PER_CREATE)
     certs: list[str] = Field(min_length=1, max_length=MAX_CERT_TARGETS_PER_CREATE)
     events: list[DoorEventKind] = Field(min_length=1)
+    time_windows: list[TimeWindow] = Field(default_factory=list, max_length=time_rules.MAX_TIME_WINDOWS_PER_RULE)
     segments: list[Segment] = Field(min_length=1, max_length=MAX_SEGMENTS_PER_RULE)
     volume: int = Field(default=VOLUME_DEFAULT, ge=VOLUME_MIN, le=VOLUME_MAX)
     enabled: bool = True
@@ -176,8 +207,10 @@ class VoiceRuleView(BaseModel):
     certs: list[str]
     exempt: list[str]
     events: list[DoorEventKind]
+    time_windows: list[TimeWindow]
     segments: list[Segment]
     summary: str
+    time_summary: str
     volume: int
     enabled: bool
     created_at: str
@@ -268,5 +301,6 @@ class VoiceSpecView(BaseModel):
     digits: list[int]
     asset_count: int
     max_segments: int
+    max_time_windows: int
     max_pause_ms: int
     min_pause_ms: int

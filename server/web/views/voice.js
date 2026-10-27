@@ -200,7 +200,7 @@ function renderRules() {
       return `<tr${selected} data-id="${esc(String(rule.id))}">
         <td>${devices}</td>
         <td>${certCell(rule)}</td>
-        <td>${eventBadges}</td>
+        <td>${eventBadges}<div class="rule-time">时段：${esc(rule.time_summary || '不限')}</div></td>
         <td><div class="muted" title="${esc(summary)}">${esc(summary)}</div></td>
         <td class="mono">音量 ${esc(String(rule.volume))}</td>
         <td>${rule.enabled ? '<span class="badge badge-green">启用</span>' : '<span class="badge">停用</span>'}</td>
@@ -357,6 +357,67 @@ function readEventSelection() {
   return [...document.querySelectorAll('#voiceEvents input[data-event]:checked')].map((input) => input.dataset.event)
 }
 
+const WEEKDAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+
+function timeWindowRowHtml(value) {
+  const selected = value?.days?.length ? value.days : [1, 2, 3, 4, 5, 6, 7]
+  const days = WEEKDAYS.map(
+    (label, index) => `<label class="weekday-option">
+        <input type="checkbox" data-window-day="${index + 1}" ${selected.includes(index + 1) ? 'checked' : ''}>
+        <span>${label}</span>
+      </label>`,
+  ).join('')
+  return `<div class="time-window" data-window>
+      <div class="weekday-options">${days}</div>
+      <div class="btn-row">
+        <input type="time" data-window-start value="${esc(value?.start || '')}" aria-label="开始时刻">
+        <span class="muted">至</span>
+        <input type="time" data-window-end value="${esc(value?.end || '')}" aria-label="结束时刻">
+        <button type="button" class="btn btn-danger btn-sm" data-remove-window>移除</button>
+      </div>
+    </div>`
+}
+
+function renderTimeWindows(windows) {
+  $('voiceTimeWindows').innerHTML = windows.map((window) => timeWindowRowHtml(window)).join('')
+}
+
+function updateTimeWindowState() {
+  const unlimited = $('voiceTimeUnlimited').checked
+  $('voiceTimeWindows').hidden = unlimited
+  $('voiceTimeAddWrap').hidden = unlimited
+  if (!unlimited && $('voiceTimeWindows').children.length === 0) addTimeWindowRow()
+}
+
+function addTimeWindowRow(window = null) {
+  if (!spec) {
+    report('voiceResult', '失败 · 规则规格尚未加载', 'err')
+    return
+  }
+  if ($('voiceTimeWindows').children.length >= spec.max_time_windows) {
+    report('voiceResult', `失败 · 最多 ${spec.max_time_windows} 个时段`, 'err')
+    return
+  }
+  $('voiceTimeWindows').insertAdjacentHTML('beforeend', timeWindowRowHtml(window))
+}
+
+function readTimeWindows() {
+  if ($('voiceTimeUnlimited').checked) return []
+  const rows = [...$('voiceTimeWindows').querySelectorAll('[data-window]')]
+  if (rows.length === 0) throw new Error('请至少添加一个时段，或勾选不限时段')
+  return rows.map((row) => {
+    const days = [...row.querySelectorAll('input[data-window-day]:checked')].map((input) =>
+      Number(input.dataset.windowDay),
+    )
+    const start = row.querySelector('[data-window-start]').value
+    const end = row.querySelector('[data-window-end]').value
+    if (days.length === 0) throw new Error('每个时段至少选择一天')
+    if (!start || !end) throw new Error('每个时段都要填写开始和结束时刻')
+    if (start === end) throw new Error('时段的开始和结束时刻不能相同')
+    return { days, start, end }
+  })
+}
+
 function applyFormMode() {
   const editing = editingId !== null
   $('voiceFormTitle').textContent = editing ? '编辑语音规则' : '新增语音规则'
@@ -372,6 +433,9 @@ function clearForm() {
   $('voiceCert').value = ''
   updateCertHint()
   renderEventChoices([])
+  $('voiceTimeUnlimited').checked = true
+  renderTimeWindows([])
+  updateTimeWindowState()
   segments = []
   renderSegments()
   renderSpec()
@@ -389,6 +453,9 @@ function fillForm(rule) {
   $('voiceCert').value = wildcard ? (rule.exempt || []).join('\n') : rule.certs.join('\n')
   updateCertHint()
   renderEventChoices(rule.events)
+  $('voiceTimeUnlimited').checked = rule.time_windows.length === 0
+  renderTimeWindows(rule.time_windows)
+  updateTimeWindowState()
   segments = rule.segments.map((item) => ({ ...item }))
   renderSegments()
   $('voiceVolume').value = String(rule.volume)
@@ -444,6 +511,13 @@ function readForm() {
     report('voiceResult', '失败 · 请勾选至少一个事件', 'err')
     return null
   }
+  let timeWindows
+  try {
+    timeWindows = readTimeWindows()
+  } catch (error) {
+    report('voiceResult', `失败 · ${error.message}`, 'err')
+    return null
+  }
   if (segments.length === 0) {
     report('voiceResult', '失败 · 请至少添加一个分段', 'err')
     return null
@@ -452,6 +526,7 @@ function readForm() {
     devices: deviceIds,
     certs,
     events: selectedEvents,
+    time_windows: timeWindows,
     segments: segments.map((item) => ({ ...item })),
     volume: Number($('voiceVolume').value),
     enabled: $('voiceEnabled').checked,
@@ -776,7 +851,19 @@ export const voiceView = {
               <label>事件（可勾多个）</label>
               <div id="voiceEvents"></div>
             </div>
-            <div class="hint">匹配优先级：设备具体 → 学号具体 → 同档集合更小。完全同优先级且目标重叠的规则不能保存。</div>
+            <div class="field">
+              <label>生效时段</label>
+              <label class="field-row">
+                <input id="voiceTimeUnlimited" type="checkbox" checked>
+                <span>不限时段</span>
+              </label>
+              <div class="time-windows" id="voiceTimeWindows"></div>
+              <div class="btn-row" id="voiceTimeAddWrap" hidden>
+                <button type="button" class="btn btn-ghost btn-sm" id="btnVoiceAddWindow">添加时段</button>
+              </div>
+              <div class="hint">跨天按开始日算；结束时刻不含。按服务端当地时间判断。</div>
+            </div>
+            <div class="hint">匹配优先级：设备具体 → 学号具体 → 同档集合更小 → 时段更紧。完全同优先级且目标与时段都重叠的规则不能保存。</div>
             <div class="field">
               <label>播报分段</label>
               <div class="seg-editor" id="voiceSegments"></div>
@@ -835,6 +922,16 @@ export const voiceView = {
         $('voiceAssetName').value = file.name.replace(/\.[^.]+$/, '')
       }
     }))
+    dispose.add(listen($('voiceTimeUnlimited'), 'change', updateTimeWindowState))
+    dispose.add(listen($('btnVoiceAddWindow'), 'click', () => addTimeWindowRow()))
+    dispose.add(
+      listen($('voiceTimeWindows'), 'click', (event) => {
+        const button = event.target.closest('[data-remove-window]')
+        if (!button) return
+        button.closest('[data-window]')?.remove()
+        if ($('voiceTimeWindows').children.length === 0 && !$('voiceTimeUnlimited').checked) addTimeWindowRow()
+      }),
+    )
     dispose.add(listen($('voiceAssetTable'), 'click', (event) => {
       const button = event.target.closest('button[data-act]')
       if (!button) return
