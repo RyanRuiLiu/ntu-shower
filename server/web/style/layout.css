@@ -254,7 +254,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--sp-4);
-  align-items: flex-start;
+  align-items: stretch;
 }
 
 .grid-list-form > :first-child {
@@ -265,4 +265,16 @@
 .grid-list-form > :last-child {
   flex: 1 0 var(--list-form-form-min);
   min-width: 0;
+}
+
+/* 列表与表单同高：列表随表单的高度拉伸，内容超出时在面板内滚动 */
+.grid-list-form > .panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.grid-list-form > .panel > .panel-body.flush {
+  flex: 1;
+  min-height: 0;
 }
