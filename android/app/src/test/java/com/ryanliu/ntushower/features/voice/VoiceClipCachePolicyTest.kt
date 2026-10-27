@@ -12,21 +12,31 @@ class VoiceClipCachePolicyTest {
     fun `under limit deletes nothing`() {
         val files = listOf(file("a.mp3", 40, 1), file("b.mp3", 40, 2))
 
-        assertTrue(VoiceClipCachePolicy.filesToDelete(files, 100, "b.mp3").isEmpty())
+        assertTrue(VoiceClipCachePolicy.filesToDelete(files, 100, setOf("b.mp3")).isEmpty())
     }
 
     @Test
     fun `over limit deletes the oldest`() {
         val files = listOf(file("old.mp3", 60, 1), file("new.mp3", 60, 2))
 
-        assertEquals(listOf("old.mp3"), VoiceClipCachePolicy.filesToDelete(files, 70, "new.mp3"))
+        assertEquals(listOf("old.mp3"), VoiceClipCachePolicy.filesToDelete(files, 70, setOf("new.mp3")))
     }
 
     @Test
     fun `keeps the current file even when it is the oldest`() {
         val files = listOf(file("current.mp3", 60, 1), file("other.mp3", 60, 2))
 
-        assertEquals(listOf("other.mp3"), VoiceClipCachePolicy.filesToDelete(files, 70, "current.mp3"))
+        assertEquals(listOf("other.mp3"), VoiceClipCachePolicy.filesToDelete(files, 70, setOf("current.mp3")))
+    }
+
+    @Test
+    fun `keeps every file in the current playlist`() {
+        val files = listOf(file("a.mp3", 60, 1), file("b.mp3", 60, 2), file("other.mp3", 60, 3))
+
+        assertEquals(
+            listOf("other.mp3"),
+            VoiceClipCachePolicy.filesToDelete(files, 130, setOf("a.mp3", "b.mp3")),
+        )
     }
 
     @Test
@@ -39,7 +49,7 @@ class VoiceClipCachePolicyTest {
 
         assertEquals(
             listOf("old.mp3", "middle.mp3"),
-            VoiceClipCachePolicy.filesToDelete(files, 10, "current.mp3"),
+            VoiceClipCachePolicy.filesToDelete(files, 10, setOf("current.mp3")),
         )
     }
 }
