@@ -54,7 +54,7 @@ object AppConfig {
     /** OTA 脱手安装脚本的原始输出（`pm install` 的结论只在这里）。 */
     const val OTA_INSTALL_LOG_NAME = "ota-install.log"
 
-    /** 播报音频缓存：文件名是 clip_id（内容身份），服务端只下发 id。 */
+    /** 旧版播报缓存目录：仅用于升级时清除，新缓存放在应用私有 filesDir/voice。 */
     const val VOICE_DIR = "$WORK_DIR/voice"
 
     /**

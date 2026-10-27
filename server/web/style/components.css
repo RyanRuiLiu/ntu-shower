@@ -670,3 +670,39 @@ tr.audit-row.is-selected td {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
+
+/* ── 语音分段编辑器 ─────────────────────────────────────── */
+
+.seg-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.seg-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+  padding: var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.seg-kind {
+  flex: 0 0 auto;
+  min-width: 2.5rem;
+  color: var(--dim);
+  font-size: var(--fs-chip);
+}
+
+.seg-row select,
+.seg-row input {
+  flex: 1 1 7rem;
+  min-width: 0;
+}
+
+.seg-row .btn-row {
+  flex: 0 0 auto;
+}

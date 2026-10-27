@@ -6,7 +6,7 @@ import com.ryanliu.ntushower.core.a11y.A11yRuntime
 import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.features.remote.ScreenCapture
-import com.ryanliu.ntushower.features.voice.VoiceClipSpec
+import com.ryanliu.ntushower.features.voice.VoicePlaySpec
 import com.ryanliu.ntushower.features.voice.VoicePlayer
 import com.ryanliu.ntushower.transport.OutcomeStatus
 import com.ryanliu.ntushower.transport.ReasonCodes
@@ -19,6 +19,7 @@ enum class CommandChannel {
     AUTOMATION,
     CAPTURE,
     VOICE,
+    PREFETCH,
 }
 
 /** 调度器产出的命令结果（与 session.command_result payload 对应）。 */
@@ -45,6 +46,7 @@ class CommandScheduler(
     private val automationExecutor: Executor = Executors.newSingleThreadExecutor(),
     private val captureExecutor: Executor = Executors.newSingleThreadExecutor(),
     private val voiceExecutor: Executor = Executors.newSingleThreadExecutor(),
+    private val prefetchExecutor: Executor = Executors.newSingleThreadExecutor(),
 ) {
 
     sealed class Command(val id: String) {
@@ -92,10 +94,10 @@ class CommandScheduler(
         /** 导出界面节点树。 */
         class UiDump(id: String) : Command(id)
 
-        /** 播放一段服务端合成的音频。参数在执行时解析。 */
+        /** 按播放清单顺序播放固定音频与停顿。参数在执行时解析。 */
         class PlayVoice(id: String, val params: JSONObject) : Command(id)
 
-        /** 只下载/校验音频，不播放。 */
+        /** 把音频排入低优先级后台预下载队列，不播放、不等待网络。 */
         class PrepareVoice(id: String, val params: JSONObject) : Command(id)
     }
 
@@ -108,6 +110,9 @@ class CommandScheduler(
     // 语音独立排队：下载/播放不碰界面，也不该被分配/结算或截图堵住；同设备多条语音串行。
     private val voiceQueue = SerialCommandQueue<Command>()
 
+    // 预下载只把素材排入后台队列、立即返回；单独排队，播放永远不用等它。
+    private val prefetchQueue = SerialCommandQueue<Command>()
+
     fun enqueue(command: Command, expireAtMs: Long) {
         when (channelOf(command)) {
             // 图像采集资源独立，不占用自动化队列——否则一条慢截图会把
@@ -117,6 +122,10 @@ class CommandScheduler(
             // 语音独立执行器：与自动化、采集互不阻塞
             CommandChannel.VOICE -> dispatch(command, voiceQueue, expireAtMs) {
                 runVoice(it)
+            }
+
+            CommandChannel.PREFETCH -> dispatch(command, prefetchQueue, expireAtMs) {
+                runPrefetch(it)
             }
 
             // 读节点树走自动化队列：它读的就是那份 UI 节点树，与 ui.touch / ui.key
@@ -234,31 +243,54 @@ class CommandScheduler(
         }
     }
 
+    /** 执行一条预下载命令：只入后台队列，不等待网络。 */
+    private fun runPrefetch(command: Command) {
+        prefetchExecutor.execute {
+            var reported = false
+            try {
+                onOutcome(executeVoice(command))
+                reported = true
+            } catch (e: Throwable) {
+                if (!reported) {
+                    Log.e(TAG, "prefetch crashed: ${e.message}", e)
+                    onOutcome(
+                        CommandOutcome(
+                            command.id,
+                            OutcomeStatus.FAILED,
+                            ReasonCodes.DEVICE_INTERNAL_ERROR,
+                            "设备端内部错误",
+                        ),
+                    )
+                }
+            } finally {
+                prefetchQueue.complete()?.let { runPrefetch(it) }
+            }
+        }
+    }
+
     private fun executeVoice(command: Command): CommandOutcome {
-        val spec = when (command) {
-            is Command.PlayVoice -> VoiceClipSpec.parsePlay(command.params)
-            is Command.PrepareVoice -> VoiceClipSpec.parsePrepare(command.params)
-            else -> null
-        } ?: return CommandOutcome(
-            command.id,
-            OutcomeStatus.FAILED,
-            ReasonCodes.VOICE_PARAMS_INVALID,
-            "播报参数不合法",
-        )
         val result = when (command) {
-            is Command.PlayVoice -> voicePlayer.play(spec)
+            is Command.PlayVoice -> {
+                val spec = VoicePlaySpec.parse(command.params) ?: return invalidVoice(command)
+                voicePlayer.play(spec)
+            }
 
-            is Command.PrepareVoice -> voicePlayer.prepare(spec)
+            is Command.PrepareVoice -> {
+                val clips = VoicePlaySpec.parsePrepare(command.params) ?: return invalidVoice(command)
+                voicePlayer.prepare(clips)
+            }
 
-            else -> return CommandOutcome(
-                command.id,
-                OutcomeStatus.FAILED,
-                ReasonCodes.VOICE_PARAMS_INVALID,
-                "播报参数不合法",
-            )
+            else -> return invalidVoice(command)
         }
         return CommandOutcome(command.id, result.status, result.reasonCode, result.message, result.data)
     }
+
+    private fun invalidVoice(command: Command): CommandOutcome = CommandOutcome(
+        command.id,
+        OutcomeStatus.FAILED,
+        ReasonCodes.VOICE_PARAMS_INVALID,
+        "播报参数不合法",
+    )
 
     /**
      * 执行一条自动化命令，结束后放行队列中的下一条。
@@ -485,7 +517,8 @@ class CommandScheduler(
          */
         fun channelOf(command: Command): CommandChannel = when (command) {
             is Command.Photo, is Command.Screen -> CommandChannel.CAPTURE
-            is Command.PlayVoice, is Command.PrepareVoice -> CommandChannel.VOICE
+            is Command.PlayVoice -> CommandChannel.VOICE
+            is Command.PrepareVoice -> CommandChannel.PREFETCH
             else -> CommandChannel.AUTOMATION
         }
     }

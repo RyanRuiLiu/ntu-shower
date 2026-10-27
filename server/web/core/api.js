@@ -128,9 +128,8 @@ export const api = {
 
   // ── 语音播报 ──（admin；规则目标 = 设备 × 学号，各自可具体或「全部」）
   voiceSpec: () => send(`${API_V1}/voice/spec`),
-  /** device_id 省略列全部；传 '*' 只列「全部设备」的通配规则。 */
-  voiceRules: (deviceId) => send(`${API_V1}/voice/rules${query({ device_id: deviceId })}`),
-  /** 一次可展开多设备 × 多学号；已存在的组合由服务端跳过并在响应里点名。 */
+  voiceRules: () => send(`${API_V1}/voice/rules`),
+  /** 规则按「设备集合 × 学号集合 × 事件」保存；匹配按具体度与集合大小定优先级。 */
   createVoiceRule: (value) => send(`${API_V1}/voice/rules`, post(value)),
   updateVoiceRule: (id, value) => send(`${API_V1}/voice/rules/${id}`, put(value)),
   patchVoiceRule: (id, value) => send(`${API_V1}/voice/rules/${id}`, patch(value)),
@@ -139,11 +138,11 @@ export const api = {
   voiceDeliveries: () => send(`${API_V1}/voice/deliveries`),
   previewVoiceRule: (value) => send(`${API_V1}/voice/preview`, post(value)),
   pushVoiceRule: (id, deviceId) => send(`${API_V1}/voice/rules/${id}/push`, post({ device_id: deviceId })),
-  // ── 音效库 ──（admin 管理；试听文件按内容寻址公开，同 /voice/clips）
-  voiceEffects: () => send(`${API_V1}/voice/effects`),
-  uploadVoiceEffect: (form) => send(`${API_V1}/voice/effects`, { method: 'POST', body: form, raw: true }),
-  renameVoiceEffect: (id, name) => send(`${API_V1}/voice/effects/${id}`, put({ name })),
-  deleteVoiceEffect: (id) => send(`${API_V1}/voice/effects/${id}`, del()),
+  // ── 固定音频素材库 ──（admin 管理；文件按内容哈希公开）
+  voiceAssets: () => send(`${API_V1}/voice/assets`),
+  uploadVoiceAsset: (form) => send(`${API_V1}/voice/assets`, { method: 'POST', body: form, raw: true }),
+  renameVoiceAsset: (id, name) => send(`${API_V1}/voice/assets/${id}`, patch({ name })),
+  deleteVoiceAsset: (id) => send(`${API_V1}/voice/assets/${id}`, del()),
 
   // ── 身份 ──（admin；名单响应含能力位枚举，身份页一次装载）
   identities: () => send(`${API_V1}/identities`),

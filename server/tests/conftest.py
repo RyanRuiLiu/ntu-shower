@@ -127,7 +127,6 @@ def fresh_db(
     monkeypatch.setattr(config_module.settings, "photo_timeout_s", 0.3)
     # 目录存在性由 create_app 在装配时保证一次；共享应用后每个用例自己补
     Path(config_module.settings.ota_dir).mkdir(parents=True, exist_ok=True)
-    Path(config_module.settings.voice_dir, "clips").mkdir(parents=True, exist_ok=True)
     shutil.copyfile(_schema_template, path)
     yield path
     db_module.close_all_connections()

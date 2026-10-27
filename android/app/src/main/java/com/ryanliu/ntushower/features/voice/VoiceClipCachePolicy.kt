@@ -6,16 +6,16 @@ data class VoiceClipFile(val name: String, val sizeBytes: Long, val lastModified
 /**
  * 音频缓存淘汰（纯逻辑）。
  *
- * 动态占位符会生成很多最终文本，缓存不能无限涨。按最后修改时刻从旧到新删，
- * 当前正在用的文件（[keep]）永远保留；即便它是旧的，也只删其它文件。
+ * 缓存不能无限涨。按最后修改时刻从旧到新删，当前正在用的文件（[keep]）永远保留；
+ * 即便它们更旧，也只删其它文件。播放清单可能含多段音频，必须整组保留。
  */
 object VoiceClipCachePolicy {
-    fun filesToDelete(files: List<VoiceClipFile>, maxBytes: Long, keep: String?): List<String> {
+    fun filesToDelete(files: List<VoiceClipFile>, maxBytes: Long, keep: Set<String>): List<String> {
         var total = files.sumOf { it.sizeBytes }
         if (total <= maxBytes) return emptyList()
         val removed = mutableListOf<String>()
         for (file in files.sortedBy { it.lastModifiedMs }) {
-            if (total > maxBytes && file.name != keep) {
+            if (total > maxBytes && file.name !in keep) {
                 removed += file.name
                 total -= file.sizeBytes
             }
