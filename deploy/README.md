@@ -47,7 +47,7 @@ ssh deploy@<deploy-host> "systemctl daemon-reload && systemctl restart ntu-showe
 
 scp deploy/backup/ntu-shower-backup.sh deploy@<deploy-host>:/opt/ntu-shower-backup/ntu-shower-backup.sh
 scp deploy/backup/ntu-shower-backup.service deploy/backup/ntu-shower-backup.timer deploy@<deploy-host>:/etc/systemd/system/
-ssh deploy@<deploy-host> "chmod +x /opt/ntu-shower-backup/ntu-shower-backup.sh && systemctl daemon-reload && systemctl enable --now ntu-shower-backup.timer"
+ssh deploy@<deploy-host> "chmod 700 /opt/ntu-shower-backup/ntu-shower-backup.sh && systemctl daemon-reload && systemctl enable --now ntu-shower-backup.timer"
 ```
 
 ## 要点（改配置前先读）

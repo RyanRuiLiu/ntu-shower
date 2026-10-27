@@ -18,6 +18,7 @@ object VoicePcmAssembler {
 
     private const val SILENCE_THRESHOLD = 300
     private const val FADE_MS = 5
+    private const val PRE_ROLL_MS = 10
     private const val MS_PER_SECOND = 1000
 
     data class Stream(val bytes: ByteArray, val sampleRate: Int, val channels: Int, val durationMs: Long)
@@ -68,13 +69,18 @@ object VoicePcmAssembler {
             start += frameBytes
         }
         if (start >= bytes.size) return bytes
+        // 保留起音前 10ms：软辅音可能低于能量阈值，不能被当成静音切掉
+        val speechFrame = start / frameBytes
+        start = maxOf(0, start - sampleRate * PRE_ROLL_MS / MS_PER_SECOND * frameBytes)
         val result = bytes.copyOfRange(start, bytes.size)
         val totalFrames = result.size / frameBytes
-        val fadeSamples = min(sampleRate * FADE_MS / MS_PER_SECOND, totalFrames)
-        for (frame in 0 until fadeSamples) {
-            val gain = frame.toDouble() / fadeSamples
+        val fadeStart = min((speechFrame - start / frameBytes).coerceAtLeast(0), totalFrames)
+        val fadeFrames = min(sampleRate * FADE_MS / MS_PER_SECOND, totalFrames - fadeStart)
+        for (frame in 0 until fadeFrames) {
+            val gain = frame.toDouble() / fadeFrames
+            val target = fadeStart + frame
             for (channel in 0 until channels) {
-                val offset = frame * frameBytes + channel * BYTES_PER_SAMPLE
+                val offset = target * frameBytes + channel * BYTES_PER_SAMPLE
                 putSample(result, offset, (sampleAt(result, offset) * gain).toInt())
             }
         }

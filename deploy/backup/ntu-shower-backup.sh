@@ -7,6 +7,7 @@
 # keystore 不在此脚本内：它是静态文件且是"全系统唯一长期绑定物件"，
 # 采用人工异地副本 + 指纹校验（见 docs/RUNBOOK.md §3），不做自动滚动。
 set -euo pipefail
+umask 077
 
 BACKUP_DIR="${BACKUP_DIR:-/opt/ntu-shower-backup}"
 SERVER_DIR="${SERVER_DIR:-/opt/ntu-shower/server}"
@@ -15,6 +16,7 @@ PYTHON="$SERVER_DIR/.venv/bin/python"
 KEEP="${KEEP:-30}"
 
 mkdir -p "$BACKUP_DIR"
+chmod 700 "$BACKUP_DIR"
 stamp="$(date +%Y%m%d-%H%M%S)"
 target="$BACKUP_DIR/ntu-shower-$stamp.db"
 
@@ -45,6 +47,7 @@ finally:
 if result != "ok":
     raise SystemExit(f"备份完整性校验未通过：{result}")
 PY
+chmod 600 "$target"
 
 # 滚动保留：只留最近 KEEP 份
 find "$BACKUP_DIR" -maxdepth 1 -name 'ntu-shower-*.db' -printf '%T@ %p\n' \
