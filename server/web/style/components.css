@@ -141,6 +141,29 @@
   align-items: center;
 }
 
+/* 语音规则的生效时段：每条时段一块，日期和时间在窄屏自动换行 */
+.time-windows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.time-window {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.rule-time {
+  margin-top: var(--sp-1);
+  color: var(--muted);
+  font-size: var(--fs-chip);
+}
+
 /* ── 结果区：每个能出错的操作都要有一块 ─────────────────── */
 
 .result {

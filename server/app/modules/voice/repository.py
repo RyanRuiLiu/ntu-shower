@@ -16,6 +16,7 @@
 
 import json
 import shutil
+from datetime import datetime
 from pathlib import Path
 from sqlite3 import Row
 
@@ -25,6 +26,7 @@ from app.core.logging import log_event
 from app.modules.doors.events import DoorEvent
 
 from . import audio
+from . import time_windows as time_rules
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS voice_asset (
@@ -37,12 +39,13 @@ CREATE TABLE IF NOT EXISTS voice_asset (
 );
 
 CREATE TABLE IF NOT EXISTS voice_rule (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    devices     TEXT    NOT NULL,
-    certs       TEXT    NOT NULL,
-    events      TEXT    NOT NULL,
-    exempt      TEXT    NOT NULL DEFAULT '[]',
-    segments    TEXT    NOT NULL,
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    devices      TEXT    NOT NULL,
+    certs        TEXT    NOT NULL,
+    events       TEXT    NOT NULL,
+    time_windows TEXT    NOT NULL DEFAULT '[]',
+    exempt       TEXT    NOT NULL DEFAULT '[]',
+    segments     TEXT    NOT NULL,
     volume      INTEGER NOT NULL,
     enabled     INTEGER NOT NULL DEFAULT 1,
     created_at  TEXT    NOT NULL,
@@ -78,6 +81,7 @@ def init_tables() -> None:
     audio.assets_dir().mkdir(parents=True, exist_ok=True)
     audio.tmp_dir().mkdir(parents=True, exist_ok=True)
     _rebuild_legacy_if_needed()
+    _reset_rule_schema_if_outdated()
     get_conn().executescript(SCHEMA)
 
 
@@ -90,6 +94,20 @@ def _columns(name: str) -> list[str]:
     if not _table_exists(name):
         return []
     return [str(row["name"]) for row in get_conn().execute(f"PRAGMA table_info({name})")]
+
+
+def _reset_rule_schema_if_outdated() -> None:
+    """规则表结构换代：没有 time_windows 的旧表直接丢弃重建。
+
+    这是新表结构上线时的一次性重建，不保留旧规则；调用方应在部署前导出旧规则，
+    部署后按新结构回填。旧表若仍是旧 TTS 模型，[`_rebuild_legacy_if_needed`] 已经
+    处理过，这里只负责固定素材模型之后新增的时间列。
+    """
+    columns = _columns("voice_rule")
+    if columns and "time_windows" not in columns:
+        log_event("WARNING", "voice.rule-schema-reset", "语音规则表结构换代，清空并重建 voice_rule")
+        get_conn().execute("DROP TABLE voice_rule")
+        get_conn().commit()
 
 
 def _rebuild_legacy_if_needed() -> None:
@@ -233,6 +251,7 @@ def insert_rule(
     devices: str,
     certs: str,
     events: str,
+    time_windows: str,
     exempt: str,
     segments: str,
     volume: int,
@@ -240,9 +259,9 @@ def insert_rule(
     now: str,
 ) -> int:
     cursor = write(
-        "INSERT INTO voice_rule(devices,certs,events,exempt,segments,volume,enabled,created_at,updated_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?)",
-        (devices, certs, events, exempt, segments, volume, int(enabled), now, now),
+        "INSERT INTO voice_rule(devices,certs,events,time_windows,exempt,segments,volume,enabled,created_at,updated_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (devices, certs, events, time_windows, exempt, segments, volume, int(enabled), now, now),
     )
     return int(cursor.lastrowid or 0)
 
@@ -252,6 +271,7 @@ def update_rule(
     devices: str,
     certs: str,
     events: str,
+    time_windows: str,
     exempt: str,
     segments: str,
     volume: int,
@@ -259,9 +279,9 @@ def update_rule(
     now: str,
 ) -> int:
     cursor = write(
-        "UPDATE voice_rule SET devices=?, certs=?, events=?, exempt=?, segments=?, volume=?,"
+        "UPDATE voice_rule SET devices=?, certs=?, events=?, time_windows=?, exempt=?, segments=?, volume=?,"
         " enabled=?, updated_at=? WHERE id=?",
-        (devices, certs, events, exempt, segments, volume, int(enabled), now, rule_id),
+        (devices, certs, events, time_windows, exempt, segments, volume, int(enabled), now, rule_id),
     )
     return cursor.rowcount
 
@@ -285,22 +305,27 @@ def delete_rule(rule_id: int) -> int:
     return write("DELETE FROM voice_rule WHERE id=?", (rule_id,)).rowcount
 
 
-def rule_priority(devices: list[str], certs: list[str]) -> tuple[int, int, int, int]:
-    """规则匹配优先级：设备维度先于学号维度，具体先于通配，小集合先于大集合。
+def rule_priority(
+    devices: list[str], certs: list[str], time_windows: list[time_rules.Window]
+) -> tuple[int, int, int, int, int, int]:
+    """规则匹配优先级：设备 → 学号 → 集合大小 → 时段。
 
-    最后两项取负值是为了让方向一致的降序排序把范围更小的规则排在前面；不把规则 id
-    放进优先级——id 是写入顺序，不是业务优先级，用它决胜就是随机。
+    前三项沿用原模型：设备具体先于学号具体，小集合先于大集合。时间只在前四项
+    完全相同时参与：有时段比不限时段紧，一周覆盖分钟数更少的时段更紧。负号让降序
+    排序把更紧的规则排在前面；规则 id 不参与优先级。
     """
     device_specific = 0 if "*" in devices else 1
     cert_specific = 0 if "*" in certs else 1
     device_width = len(devices) if device_specific else 0
     cert_width = len(certs) if cert_specific else 0
-    return (device_specific, cert_specific, -device_width, -cert_width)
+    time_specific = 1 if time_windows else 0
+    time_coverage = time_rules.coverage(time_windows)
+    return (device_specific, cert_specific, -device_width, -cert_width, time_specific, -time_coverage)
 
 
-def matching_rules(device_id: str, cert_no: str, event: str) -> list[Row]:
+def matching_rules(device_id: str, cert_no: str, event: str, local: datetime) -> list[Row]:
     """一次事件命中的启用规则，按优先级排序；完全同优先级时拒绝替用户挑一条。"""
-    hits: list[tuple[tuple[int, int, int, int], Row]] = []
+    hits: list[tuple[tuple[int, int, int, int, int, int], Row]] = []
     for row in get_conn().execute("SELECT * FROM voice_rule WHERE enabled=1").fetchall():
         if event not in json.loads(str(row["events"])):
             continue
@@ -313,7 +338,29 @@ def matching_rules(device_id: str, cert_no: str, event: str) -> list[Row]:
                 continue
         elif cert_no not in certs:
             continue
-        hits.append((rule_priority(devices, certs), row))
+        try:
+            windows = time_rules.parse_json(str(row["time_windows"]))
+        except ValueError as exc:
+            log_event(
+                "ERROR",
+                "voice.rule-time-invalid",
+                "规则时段格式非法，跳过",
+                rule_id=int(row["id"]),
+                error=str(exc),
+            )
+            continue
+        if not time_rules.match(windows, local):
+            log_event(
+                "DEBUG",
+                "voice.rule-time-filtered",
+                "规则不在生效时段内",
+                device_id=device_id,
+                event=event,
+                rule_id=int(row["id"]),
+                local_time=local.isoformat(timespec="minutes"),
+            )
+            continue
+        hits.append((rule_priority(devices, certs, windows), row))
     hits.sort(key=lambda item: item[0], reverse=True)
     if len(hits) >= 2 and hits[0][0] == hits[1][0]:
         log_event(
@@ -323,6 +370,7 @@ def matching_rules(device_id: str, cert_no: str, event: str) -> list[Row]:
             device_id=device_id,
             cert_no=cert_no,
             event=event,
+            local_time=local.isoformat(timespec="minutes"),
             rule_ids=[int(hits[0][1]["id"]), int(hits[1][1]["id"])],
         )
         return []
