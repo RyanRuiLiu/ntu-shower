@@ -1,8 +1,9 @@
 package com.ryanliu.ntushower.features.voice
 
 import android.content.Context
+import android.media.AudioFormat
 import android.media.AudioManager
-import android.media.MediaPlayer
+import android.media.AudioTrack
 import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.log.DeviceLog
@@ -10,8 +11,6 @@ import com.ryanliu.ntushower.transport.OutcomeStatus
 import com.ryanliu.ntushower.transport.ReasonCodes
 import org.json.JSONObject
 import java.io.File
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 
 /** 一条语音命令的执行结果，与 `session.command_result` 的字段对应。 */
 data class VoiceResult(val status: String, val reasonCode: String, val message: String, val data: JSONObject? = null)
@@ -20,25 +19,25 @@ data class VoiceResult(val status: String, val reasonCode: String, val message: 
  * 固定音频播放器。
  *
  * 顺序固定：下载/校验全部片段 → 等浴室提示音结束 → 保存并设置 `STREAM_VOICE_CALL`
- * 音量 → 按清单逐段播放（停顿处静音）→ 恢复原音量。下载失败时还没碰音量；设置
+ * 音量 → 把片段解码成一条连续 PCM 写入 AudioTrack（停顿处写静音）→ 恢复原音量。
+ * 下载失败时还没碰音量；设置
  * 音量失败时清掉刚写的标记。播放优先：开始下载前暂停后台预下载，缺素材时最多用
  * 服务端给的 `download_budget_ms` 下载，超时立即失败，不无限占住语音通道。
  *
  * 本机实测只有 `STREAM_VOICE_CALL` 在主输出上有非零音量（4/5），Media/TTS 流为 0。
  * 因此不调用 `setMode`、不调 `setSpeakerphoneOn`、不抢音频焦点。
  */
-// 播放状态机：下载、等浴室提示音、逐段播放与音量恢复共享 currentPlayer/shutdown
-// 状态，拆开会把这些状态散到多个类里。清单循环的跳转集中在这里是刻意的。
+// 播放状态机：下载、等浴室提示音、PCM 播放与音量恢复共享 currentTrack/shutdown
+// 状态，拆开会把这些状态散到多个类里。
 @Suppress("CyclomaticComplexMethod", "LoopWithTooManyJumpStatements", "TooManyFunctions")
 class VoicePlayer(context: Context, private val store: VoiceClipStore, private val deviceLog: DeviceLog) {
 
     private val audio = context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val guard = VoiceVolumeGuard(context)
     private val prefetch = VoicePrefetch(store, deviceLog)
+    private val pcm = VoicePcmDecoder(deviceLog)
 
-    @Volatile private var currentPlayer: MediaPlayer? = null
-
-    @Volatile private var currentLatch: CountDownLatch? = null
+    @Volatile private var currentTrack: AudioTrack? = null
 
     @Volatile private var shuttingDown = false
 
@@ -129,8 +128,7 @@ class VoicePlayer(context: Context, private val store: VoiceClipStore, private v
     fun shutdown() {
         shuttingDown = true
         prefetch.shutdown()
-        currentLatch?.countDown()
-        runCatching { currentPlayer?.stop() }
+        runCatching { currentTrack?.stop() }
     }
 
     /**
@@ -176,104 +174,81 @@ class VoicePlayer(context: Context, private val store: VoiceClipStore, private v
         downloaded: Boolean,
         bathWaitMs: Long,
     ): VoiceResult {
-        var outcome: VoiceResult? = null
-        var played = 0
-        val totalMs = spec.segments.sumOf { segment ->
-            when (segment) {
-                is VoiceSegment.Clip -> segment.clip.durationMs
-                is VoiceSegment.Pause -> segment.ms
-            }
+        val stream = pcm.assemble(spec.segments, files)
+        if (stream == null) {
+            restoreVolume(plan)
+            val result = failed(ReasonCodes.VOICE_PLAY_FAILED, "音频解码失败")
+            deviceLog.error("audio.play-failed", "reason=${result.reasonCode} ${result.message}")
+            return result
         }
+        val played = spec.segments.count { it is VoiceSegment.Clip }
         try {
-            for (segment in spec.segments) {
-                if (shuttingDown) {
-                    outcome = failed(ReasonCodes.VOICE_PLAY_FAILED, "服务正在停止")
-                    break
-                }
-                when (segment) {
-                    is VoiceSegment.Clip -> {
-                        val file = files[segment.clip.clipId]
-                        if (file == null || !playClip(segment.clip, file)) {
-                            outcome = failed(
-                                ReasonCodes.VOICE_PLAY_FAILED,
-                                if (shuttingDown) "服务正在停止" else "播放失败或超时",
-                            )
-                            break
-                        }
-                        played += 1
-                    }
-
-                    is VoiceSegment.Pause -> {
-                        if (!pause(segment.ms)) {
-                            outcome = failed(ReasonCodes.VOICE_PLAY_FAILED, "服务正在停止")
-                            break
-                        }
-                    }
-                }
+            if (!playStream(stream)) {
+                val message = if (shuttingDown) "服务正在停止" else "播放失败或超时"
+                val result = failed(ReasonCodes.VOICE_PLAY_FAILED, message)
+                deviceLog.error("audio.play-failed", "reason=${result.reasonCode} ${result.message}")
+                return result
             }
-            if (outcome == null) {
-                deviceLog.lifecycle(
-                    "audio.played",
-                    "clip_count=$played volume=${plan.target} duration_ms=$totalMs bath_wait_ms=$bathWaitMs",
-                )
-                return success(
-                    JSONObject()
-                        .put("clip_count", played)
-                        .put("downloaded", downloaded)
-                        .put("volume", plan.target)
-                        .put("duration_ms", totalMs)
-                        .put("bath_wait_ms", bathWaitMs),
-                )
-            }
+            deviceLog.lifecycle(
+                "audio.played",
+                "clip_count=$played volume=${plan.target} duration_ms=${stream.durationMs} " +
+                    "bath_wait_ms=$bathWaitMs",
+            )
+            return success(
+                JSONObject()
+                    .put("clip_count", played)
+                    .put("downloaded", downloaded)
+                    .put("volume", plan.target)
+                    .put("duration_ms", stream.durationMs)
+                    .put("bath_wait_ms", bathWaitMs),
+            )
         } finally {
             restoreVolume(plan)
         }
-        val result = outcome ?: failed(ReasonCodes.VOICE_PLAY_FAILED, "播放失败")
-        deviceLog.error("audio.play-failed", "reason=${result.reasonCode} ${result.message}")
-        return result
     }
 
-    @Suppress("DEPRECATION")
-    private fun playClip(clip: VoiceClipSpec, file: File): Boolean {
-        val latch = CountDownLatch(1)
-        currentLatch = latch
-        val player = MediaPlayer()
-        currentPlayer = player
-        var failedThisClip = false
+    /** 一条 AudioTrack 写完整个清单；停顿已经作为静音样本写进 PCM。 */
+    @Suppress("DEPRECATION", "TooGenericExceptionCaught")
+    private fun playStream(stream: VoicePcmAssembler.Stream): Boolean {
+        val minBuffer = AudioTrack.getMinBufferSize(
+            stream.sampleRate,
+            AudioFormat.CHANNEL_OUT_MONO,
+            AudioFormat.ENCODING_PCM_16BIT,
+        )
+        if (minBuffer <= 0) return false
+        val track = AudioTrack(
+            AudioManager.STREAM_VOICE_CALL,
+            stream.sampleRate,
+            AudioFormat.CHANNEL_OUT_MONO,
+            AudioFormat.ENCODING_PCM_16BIT,
+            minBuffer * AUDIO_BUFFER_MULTIPLIER,
+            AudioTrack.MODE_STREAM,
+        )
+        currentTrack = track
         try {
-            player.setAudioStreamType(AudioManager.STREAM_VOICE_CALL)
-            player.setDataSource(file.absolutePath)
-            player.setOnCompletionListener { latch.countDown() }
-            player.setOnErrorListener { _, _, _ ->
-                failedThisClip = true
-                latch.countDown()
-                true
+            track.play()
+            var offset = 0
+            while (offset < stream.bytes.size) {
+                if (shuttingDown) return false
+                val size = minOf(WRITE_CHUNK_BYTES, stream.bytes.size - offset)
+                val written = track.write(stream.bytes, offset, size)
+                if (written < 0) return false
+                if (written == 0) Thread.sleep(PLAYBACK_POLL_MS)
+                offset += written
             }
-            player.prepare()
-            player.start()
-            if (!latch.await(clip.durationMs + COMPLETION_GRACE_MS, TimeUnit.MILLISECONDS)) {
-                failedThisClip = true
+            val totalFrames = stream.bytes.size / (PCM_BYTES_PER_SAMPLE * stream.channels)
+            val deadline = Uptime.nowMs() + stream.durationMs + PLAYBACK_GRACE_MS
+            while (!shuttingDown && track.playbackHeadPosition < totalFrames && Uptime.nowMs() < deadline) {
+                Thread.sleep(PLAYBACK_POLL_MS)
             }
-            return !failedThisClip && !shuttingDown
+            return !shuttingDown && track.playbackHeadPosition >= totalFrames
         } catch (e: Exception) {
-            deviceLog.error("audio.clip-failed", "clip=${clip.clipId} ${e.message ?: "播放失败"}")
+            deviceLog.error("audio.play-failed", e.message ?: "播放失败")
             return false
         } finally {
-            currentLatch = null
-            currentPlayer = null
-            runCatching { player.stop() }
-            runCatching { player.release() }
-        }
-    }
-
-    private fun pause(ms: Long): Boolean {
-        if (ms <= 0) return true
-        return try {
-            Thread.sleep(ms)
-            !shuttingDown
-        } catch (_: InterruptedException) {
-            Thread.currentThread().interrupt()
-            false
+            currentTrack = null
+            runCatching { track.stop() }
+            runCatching { track.release() }
         }
     }
 
@@ -313,7 +288,11 @@ class VoicePlayer(context: Context, private val store: VoiceClipStore, private v
         VoiceResult(OutcomeStatus.FAILED, reasonCode, message)
 
     companion object {
-        private const val COMPLETION_GRACE_MS = 10_000L
+        private const val PLAYBACK_GRACE_MS = 10_000L
+        private const val PLAYBACK_POLL_MS = 10L
+        private const val WRITE_CHUNK_BYTES = 4_096
+        private const val AUDIO_BUFFER_MULTIPLIER = 2
+        private const val PCM_BYTES_PER_SAMPLE = 2
 
         /** 浴室 App 的提示音通常与事件同时开始；等这段时间还没起来就当没有提示音。 */
         private const val BATH_AUDIO_START_GRACE_MS = 1_500L
