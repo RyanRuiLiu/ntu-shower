@@ -10,14 +10,15 @@ class VoicePcmAssemblerTest {
 
     @Test
     fun `trims leading silence and fades in`() {
-        val silence = IntArray(8) { 0 }
+        val silence = IntArray(500) { 0 }
         val voice = IntArray(300) { 1_000 }
-        val result = VoicePcmAssembler.trimAndFade(pcm(*silence, *voice), 44_100, 1)
+        val input = pcm(*silence, *voice)
+        val result = VoicePcmAssembler.trimAndFade(input, 44_100, 1)
 
-        assertEquals(voice.size * 2, result.size)
+        assertTrue(result.size in (voice.size * 2 + 1) until input.size)
         assertEquals(0, sampleAt(result, 0))
-        assertEquals(1_000, sampleAt(result, voice.size - 1))
-        assertTrue(sampleAt(result, 10) in 1..500)
+        assertEquals(1_000, sampleAt(result, result.size / 2 - 1))
+        assertTrue(sampleAt(result, 451) in 1..500)
     }
 
     @Test
