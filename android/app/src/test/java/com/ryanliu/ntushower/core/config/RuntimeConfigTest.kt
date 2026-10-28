@@ -93,7 +93,7 @@ class RuntimeConfigTest {
     fun supportedKeys_hasExpectedCount() {
         // 真正的键集合对账在服务端（server/tests/test_config_spec.py，按名字比对）。
         // 这里只守住数量：设备端键凭空变少或变多都该是有意的改动。
-        assertEquals(46, RuntimeConfig.supportedKeys.size)
+        assertEquals(55, RuntimeConfig.supportedKeys.size)
     }
 
     @Test
@@ -156,6 +156,49 @@ class RuntimeConfigTest {
     }
 
     @Test
+    fun apply_readsStatusLineKeys() {
+        RuntimeConfig.apply(
+            JSONObject()
+                .put("status_line_enabled", false)
+                .put("status_line_text_size_sp", 18)
+                .put("status_line_text_color", "#223344")
+                .put("status_line_color_mode", "统一")
+                .put("status_line_background", false)
+                .put("status_line_align", "靠右")
+                .put("status_line_center_offset_dp", -20)
+                .put("status_line_x_dp", 60)
+                .put("status_line_y_dp", 24),
+        )
+
+        assertEquals(false, RuntimeConfig.statusLineEnabled)
+        assertEquals(18, RuntimeConfig.statusLineTextSizeSp)
+        assertEquals("#223344", RuntimeConfig.statusLineTextColor)
+        assertEquals("统一", RuntimeConfig.statusLineColorMode)
+        assertEquals(false, RuntimeConfig.statusLineBackground)
+        assertEquals("靠右", RuntimeConfig.statusLineAlign)
+        assertEquals(-20, RuntimeConfig.statusLineCenterOffsetDp)
+        assertEquals(60, RuntimeConfig.statusLineXDp)
+        assertEquals(24, RuntimeConfig.statusLineYDp)
+    }
+
+    @Test
+    fun apply_clampsStatusLineGeometry() {
+        // 字号 0 会让整行看不见；x/y 的 0 合法，负数则没有意义。
+        RuntimeConfig.apply(
+            JSONObject()
+                .put("status_line_text_size_sp", 0)
+                .put("status_line_center_offset_dp", -40)
+                .put("status_line_x_dp", -60)
+                .put("status_line_y_dp", -8),
+        )
+
+        assertEquals(1, RuntimeConfig.statusLineTextSizeSp)
+        assertEquals(-40, RuntimeConfig.statusLineCenterOffsetDp)
+        assertEquals(0, RuntimeConfig.statusLineXDp)
+        assertEquals(0, RuntimeConfig.statusLineYDp)
+    }
+
+    @Test
     fun apply_readsBathDbArchiveKeys() {
         RuntimeConfig.apply(
             JSONObject().put("bath_db_archive_enabled", true).put("bath_db_archive_threshold_mb", 50),
@@ -210,7 +253,7 @@ class RuntimeConfigTest {
                 RuntimeConfig.apply(JSONObject().put(key, value))
             }
         }
-        assertEquals(46, RuntimeConfig.supportedKeys.size)
+        assertEquals(55, RuntimeConfig.supportedKeys.size)
     }
 
     @Test
