@@ -29,6 +29,7 @@ import com.ryanliu.ntushower.features.selfmanage.A11yGuard
 import com.ryanliu.ntushower.features.selfmanage.BathDbArchiver
 import com.ryanliu.ntushower.features.selfmanage.LogShipper
 import com.ryanliu.ntushower.features.selfmanage.OtaUpdater
+import com.ryanliu.ntushower.features.statusline.StatusLineController
 import com.ryanliu.ntushower.features.voice.VoiceClipStore
 import com.ryanliu.ntushower.features.voice.VoicePlayer
 import com.ryanliu.ntushower.receiver.WatchdogReceiver
@@ -90,6 +91,7 @@ class AgentService : Service() {
     private lateinit var sender: DoorSnapshotSender
     private lateinit var overlay: CoverOverlay
     private lateinit var notice: NoticeController
+    private lateinit var statusLine: StatusLineController
     private lateinit var voicePlayer: VoicePlayer
     private lateinit var scheduler: CommandScheduler
     private var monitor: DoorMonitor? = null
@@ -132,9 +134,14 @@ class AgentService : Service() {
             // 没有缓存（首次安装、或读不出来）时保持默认值，随后被 hello_ack 覆盖。
             ConfigCache.load(this)?.let { RuntimeConfig.apply(it) }
             // 先造遮盖层，再造就绪时读取遮盖状态的控制器，最后造读数发送器：
-            // 遮盖层回调引用稍后初始化的 notice，遮罩只在自动化流程中显示，构造期不会回调。
-            overlay = CoverOverlay(this) { visible -> notice.onCoverVisibilityChanged(visible) }
+            // 遮盖层回调引用稍后初始化的 notice/statusLine，遮罩只在自动化流程中显示，
+            // 构造期不会回调。
+            overlay = CoverOverlay(this) { visible ->
+                notice.onCoverVisibilityChanged(visible)
+                statusLine.onCoverVisibilityChanged(visible)
+            }
             notice = NoticeController(this, deviceLog) { overlay.isShowingOrPending }
+            statusLine = StatusLineController(this, deviceLog) { overlay.isShowingOrPending }
             sender = DoorSnapshotSender(this) { reading -> notice.onReading(reading) }
             voicePlayer = VoicePlayer(
                 this,
@@ -199,6 +206,7 @@ class AgentService : Service() {
         override fun onDisconnected(reason: String) {
             trusted = false
             voicePlayer.setPrefetchAllowed(false)
+            statusLine.onDisconnected()
             deviceLog.gateway(connected = false, detail = reason)
             Log.w(TAG, "gateway disconnected: $reason")
         }
@@ -212,6 +220,8 @@ class AgentService : Service() {
                 MessageTypes.SESSION_COMMAND -> dispatchCommand(envelope)
 
                 MessageTypes.CONFIG_UPDATE -> applyConfig(envelope)
+
+                MessageTypes.DISPLAY_STATUS -> statusLine.onStatus(envelope.payload)
 
                 // 调试桥也要离开主线程：openAdbBridge 里的 setprop / stop adbd / start adbd
                 // 是同步 shell 调用，closeAdbBridge 的关闭回调里还藏着一条——两条都会把
@@ -306,6 +316,7 @@ class AgentService : Service() {
         RootShell.command.maxOutputBytes = RuntimeConfig.deviceExecMaxOutputBytes.toInt()
         recentOutcomes.setCapacity(RuntimeConfig.commandDedupMaxCount.toInt())
         notice.onConfigChanged()
+        statusLine.onConfigChanged()
         // hasReading 表示收到过完整读数：读失败不算，每次看门狗 tick 都会再补一次，
         // 直到读成为止。浴室数据库在没人洗浴时长期安静，事件驱动的采集补不上这次失败。
         if (notice.needsOccupancy() && !notice.hasReading()) {
@@ -519,6 +530,7 @@ class AgentService : Service() {
         maintenanceExecutor.shutdownNow()
         terminatingExecutor.shutdownNow()
         if (::notice.isInitialized) notice.destroy()
+        if (::statusLine.isInitialized) statusLine.destroy()
         if (::voicePlayer.isInitialized) voicePlayer.shutdown()
         closeAdbBridge("service destroyed")
         client.disconnect()

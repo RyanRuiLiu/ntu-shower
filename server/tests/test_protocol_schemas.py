@@ -32,6 +32,7 @@ KNOWN_TYPES = [
     "session.command_result",
     "config.update",
     "config.ack",
+    "display.status",
     "ota.upgrade_available",
     "ota.progress",
     "bridge.open",
@@ -74,6 +75,15 @@ SAMPLES: dict[str, dict[str, Any]] = {
     "session.command_result": {"payload": {"status": "ok", "reason_code": "", "data": {}}},
     "config.update": {"payload": {"revision": 1, "config": {"heartbeat_interval_s": 30}}},
     "config.ack": {"payload": {"revision": 1}},
+    "display.status": {
+        "payload": {
+            "floors": [
+                {"device_id": "<device-id>", "name": "1F", "online": True, "free": 3},
+                {"device_id": "2c94310a536777d6", "name": "2F", "online": True, "free": 0},
+                {"device_id": "3c94310a536777d6", "name": "3F", "online": False, "free": None},
+            ]
+        }
+    },
     "ota.upgrade_available": {
         "payload": {
             "version": "0.2.4",

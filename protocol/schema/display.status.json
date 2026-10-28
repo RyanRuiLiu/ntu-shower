@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://<public-domain>/schema/display.status.json",
+  "title": "Fleet free-door status line",
+  "allOf": [
+    {
+      "$ref": "https://<public-domain>/schema/envelope.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "display.status"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "floors"
+          ],
+          "properties": {
+            "floors": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "device_id",
+                  "name",
+                  "online",
+                  "free"
+                ],
+                "properties": {
+                  "device_id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "online": {
+                    "type": "boolean"
+                  },
+                  "free": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

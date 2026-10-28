@@ -515,7 +515,7 @@ GET      /api/v1/audit/background-task-runs          后台任务审计    admin
 
 | 路径 | 谁连 | 用途 |
 |---|---|---|
-| `/gateway/device` | 设备 | 设备报帧、服务端下发命令。先 `link.hello` 声明能力，之后 `link.ping`／`link.pong` 保活并更新偏差 |
+| `/gateway/device` | 设备 | 设备报帧、服务端下发命令。先 `link.hello` 声明能力，之后 `link.ping`／`link.pong` 保活并更新偏差；服务端另按现态推 `display.status`（各楼层空闲喷头数），设备不回执 |
 | `/gateway/bridge` | 服务端隧道 | 把设备的 ADB 端口转发出来，排障用 |
 | `/stream` | 消费端 | 实时推送，两类消息见下 |
 
@@ -528,7 +528,7 @@ GET      /api/v1/audit/background-task-runs          后台任务审计    admin
 
 ### 7.4 契约的唯一出处
 
-`protocol/schema/*.json`（16 份，含中文 `description`）。Kotlin 与 JavaScript 都不能 import Python，所以另两端拿到的是**生成产物**，由 `server/tools/sync_contracts.py` 生成、`test_contract_sync.py` 断言逐字节相同。**改契约就是改那 16 份里的源**，不要手改生成物。
+`protocol/schema/*.json`（17 份，含中文 `description`）。Kotlin 与 JavaScript 都不能 import Python，所以另两端拿到的是**生成产物**，由 `server/tools/sync_contracts.py` 生成、`test_contract_sync.py` 断言逐字节相同。**改契约就是改那 17 份里的源**，不要手改生成物。
 
 ---
 

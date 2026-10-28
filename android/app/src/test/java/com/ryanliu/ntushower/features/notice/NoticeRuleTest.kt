@@ -1,5 +1,6 @@
 package com.ryanliu.ntushower.features.notice
 
+import com.ryanliu.ntushower.features.overlay.OverlayAlign
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -24,7 +25,7 @@ class NoticeRuleTest {
         text = text,
         textSizeSp = 48,
         textColor = "#d94f16",
-        align = NoticeAlign.LEFT,
+        align = OverlayAlign.LEFT,
         centerOffsetDp = 0,
         xDp = 40,
         yDp = 40,
