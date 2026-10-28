@@ -142,7 +142,10 @@ class AgentService : Service() {
             }
             notice = NoticeController(this, deviceLog) { overlay.isShowingOrPending }
             statusLine = StatusLineController(this, deviceLog) { overlay.isShowingOrPending }
-            sender = DoorSnapshotSender(this) { reading -> notice.onReading(reading) }
+            sender = DoorSnapshotSender(this) { reading ->
+                notice.onReading(reading)
+                statusLine.onReading(reading)
+            }
             voicePlayer = VoicePlayer(
                 this,
                 // 单段下载 callTimeout 60s：播放命令另有总下载预算，预下载在独立后台线程，
@@ -221,7 +224,7 @@ class AgentService : Service() {
 
                 MessageTypes.CONFIG_UPDATE -> applyConfig(envelope)
 
-                MessageTypes.DISPLAY_STATUS -> statusLine.onStatus(envelope.payload)
+                MessageTypes.STATUS_LINE_UPDATE -> statusLine.onStatus(envelope.payload)
 
                 // 调试桥也要离开主线程：openAdbBridge 里的 setprop / stop adbd / start adbd
                 // 是同步 shell 调用，closeAdbBridge 的关闭回调里还藏着一条——两条都会把
@@ -319,7 +322,10 @@ class AgentService : Service() {
         statusLine.onConfigChanged()
         // hasReading 表示收到过完整读数：读失败不算，每次看门狗 tick 都会再补一次，
         // 直到读成为止。浴室数据库在没人洗浴时长期安静，事件驱动的采集补不上这次失败。
-        if (notice.needsOccupancy() && !notice.hasReading()) {
+        // 两个浮层都需要占用时共用同一次读；一次回调会同时喂给它们。
+        val noticeNeedsOccupancy = notice.needsOccupancy() && !notice.hasReading()
+        val statusLineNeedsOccupancy = statusLine.needsOccupancy() && !statusLine.hasReading()
+        if (noticeNeedsOccupancy || statusLineNeedsOccupancy) {
             worker.execute { sender.readAndNotify() }
         }
     }

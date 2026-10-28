@@ -127,7 +127,7 @@ object RuntimeConfig {
         private set
 
     // ── 楼层状态行 ──
-    // 内容由服务端汇总后经 display.status 推送；这里只保存显示样式与位置。
+    // 内容由服务端汇总后经 status_line.update 推送；这里只保存显示样式、位置与条件。
     @Volatile var statusLineEnabled = ConfigDefaults.STATUS_LINE_ENABLED
         private set
 
@@ -154,6 +154,27 @@ object RuntimeConfig {
         private set
 
     @Volatile var statusLineYDp = ConfigDefaults.STATUS_LINE_Y_DP.toInt()
+        private set
+
+    @Volatile var statusLineTimeEnabled = ConfigDefaults.STATUS_LINE_TIME_ENABLED
+        private set
+
+    @Volatile var statusLineTimeStart = ConfigDefaults.STATUS_LINE_TIME_START
+        private set
+
+    @Volatile var statusLineTimeEnd = ConfigDefaults.STATUS_LINE_TIME_END
+        private set
+
+    @Volatile var statusLineWeekdays = ConfigDefaults.STATUS_LINE_WEEKDAYS
+        private set
+
+    @Volatile var statusLineOccupancyEnabled = ConfigDefaults.STATUS_LINE_OCCUPANCY_ENABLED
+        private set
+
+    @Volatile var statusLineOccupancyMin = ConfigDefaults.STATUS_LINE_OCCUPANCY_MIN.toInt()
+        private set
+
+    @Volatile var statusLineOccupancyMax = ConfigDefaults.STATUS_LINE_OCCUPANCY_MAX.toInt()
         private set
 
     /**
@@ -322,6 +343,20 @@ object RuntimeConfig {
             { c, key -> statusLineXDp = c.optInt(key, statusLineXDp).coerceAtLeast(0) },
         "status_line_y_dp" to
             { c, key -> statusLineYDp = c.optInt(key, statusLineYDp).coerceAtLeast(0) },
+        "status_line_time_enabled" to
+            { c, key -> statusLineTimeEnabled = c.optBoolean(key, statusLineTimeEnabled) },
+        "status_line_time_start" to
+            { c, key -> statusLineTimeStart = c.optString(key, statusLineTimeStart) },
+        "status_line_time_end" to
+            { c, key -> statusLineTimeEnd = c.optString(key, statusLineTimeEnd) },
+        "status_line_weekdays" to
+            { c, key -> statusLineWeekdays = c.optString(key, statusLineWeekdays) },
+        "status_line_occupancy_enabled" to
+            { c, key -> statusLineOccupancyEnabled = c.optBoolean(key, statusLineOccupancyEnabled) },
+        "status_line_occupancy_min" to
+            { c, key -> statusLineOccupancyMin = c.optInt(key, statusLineOccupancyMin).coerceAtLeast(0) },
+        "status_line_occupancy_max" to
+            { c, key -> statusLineOccupancyMax = c.optInt(key, statusLineOccupancyMax).coerceAtLeast(0) },
         "automation_trace_enabled" to
             { c, key -> automationTraceEnabled = c.optBoolean(key, automationTraceEnabled) },
         "command_dedup_max_count" to

@@ -34,7 +34,7 @@ class MessageTypesTest {
                 "door.snapshot", "door.snapshot_ack",
                 "session.command", "session.command_result",
                 "config.update", "config.ack",
-                "display.status",
+                "status_line.update",
                 "bridge.open", "bridge.close",
                 "ota.upgrade_available", "ota.progress",
                 "device.log_upload",
@@ -46,7 +46,7 @@ class MessageTypesTest {
     @Test
     fun `values use the family dot event form`() {
         MessageTypes.ALL.forEach { type ->
-            assertTrue("不符合 <族>.<事件>：$type", type.matches(Regex("""^[a-z]+\.[a-z0-9_]+$""")))
+            assertTrue("不符合 <族>.<事件>：$type", type.matches(Regex("""^[a-z][a-z_]*\.[a-z0-9_]+$""")))
         }
     }
 }
