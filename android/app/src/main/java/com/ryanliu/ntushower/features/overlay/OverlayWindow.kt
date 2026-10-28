@@ -23,16 +23,23 @@ import android.widget.TextView
  * 可以单独出现，也可以同时出现。本类只负责窗口本身——加窗、更新、移除与几何，
  * 不决定"什么时候该显示"。
  *
- * **窗口类型必须是 [WindowManager.LayoutParams.TYPE_SYSTEM_ERROR]，不能用 TYPE_PHONE。**
- * KitKat 的层级（PhoneWindowManager.windowTypeToLayerLw）里 TYPE_PHONE 是第 3 层，
- * 在状态栏（16）、下拉通知面板（15）、虚拟按键（20）之下——这台 ROM 的边缘划出
- * 手势是死的，系统栏一旦出现就永远挂着，文案浮在顶部会被它盖住。
- * TYPE_SYSTEM_ERROR 在第 22 层，高于上述全部系统窗口；权限仍是已有的
- * SYSTEM_ALERT_WINDOW，不新增。文案位置在顶部、不可触摸，盖过系统栏没有副作用。
+ * **窗口类型由调用方给，层级靠类型而不是添加顺序**：
+ * - 屏幕提示用 `TYPE_SYSTEM_ALERT`（KitKat 第 9 层）；
+ * - 楼层状态行用 `TYPE_PHONE`（第 3 层），只压住浴室 App。
+ *
+ * 两者都是标准的应用浮层，都在系统栏（第 16 层）之下；提示因层级更高而始终在状态行
+ * 上方，不依赖“同类型窗口后加的在上”这种顺序。代价是系统栏一旦出现会盖住它们——
+ * 这是不越级的直接结果，不是遗漏；本机浴室 App 全屏时不出现系统栏。
+ *
+ * 两个类型在 KitKat 的 `checkAddPermission` 里都只要求已有的 `SYSTEM_ALERT_WINDOW`，
+ * 不新增权限。
  *
  * 所有方法只在主线程调用；状态 `added` 只在主线程读写。
  */
-class OverlayWindow(private val context: Context) {
+class OverlayWindow(
+    private val context: Context,
+    private val windowType: Int = WindowManager.LayoutParams.TYPE_SYSTEM_ALERT,
+) {
 
     /**
      * 一次显示所需的全部外观参数。
@@ -182,7 +189,7 @@ class OverlayWindow(private val context: Context) {
         return WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.TYPE_SYSTEM_ERROR,
+            windowType,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,

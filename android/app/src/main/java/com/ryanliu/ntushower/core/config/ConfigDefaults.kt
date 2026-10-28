@@ -104,8 +104,17 @@ object ConfigDefaults {
     /** 状态行的配色方式 */
     const val STATUS_LINE_COLOR_MODE = "按状态"
 
+    /** 空闲楼层颜色 */
+    const val STATUS_LINE_AVAILABLE_COLOR = "#6bc600"
+
+    /** 不可用楼层颜色 */
+    const val STATUS_LINE_UNAVAILABLE_COLOR = "#999999"
+
     /** 显示状态行背景 */
     const val STATUS_LINE_BACKGROUND = true
+
+    /** 状态行背景颜色 */
+    const val STATUS_LINE_BACKGROUND_COLOR = "#cc0066cc"
 
     /** 状态行水平对齐 */
     const val STATUS_LINE_ALIGN = "居中"
@@ -232,7 +241,10 @@ object ConfigDefaults {
         .put("status_line_text_size_sp", STATUS_LINE_TEXT_SIZE_SP)
         .put("status_line_text_color", STATUS_LINE_TEXT_COLOR)
         .put("status_line_color_mode", STATUS_LINE_COLOR_MODE)
+        .put("status_line_available_color", STATUS_LINE_AVAILABLE_COLOR)
+        .put("status_line_unavailable_color", STATUS_LINE_UNAVAILABLE_COLOR)
         .put("status_line_background", STATUS_LINE_BACKGROUND)
+        .put("status_line_background_color", STATUS_LINE_BACKGROUND_COLOR)
         .put("status_line_align", STATUS_LINE_ALIGN)
         .put("status_line_center_offset_dp", STATUS_LINE_CENTER_OFFSET_DP)
         .put("status_line_x_dp", STATUS_LINE_X_DP)

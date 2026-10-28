@@ -93,7 +93,7 @@ class RuntimeConfigTest {
     fun supportedKeys_hasExpectedCount() {
         // 真正的键集合对账在服务端（server/tests/test_config_spec.py，按名字比对）。
         // 这里只守住数量：设备端键凭空变少或变多都该是有意的改动。
-        assertEquals(62, RuntimeConfig.supportedKeys.size)
+        assertEquals(65, RuntimeConfig.supportedKeys.size)
     }
 
     @Test
@@ -163,7 +163,10 @@ class RuntimeConfigTest {
                 .put("status_line_text_size_sp", 18)
                 .put("status_line_text_color", "#223344")
                 .put("status_line_color_mode", "统一")
+                .put("status_line_available_color", "#112233")
+                .put("status_line_unavailable_color", "#445566")
                 .put("status_line_background", false)
+                .put("status_line_background_color", "#778899")
                 .put("status_line_align", "靠右")
                 .put("status_line_center_offset_dp", -20)
                 .put("status_line_x_dp", 60)
@@ -181,7 +184,10 @@ class RuntimeConfigTest {
         assertEquals(18, RuntimeConfig.statusLineTextSizeSp)
         assertEquals("#223344", RuntimeConfig.statusLineTextColor)
         assertEquals("统一", RuntimeConfig.statusLineColorMode)
+        assertEquals("#112233", RuntimeConfig.statusLineAvailableColor)
+        assertEquals("#445566", RuntimeConfig.statusLineUnavailableColor)
         assertEquals(false, RuntimeConfig.statusLineBackground)
+        assertEquals("#778899", RuntimeConfig.statusLineBackgroundColor)
         assertEquals("靠右", RuntimeConfig.statusLineAlign)
         assertEquals(-20, RuntimeConfig.statusLineCenterOffsetDp)
         assertEquals(60, RuntimeConfig.statusLineXDp)
@@ -271,7 +277,7 @@ class RuntimeConfigTest {
                 RuntimeConfig.apply(JSONObject().put(key, value))
             }
         }
-        assertEquals(62, RuntimeConfig.supportedKeys.size)
+        assertEquals(65, RuntimeConfig.supportedKeys.size)
     }
 
     @Test
