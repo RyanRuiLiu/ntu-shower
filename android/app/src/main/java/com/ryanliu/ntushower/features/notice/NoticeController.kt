@@ -4,43 +4,43 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.ryanliu.ntushower.core.clock.Clock
-import com.ryanliu.ntushower.core.clock.ServerClock
 import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.log.DeviceLog
 import com.ryanliu.ntushower.core.threading.MainThread
 import com.ryanliu.ntushower.features.doors.DoorReading
-import java.util.TimeZone
+import com.ryanliu.ntushower.features.overlay.ConditionClock
+import com.ryanliu.ntushower.features.overlay.ConditionInputs
+import com.ryanliu.ntushower.features.overlay.ConditionSettings
+import com.ryanliu.ntushower.features.overlay.LocalMoment
+import com.ryanliu.ntushower.features.overlay.OverlayPresenter
+import com.ryanliu.ntushower.features.overlay.OverlayReason
 
 /**
  * 屏幕提示的主线程状态机。
  *
  * 所有状态只在主线程读写；数据库读取在 AgentService.worker 上完成，[onReading] 把结果
- * 投递到主线程。判定全部委托给 [NoticeRule]；本类只负责收集输入、驱动窗口、记录变化。
+ * 投递到主线程。判定全部委托给 [NoticeRule] 与共用的 [com.ryanliu.ntushower.features.overlay.ConditionRule]；
+ * 本类只负责收集输入、驱动窗口、记录变化。
  *
- * 时间条件用 [ServerClock] 的服务端时间轴，经设备系统时区换算成 [LocalMoment]；没有
- * 锚点时时间条件未决，按隐藏处理。占用条件只在收到完整 [DoorReading] 时参与判定。
+ * 时间条件用 [ConditionClock] 的服务端时间轴，经设备系统时区换算成 [LocalMoment]；
+ * 没有锚点时时间条件未决，按隐藏处理。占用条件只在收到完整 [DoorReading] 时参与判定。
  * 遮盖层状态每次判定现读 [coverVisible]；遮盖层显示期间提示窗被移除。
  */
-// TooManyFunctions：状态机的入口、定时器、窗口驱动各自是独立小函数；合并会把线程边界
+// TooManyFunctions：状态机的入口、定时器与窗口驱动各自是独立小函数；合并会把线程边界
 // 与重试路径藏进一个长方法，反而更难核对。
 @Suppress("TooManyFunctions")
 class NoticeController(context: Context, private val deviceLog: DeviceLog, private val coverVisible: () -> Boolean) {
 
-    private val overlay = NoticeOverlay(context)
     private val handler = Handler(Looper.getMainLooper())
+    private val presenter = OverlayPresenter(NoticeOverlay(context), handler, retry = { evaluate() })
 
-    private var windowAdded = false
-    private var appliedSettings: NoticeSettings? = null
     private var lastReading: DoorReading? = null
     private var hasReading = false
     private var lastNeedsOccupancy = false
-    private var lastLoggedDecision: NoticeDecision? = null
-    private var retryPending = false
+    private var lastLoggedReason: String? = null
     private var destroyed = false
 
     private val timeTickRunnable = Runnable { onTimeTick() }
-    private val addRetryRunnable = Runnable { onAddRetry() }
 
     /** 是否收到过**完整**读数；供 AgentService 判断要不要为看门狗补读一次。 */
     fun hasReading(): Boolean = hasReading
@@ -78,7 +78,7 @@ class NoticeController(context: Context, private val deviceLog: DeviceLog, priva
         evaluate()
     }
 
-    /** 服务销毁：停止两个回调、移除窗口；之后到达的事件丢弃。 */
+    /** 服务销毁：停止全部回调、移除窗口；之后到达的事件丢弃。 */
     fun destroy() {
         if (!MainThread.isCurrent()) {
             MainThread.post { destroy() }
@@ -87,11 +87,7 @@ class NoticeController(context: Context, private val deviceLog: DeviceLog, priva
         if (destroyed) return
         destroyed = true
         handler.removeCallbacksAndMessages(null)
-        retryPending = false
-        overlay.destroy()
-        windowAdded = overlay.isAdded
-        if (windowAdded) Log.w(TAG, "notice window still attached after destroy")
-        appliedSettings = null
+        presenter.destroy()
     }
 
     private fun onReadingOnMain(reading: DoorReading) {
@@ -114,22 +110,18 @@ class NoticeController(context: Context, private val deviceLog: DeviceLog, priva
 
     private fun evaluateInternal() {
         val settings = currentSettings()
+        val condition = settings.condition
         val reading = lastReading
-        val occupied = if (settings.occupancyEnabled && reading?.complete == true) {
+        val occupied = if (condition.occupancyEnabled && reading?.complete == true) {
             reading.doors.count { it.isOccupied() }
         } else {
             null
         }
-        val moment = if (settings.timeEnabled) {
-            val serverMs = ServerClock.nowRfc3339()?.let { Clock.parseRfc3339(it)?.time }
-            serverMs?.let { NoticeRule.localMoment(it, TimeZone.getDefault()) }
-        } else {
-            null
-        }
+        val moment = if (condition.timeEnabled) ConditionClock.now() else null
 
-        val decision = NoticeRule.decide(settings, moment, occupied, coverVisible())
-        applyDecision(settings, decision)
-        logDecision(decision, occupied, moment)
+        val decision = NoticeRule.decide(settings, ConditionInputs(moment, occupied, coverVisible()))
+        if (decision.visible) presenter.present(settings) else presenter.hide()
+        logDecision(decision.reason, occupied, moment)
     }
 
     private fun currentSettings(): NoticeSettings = NoticeSettings(
@@ -141,94 +133,37 @@ class NoticeController(context: Context, private val deviceLog: DeviceLog, priva
         centerOffsetDp = RuntimeConfig.noticeCenterOffsetDp,
         xDp = RuntimeConfig.noticeXDp,
         yDp = RuntimeConfig.noticeYDp,
-        timeEnabled = RuntimeConfig.noticeTimeEnabled,
-        timeStart = RuntimeConfig.noticeTimeStart,
-        timeEnd = RuntimeConfig.noticeTimeEnd,
-        weekdays = RuntimeConfig.noticeWeekdays,
-        occupancyEnabled = RuntimeConfig.noticeOccupancyEnabled,
-        occupancyMin = RuntimeConfig.noticeOccupancyMin,
-        occupancyMax = RuntimeConfig.noticeOccupancyMax,
+        condition = ConditionSettings(
+            timeEnabled = RuntimeConfig.noticeTimeEnabled,
+            timeStart = RuntimeConfig.noticeTimeStart,
+            timeEnd = RuntimeConfig.noticeTimeEnd,
+            weekdays = RuntimeConfig.noticeWeekdays,
+            occupancyEnabled = RuntimeConfig.noticeOccupancyEnabled,
+            occupancyMin = RuntimeConfig.noticeOccupancyMin,
+            occupancyMax = RuntimeConfig.noticeOccupancyMax,
+        ),
     )
 
-    private fun applyDecision(settings: NoticeSettings, decision: NoticeDecision) {
-        if (decision.visible) {
-            if (!windowAdded) {
-                val shown = overlay.show(settings)
-                windowAdded = overlay.isAdded
-                if (shown && windowAdded) {
-                    appliedSettings = settings
-                    cancelAddRetry()
-                } else {
-                    appliedSettings = null
-                    scheduleAddRetry()
-                }
-            } else if (settings != appliedSettings) {
-                val updated = overlay.update(settings)
-                windowAdded = overlay.isAdded
-                if (updated) {
-                    appliedSettings = settings
-                    cancelAddRetry()
-                } else {
-                    appliedSettings = null
-                    scheduleAddRetry()
-                }
-            } else {
-                cancelAddRetry()
-            }
-        } else {
-            if (windowAdded) {
-                overlay.hide()
-                windowAdded = overlay.isAdded
-                // 移除失败（视图仍附着）时窗口还在屏幕上；排一次重试继续尝试隐藏。
-                if (windowAdded) scheduleAddRetry()
-            }
-            if (!windowAdded) {
-                appliedSettings = null
-                cancelAddRetry()
-            }
-        }
-    }
-
-    private fun logDecision(decision: NoticeDecision, occupied: Int?, moment: LocalMoment?) {
-        if (decision == lastLoggedDecision) return
-        val detail = "reason=${decision.reason} occupied=${occupied ?: "unknown"} " +
+    private fun logDecision(reason: String, occupied: Int?, moment: LocalMoment?) {
+        if (reason == lastLoggedReason) return
+        val detail = "reason=$reason occupied=${occupied ?: "unknown"} " +
             "weekday=${moment?.isoWeekday ?: "unknown"} minute=${moment?.minuteOfDay ?: "unknown"}"
-        deviceLog.lifecycle(if (decision.visible) "notice.visible" else "notice.hidden", detail)
-        Log.i(TAG, "notice ${decision.reason} $detail")
-        lastLoggedDecision = decision
+        deviceLog.lifecycle(if (reason == OverlayReason.VISIBLE) "notice.visible" else "notice.hidden", detail)
+        Log.i(TAG, "notice $reason $detail")
+        lastLoggedReason = reason
     }
 
     private fun scheduleTimeTick() {
         if (destroyed) return
         handler.removeCallbacks(timeTickRunnable)
         if (!RuntimeConfig.noticeEnabled || !RuntimeConfig.noticeTimeEnabled) return
-
-        val serverMs = ServerClock.nowRfc3339()?.let { Clock.parseRfc3339(it)?.time }
-        handler.postDelayed(timeTickRunnable, NoticeRule.delayUntilNextMinute(serverMs))
+        handler.postDelayed(timeTickRunnable, ConditionClock.delayUntilNextMinute())
     }
 
     private fun onTimeTick() {
         if (destroyed) return
         evaluate()
         scheduleTimeTick()
-    }
-
-    private fun scheduleAddRetry() {
-        if (destroyed || retryPending) return
-        retryPending = true
-        handler.postDelayed(addRetryRunnable, ADD_RETRY_MS)
-    }
-
-    private fun onAddRetry() {
-        if (destroyed) return
-        retryPending = false
-        evaluate()
-    }
-
-    private fun cancelAddRetry() {
-        if (!retryPending) return
-        handler.removeCallbacks(addRetryRunnable)
-        retryPending = false
     }
 
     private fun ensureMain(entry: String): Boolean {
@@ -239,6 +174,5 @@ class NoticeController(context: Context, private val deviceLog: DeviceLog, priva
 
     companion object {
         private const val TAG = "NoticeController"
-        private const val ADD_RETRY_MS = 30_000L
     }
 }

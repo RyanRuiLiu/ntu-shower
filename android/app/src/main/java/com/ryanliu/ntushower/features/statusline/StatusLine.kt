@@ -1,5 +1,6 @@
 package com.ryanliu.ntushower.features.statusline
 
+import com.ryanliu.ntushower.features.overlay.ConditionSettings
 import org.json.JSONObject
 
 /** 服务端推送的一台设备现状：楼层名、可用与否、空闲喷头数。 */
@@ -28,17 +29,9 @@ data class StatusLineSettings(
     val centerOffsetDp: Int,
     val xDp: Int,
     val yDp: Int,
+    val condition: ConditionSettings,
     val floors: List<FloorStatus>,
 )
-
-/** 显隐原因的唯一出处；日志与测试都用这些常量。 */
-object StatusLineReason {
-    const val VISIBLE = "visible"
-    const val DISABLED = "disabled"
-    const val COVER_VISIBLE = "cover_visible"
-    const val NO_STATUS = "no_status"
-    const val STALE = "stale"
-}
 
 /**
  * 楼层状态行的内容规则：服务端给结构化的楼层列表，文字在这里拼。
@@ -57,7 +50,7 @@ object StatusLine {
     private const val OFFLINE = "离线"
     private const val NO_DATA = "无数据"
 
-    /** 解析 `display.status` 的 payload；形状不对的楼层丢掉，不因一条坏数据整行不显示。 */
+    /** 解析 `status_line.update` 的 payload；形状不对的楼层丢掉，不因一条坏数据整行不显示。 */
     fun parse(payload: JSONObject): List<FloorStatus> {
         val array = payload.optJSONArray("floors") ?: return emptyList()
         return (0 until array.length()).mapNotNull { index ->

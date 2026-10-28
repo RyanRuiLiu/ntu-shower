@@ -100,7 +100,8 @@ def test_unsupported_action_fails_before_sending(fresh_db: str, monkeypatch: pyt
     result = asyncio.run(flow())
     assert result["status"] == "failed"
     assert result["reason_code"] == "device.unsupported_action"
-    assert fake.sent == []
+    # 状态行是服务端另一条现态推送通道，与命令无关；这里只断言没有命令帧下发
+    assert [frame for frame in (json.loads(text) for text in fake.sent) if frame["type"] == "session.command"] == []
 
     rows = command_audit.list_commands(device_id=device_id)
     assert rows[0]["reason_code"] == "device.unsupported_action"

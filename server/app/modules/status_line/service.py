@@ -12,12 +12,13 @@
 - **在线但没上报过任何喷头的设备给 `free = null`**，设备端显示「无数据」。给 0 会
   把「不知道」说成「满了」。
 - 顺序沿用设备清单的展示顺序（管理员排的 `sort_order`），与设备下拉、设备表同序。
-- 接收方还要**已经上报过喷头**：它说明这台设备的采集链路已经跑起来；刚入网、还没
-  连上浴室库的设备不白收帧，状态行在它的首次采集之后自然出现。
+- **接收方 = 已信任且有活动连接**，与 `config.update` / `device.update` 同一条口径；
+  刚上线、还没上报喷头的设备也收帧，它自己的楼层在首次采集前显示「无数据」，其余
+  楼层立刻可见。
 
 ## 推送形态
 
-`display.status` 是现态，不是事件：不排队、不回执、不补发。每轮比对整份载荷，
+`status_line.update` 是现态，不是事件：不排队、不回执、不补发。每轮比对整份载荷，
 变了就推，没变则每 [KEEPALIVE_S] 秒重发一次——设备据此判断这条数据还活着，超过
 三倍保活时长没收到就自行隐藏。链路断开时设备端立即隐藏，重连后的第一轮推送恢复。
 旧版 APK 不认识这条消息，按既有规则忽略，因此不需要能力协商。
@@ -87,7 +88,7 @@ def _snapshot() -> _Snapshot:
                 "free": free,
             }
         )
-        if online and live:
+        if online:
             recipients.append(_Recipient(device_id, manager.generation_of(device_id)))
     return _Snapshot({"floors": floors}, tuple(recipients))
 
@@ -112,7 +113,7 @@ async def _run() -> None:
             now = loop.time()
             if now - last_failure_log >= FAILURE_LOG_INTERVAL_S:
                 last_failure_log = now
-                log_event("ERROR", "display.snapshot-failed", "楼层状态汇总失败，下一轮重试", error=str(exc))
+                log_event("ERROR", "status_line.snapshot-failed", "楼层状态汇总失败，下一轮重试", error=str(exc))
             await asyncio.sleep(PUSH_INTERVAL_S)
             continue
 
@@ -129,11 +130,11 @@ async def _run() -> None:
             if not changed and fresh_connection and now - last_sent.get(device_id, 0.0) < KEEPALIVE_S:
                 continue
             try:
-                sent = await manager.send_to(device_id, protocol.envelope("display.status", snapshot.payload))
+                sent = await manager.send_to(device_id, protocol.envelope("status_line.update", snapshot.payload))
             except Exception as exc:  # noqa: BLE001 —— 一条坏连接不影响其余设备
                 log_event(
                     "WARNING",
-                    "display.push-failed",
+                    "status_line.push-failed",
                     "楼层状态推送异常",
                     device_id=device_id,
                     error=str(exc),
@@ -150,7 +151,7 @@ def start() -> None:
     global _task
     if _task is None:
         _task = asyncio.create_task(_run())
-        log_event("INFO", "display.started", "楼层状态推送已启动")
+        log_event("INFO", "status_line.started", "楼层状态推送已启动")
 
 
 async def stop() -> None:
@@ -163,4 +164,4 @@ async def stop() -> None:
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await task
-    log_event("INFO", "display.stopped", "楼层状态推送已停止")
+    log_event("INFO", "status_line.stopped", "楼层状态推送已停止")

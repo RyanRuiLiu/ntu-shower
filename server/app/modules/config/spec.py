@@ -154,6 +154,7 @@ GROUPS: tuple[GroupSpec, ...] = (
     GroupSpec("notice", "屏幕提示", "device"),
     GroupSpec("notice_condition", "提示条件", "device"),
     GroupSpec("status_line", "楼层状态行", "device"),
+    GroupSpec("status_line_condition", "状态行条件", "device"),
     GroupSpec("doors", "喷头状态采集", "device"),
     GroupSpec("ui", "界面操作", "device"),
     GroupSpec("automation", "自动化流程", "device"),
@@ -612,6 +613,84 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         maximum=2000,
         unit="dp",
         group="status_line",
+    ),
+    # ── 状态行条件 ──
+    # 与屏幕提示共用同一套判定（时间窗 / 本地占用），但值是独立的一组：两个窗口
+    # 可以各自显示、各自隐藏，互不牵连。
+    ConfigSpec(
+        "status_line_time_enabled",
+        BOOL,
+        DEVICE,
+        False,
+        "启用时间条件",
+        "开启后，只有设备当前的服务端时间落在下面的星期与时段内才显示状态行。服务端时间"
+        "尚无锚点时（刚启动且未连上服务端）不显示；设备离线但已有锚点时，仍按单调钟"
+        "继续走时。时间按设备系统时区换算，与浴室 App 的日历一致",
+        group="status_line_condition",
+    ),
+    ConfigSpec(
+        "status_line_time_start",
+        TIME,
+        DEVICE,
+        "22:00",
+        "状态行时段开始",
+        "每天的开始时刻，含这一刻。开始晚于结束时视为跨午夜（如 23:30–00:30）；开始等于"
+        "结束表示全天。延长服务期间设备表盘可能被拨快跨日，而本条件按真实的服务端时间"
+        "判断，两者会不一致",
+        group="status_line_condition",
+    ),
+    ConfigSpec(
+        "status_line_time_end",
+        TIME,
+        DEVICE,
+        "23:00",
+        "状态行时段结束",
+        "每天的结束时刻，不含这一刻。与开始时刻相同表示全天",
+        group="status_line_condition",
+    ),
+    ConfigSpec(
+        "status_line_weekdays",
+        WEEKDAYS,
+        DEVICE,
+        "1,2,3,4,5,6,7",
+        "状态行生效星期",
+        "只在选中的星期生效。1=周一……7=周日。跨午夜的时段按开始那一天归属：例如周五 "
+        "23:30–00:30 会覆盖周六 00:00–00:30，即使周六未勾选",
+        group="status_line_condition",
+    ),
+    ConfigSpec(
+        "status_line_occupancy_enabled",
+        BOOL,
+        DEVICE,
+        False,
+        "启用占用条件",
+        "开启后，只有当前占用的喷头数落在下面的区间内才显示状态行。占用指等待开阀、"
+        "淋浴中、已暂停三种状态；维修中与已禁用不算。读不到完整的喷头读数时不显示",
+        group="status_line_condition",
+    ),
+    ConfigSpec(
+        "status_line_occupancy_min",
+        INT,
+        DEVICE,
+        0,
+        "占用喷头数下限",
+        "包含下限。与上限相同可以精确匹配一个数字；下限大于上限时状态行不会显示",
+        minimum=0,
+        maximum=48,
+        unit="个",
+        group="status_line_condition",
+    ),
+    ConfigSpec(
+        "status_line_occupancy_max",
+        INT,
+        DEVICE,
+        48,
+        "占用喷头数上限",
+        "包含上限。最大 48 与协议里的喷头号上限一致；0 表示只在没有喷头被占用时显示",
+        minimum=0,
+        maximum=48,
+        unit="个",
+        group="status_line_condition",
     ),
     ConfigSpec(
         "automation_trace_enabled",

@@ -29,8 +29,8 @@ object MessageTypes {
     const val CONFIG_UPDATE = "config.update"
     const val CONFIG_ACK = "config.ack"
 
-    // ── 屏幕显示 ──
-    const val DISPLAY_STATUS = "display.status"
+    // ── 楼层状态行 ──
+    const val STATUS_LINE_UPDATE = "status_line.update"
 
     // ── 调试桥（服务端发出即返回，不等答复） ──
     const val BRIDGE_OPEN = "bridge.open"
@@ -56,7 +56,7 @@ object MessageTypes {
         SESSION_COMMAND_RESULT,
         CONFIG_UPDATE,
         CONFIG_ACK,
-        DISPLAY_STATUS,
+        STATUS_LINE_UPDATE,
         BRIDGE_OPEN,
         BRIDGE_CLOSE,
         OTA_UPGRADE_AVAILABLE,

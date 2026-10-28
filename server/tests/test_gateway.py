@@ -487,12 +487,13 @@ def test_snapshot_that_cannot_be_stored_gets_no_ack(
 
     with helpers.trusted_online(client, "dev-snap-not-stored", admin_headers) as ws:
         ws.send_text(helpers.frame("door.snapshot", {"snapshot_id": "not-stored-1", "doors": [{"door_no": 1}]}))
-        # 下一条非 ping 的帧必须是 pong（链路还活着、ack 被扣下）；ack 先到即失败
+        # 下一条非 ping、非状态行的帧必须是 pong（链路还活着、ack 被扣下）
         ws.send_text(helpers.frame("link.ping", {"sender_time": now_rfc3339()}))
         while True:
             msg = json.loads(ws.receive_text())
-            if msg["type"] == "link.ping":
-                ws.send_text(helpers.frame("link.pong", {}))
+            if msg["type"] in ("link.ping", "status_line.update"):
+                if msg["type"] == "link.ping":
+                    ws.send_text(helpers.frame("link.pong", {}))
                 continue
             assert msg["type"] == "link.pong", f"先到的帧是 {msg['type']}，ack 未被扣下"
             break
