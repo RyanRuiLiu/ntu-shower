@@ -6,30 +6,32 @@ import android.text.Spannable
 import android.text.SpannableString
 import android.text.style.ForegroundColorSpan
 import android.util.Log
+import com.ryanliu.ntushower.features.overlay.OverlayTarget
 import com.ryanliu.ntushower.features.overlay.OverlayWindow
 
 /**
  * 楼层状态行窗口：一行文字，默认居中贴在屏幕顶部。
  *
  * 与屏幕提示是两个独立窗口：各自的位置、字号、配色互不影响，可以同时出现。窗口的
- * 层级、几何与重试语义都在 [OverlayWindow] 里。
+ * 层级、几何与重试语义都在 [OverlayWindow] 与
+ * [com.ryanliu.ntushower.features.overlay.OverlayPresenter] 里。
  *
  * 「按状态」配色只改颜色，不改文字：有空闲为绿色，0 个空闲与离线/无数据为灰色。
  * 颜色取 Material 500 的标准绿/灰——它们是语义色，不随后台主题变化。
  */
-class StatusLineOverlay(context: Context) {
+class StatusLineOverlay(context: Context) : OverlayTarget<StatusLineSettings> {
 
     private val window = OverlayWindow(context)
 
-    val isAdded: Boolean get() = window.isAdded
+    override val isAdded: Boolean get() = window.isAdded
 
-    fun show(settings: StatusLineSettings): Boolean = window.show(style(settings))
+    override fun show(settings: StatusLineSettings): Boolean = window.show(style(settings))
 
-    fun update(settings: StatusLineSettings): Boolean = window.update(style(settings))
+    override fun update(settings: StatusLineSettings): Boolean = window.update(style(settings))
 
-    fun hide(): Boolean = window.hide()
+    override fun hide(): Boolean = window.hide()
 
-    fun destroy() {
+    override fun destroy() {
         window.destroy()
     }
 

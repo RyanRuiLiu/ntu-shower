@@ -93,7 +93,7 @@ class RuntimeConfigTest {
     fun supportedKeys_hasExpectedCount() {
         // 真正的键集合对账在服务端（server/tests/test_config_spec.py，按名字比对）。
         // 这里只守住数量：设备端键凭空变少或变多都该是有意的改动。
-        assertEquals(55, RuntimeConfig.supportedKeys.size)
+        assertEquals(62, RuntimeConfig.supportedKeys.size)
     }
 
     @Test
@@ -167,7 +167,14 @@ class RuntimeConfigTest {
                 .put("status_line_align", "靠右")
                 .put("status_line_center_offset_dp", -20)
                 .put("status_line_x_dp", 60)
-                .put("status_line_y_dp", 24),
+                .put("status_line_y_dp", 24)
+                .put("status_line_time_enabled", true)
+                .put("status_line_time_start", "21:30")
+                .put("status_line_time_end", "22:30")
+                .put("status_line_weekdays", "1,3,5")
+                .put("status_line_occupancy_enabled", true)
+                .put("status_line_occupancy_min", 2)
+                .put("status_line_occupancy_max", 9),
         )
 
         assertEquals(false, RuntimeConfig.statusLineEnabled)
@@ -179,6 +186,13 @@ class RuntimeConfigTest {
         assertEquals(-20, RuntimeConfig.statusLineCenterOffsetDp)
         assertEquals(60, RuntimeConfig.statusLineXDp)
         assertEquals(24, RuntimeConfig.statusLineYDp)
+        assertEquals(true, RuntimeConfig.statusLineTimeEnabled)
+        assertEquals("21:30", RuntimeConfig.statusLineTimeStart)
+        assertEquals("22:30", RuntimeConfig.statusLineTimeEnd)
+        assertEquals("1,3,5", RuntimeConfig.statusLineWeekdays)
+        assertEquals(true, RuntimeConfig.statusLineOccupancyEnabled)
+        assertEquals(2, RuntimeConfig.statusLineOccupancyMin)
+        assertEquals(9, RuntimeConfig.statusLineOccupancyMax)
     }
 
     @Test
@@ -189,13 +203,17 @@ class RuntimeConfigTest {
                 .put("status_line_text_size_sp", 0)
                 .put("status_line_center_offset_dp", -40)
                 .put("status_line_x_dp", -60)
-                .put("status_line_y_dp", -8),
+                .put("status_line_y_dp", -8)
+                .put("status_line_occupancy_min", -2)
+                .put("status_line_occupancy_max", -1),
         )
 
         assertEquals(1, RuntimeConfig.statusLineTextSizeSp)
         assertEquals(-40, RuntimeConfig.statusLineCenterOffsetDp)
         assertEquals(0, RuntimeConfig.statusLineXDp)
         assertEquals(0, RuntimeConfig.statusLineYDp)
+        assertEquals(0, RuntimeConfig.statusLineOccupancyMin)
+        assertEquals(0, RuntimeConfig.statusLineOccupancyMax)
     }
 
     @Test
@@ -253,7 +271,7 @@ class RuntimeConfigTest {
                 RuntimeConfig.apply(JSONObject().put(key, value))
             }
         }
-        assertEquals(55, RuntimeConfig.supportedKeys.size)
+        assertEquals(62, RuntimeConfig.supportedKeys.size)
     }
 
     @Test

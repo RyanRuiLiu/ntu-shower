@@ -52,7 +52,6 @@ from .modules.config.routes import admin_router as config_admin_router
 from .modules.devices import repository as devices_repository
 from .modules.devices.routes import admin_router as devices_admin_router
 from .modules.devices.routes import router as devices_router
-from .modules.display import service as display_service
 from .modules.doors import repository as doors_repository
 from .modules.doors.routes import router as doors_router
 from .modules.extend_hours import repository as extend_hours_repository
@@ -64,6 +63,7 @@ from .modules.ota.routes import router as ota_router
 from .modules.sessions import scheduler as sessions_scheduler
 from .modules.sessions.routes import router as sessions_router
 from .modules.stats.routes import router as stats_router
+from .modules.status_line import service as status_line_service
 from .modules.tasks.routes import admin_router as tasks_admin_router
 from .modules.tasks.routes import router as tasks_router
 from .modules.voice import repository as voice_repository
@@ -114,11 +114,11 @@ def create_app() -> FastAPI:
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         sessions_scheduler.start()
         extend_hours_service.start()
-        display_service.start()
+        status_line_service.start()
         audit.start_prune()
         yield
         audit.stop_prune()
-        await display_service.stop()
+        await status_line_service.stop()
         extend_hours_service.stop()
         sessions_scheduler.stop()
 

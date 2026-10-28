@@ -38,8 +38,8 @@ android {
         applicationId = "com.ryanliu.ntushower"
         minSdk = 19          // 设备 ROM 固定 Android 4.4，运行时下限不可动
         targetSdk = 19       // 目标设备冻结在 4.4，无升级路径
-        versionCode = 108
-        versionName = "0.5.7"
+        versionCode = 109
+        versionName = "0.5.8"
         buildConfigField("String", "SERVER_DOMAIN", "\"${providers.gradleProperty("serverDomain").get()}\"")
         buildConfigField("String", "APP_VERSION", "\"$versionName\"")
         buildConfigField("int", "VERSION_CODE", "$versionCode")
@@ -149,6 +149,10 @@ val frameworkBoundClasses = listOf(
     "**/features/statusline/StatusLineReason*",
     // 屏幕提示与状态行共用的浮层窗口：窗口 token 与几何依赖真实 WindowManager
     "**/features/overlay/OverlayWindow*",
+    // 浮层展示器：Handler、窗口 token 与重试都依赖主线程和真实系统服务
+    "**/features/overlay/OverlayPresenter*",
+    // 条件时钟：服务端锚点外壳；本地换算与分钟对齐由 ConditionRuleTest 覆盖
+    "**/features/overlay/ConditionClock*",
     // 语音播报：下载/播放/后台预下载/音量守卫依赖 OkHttp 文件系统、线程、MediaPlayer/
     // AudioManager、SharedPreferences；参数、音量计划、缓存淘汰已抽为纯逻辑并纳入覆盖
     "**/features/voice/VoiceClipStore*",

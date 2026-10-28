@@ -515,7 +515,7 @@ GET      /api/v1/audit/background-task-runs          后台任务审计    admin
 
 | 路径 | 谁连 | 用途 |
 |---|---|---|
-| `/gateway/device` | 设备 | 设备报帧、服务端下发命令。先 `link.hello` 声明能力，之后 `link.ping`／`link.pong` 保活并更新偏差；服务端另按现态推 `display.status`（各楼层空闲喷头数），设备不回执 |
+| `/gateway/device` | 设备 | 设备报帧、服务端下发命令。先 `link.hello` 声明能力，之后 `link.ping`／`link.pong` 保活并更新偏差；服务端另按现态推 `status_line.update`（各楼层空闲喷头数），设备不回执 |
 | `/gateway/bridge` | 服务端隧道 | 把设备的 ADB 端口转发出来，排障用 |
 | `/stream` | 消费端 | 实时推送，两类消息见下 |
 

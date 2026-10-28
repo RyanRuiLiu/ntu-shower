@@ -32,7 +32,7 @@ KNOWN_TYPES = [
     "session.command_result",
     "config.update",
     "config.ack",
-    "display.status",
+    "status_line.update",
     "ota.upgrade_available",
     "ota.progress",
     "bridge.open",
@@ -75,7 +75,7 @@ SAMPLES: dict[str, dict[str, Any]] = {
     "session.command_result": {"payload": {"status": "ok", "reason_code": "", "data": {}}},
     "config.update": {"payload": {"revision": 1, "config": {"heartbeat_interval_s": 30}}},
     "config.ack": {"payload": {"revision": 1}},
-    "display.status": {
+    "status_line.update": {
         "payload": {
             "floors": [
                 {"device_id": "1c94310a536777d6", "name": "1F", "online": True, "free": 3},
