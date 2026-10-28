@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://<public-domain>/schema/display.status.json",
+  "$id": "https://<public-domain>/schema/status_line.update.json",
   "title": "Fleet free-door status line",
   "allOf": [
     {
@@ -10,7 +10,7 @@
       "type": "object",
       "properties": {
         "type": {
-          "const": "display.status"
+          "const": "status_line.update"
         },
         "payload": {
           "type": "object",

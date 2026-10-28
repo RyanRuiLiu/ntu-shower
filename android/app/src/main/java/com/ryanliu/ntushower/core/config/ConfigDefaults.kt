@@ -119,6 +119,27 @@ object ConfigDefaults {
     /** 状态行上边距 */
     const val STATUS_LINE_Y_DP = 8L
 
+    /** 启用时间条件 */
+    const val STATUS_LINE_TIME_ENABLED = false
+
+    /** 状态行时段开始 */
+    const val STATUS_LINE_TIME_START = "22:00"
+
+    /** 状态行时段结束 */
+    const val STATUS_LINE_TIME_END = "23:00"
+
+    /** 状态行生效星期 */
+    const val STATUS_LINE_WEEKDAYS = "1,2,3,4,5,6,7"
+
+    /** 启用占用条件 */
+    const val STATUS_LINE_OCCUPANCY_ENABLED = false
+
+    /** 占用喷头数下限 */
+    const val STATUS_LINE_OCCUPANCY_MIN = 0L
+
+    /** 占用喷头数上限 */
+    const val STATUS_LINE_OCCUPANCY_MAX = 48L
+
     /** 记录自动化耗时 */
     const val AUTOMATION_TRACE_ENABLED = false
 
@@ -216,6 +237,13 @@ object ConfigDefaults {
         .put("status_line_center_offset_dp", STATUS_LINE_CENTER_OFFSET_DP)
         .put("status_line_x_dp", STATUS_LINE_X_DP)
         .put("status_line_y_dp", STATUS_LINE_Y_DP)
+        .put("status_line_time_enabled", STATUS_LINE_TIME_ENABLED)
+        .put("status_line_time_start", STATUS_LINE_TIME_START)
+        .put("status_line_time_end", STATUS_LINE_TIME_END)
+        .put("status_line_weekdays", STATUS_LINE_WEEKDAYS)
+        .put("status_line_occupancy_enabled", STATUS_LINE_OCCUPANCY_ENABLED)
+        .put("status_line_occupancy_min", STATUS_LINE_OCCUPANCY_MIN)
+        .put("status_line_occupancy_max", STATUS_LINE_OCCUPANCY_MAX)
         .put("automation_trace_enabled", AUTOMATION_TRACE_ENABLED)
         .put("command_dedup_max_count", COMMAND_DEDUP_MAX_COUNT)
         .put("bath_response_timeout_ms", BATH_RESPONSE_TIMEOUT_MS)

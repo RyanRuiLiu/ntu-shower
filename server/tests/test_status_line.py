@@ -1,4 +1,4 @@
-"""楼层状态行：空闲口径、接收方筛选与 `display.status` 帧。"""
+"""楼层状态行：空闲口径、接收方口径与 `status_line.update` 帧。"""
 
 import uuid
 from typing import Any
@@ -10,8 +10,8 @@ from tests import helpers
 from app.core.connections import manager
 from app.modules.devices import repository as devices_repository
 from app.modules.devices import service as devices_service
-from app.modules.display import service as display_service
 from app.modules.doors import service as doors_service
+from app.modules.status_line import service as status_line_service
 
 
 def _door(door_no: int, **overrides: object) -> dict[str, Any]:
@@ -64,7 +64,7 @@ def test_free_count_only_counts_free_and_follows_device_order(
         {"dev-1f": helpers.FakeGatewayWS(), "dev-2f": helpers.FakeGatewayWS()},
     )
 
-    snapshot = display_service._snapshot()
+    snapshot = status_line_service._snapshot()
 
     assert [floor["name"] for floor in snapshot.payload["floors"]] == ["1F", "2F"]
     assert [floor["free"] for floor in snapshot.payload["floors"]] == [1, 2]
@@ -72,9 +72,10 @@ def test_free_count_only_counts_free_and_follows_device_order(
 
 
 def test_unavailable_devices_report_no_free_count(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """离线、未信任、在线但没上报过喷头：free 都是 None，且只有可用的上报设备收帧。
+    """离线、未信任、在线但没上报过喷头：free 都是 None。
 
     这三件事不能都显示成 0：离线是不知道，未信任是数据不可用，没上报过是还没有数据。
+    接收方只按「已信任且在线」筛选，所以在线但没数据的设备也会收到整份现态。
     """
     _register("dev-offline", "4F")
     _report("dev-offline", [_door(1)])
@@ -93,7 +94,7 @@ def test_unavailable_devices_report_no_free_count(fresh_db: str, monkeypatch: py
         },
     )
 
-    snapshot = display_service._snapshot()
+    snapshot = status_line_service._snapshot()
 
     by_name = {floor["name"]: floor for floor in snapshot.payload["floors"]}
     assert by_name["4F"]["online"] is False
@@ -104,7 +105,7 @@ def test_unavailable_devices_report_no_free_count(fresh_db: str, monkeypatch: py
     assert by_name["6F"]["free"] is None
     assert by_name["7F"]["online"] is True
     assert by_name["7F"]["free"] == 1
-    assert [recipient.device_id for recipient in snapshot.recipients] == ["dev-online"]
+    assert [recipient.device_id for recipient in snapshot.recipients] == ["dev-nodata", "dev-online"]
 
 
 def test_unnamed_device_uses_its_id_as_the_label(fresh_db: str) -> None:
@@ -112,24 +113,41 @@ def test_unnamed_device_uses_its_id_as_the_label(fresh_db: str) -> None:
     devices_repository.register("dev-unnamed", "0.5.0", 1, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
     _report("dev-unnamed", [_door(1)])
 
-    snapshot = display_service._snapshot()
+    snapshot = status_line_service._snapshot()
 
     assert snapshot.payload["floors"][0]["name"] == "dev-unnamed"
 
 
-def test_display_status_is_pushed_to_trusted_reporting_device(
+def test_status_line_update_is_pushed_to_trusted_online_device(
     client: TestClient,
     admin_headers: dict[str, str],
     fresh_db: str,
 ) -> None:
-    """已信任、在线、上报过喷头的设备会在一个推送周期内收到整份楼层现态。"""
+    """已信任且在线的设备会在一个推送周期内收到整份楼层现态。"""
     device_id = "dev-status-line"
     _register(device_id, "2F")
     _report(device_id, [_door(1), _door(2, status_raw=2)])
 
     with helpers.trusted_online(client, device_id, admin_headers) as ws:
-        message = helpers.recv_until(ws, "display.status")
+        message = helpers.recv_until(ws, "status_line.update")
 
     assert message["payload"]["floors"] == [
         {"device_id": device_id, "name": "2F", "online": True, "free": 1},
+    ]
+
+
+def test_device_without_door_data_still_receives_the_fleet_status(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    fresh_db: str,
+) -> None:
+    """刚上线、还没上报喷头的设备也收帧；它自己的楼层是「无数据」，别的楼层照常可见。"""
+    device_id = "dev-status-line-nodata"
+    _register(device_id, "6F")
+
+    with helpers.trusted_online(client, device_id, admin_headers) as ws:
+        message = helpers.recv_until(ws, "status_line.update")
+
+    assert message["payload"]["floors"] == [
+        {"device_id": device_id, "name": "6F", "online": True, "free": None},
     ]
