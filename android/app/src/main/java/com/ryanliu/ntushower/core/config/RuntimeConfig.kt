@@ -140,7 +140,16 @@ object RuntimeConfig {
     @Volatile var statusLineColorMode = ConfigDefaults.STATUS_LINE_COLOR_MODE
         private set
 
+    @Volatile var statusLineAvailableColor = ConfigDefaults.STATUS_LINE_AVAILABLE_COLOR
+        private set
+
+    @Volatile var statusLineUnavailableColor = ConfigDefaults.STATUS_LINE_UNAVAILABLE_COLOR
+        private set
+
     @Volatile var statusLineBackground = ConfigDefaults.STATUS_LINE_BACKGROUND
+        private set
+
+    @Volatile var statusLineBackgroundColor = ConfigDefaults.STATUS_LINE_BACKGROUND_COLOR
         private set
 
     @Volatile var statusLineAlign = ConfigDefaults.STATUS_LINE_ALIGN
@@ -333,8 +342,14 @@ object RuntimeConfig {
             { c, key -> statusLineTextColor = c.optString(key, statusLineTextColor) },
         "status_line_color_mode" to
             { c, key -> statusLineColorMode = c.optString(key, statusLineColorMode) },
+        "status_line_available_color" to
+            { c, key -> statusLineAvailableColor = c.optString(key, statusLineAvailableColor) },
+        "status_line_unavailable_color" to
+            { c, key -> statusLineUnavailableColor = c.optString(key, statusLineUnavailableColor) },
         "status_line_background" to
             { c, key -> statusLineBackground = c.optBoolean(key, statusLineBackground) },
+        "status_line_background_color" to
+            { c, key -> statusLineBackgroundColor = c.optString(key, statusLineBackgroundColor) },
         "status_line_align" to
             { c, key -> statusLineAlign = c.optString(key, statusLineAlign) },
         "status_line_center_offset_dp" to
