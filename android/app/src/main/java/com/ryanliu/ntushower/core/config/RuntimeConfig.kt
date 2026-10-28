@@ -126,6 +126,36 @@ object RuntimeConfig {
     @Volatile var noticeOccupancyMax = ConfigDefaults.NOTICE_OCCUPANCY_MAX.toInt()
         private set
 
+    // ── 楼层状态行 ──
+    // 内容由服务端汇总后经 display.status 推送；这里只保存显示样式与位置。
+    @Volatile var statusLineEnabled = ConfigDefaults.STATUS_LINE_ENABLED
+        private set
+
+    @Volatile var statusLineTextSizeSp = ConfigDefaults.STATUS_LINE_TEXT_SIZE_SP.toInt()
+        private set
+
+    @Volatile var statusLineTextColor = ConfigDefaults.STATUS_LINE_TEXT_COLOR
+        private set
+
+    @Volatile var statusLineColorMode = ConfigDefaults.STATUS_LINE_COLOR_MODE
+        private set
+
+    @Volatile var statusLineBackground = ConfigDefaults.STATUS_LINE_BACKGROUND
+        private set
+
+    @Volatile var statusLineAlign = ConfigDefaults.STATUS_LINE_ALIGN
+        private set
+
+    @Volatile var statusLineCenterOffsetDp = ConfigDefaults.STATUS_LINE_CENTER_OFFSET_DP.toInt()
+        private set
+
+    // x/y 的 0 是合法值，只挡住负数；字号则至少为 1。
+    @Volatile var statusLineXDp = ConfigDefaults.STATUS_LINE_X_DP.toInt()
+        private set
+
+    @Volatile var statusLineYDp = ConfigDefaults.STATUS_LINE_Y_DP.toInt()
+        private set
+
     /**
      * 是否记录自动化流程的分段耗时。
      *
@@ -274,6 +304,24 @@ object RuntimeConfig {
             { c, key -> noticeOccupancyMin = c.optInt(key, noticeOccupancyMin).coerceAtLeast(0) },
         "notice_occupancy_max" to
             { c, key -> noticeOccupancyMax = c.optInt(key, noticeOccupancyMax).coerceAtLeast(0) },
+        "status_line_enabled" to
+            { c, key -> statusLineEnabled = c.optBoolean(key, statusLineEnabled) },
+        "status_line_text_size_sp" to
+            { c, key -> statusLineTextSizeSp = atLeastOne(c.optInt(key, statusLineTextSizeSp)) },
+        "status_line_text_color" to
+            { c, key -> statusLineTextColor = c.optString(key, statusLineTextColor) },
+        "status_line_color_mode" to
+            { c, key -> statusLineColorMode = c.optString(key, statusLineColorMode) },
+        "status_line_background" to
+            { c, key -> statusLineBackground = c.optBoolean(key, statusLineBackground) },
+        "status_line_align" to
+            { c, key -> statusLineAlign = c.optString(key, statusLineAlign) },
+        "status_line_center_offset_dp" to
+            { c, key -> statusLineCenterOffsetDp = c.optInt(key, statusLineCenterOffsetDp) },
+        "status_line_x_dp" to
+            { c, key -> statusLineXDp = c.optInt(key, statusLineXDp).coerceAtLeast(0) },
+        "status_line_y_dp" to
+            { c, key -> statusLineYDp = c.optInt(key, statusLineYDp).coerceAtLeast(0) },
         "automation_trace_enabled" to
             { c, key -> automationTraceEnabled = c.optBoolean(key, automationTraceEnabled) },
         "command_dedup_max_count" to

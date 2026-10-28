@@ -38,8 +38,8 @@ android {
         applicationId = "com.ryanliu.ntushower"
         minSdk = 19          // 设备 ROM 固定 Android 4.4，运行时下限不可动
         targetSdk = 19       // 目标设备冻结在 4.4，无升级路径
-        versionCode = 104
-        versionName = "0.5.3"
+        versionCode = 105
+        versionName = "0.5.4"
         buildConfigField("String", "SERVER_DOMAIN", "\"${providers.gradleProperty("serverDomain").get()}\"")
         buildConfigField("String", "APP_VERSION", "\"$versionName\"")
         buildConfigField("int", "VERSION_CODE", "$versionCode")
@@ -136,6 +136,19 @@ val frameworkBoundClasses = listOf(
     // 判定逻辑在 NoticeRule 里并有单测，不随这两个外壳一起豁免
     "**/features/notice/NoticeOverlay*",
     "**/features/notice/NoticeController*",
+    // 楼层状态行：窗口与主线程状态机依赖 WindowManager / Handler；内容规则在
+    // StatusLine 里并由 StatusLineTest 覆盖
+    "**/features/statusline/StatusLineController*",
+    "**/features/statusline/StatusLineOverlay*",
+    // 状态行的数据载体与常量：只有编译器生成的方法；内容规则见 StatusLineTest
+    "**/features/statusline/FloorStatus*",
+    "**/features/statusline/StatusPart*",
+    "**/features/statusline/StatusLineSettings*",
+    "**/features/statusline/StatusTone*",
+    "**/features/statusline/StatusLineColorMode*",
+    "**/features/statusline/StatusLineReason*",
+    // 屏幕提示与状态行共用的浮层窗口：窗口 token 与几何依赖真实 WindowManager
+    "**/features/overlay/OverlayWindow*",
     // 语音播报：下载/播放/后台预下载/音量守卫依赖 OkHttp 文件系统、线程、MediaPlayer/
     // AudioManager、SharedPreferences；参数、音量计划、缓存淘汰已抽为纯逻辑并纳入覆盖
     "**/features/voice/VoiceClipStore*",
