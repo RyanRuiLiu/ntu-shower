@@ -558,12 +558,45 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         group="status_line",
     ),
     ConfigSpec(
+        "status_line_available_color",
+        TEXT,
+        DEVICE,
+        "#6bc600",
+        "空闲楼层颜色",
+        "「按状态」配色下，空闲喷头数大于 0 的楼层文字颜色。十六进制颜色，如 #6bc600；"
+        "也可写 #AARRGGBB 带透明度。默认取浴室 App 资源里的 `title_color` #6bc600；"
+        "格式无法识别时显示白色，并在设备日志留痕",
+        group="status_line",
+    ),
+    ConfigSpec(
+        "status_line_unavailable_color",
+        TEXT,
+        DEVICE,
+        "#999999",
+        "不可用楼层颜色",
+        "「按状态」配色下，0 个空闲、离线或无数据的楼层文字颜色。默认取浴室 App 资源里的"
+        "`zitihui` #999999；与空闲绿保持足够的明度差，不靠色相区分也能看出有没有空位。"
+        "格式无法识别时显示白色，并在设备日志留痕",
+        group="status_line",
+    ),
+    ConfigSpec(
         "status_line_background",
         BOOL,
         DEVICE,
         True,
         "显示状态行背景",
-        "在文字后面加一层半透明深色底，避免浅色浴室界面上白字看不清；关闭后只留文字",
+        "在文字后面加一层背景色，避免浅色浴室界面上文字看不清；关闭后只留文字",
+        group="status_line",
+    ),
+    ConfigSpec(
+        "status_line_background_color",
+        TEXT,
+        DEVICE,
+        "#cc0066cc",
+        "状态行背景颜色",
+        "开启背景时使用的颜色，十六进制，可写 #AARRGGBB 带透明度。默认取浴室 App 资源里的"
+        "`background_blue` #0066cc 加八成不透明度，让状态行融进浴室界面而不是一块黑底。"
+        "格式无法识别时不显示背景，并在设备日志留痕",
         group="status_line",
     ),
     ConfigSpec(
