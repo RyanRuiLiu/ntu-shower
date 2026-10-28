@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import io
 import json
+import time
 from typing import Any, cast
 
 import pytest
@@ -424,12 +425,20 @@ def test_link_events_record_connect_and_disconnect(client: TestClient, fresh_db:
         ws.send_text(helpers.hello_frame(device_id))
         helpers.recv_until(ws, "link.hello_ack")
 
-    rows = (
-        db.get_conn()
-        .execute("SELECT event FROM device_link_event WHERE device_id = ? ORDER BY id", (device_id,))
-        .fetchall()
-    )
-    assert [row["event"] for row in rows] == [LINK_ONLINE, LINK_OFFLINE]
+    # 关闭连接只是把"关闭帧"交给服务端，offline 由服务端那条连接的 finally 异步记下。
+    # 测试线程不等它跑完就读库会偶发地只看到 online；等结果出现即可，不掩盖任何产品路径。
+    deadline = time.monotonic() + 2
+    while True:
+        rows = (
+            db.get_conn()
+            .execute("SELECT event FROM device_link_event WHERE device_id = ? ORDER BY id", (device_id,))
+            .fetchall()
+        )
+        events = [row["event"] for row in rows]
+        if events == [LINK_ONLINE, LINK_OFFLINE] or time.monotonic() > deadline:
+            break
+        time.sleep(0.01)
+    assert events == [LINK_ONLINE, LINK_OFFLINE]
 
 
 def test_reconnect_does_not_record_a_false_offline(client: TestClient, fresh_db: str) -> None:

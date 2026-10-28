@@ -4,13 +4,6 @@ import com.ryanliu.ntushower.core.clock.TimeOfDay
 import java.util.Calendar
 import java.util.TimeZone
 
-/** 水平对齐的取值；与配置登记表 `notice_align` 的 choices 逐字一致。 */
-object NoticeAlign {
-    const val LEFT = "左对齐"
-    const val CENTER = "居中"
-    const val RIGHT = "靠右"
-}
-
 /** 一次判定的全部配置输入；由控制器在主线程从 RuntimeConfig 复制。 */
 data class NoticeSettings(
     val enabled: Boolean,

@@ -46,6 +46,7 @@ def _reset_process_singletons() -> Iterator[None]:
 
     def clear() -> None:
         manager._connections.clear()
+        manager._generations.clear()
         registry.reset()
         doors_service._device_locks.clear()
         sessions_service._pending.clear()

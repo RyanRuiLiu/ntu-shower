@@ -92,6 +92,33 @@ object ConfigDefaults {
     /** 占用喷头数上限 */
     const val NOTICE_OCCUPANCY_MAX = 48L
 
+    /** 显示楼层状态行 */
+    const val STATUS_LINE_ENABLED = true
+
+    /** 状态行字号 */
+    const val STATUS_LINE_TEXT_SIZE_SP = 13L
+
+    /** 状态行文字颜色 */
+    const val STATUS_LINE_TEXT_COLOR = "#ffffff"
+
+    /** 状态行的配色方式 */
+    const val STATUS_LINE_COLOR_MODE = "按状态"
+
+    /** 显示状态行背景 */
+    const val STATUS_LINE_BACKGROUND = true
+
+    /** 状态行水平对齐 */
+    const val STATUS_LINE_ALIGN = "居中"
+
+    /** 状态行居中偏移 */
+    const val STATUS_LINE_CENTER_OFFSET_DP = 0L
+
+    /** 状态行水平边距 */
+    const val STATUS_LINE_X_DP = 0L
+
+    /** 状态行上边距 */
+    const val STATUS_LINE_Y_DP = 8L
+
     /** 记录自动化耗时 */
     const val AUTOMATION_TRACE_ENABLED = false
 
@@ -180,6 +207,15 @@ object ConfigDefaults {
         .put("notice_occupancy_enabled", NOTICE_OCCUPANCY_ENABLED)
         .put("notice_occupancy_min", NOTICE_OCCUPANCY_MIN)
         .put("notice_occupancy_max", NOTICE_OCCUPANCY_MAX)
+        .put("status_line_enabled", STATUS_LINE_ENABLED)
+        .put("status_line_text_size_sp", STATUS_LINE_TEXT_SIZE_SP)
+        .put("status_line_text_color", STATUS_LINE_TEXT_COLOR)
+        .put("status_line_color_mode", STATUS_LINE_COLOR_MODE)
+        .put("status_line_background", STATUS_LINE_BACKGROUND)
+        .put("status_line_align", STATUS_LINE_ALIGN)
+        .put("status_line_center_offset_dp", STATUS_LINE_CENTER_OFFSET_DP)
+        .put("status_line_x_dp", STATUS_LINE_X_DP)
+        .put("status_line_y_dp", STATUS_LINE_Y_DP)
         .put("automation_trace_enabled", AUTOMATION_TRACE_ENABLED)
         .put("command_dedup_max_count", COMMAND_DEDUP_MAX_COUNT)
         .put("bath_response_timeout_ms", BATH_RESPONSE_TIMEOUT_MS)

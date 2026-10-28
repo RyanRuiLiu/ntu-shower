@@ -13,11 +13,23 @@ from starlette.websockets import WebSocketDisconnect
 class ConnectionManager:
     def __init__(self) -> None:
         self._connections: dict[str, WebSocket] = {}
+        #: 每条连接的身份代数：同一设备重连即递增。推送方据此认出"这是新连接"，
+        #: 不必等下一次内容变化或保活周期——刚握手的设备应当立刻拿到现态。
+        self._generations: dict[str, int] = {}
 
     def register(self, device_id: str, ws: WebSocket) -> bool:
         replaced = device_id in self._connections
         self._connections[device_id] = ws
+        self._generations[device_id] = self._generations.get(device_id, 0) + 1
         return replaced
+
+    def generation_of(self, device_id: str) -> int:
+        """这条设备连接的身份代数；没有连接时为 0。
+
+        代数只用于判断"换没换连接"，不是业务状态。调用方直接 monkeypatch
+        `_connections` 时（测试替身）拿到的也是 0——同一替身不会被误认成新连接。
+        """
+        return self._generations.get(device_id, 0)
 
     def unregister(self, device_id: str, ws: WebSocket) -> bool:
         """注销连接，返回**它是否确实是当前那条**。
@@ -30,6 +42,7 @@ class ConnectionManager:
         """
         if self._connections.get(device_id) is ws:
             del self._connections[device_id]
+            self._generations.pop(device_id, None)
             return True
         return False
 

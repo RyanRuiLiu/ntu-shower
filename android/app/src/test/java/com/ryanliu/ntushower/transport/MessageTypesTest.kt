@@ -34,6 +34,7 @@ class MessageTypesTest {
                 "door.snapshot", "door.snapshot_ack",
                 "session.command", "session.command_result",
                 "config.update", "config.ack",
+                "display.status",
                 "bridge.open", "bridge.close",
                 "ota.upgrade_available", "ota.progress",
                 "device.log_upload",
