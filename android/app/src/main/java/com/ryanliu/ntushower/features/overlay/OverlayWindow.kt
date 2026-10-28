@@ -7,6 +7,7 @@ package com.ryanliu.ntushower.features.overlay
 import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.text.Spanned
 import android.text.TextUtils
 import android.util.Log
 import android.util.TypedValue
@@ -135,9 +136,16 @@ class OverlayWindow(private val context: Context) {
     }
 
     private fun apply(style: Style) {
-        textView.text = style.text
+        // 先定字号与基色，再放文字。带 ForegroundColorSpan 的文字走 SPANNABLE：
+        // 实测本 ROM 下经 SpannedString 包装的 ForegroundColorSpan 不生效（0.5.5
+        // 状态行整行仍是白色）；直接交给 TextView 持有 Spannable 才画出分段颜色。
         textView.setTextSize(TypedValue.COMPLEX_UNIT_SP, style.textSizeSp.coerceAtLeast(1).toFloat())
         textView.setTextColor(style.textColor)
+        if (style.text is Spanned) {
+            textView.setText(style.text, TextView.BufferType.SPANNABLE)
+        } else {
+            textView.text = style.text
+        }
         textView.setBackgroundColor(style.backgroundColor)
 
         val density = context.resources.displayMetrics.density
