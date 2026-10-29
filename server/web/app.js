@@ -306,6 +306,10 @@ function bindTopbar() {
     if (!$('deviceInfo').hidden) renderDeviceInfo()
   })
 
+  subscribe('view', (id) => {
+    if (id === 'overview') refreshWaterIfAdmin()
+  })
+
   subscribeWater(() => {
     if (!$('deviceInfo').hidden) renderDeviceInfo()
     const btn = $('btnRefreshWater')
@@ -325,6 +329,7 @@ function bindTopbar() {
     // 切换设备立刻重拉喷头：store.doors 是"当前设备"的现态，不重拉的话看到的是
     // 上一台的数据（多设备下切换后必然张冠李戴）
     refreshDoors()
+    refreshWaterIfAdmin()
     if (!$('deviceInfo').hidden) renderDeviceInfo()
   })
 
@@ -463,7 +468,7 @@ function askForIdentity() {
   setIdentity(input.trim())
   toast(input.trim() ? '身份标识已保存' : '身份标识已清除')
   refreshDevicesSafely()
-  refreshRuntimeSafely()
+  refreshRuntimeSafely().then(refreshWaterIfAdmin)
   refreshDoors()
 }
 
@@ -478,6 +483,12 @@ function handleAuthError(error) {
   toast('身份缺失或未授权，请在顶栏填写身份标识')
   askForIdentity()
   return true
+}
+
+/** 进入页面/切换设备：有管理身份时静默刷新一次水控板；失败不弹提示，状态里可见。 */
+function refreshWaterIfAdmin() {
+  if (!store.deviceId || store.runtime.length === 0) return
+  refreshWater(store.deviceId)
 }
 
 /**
@@ -525,6 +536,7 @@ async function main() {
   await refreshDevicesSafely()
   await refreshDoors()
   await refreshRuntimeSafely()
+  refreshWaterIfAdmin()
 }
 
 main()
