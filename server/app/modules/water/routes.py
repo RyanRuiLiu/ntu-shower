@@ -1,13 +1,13 @@
-"""水控板直控 API：开阀、关阀、读板信息（`POST /devices/{device_id}/water/<动词>`）。
+"""水控板直控 API：授权出水、断水、读板信息（`POST /devices/{device_id}/water/<动词>`）。
 
 ## 与会话域的分工
 
 - `session.assign` / `session.settle` 驱动浴室 App 的界面，建会话、写 App 的库；
 - 本模块直连水控板（设备端读 `data.xml` 的 waterList 拿板坐标），**不建会话、不写
-  浴室 App 数据库、不与 App 状态同步**。两者是并列通路，不是主备。
+  浴室 App 数据库、不读写 App 的会话状态**。两者是并列通路，不是主备。
 
-`water.open` 只置开阀位（0x01），**不直接出水**；0x02 是电磁阀按钮位，0x04 是
-出水位，现场按下电磁阀才出现。`water.close` 清 0x01/0x04 断水，不清 0x02。
+`water.open` 只置授权位（0x01），**不直接出水**；0x02 是按钮位（现场电磁阀），0x04
+是出水位，现场按下电磁阀才出现。`water.close` 清 0x01/0x04 断水，不清 0x02。
 
 ## 数据源（设备端）
 
@@ -32,7 +32,7 @@ from app.modules.sessions.schemas import CommandOutcome
 
 from .schemas import WaterDoorRequest
 
-#: 一次开/关是板子 TCP 请求-响应；一次状态是 F4 B1 + F4 B3 两次短连接。
+#: 一次授权/断水是板子 TCP 请求-响应；一次状态是 F4 B1 + F4 B3 两次短连接。
 #: 设备端每步读 3 秒上限（状态是 B1+B3 两次短连接），服务端留整条动作的余量；
 #: 超时只说明板子没回，不是"等设备慢慢做"。
 WATER_ACTION_TIMEOUT_S = 8.0
@@ -42,7 +42,7 @@ router = APIRouter(prefix="/api/v1/devices", dependencies=[Depends(require_admin
 
 @router.post("/{device_id}/water/open")
 async def open_valve(device_id: str, req: WaterDoorRequest) -> CommandOutcome:
-    """置指定喷头的开阀位；**不直接出水**，真正出水仍需现场按电磁阀。"""
+    """授权出水：置指定喷头的授权位；**不直接出水**，真正出水仍需现场按电磁阀。"""
     return await device_action(
         device_id,
         actions.WATER_OPEN,
@@ -53,7 +53,7 @@ async def open_valve(device_id: str, req: WaterDoorRequest) -> CommandOutcome:
 
 @router.post("/{device_id}/water/close")
 async def close_valve(device_id: str, req: WaterDoorRequest) -> CommandOutcome:
-    """关指定喷头的电磁阀。"""
+    """断水：清授权位与出水位；不清按钮位。"""
     return await device_action(
         device_id,
         actions.WATER_CLOSE,

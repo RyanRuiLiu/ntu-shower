@@ -147,7 +147,7 @@ class CommandScheduler(
                 runPrefetch(it)
             }
 
-            // 板子 TCP 独立执行器：开关阀/读状态不与界面、截图、语音互堵
+            // 板子 TCP 独立执行器：授权出水/断水/读状态不与界面、截图、语音互堵
             CommandChannel.WATER -> dispatch(command, waterQueue, expireAtMs) {
                 runWater(it)
             }

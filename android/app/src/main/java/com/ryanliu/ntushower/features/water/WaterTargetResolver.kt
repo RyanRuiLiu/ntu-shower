@@ -73,7 +73,7 @@ object WaterTargetResolver {
             }
             boards
         } catch (e: Exception) {
-            // 不打印 XML 原文：同一文件里有 usercode/seedkey，它们与开阀无关。
+            // 不打印 XML 原文：同一文件里有 usercode/seedkey，它们与授权出水无关。
             Log.w(TAG, "解析 waterList 失败：${e.message}")
             emptyList()
         }
