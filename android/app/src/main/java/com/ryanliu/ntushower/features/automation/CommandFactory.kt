@@ -63,8 +63,20 @@ object CommandFactory {
 
         SupportedActions.VOICE_PREPARE -> CommandScheduler.Command.PrepareVoice(commandId, params)
 
-        else -> null
+        else -> waterCommand(action, params, commandId)
     }
+
+    /**
+     * 水控板动作单独成组：服务端只给逻辑门号；板/板内门号由设备端 waterList 解析。
+     * 从主 `when` 里拆出来只为让每个函数的复杂度保持在阈值内，分支本身没有变化。
+     */
+    private fun waterCommand(action: String, params: JSONObject, commandId: String): CommandScheduler.Command? =
+        when (action) {
+            SupportedActions.WATER_OPEN -> CommandScheduler.Command.WaterOpen(commandId, params.optInt("door_no"))
+            SupportedActions.WATER_CLOSE -> CommandScheduler.Command.WaterClose(commandId, params.optInt("door_no"))
+            SupportedActions.WATER_STATUS -> CommandScheduler.Command.WaterStatus(commandId)
+            else -> null
+        }
 
     /** 取一个可空整数：键不存在返回 null，存在则返回值（含 0）。 */
     private fun JSONObject.optIntOrNull(key: String): Int? = if (has(key)) optInt(key) else null

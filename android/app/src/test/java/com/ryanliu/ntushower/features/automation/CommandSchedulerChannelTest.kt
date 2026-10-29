@@ -31,6 +31,9 @@ class CommandSchedulerChannelTest {
         SupportedActions.SCREEN_CAPTURE to CommandChannel.CAPTURE,
         SupportedActions.VOICE_PLAY to CommandChannel.VOICE,
         SupportedActions.VOICE_PREPARE to CommandChannel.PREFETCH,
+        SupportedActions.WATER_OPEN to CommandChannel.WATER,
+        SupportedActions.WATER_CLOSE to CommandChannel.WATER,
+        SupportedActions.WATER_STATUS to CommandChannel.WATER,
     )
 
     /** 服务端归入 maintenance 通道的动作：设备端不进任何队列，即时执行。 */

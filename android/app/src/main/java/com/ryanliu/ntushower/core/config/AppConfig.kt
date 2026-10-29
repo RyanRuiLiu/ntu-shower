@@ -38,6 +38,18 @@ object AppConfig {
     const val BATH_DB_PATH = "$BATH_DB_DIR/$BATH_DB_FILE"
 
     /**
+     * 浴室 App 的 SharedPreferences（`MODE_PRIVATE`，需 root 读）。
+     *
+     * 水控板直控只用其中的 `waterList`（板 IP/端口/起始门号/门数/编码/名称）与
+     * `BathControlPosno`（协议 POS）。**不要读 `usercode`/`seedkey`**——那是制卡密钥，
+     * 与开阀无关；整份 XML 也不进日志。
+     *
+     * 同一文件里还有旧默认值 `BathControlIP=192.168.16.222`、`DoorCount=48`，那些
+     * 不是服务器下发的 waterList，水控板直控明确不读它们。
+     */
+    const val BATH_PREFS_PATH = "/data/data/$BATH_APP_PACKAGE/shared_prefs/data.xml"
+
+    /**
      * 浴室 App 读的免费名单：一行一个学号，名单里的人不收费。
      *
      * 路径写在这里而不由服务端下发——服务端只给内容。**给得了路径就等于把"写哪个

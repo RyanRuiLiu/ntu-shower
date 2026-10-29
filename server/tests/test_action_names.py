@@ -118,6 +118,7 @@ def test_channel_names_are_defined_constants() -> None:
         actions.CHANNEL_MAINTENANCE,
         actions.CHANNEL_VOICE,
         actions.CHANNEL_PREFETCH,
+        actions.CHANNEL_WATER,
     }
     for action, channel in actions.ACTION_CHANNELS.items():
         assert channel in known, f"{action} 的通道不认识：{channel}"

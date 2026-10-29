@@ -23,6 +23,31 @@ CAMERA_CAPTURE = "camera.capture"
 动作对象是摄像头硬件而非会话，因此不挂在 session 名下。
 """
 
+# ── 水控板直控 ──
+# 设备端读浴室 App 的 data.xml（waterList + BathControlPosno）解析板 IP/端口/起始门号/
+# 门数，直连板子 TCP 4001。**不建会话、不写浴室 App 数据库、不与 App 状态同步**：
+# 这是与 session.assign/settle 并列的另一条通路，边界在 UI 上分开显示。
+#
+# 板子的物理门数（F4 B1）可能是 24（6F），但 waterList 的 nozzlenumber 才是本机使用的
+# 门数（7）；控制与状态只取 waterList 的前 N 门，F4 B1 只用于页面展示。
+
+WATER_OPEN = "water.open"
+"""开阀：params.door_no 为逻辑喷头号。
+
+设备端按 waterList 的 startnumber 换算成板内门号，向板子发 F4 B2（0xAA）。
+只发一次、2 秒超时；失败不自动补关阀，由调用方显式发 water.close。
+"""
+
+WATER_CLOSE = "water.close"
+"""关阀：params.door_no 为逻辑喷头号；向板子发 F4 B2（0x00）。"""
+
+WATER_STATUS = "water.status"
+"""读水控板信息：对设备 waterList 里的每块板发 F4 B1（板配置）与 F4 B3（状态）。
+
+结果 data.boards 每项含 waterList 的板信息、F4 B1 的 door_num/bath_min、以及只取
+waterList.nozzlenumber 条的 doors（status/bath_s/allopen_s）。板子多出的门不返回，
+不做隐式合并。"""
+
 # ── 设备自身 ──
 # 即时执行，不经调度队列：重启与卸载会停掉 agent 进程，排队没有意义。
 # 三者都是管理面动作，设备须已信任在线，结果记入 command_audit。
@@ -190,6 +215,9 @@ ALL_ACTIONS: tuple[str, ...] = (
     SESSION_ASSIGN,
     SESSION_SETTLE,
     CAMERA_CAPTURE,
+    WATER_OPEN,
+    WATER_CLOSE,
+    WATER_STATUS,
     SCREEN_CAPTURE,
     DEVICE_EXEC,
     DEVICE_LOG_TAIL,
@@ -212,8 +240,8 @@ ALL_ACTIONS: tuple[str, ...] = (
 )
 
 # ── 执行通道 ──
-# 设备端把命令分到五条互不阻塞的路径（自动化队列、采集执行器、维护执行器、
-# 语音播放队列、语音预下载队列），
+# 设备端把命令分到六条互不阻塞的路径（自动化队列、采集执行器、维护执行器、
+# 语音播放队列、语音预下载队列、水控板执行器），
 # 服务端按同一划分排队限流：同一通道内每台设备串行，跨通道并行。两侧划分必须
 # 一致，否则服务端会拒掉设备明明做得了的事。
 
@@ -232,6 +260,9 @@ CHANNEL_VOICE = "voice"
 CHANNEL_PREFETCH = "prefetch"
 """语音素材预下载：只把素材排入设备后台队列，不播放。与播放及自动化、采集、维护互不阻塞。"""
 
+CHANNEL_WATER = "water"
+"""水控板直控：读板配置/状态与开关阀。板子 TCP 是独立执行路径，与界面自动化、采集、维护、语音互不阻塞。"""
+
 #: 动作 → 执行通道。每个动作恰好属于一个通道。
 ACTION_CHANNELS: dict[str, str] = {
     SESSION_ASSIGN: CHANNEL_AUTOMATION,
@@ -243,6 +274,9 @@ ACTION_CHANNELS: dict[str, str] = {
     UI_DUMP: CHANNEL_AUTOMATION,
     CAMERA_CAPTURE: CHANNEL_CAPTURE,
     SCREEN_CAPTURE: CHANNEL_CAPTURE,
+    WATER_OPEN: CHANNEL_WATER,
+    WATER_CLOSE: CHANNEL_WATER,
+    WATER_STATUS: CHANNEL_WATER,
     VOICE_PLAY: CHANNEL_VOICE,
     VOICE_PREPARE: CHANNEL_PREFETCH,
     DEVICE_EXEC: CHANNEL_MAINTENANCE,

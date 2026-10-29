@@ -4,7 +4,8 @@ reason_code 供客户端分支，中文说明供展示；散落三端会让改�
 静默失效。每个码登记于此，由 tests/test_reason_codes.py 解析设备端源码对账。
 
 前缀表示问题归属而非代码模块：proto 帧本身不合法、device 设备侧、server 服务端
-侧、command 命令生命周期、door 业务规则、ui 界面操作、camera 与 screen 采集。
+侧、command 命令生命周期、door 业务规则、ui 界面操作、camera 与 screen 采集、
+voice 播报、water 水控板直控。
 
 与 core/problems 的分工：那边管 HTTP 面的问题类型（RFC 9457 的 type，kebab-case
 URI），本表管设备协议的失败原因（点分命名空间）。格式不同是有意的，不要合并。
@@ -89,6 +90,16 @@ UI_UNKNOWN_DIRECTION = Reason("ui.unknown_direction", "未知的滚动方向")
 CAMERA_CAPTURE_FAILED = Reason("camera.capture_failed", "拍照失败")
 SCREEN_CAPTURE_FAILED = Reason("screen.capture_failed", "截屏失败")
 
+# ── 水控板直控 ──
+# 目标映射来自设备上的 data.xml waterList；板子本身没有会话/鉴权，失败原因按
+# "映射找不到 / 板子连不上 / 板子不回 / 回包不合法 / 板子拒绝" 分开，排障时指向不同动作。
+
+WATER_TARGET_NOT_FOUND = Reason("water.target_not_found", "找不到该喷头的板/门映射")
+WATER_BOARD_UNREACHABLE = Reason("water.board_unreachable", "水控板不可达")
+WATER_TIMEOUT = Reason("water.timeout", "水控板未在时限内回应")
+WATER_FRAME_INVALID = Reason("water.frame_invalid", "水控板回包不合法")
+WATER_BOARD_REJECTED = Reason("water.board_rejected", "水控板拒绝了该操作")
+
 # ── 语音播报 ──
 
 VOICE_PARAMS_INVALID = Reason("voice.params_invalid", "播报参数不合法")
@@ -137,6 +148,11 @@ REGISTRY: tuple[Reason, ...] = (
     UI_UNKNOWN_DIRECTION,
     CAMERA_CAPTURE_FAILED,
     SCREEN_CAPTURE_FAILED,
+    WATER_TARGET_NOT_FOUND,
+    WATER_BOARD_UNREACHABLE,
+    WATER_TIMEOUT,
+    WATER_FRAME_INVALID,
+    WATER_BOARD_REJECTED,
     VOICE_PARAMS_INVALID,
     VOICE_CLIP_DOWNLOAD_FAILED,
     VOICE_CLIP_INVALID,

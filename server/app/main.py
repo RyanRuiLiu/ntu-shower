@@ -69,6 +69,7 @@ from .modules.tasks.routes import router as tasks_router
 from .modules.voice import repository as voice_repository
 from .modules.voice.routes import admin_router as voice_admin_router
 from .modules.voice.routes import router as voice_router
+from .modules.water.routes import router as water_router
 
 #: 要求浏览器每次回来验证的前端资源后缀。
 STATIC_SUFFIXES = (".html", ".js", ".css")
@@ -146,6 +147,7 @@ def create_app() -> FastAPI:
     app.include_router(tasks_admin_router)
     app.include_router(stats_router)
     app.include_router(voice_router)
+    app.include_router(water_router)
     app.include_router(voice_admin_router)
 
     @app.get("/healthz", tags=["meta"])
