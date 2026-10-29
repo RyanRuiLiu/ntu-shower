@@ -39,6 +39,7 @@ class WaterHandlerTest {
 
         assertEquals(OutcomeStatus.OK, outcome.status)
         assertEquals("", outcome.reasonCode)
+        assertTrue(outcome.terminalMessage.contains("已登记占用"))
         assertTrue(fake.openCalled)
         assertFalse(fake.closeCalled)
         val data = requireNotNull(outcome.data)
@@ -62,6 +63,7 @@ class WaterHandlerTest {
         )
 
         assertEquals(OutcomeStatus.OK, outcome.status)
+        assertTrue(outcome.terminalMessage.contains("已关阀"))
         assertTrue(fake.closeCalled)
         assertFalse(fake.openCalled)
     }
