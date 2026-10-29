@@ -39,8 +39,8 @@ object WaterHandler {
      */
     internal fun execute(
         command: CommandScheduler.Command,
-        resolveTarget: (Int) -> WaterTargetResolver.Target? = WaterTargetResolver::target,
-        listBoards: () -> List<WaterTargetResolver.Board> = WaterTargetResolver::boards,
+        resolveTarget: (Int) -> WaterTargetResolver.Target? = { WaterTargetReader.target(it) },
+        listBoards: () -> List<WaterTargetResolver.Board> = { WaterTargetReader.boards() },
         board: WaterBoard = WaterBoardClient(),
     ): CommandOutcome = when (command) {
         is CommandScheduler.Command.WaterOpen -> switch(command.id, command.doorNo, open = true, resolveTarget, board)

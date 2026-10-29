@@ -1,5 +1,6 @@
 package com.ryanliu.ntushower.features.water
 
+import com.ryanliu.ntushower.core.shell.ShellChannel
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -114,6 +115,22 @@ class WaterTargetResolverTest {
         "<string name=\"BathControlPosno\">$pos</string>",
         "</map>",
     ).joinToString(10.toChar().toString())
+
+    @Test
+    fun `boards reads through the injected shell`() {
+        val boards = WaterTargetReader.boards { ShellChannel.Result(oneFloor, 0) }
+        assertEquals(1, boards.size)
+        assertEquals("172.21.30.50", boards.single().ip)
+
+        val target = WaterTargetReader.target(1) { ShellChannel.Result(oneFloor, 0) }
+        assertEquals(1, target!!.boardDoor)
+    }
+
+    @Test
+    fun `boards rejects a failed or blank shell result`() {
+        assertTrue(WaterTargetReader.boards { ShellChannel.Result(oneFloor, 1) }.isEmpty())
+        assertTrue(WaterTargetReader.boards { ShellChannel.Result("   ", 0) }.isEmpty())
+    }
 
     @Test
     fun `empty or missing waterList yields no boards and no default board`() {
