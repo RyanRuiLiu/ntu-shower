@@ -20,6 +20,7 @@ import { promptClockSet, restartBathApp } from './core/device-actions.js'
 import { $, esc, listen, PLACEHOLDER } from './core/dom.js'
 import { problemText, report } from './core/outcome.js'
 import { toast } from './core/toast.js'
+import { refreshWater, subscribeWater, water, waterForDevice } from './core/water.js'
 import {
   currentDevice,
   currentRuntime,
@@ -158,6 +159,32 @@ function renderDevicePicker() {
  * 面板里的每一行都会渲染，缺值给占位符——不按有没有值增减行数，行数忽多忽少会让人
  * 分不清"这一项没有了"与"这一项没值"。
  */
+/** 设备信息浮层里的水控板行；门数只认 waterList，板自报单独标出。 */
+function waterInfoRows() {
+  const current = waterForDevice()
+  if (!current) {
+    const text = water.loading ? '刷新中…' : water.error || '尚未刷新'
+    return `<div class="kv"><span class="k">水控板</span><span class="v">${esc(text)}</span></div>`
+  }
+  const rows = current.boards.map((board) => {
+    const config = board.config || {}
+    const used = `${board.start}–${board.start + board.count - 1}（${board.count} 个）`
+    const selfReport = config.door_num
+      ? `${config.door_num} 门 / 最长 ${config.bath_min} 分钟`
+      : '未读到'
+    return [
+      ['水控板', `${board.name || board.code || board.ip}${board.code ? `（${board.code}）` : ''}`],
+      ['水控地址', `${board.ip}:${board.port}`],
+      ['水控 POS', board.pos],
+      ['应用喷头', used],
+      ['板自报', selfReport],
+    ]
+      .map(([key, value]) => `<div class="kv"><span class="k">${esc(key)}</span><span class="v">${esc(value)}</span></div>`)
+      .join('')
+  })
+  return `${rows.join('')}<div class="hint">门数以 waterList 为准，板自报门数可能不准。上次刷新 ${esc(fmtDateTime(current.at))}</div>`
+}
+
 function renderDeviceInfo() {
   const summary = currentDevice()
   const diag = currentRuntime()
@@ -205,7 +232,7 @@ function renderDeviceInfo() {
        </div>`
     : ''
 
-  $('deviceInfo').innerHTML = html + actions
+  $('deviceInfo').innerHTML = html + waterInfoRows() + actions
 }
 
 /**
@@ -261,6 +288,10 @@ function toggleDeviceInfo(open) {
 }
 
 function bindTopbar() {
+  const waterBtn = $('btnRefreshWater')
+  waterBtn.hidden = store.runtime.length === 0
+  waterBtn.disabled = !store.deviceId || water.loading
+
   subscribe('online', (online) => {
     $('deviceDot').className = `bar-dot ${online ? 'on' : 'off'}`
     $('deviceText').textContent = online ? '设备在线' : '设备离线'
@@ -278,7 +309,16 @@ function bindTopbar() {
     if (!$('deviceInfo').hidden) renderDeviceInfo()
   })
 
+  subscribeWater(() => {
+    if (!$('deviceInfo').hidden) renderDeviceInfo()
+    const btn = $('btnRefreshWater')
+    if (btn) btn.disabled = !store.deviceId || water.loading
+  })
+
   subscribe('runtime', () => {
+    const btn = $('btnRefreshWater')
+    if (btn) btn.hidden = store.runtime.length === 0
+
     // 运维档案到达（或因身份缺失清空）时刷新诊断面板
     if (!$('deviceInfo').hidden) renderDeviceInfo()
   })
@@ -308,6 +348,12 @@ function bindTopbar() {
     },
     { passive: false },
   )
+
+  // 水控刷新与设备信息并列：水控板信息在设备信息浮层里，刷新入口放在它左侧。
+  listen($('btnRefreshWater'), 'click', async () => {
+    const result = await refreshWater()
+    report(null, result.message, result.ok ? 'ok' : 'err')
+  })
 
   listen($('btnDeviceInfo'), 'click', (event) => {
     // 不冒泡到 document，否则紧接着的"点外部关闭"会立刻把它收回去
