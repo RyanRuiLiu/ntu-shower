@@ -522,8 +522,9 @@ function stopTaskBoard() {
 /**
  * 水控板信息卡：只显示结构化的 waterList/板配置（F4 B1），不显示 raw。
  *
- * 6F 的板子自身是 24 门/30 分钟，而 waterList 只用 7 门：这里同时显示
- * `应用喷头 1–7（7 个）` 与 `板配置 24 门/最长 30 分钟`，不把两者混成一个数字。
+ * 5F/6F 的板子会自报 24 门（5F 24/20、6F 24/30），但现场实际只有 7 个喷头；
+ * 门数一律以浴室服务器下发的 waterList 为准。这里把两者并列：
+ * `应用喷头 1–7（7 个）` 与 `板自报 24 门/最长 30 分钟`，不把板报当成物理门数。
  */
 function renderWaterInfo() {
   const card = $('waterCard')
@@ -552,7 +553,7 @@ function renderWaterInfo() {
       const config = board.config || {}
       const used = `${board.start}–${board.start + board.count - 1}（${board.count} 个）`
       const configText = config.door_num
-        ? `板配置 ${config.door_num} 门 / 最长 ${config.bath_min} 分钟`
+        ? `板自报 ${config.door_num} 门 / 最长 ${config.bath_min} 分钟`
         : '板配置未读到'
       return `
         <div class="water-board">
@@ -685,7 +686,7 @@ export const overviewView = {
         </div>
         <div class="result" id="resWater"></div>
         <div id="waterInfo" class="water-info"><div class="empty">尚未刷新水控板信息</div></div>
-        <div class="muted">开阀只登记占用；真正出水需现场按电磁阀。关阀会断水，浴室 App 可能按现场关水更新会话。手动操作不建会话；卡片上的会话状态仍来自浴室 App。</div>
+        <div class="muted">开阀只登记占用；真正出水需现场按电磁阀。关阀会断水，浴室 App 可能按现场关水更新会话。手动操作不建会话；卡片上的会话状态仍来自浴室 App。门数以 waterList 为准，板自报门数可能不准。</div>
       </div>
 
       <div class="act-card task-board">

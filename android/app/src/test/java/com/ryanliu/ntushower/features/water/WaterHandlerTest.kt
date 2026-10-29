@@ -187,6 +187,36 @@ class WaterHandlerTest {
     }
 
     @Test
+    fun `status ignores board-reported doors outside the waterList`() {
+        val sixBoard = WaterTargetResolver.Board(
+            code = "0030",
+            name = "啬园校区28号楼6层",
+            ip = "172.21.30.60",
+            port = 4001,
+            pos = 1,
+            start = 1,
+            count = 7,
+        )
+        // 板子自报 24 门，但现场实际只有 7 个喷头；第 8 门即使有状态也不应出现。
+        val all = (1..24).map { index ->
+            val status = if (index == 7 || index == 8) 0x07 else 0
+            door(index, status, 0, 0)
+        }
+        val outcome = WaterHandler.execute(
+            CommandScheduler.Command.WaterStatus("c-24"),
+            listBoards = { listOf(sixBoard) },
+            board = FakeBoard(
+                configResponse = config(doorNum = 24, bathMin = 30),
+                statusResponse = status(doors = all),
+            ),
+        )
+
+        val row = requireNotNull(outcome.data).getJSONArray("boards").getJSONObject(0)
+        assertEquals(7, row.getJSONArray("doors").length())
+        assertEquals(0x07, row.getJSONArray("doors").getJSONObject(6).getInt("status"))
+    }
+
+    @Test
     fun `status without any board is a mapping failure`() {
         val outcome = WaterHandler.execute(
             CommandScheduler.Command.WaterStatus("c-empty"),

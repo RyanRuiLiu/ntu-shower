@@ -16,8 +16,8 @@ import org.json.JSONObject
  * - **不建会话**、不写浴室 App 数据库、不发 `F4 B0`（板配置由 App 自己设）；
  * - 板坐标/门数来自 [WaterTargetResolver]（`data.xml` 的 waterList），不是服务端下发；
  * - 板配置 `F4 B1` 只进 `data.boards[].config` 供页面展示，不参与控制；
- * - 板状态 `F4 B3` 只取 waterList 的 `count` 条；6F 的板报 N=24 时，后 17 条
- *   **不返回、不展示**（App 的 waterList 只用 7 门）。
+ * - 门数以浴室服务器下发的 waterList 为准；5F/6F 的板子会自报 N=24，但现场
+ *   实际只有 7 个喷头，后 17 条**不返回、不展示**。
  *
  * ## 物理/协议位义（实测）
  *
@@ -136,7 +136,8 @@ object WaterHandler {
                     )
                 }
                 val doors = JSONArray()
-                // 只取 waterList 的前 count 条；板子多出的门（6F 的 17 门）不返回。
+                // 门数以浴室服务器下发的 waterList 为准。5F/6F 的板子会自报 24 门，
+                // 但现场实际只有 7 个喷头；板报多出的记录不当作物理喷头。
                 status.doors.take(board.count).forEach { door ->
                     doors.put(
                         JSONObject()
