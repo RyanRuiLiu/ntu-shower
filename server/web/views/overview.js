@@ -125,7 +125,7 @@ function doorWaterButtons(door) {
   return `
       <div class="water-actions">
         <button type="button" class="btn btn-sm" data-water="open" data-door="${esc(doorNo)}" title="${registered ? '已登记占用，无需重复登记' : '只登记占用；真正出水需现场按电磁阀'}" ${opening || registered ? 'disabled' : ''}>开阀（登记）</button>
-        <button type="button" class="btn btn-ghost btn-sm" data-water="close" data-door="${esc(doorNo)}" title="关阀会断水，浴室 App 可能按现场关水记账；有卡的喷头可能保留占用" ${closing ? 'disabled' : ''}>关阀</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-water="close" data-door="${esc(doorNo)}" title="关阀会断水；浴室 App 可能按现场关水更新会话；已现场开过水的喷头可能保留占用" ${closing ? 'disabled' : ''}>关阀</button>
       </div>`
 }
 
@@ -685,7 +685,7 @@ export const overviewView = {
         </div>
         <div class="result" id="resWater"></div>
         <div id="waterInfo" class="water-info"><div class="empty">尚未刷新水控板信息</div></div>
-        <div class="muted">开阀只登记占用；真正出水需现场按电磁阀。关阀会断水，浴室 App 可能按现场关水记账。手动操作不建会话；卡片上的会话状态仍来自浴室 App。</div>
+        <div class="muted">开阀只登记占用；真正出水需现场按电磁阀。关阀会断水，浴室 App 可能按现场关水更新会话。手动操作不建会话；卡片上的会话状态仍来自浴室 App。</div>
       </div>
 
       <div class="act-card task-board">
