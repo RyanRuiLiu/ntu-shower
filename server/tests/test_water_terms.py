@@ -75,6 +75,7 @@ def test_timers_use_the_measured_fields() -> None:
     auth_line = next(line for line in src.splitlines() if "水控板授权计时" in line)
     assert "${esc(flow)}" in flow_line
     assert "${esc(auth)}" in auth_line
+    assert src.index("水控板授权计时") < src.index("水控板淋浴时长")
     assert "水控板开阀时长" not in src
 
 
