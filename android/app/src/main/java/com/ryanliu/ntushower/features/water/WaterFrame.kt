@@ -27,8 +27,9 @@ package com.ryanliu.ntushower.features.water
  * [WaterBoardClient] 负责——不要在解析器里假设"一次 read 就是一帧"。
  *
  * 门序：`F4 B3` 的每条记录按板内门号 1..N 排列；`DoorStatus.boardDoor` 就是
- * 这个 1-based 门号。逻辑门号 = `waterList.startnumber + boardDoor - 1`，由
- * [WaterTargetResolver] 换算。
+ * 这个 1-based 门号。N 是**板子自报**，可能是错的（5F/6F 自报 24，现场实际 7 个
+ * 喷头）；逻辑门号只按浴室服务器下发的 waterList 前 `nozzlenumber` 条换算，
+ * 即 `waterList.startnumber + boardDoor - 1`，由 [WaterTargetResolver] 负责。
  */
 object WaterFrame {
 
