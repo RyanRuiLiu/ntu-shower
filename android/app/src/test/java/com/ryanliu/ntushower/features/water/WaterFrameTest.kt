@@ -106,8 +106,8 @@ class WaterFrameTest {
     }
 
     @Test
-    fun `parses 6F 24-door status while callers only use the waterList seven`() {
-        // 6F 板子自身 24 门；前 7 条里 2/3/5 号在计时，其余空闲。
+    fun `parses 6F board-reported 24 doors while the site has only seven`() {
+        // 6F 板自报 24 门，但现场实际只有 7 个喷头；前 7 条里 2/3/5 号在计时，其余空闲。
         val raw = hex(
             "9A 13 38 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00" +
                 "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00" +
@@ -129,6 +129,27 @@ class WaterFrameTest {
         assertEquals(3670, frame.doors[1].bathSeconds)
         assertEquals(5123, frame.doors[2].bathSeconds)
         assertEquals(546, frame.doors[4].bathSeconds)
+    }
+
+    @Test
+    fun `parses 5F 24-door status with unused doors zero`() {
+        // 5F 板自报 24 门/20 分钟是错的：现场实际只有 7 个喷头。前 7 门里 1、3、5
+        // 有状态，8–24 全 0；解析器保留全部记录只为确认边界，业务只取 waterList 的 7 门。
+        val raw = hex(
+            "11 21 FD 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00" +
+                "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00" +
+                "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00" +
+                "00 00 00 00 00 57 00 93 00 07 00 00 00 00 00 88 00 BA 01 01 00 00 00 00 00 00 00 00 00 02 05 18" +
+                "10 00 7C 00 01 00 A5 02",
+        )
+        val frame = WaterFrame.parseFrames(raw).single()
+        assertEquals(24, frame.doors.size)
+        assertEquals(0x02, frame.doors[0].status)
+        assertEquals(0x01, frame.doors[2].status)
+        assertEquals(0x07, frame.doors[4].status)
+        assertTrue((7 until 24).all { frame.doors[it].status == 0 })
+        assertEquals(441, frame.doors[2].bathSeconds)
+        assertEquals(136, frame.doors[2].allOpenSeconds)
     }
 
     @Test
