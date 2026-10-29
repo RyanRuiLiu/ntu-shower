@@ -32,14 +32,18 @@ CAMERA_CAPTURE = "camera.capture"
 # 门数（7）；控制与状态只取 waterList 的前 N 门，F4 B1 只用于页面展示。
 
 WATER_OPEN = "water.open"
-"""开阀：params.door_no 为逻辑喷头号。
+"""登记占用：params.door_no 为逻辑喷头号。
 
 设备端按 waterList 的 startnumber 换算成板内门号，向板子发 F4 B2（0xAA）。
-只发一次、2 秒超时；失败不自动补关阀，由调用方显式发 water.close。
+**它只置占用位 0x01，不直接出水**；水控板的现场开关位 0x04 只能由人按下电磁阀
+置位——实测空闲喷头从 0x00 变 0x01，累计开阀时长仍为 0。只发一次、2 秒超时；
+失败不自动补关阀，由调用方显式发 water.close。
 """
 
 WATER_CLOSE = "water.close"
-"""关阀：params.door_no 为逻辑喷头号；向板子发 F4 B2（0x00）。"""
+"""关阀/断水：params.door_no 为逻辑喷头号；向板子发 F4 B2（0x00）。
+
+实测会清掉现场开关位 0x04 与同步位 0x02；有卡的喷头可能保留占用位 0x01。"""
 
 WATER_STATUS = "water.status"
 """读水控板信息：对设备 waterList 里的每块板发 F4 B1（板配置）与 F4 B3（状态）。
