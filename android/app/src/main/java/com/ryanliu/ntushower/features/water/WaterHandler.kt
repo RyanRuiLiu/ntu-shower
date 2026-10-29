@@ -83,7 +83,8 @@ object WaterHandler {
                 .put("board", boardJson(target.board))
                 .put("ack", true)
                 .put("raw", response.raw.toHex())
-            CommandOutcome(commandId, OutcomeStatus.OK, "", "", data)
+            val message = if (open) "已登记占用；出水需现场按电磁阀" else "已关阀（断水）"
+            CommandOutcome(commandId, OutcomeStatus.OK, "", message, data)
         } catch (e: WaterBoardException) {
             Log.w(TAG, "水控板${if (open) "开" else "关"}阀失败：${e.message}")
             failure(commandId, e.reasonCode, e.message ?: "水控板请求失败", target)
