@@ -132,7 +132,7 @@ class WaterFrameTest {
     }
 
     @Test
-    fun `parses 5F 24-door status with unused doors zero`() {
+    fun `parses 5F board-reported 24 doors while the site has seven`() {
         // 5F 板自报 24 门/20 分钟是错的：现场实际只有 7 个喷头。前 7 门里 1、3、5
         // 有状态，8–24 全 0；解析器保留全部记录只为确认边界，业务只取 waterList 的 7 门。
         val raw = hex(
