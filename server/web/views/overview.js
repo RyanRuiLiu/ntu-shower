@@ -79,12 +79,12 @@ function doorWaterDetail(door) {
   if (!found && !isAdmin()) return ''
   const flow = found ? fmtDuration(found.door.allopen_s) : PLACEHOLDER
   const auth = found ? fmtDuration(found.door.bath_s) : PLACEHOLDER
-  // 水控板自己的计时：淋浴时长=出水位时间，授权计时=授权位时间；与会话的
+  // 水控板自己的计时：授权计时=授权位时间，淋浴时长=出水位时间；与会话的
   // 淋浴时长/分配时长不是同一口径，标签必须带“水控板”。
   return `
       <div class="door-grid">
-        <div class="kv door-cell"><span class="k" title="出水位存在时增长；手动停水后冻结，再次出水接着累计；授权清除后归零">水控板淋浴时长</span><span class="v">${esc(flow)}</span></div>
         <div class="kv door-cell"><span class="k" title="从授权位出现开始计时；手动停水后继续；授权清除后归零">水控板授权计时</span><span class="v">${esc(auth)}</span></div>
+        <div class="kv door-cell"><span class="k" title="出水位存在时增长；手动停水后冻结，再次出水接着累计；授权清除后归零">水控板淋浴时长</span><span class="v">${esc(flow)}</span></div>
       </div>`
 }
 
