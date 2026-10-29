@@ -62,4 +62,21 @@ ACTION_DATA: dict[str, dict[str, str]] = {
     "freelist.read": {
         "content": "免费名单文件的原文，含行尾",
     },
+    "water.open": {
+        "door_no": "逻辑喷头号",
+        "board_door": "换算后的板内门号",
+        "board": "命中的板信息（waterList 的 code/name/ip/port/pos/start/count）",
+        "ack": "板子是否接受（F4 B2 返回码为 0）",
+        "raw": "板子回包的十六进制原文",
+    },
+    "water.close": {
+        "door_no": "逻辑喷头号",
+        "board_door": "换算后的板内门号",
+        "board": "命中的板信息（waterList 的 code/name/ip/port/pos/start/count）",
+        "ack": "板子是否接受（F4 B2 返回码为 0）",
+        "raw": "板子回包的十六进制原文",
+    },
+    "water.status": {
+        "boards": "每块板的 waterList 信息、F4 B1 配置与 F4 B3 状态（只含 waterList 门数）",
+    },
 }

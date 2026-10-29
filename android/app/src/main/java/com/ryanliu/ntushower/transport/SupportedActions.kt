@@ -23,6 +23,11 @@ object SupportedActions {
     // ── camera ──
     const val CAMERA_CAPTURE = "camera.capture"
 
+    // ── 水控板直控 ──
+    const val WATER_OPEN = "water.open"
+    const val WATER_CLOSE = "water.close"
+    const val WATER_STATUS = "water.status"
+
     // ── 设备屏幕 ──
     const val SCREEN_CAPTURE = "screen.capture"
 
@@ -67,6 +72,9 @@ object SupportedActions {
         SESSION_ASSIGN,
         SESSION_SETTLE,
         CAMERA_CAPTURE,
+        WATER_OPEN,
+        WATER_CLOSE,
+        WATER_STATUS,
         SCREEN_CAPTURE,
         DEVICE_EXEC,
         DEVICE_LOG_TAIL,
