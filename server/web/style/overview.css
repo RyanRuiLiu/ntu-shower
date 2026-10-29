@@ -82,10 +82,9 @@
 
 .doors {
   display: grid;
-  /* 每张至少 320px：喷头卡片内容是"编号 + 状态标签 + 最多六行明细"，320px 刚好容得下
-     两列文字不折行。写死 `repeat(3, 1fr)` 时宽屏上每张能到 500px 以上，空闲的门
-     只有一行字，剩下的全是空白。
-     `min(320px, 100%)` 让容器比 320px 还窄时落成一列，而不是撑出轨道横溢 */
+  /* 每张至少 440px：卡片头现在同时放"编号 + 浴室状态 + 水控状态 + 上次使用时间 +
+     开阀/关阀"，320px 会把这些挤成折行或溢出。440px 刚好容下三组信息与两个按钮；
+     窄屏用 `min(440px, 100%)` 落成一列，不撑破容器。 */
   grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
   gap: 10px;
 }
@@ -135,6 +134,23 @@
   margin-left: auto;
   justify-content: flex-start;
   gap: 6px;
+}
+
+/* 头部下方独立一行：左水控状态，右开阀/关阀；只用现有间距令牌 */
+.door-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+
+.door-controls .btn-row {
+  margin-left: auto;
+}
+
+/* 状态标签不折行：它是头部的一枚短标签，折成两行会把头部撑高 */
+.door-head .door-tag {
+  white-space: nowrap;
 }
 
 .door-head {
@@ -230,10 +246,6 @@
   color: var(--amber);
 }
 
-/* 喷头卡片里的水控动作行：复用 .btn-row，只补上与前一组标签值之间的间距 */
-.door .btn-row {
-  margin-top: var(--sp-2);
-}
 
 /* 会话明细与水控明细各是一组 door-grid；第二组与前一组留出间距 */
 .door-grid + .door-grid {
