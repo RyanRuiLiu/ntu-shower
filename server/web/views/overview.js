@@ -103,8 +103,8 @@ function doorWaterControls(door) {
   const admin = isAdmin()
   if (!found && !admin) return ''
   const status = found
-    ? `<span class="badge" title="${esc(waterStatusText(found.door.status))}">水控 ${esc(waterTagText(found.door.status))}</span>`
-    : '<span class="badge">水控 未刷新</span>'
+    ? `<span class="badge" title="${esc(waterStatusText(found.door.status))}">水控板 ${esc(waterTagText(found.door.status))}</span>`
+    : '<span class="badge">水控板 未刷新</span>'
   const doorNo = door.door_no
   const opening = waterPending.has(waterKey(doorNo, 'open'))
   const closing = waterPending.has(waterKey(doorNo, 'close'))

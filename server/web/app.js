@@ -159,30 +159,27 @@ function renderDevicePicker() {
  * 面板里的每一行都会渲染，缺值给占位符——不按有没有值增减行数，行数忽多忽少会让人
  * 分不清"这一项没有了"与"这一项没值"。
  */
-/** 设备信息浮层里的水控板行；门数只认 waterList，板自报单独标出。 */
+/** 设备信息浮层里的水控板行：只显示 waterList 的板信息与应用范围，不展示板自报门数。 */
 function waterInfoRows() {
   const current = waterForDevice()
   if (!current) {
     const text = water.loading ? '刷新中…' : water.error || '尚未刷新'
     return `<div class="kv"><span class="k">水控板</span><span class="v">${esc(text)}</span></div>`
   }
-  const rows = current.boards.map((board) => {
-    const config = board.config || {}
-    const used = `${board.start}–${board.start + board.count - 1}（${board.count} 个）`
-    const selfReport = config.door_num
-      ? `${config.door_num} 门 / 最长 ${config.bath_min} 分钟`
-      : '未读到'
-    return [
-      ['水控板', `${board.name || board.code || board.ip}${board.code ? `（${board.code}）` : ''}`],
-      ['水控地址', `${board.ip}:${board.port}`],
-      ['水控 POS', board.pos],
-      ['应用喷头', used],
-      ['板自报', selfReport],
-    ]
-      .map(([key, value]) => `<div class="kv"><span class="k">${esc(key)}</span><span class="v">${esc(value)}</span></div>`)
-      .join('')
-  })
-  return `${rows.join('')}<div class="hint">门数以 waterList 为准，板自报门数可能不准。上次刷新 ${esc(fmtDateTime(current.at))}</div>`
+  const rows = current.boards
+    .map((board) => {
+      const used = `${board.start}–${board.start + board.count - 1}（${board.count} 个）`
+      return [
+        ['水控板', `${board.name || board.code || board.ip}${board.code ? `（${board.code}）` : ''}`],
+        ['地址', `${board.ip}:${board.port}`],
+        ['POS', board.pos],
+        ['喷头', used],
+      ]
+        .map(([key, value]) => `<div class="kv"><span class="k">${esc(key)}</span><span class="v">${esc(value)}</span></div>`)
+        .join('')
+    })
+    .join('')
+  return `${rows}<div class="kv"><span class="k">上次刷新</span><span class="v">${esc(fmtDateTime(current.at))}</span></div>`
 }
 
 function renderDeviceInfo() {
