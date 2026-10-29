@@ -27,10 +27,11 @@ internal interface WaterBoard {
  *
  * ## 连接与超时
  *
- * 每次动作**短连接**：connect → 发一帧 → 收到匹配 packid 的回包 → 断开。连接与
- * 读各 2 秒；只尝试一次，不自动重试、不自动补发关阀——失败如实返回原因，由调用方
- * 决定下一步。板子是 USR-TCP232，浴室 App 也在同一条串行线上下发；一次读到的
- * 流里会混入 App 轮询的 `F4 B3` 帧，必须按 packid 过滤。
+ * 每次动作**短连接**：connect → 发一帧 → 收到匹配 packid 的回包 → 断开。连接
+ * 2 秒、读 3 秒；只尝试一次，不自动重试、不自动补发关阀——失败如实返回原因，由
+ * 调用方决定下一步。板子是 USR-TCP232，浴室 App 也在同一条串行线上下发；一次
+ * 读到的流里会混入 App 轮询的 `F4 B3` 帧，必须按 packid 过滤。读窗口比连接长，
+ * 是因为串行线在 App 轮询时会有短暂排队；实测 2 秒曾在连续动作时误报超时。
  *
  * ## packid
  *
@@ -45,7 +46,7 @@ internal interface WaterBoard {
  * `0x07` 三者、`0x03` 占用+同步（现场开关未按/无水）、`0x00` 无占用。
  * 注意 `open` 只登记占用，真正出水仍需现场按电磁阀；这是板子的硬件行为。
  */
-class WaterBoardClient(private val connectTimeoutMs: Int = 2_000, private val readTimeoutMs: Int = 2_000) : WaterBoard {
+class WaterBoardClient(private val connectTimeoutMs: Int = 2_000, private val readTimeoutMs: Int = 3_000) : WaterBoard {
 
     override fun open(board: WaterTargetResolver.Board, boardDoor: Int): WaterFrame.Response =
         request(board, WaterFrame.openPayload(boardDoor), WaterFrame.Kind.ACK)

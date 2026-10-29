@@ -33,7 +33,8 @@ from app.modules.sessions.schemas import CommandOutcome
 from .schemas import WaterDoorRequest
 
 #: 一次开/关是板子 TCP 请求-响应；一次状态是 F4 B1 + F4 B3 两次短连接。
-#: 设备端每步 2 秒上限，服务端留整条动作的余量，超时只说明板子没回，不是"等设备慢慢做"。
+#: 设备端每步读 3 秒上限（状态是 B1+B3 两次短连接），服务端留整条动作的余量；
+#: 超时只说明板子没回，不是"等设备慢慢做"。
 WATER_ACTION_TIMEOUT_S = 8.0
 
 router = APIRouter(prefix="/api/v1/devices", dependencies=[Depends(require_admin)], tags=["water"])
