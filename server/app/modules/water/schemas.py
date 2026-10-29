@@ -8,6 +8,6 @@ from pydantic import BaseModel, Field
 
 
 class WaterDoorRequest(BaseModel):
-    """开阀/关阀：一个逻辑喷头号。"""
+    """授权出水/断水：一个逻辑喷头号。"""
 
     door_no: int = Field(ge=1)

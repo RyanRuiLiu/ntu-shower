@@ -25,25 +25,25 @@ CAMERA_CAPTURE = "camera.capture"
 
 # ── 水控板直控 ──
 # 设备端读浴室 App 的 data.xml（waterList + BathControlPosno）解析板 IP/端口/起始门号/
-# 门数，直连板子 TCP 4001。**不建会话、不写浴室 App 数据库、不与 App 状态同步**：
+# 门数，直连板子 TCP 4001。**不建会话、不写浴室 App 数据库、不读写 App 的会话状态**：
 # 这是与 session.assign/settle 并列的另一条通路，边界在 UI 上分开显示。
 #
-# 板子的物理门数（F4 B1）可能是 24（6F），但 waterList 的 nozzlenumber 才是本机使用的
-# 门数（7）；控制与状态只取 waterList 的前 N 门，F4 B1 只用于页面展示。
+# 板子的自报门数（F4 B1）可能是 24（2F/5F/6F 实测），但 waterList 的 nozzlenumber
+# 才是本机使用的门数（7）；控制与状态只取 waterList 的前 N 门，F4 B1 只用于页面展示。
 
 WATER_OPEN = "water.open"
-"""登记占用：params.door_no 为逻辑喷头号。
+"""授权出水：params.door_no 为逻辑喷头号。
 
 设备端按 waterList 的 startnumber 换算成板内门号，向板子发 F4 B2（0xAA）。
-**它只置开阀位 0x01，不直接出水**；0x02 是电磁阀按钮位，0x04 是出水位，只有
-现场按下电磁阀才会出现。实测空闲喷头从 0x00 变 0x01，累计开阀时长仍为 0。
-只发一次、读 3 秒超时；失败不自动补关阀，由调用方显式发 water.close。
+**它只置授权位 0x01，不直接出水**；0x02 是按钮位（现场电磁阀），0x04 是出水位，
+只有现场按下电磁阀才会出现。实测空闲喷头从 0x00 变 0x01，淋浴时长仍为 0。
+只发一次、读 3 秒超时；失败不自动补断水，由调用方显式发 water.close。
 """
 
 WATER_CLOSE = "water.close"
-"""关阀/断水：params.door_no 为逻辑喷头号；向板子发 F4 B2（0x00）。
+"""断水：params.door_no 为逻辑喷头号；向板子发 F4 B2（0x00）。
 
-实测会清掉开阀位 0x01 与出水位 0x04；0x02 电磁阀按钮位不清，只能现场再按一次。"""
+实测清掉授权位 0x01 与出水位 0x04；按钮位 0x02 不清，只能现场再按一次。"""
 
 WATER_STATUS = "water.status"
 """读水控板信息：对设备 waterList 里的每块板发 F4 B1（板配置）与 F4 B3（状态）。
@@ -265,7 +265,7 @@ CHANNEL_PREFETCH = "prefetch"
 """语音素材预下载：只把素材排入设备后台队列，不播放。与播放及自动化、采集、维护互不阻塞。"""
 
 CHANNEL_WATER = "water"
-"""水控板直控：读板配置/状态与开关阀。板子 TCP 是独立执行路径，与界面自动化、采集、维护、语音互不阻塞。"""
+"""水控板直控：读板配置/状态与授权出水/断水。板子 TCP 是独立执行路径，与界面自动化、采集、维护、语音互不阻塞。"""
 
 #: 动作 → 执行通道。每个动作恰好属于一个通道。
 ACTION_CHANNELS: dict[str, str] = {
