@@ -86,17 +86,18 @@ function waterDoor(doorNo) {
  * 位义来自反编译源码（`STATUS_door_bits.md` / `DoorStatusConfirmThread`）并与实测一致：
  * `0x01` 占用（板子登记/使能）、`0x02` 被动同步、`0x04` 现场开关（手动按下才出水）。
  * `0x07` 三者、`0x03` 占用+同步（现场开关未按/无水）、`0x00` 无占用。
- * 有占用而没有现场开关位时补一句“未出水”，让“登记了但没按阀”一眼可辨。
+ * 有开阀位而没有现场开关位时补一句“未出水”，让“登记了但没按阀”一眼可辨。
  * 只翻已知的三位；出现其他位就显示“未知状态”，不猜、不把它映射成浴室 App 的会话状态。
  */
 function waterStatusText(status) {
   if (status & ~0x07) return '未知状态'
   const parts = []
-  if (status & 0x01) parts.push('占用')
+  if (status & 0x01) parts.push('开阀')
   if (status & 0x02) parts.push('同步')
   if (status & 0x04) parts.push('现场开关')
   else if (status & 0x01) parts.push('未出水')
-  return parts.length ? parts.join(' · ') : '无占用'
+  else parts.push('未开阀')
+  return parts.join(' · ')
 }
 
 function doorWaterLine(door) {
@@ -105,11 +106,12 @@ function doorWaterLine(door) {
   const value = found.door
   // `bath_s` 是板子的 bathTime：只登记占用时也会走，不能当成“洗了多久”；
   // `allopen_s` 才是累计开阀（现场开关按下）的时长。两者分开显示。
+  // 全部复用喷头卡片既有的 `door-grid` / `kv door-cell` / `badge`，不另造样式。
   return `
-      <div class="door-water">
-        <span class="water-label">水控板</span>
-        <span class="water-state">${esc(waterStatusText(value.status))}</span>
-        <span class="water-meta">板计时 ${esc(fmtDuration(value.bath_s))} · 累计开阀 ${esc(fmtDuration(value.allopen_s))}</span>
+      <div class="door-grid">
+        <div class="kv door-cell"><span class="k">水控板</span><span class="v"><span class="badge">${esc(waterStatusText(value.status))}</span></span></div>
+        <div class="kv door-cell"><span class="k">板计时</span><span class="v">${esc(fmtDuration(value.bath_s))}</span></div>
+        <div class="kv door-cell"><span class="k">累计开阀</span><span class="v">${esc(fmtDuration(value.allopen_s))}</span></div>
       </div>`
 }
 
@@ -118,14 +120,10 @@ function doorWaterButtons(door) {
   const doorNo = door.door_no
   const opening = waterPending.has(waterKey(doorNo, 'open'))
   const closing = waterPending.has(waterKey(doorNo, 'close'))
-  // 已登记占用时不再重复登记：实测重复 F4 B2(AA) 会把板子的 bathTime 重置，
-  // 对正在用的喷头是无谓的干扰。要重读板状态，先点上面的刷新。
-  const found = waterDoor(doorNo)
-  const registered = found ? (found.door.status & 0x01) !== 0 : false
   return `
-      <div class="water-actions">
-        <button type="button" class="btn btn-sm" data-water="open" data-door="${esc(doorNo)}" title="${registered ? '已登记占用，无需重复登记' : '只登记占用；真正出水需现场按电磁阀'}" ${opening || registered ? 'disabled' : ''}>开阀（登记）</button>
-        <button type="button" class="btn btn-ghost btn-sm" data-water="close" data-door="${esc(doorNo)}" title="关阀会断水；浴室 App 可能按现场关水更新会话；已现场开过水的喷头可能保留占用" ${closing ? 'disabled' : ''}>关阀</button>
+      <div class="btn-row">
+        <button type="button" class="btn btn-sm" data-water="open" data-door="${esc(doorNo)}" title="只置开阀位；真正出水需现场按电磁阀" ${opening ? 'disabled' : ''}>开阀</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-water="close" data-door="${esc(doorNo)}" title="关阀会断水；浴室 App 可能按现场关水更新会话；已现场开过水的喷头可能保留开阀位" ${closing ? 'disabled' : ''}>关阀</button>
       </div>`
 }
 
@@ -553,21 +551,19 @@ function renderWaterInfo() {
       const config = board.config || {}
       const used = `${board.start}–${board.start + board.count - 1}（${board.count} 个）`
       const configText = config.door_num
-        ? `板自报 ${config.door_num} 门 / 最长 ${config.bath_min} 分钟`
-        : '板配置未读到'
+        ? `${config.door_num} 门 / 最长 ${config.bath_min} 分钟`
+        : '未读到'
       return `
-        <div class="water-board">
-          <div class="water-board-head">${esc(board.name || board.code || board.ip)}<span class="muted">${esc(board.code || '')}</span></div>
-          <div class="water-board-meta">
-            <span>${esc(board.ip)}:${esc(board.port)}</span>
-            <span>POS ${esc(board.pos)}</span>
-            <span>应用喷头 ${esc(used)}</span>
-            <span>${esc(configText)}</span>
-          </div>
+        <div class="cfg-card">
+          <div class="cfg-card-title">${esc(board.name || board.code || board.ip)}<span class="muted"> ${esc(board.code || '')}</span></div>
+          <div class="kv"><span class="k">地址</span><span class="v">${esc(board.ip)}:${esc(board.port)}</span></div>
+          <div class="kv"><span class="k">POS</span><span class="v">${esc(board.pos)}</span></div>
+          <div class="kv"><span class="k">应用喷头</span><span class="v">${esc(used)}</span></div>
+          <div class="kv"><span class="k">板自报</span><span class="v">${esc(configText)}</span></div>
         </div>`
     })
     .join('')
-  info.innerHTML = `<div class="water-refresh muted">上次刷新 ${esc(fmtDateTime(waterState.at))}</div>${rows}`
+  info.innerHTML = `<div class="cfg-grid">${rows}</div><div class="hint">上次刷新 ${esc(fmtDateTime(waterState.at))}</div>`
 }
 
 /**
@@ -685,8 +681,8 @@ export const overviewView = {
           <button type="button" class="btn" id="btnRefreshWater">刷新水控板信息</button>
         </div>
         <div class="result" id="resWater"></div>
-        <div id="waterInfo" class="water-info"><div class="empty">尚未刷新水控板信息</div></div>
-        <div class="muted">开阀只登记占用；真正出水需现场按电磁阀。关阀会断水，浴室 App 可能按现场关水更新会话。手动操作不建会话；卡片上的会话状态仍来自浴室 App。门数以 waterList 为准，板自报门数可能不准。</div>
+        <div id="waterInfo"><div class="empty">尚未刷新水控板信息</div></div>
+        <div class="muted">「开阀」只置板子的开阀位，不直接出水；真正出水需现场按电磁阀。「关阀」会断水，浴室 App 可能按现场关水更新会话。手动操作不建会话；卡片上的会话状态仍来自浴室 App。门数以 waterList 为准，板自报门数可能不准。</div>
       </div>
 
       <div class="act-card task-board">
