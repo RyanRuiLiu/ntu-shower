@@ -1,8 +1,6 @@
 package com.ryanliu.ntushower.features.water
 
 import android.util.Log
-import com.ryanliu.ntushower.core.config.AppConfig
-import com.ryanliu.ntushower.core.shell.RootShell
 import org.json.JSONArray
 import org.json.JSONObject
 import org.w3c.dom.Document
@@ -116,19 +114,6 @@ object WaterTargetResolver {
             count = count,
         )
     }
-
-    /** 每次动作现读 `data.xml`，不缓存：App 会在 V8 参数下发后改写这份文件。 */
-    fun boards(): List<Board> {
-        val result = RootShell.control.exec("cat ${AppConfig.BATH_PREFS_PATH}")
-        if (result.exitCode != 0 || result.output.isBlank()) {
-            Log.w(TAG, "读 data.xml 失败，exit=${result.exitCode}")
-            return emptyList()
-        }
-        return parse(result.output)
-    }
-
-    /** 逻辑门号 → 板子与板内门号；不在任何 waterList 区间时返回 null。 */
-    fun target(doorNo: Int): Target? = targetIn(boards(), doorNo)
 
     /** 纯换算版本，供单元测试直接喂 waterList 解析结果。 */
     fun targetIn(boards: List<Board>, doorNo: Int): Target? {

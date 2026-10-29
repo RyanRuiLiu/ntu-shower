@@ -153,6 +153,9 @@ val frameworkBoundClasses = listOf(
     "**/features/overlay/OverlayPresenter*",
     // 条件时钟：服务端锚点外壳；本地换算与分钟对齐由 ConditionRuleTest 覆盖
     "**/features/overlay/ConditionClock*",
+    // 水控板根 shell 读取：依赖 su 读 App 私有 data.xml；纯解析/区间换算由
+    // WaterTargetResolverTest 覆盖
+    "**/features/water/WaterTargetReader*",
     // 语音播报：下载/播放/后台预下载/音量守卫依赖 OkHttp 文件系统、线程、MediaPlayer/
     // AudioManager、SharedPreferences；参数、音量计划、缓存淘汰已抽为纯逻辑并纳入覆盖
     "**/features/voice/VoiceClipStore*",
