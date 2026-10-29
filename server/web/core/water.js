@@ -45,6 +45,7 @@ export function subscribeWater(fn) {
  */
 export async function refreshWater(deviceId = store.deviceId) {
   if (!deviceId) return { ok: false, message: '失败 · 请先选择设备' }
+  if (water.loading && water.deviceId === deviceId) return { ok: false, message: '正在刷新水控板' }
   setWater({ ...water, deviceId, loading: true, error: '' })
   try {
     const result = await api.waterStatus(deviceId)
