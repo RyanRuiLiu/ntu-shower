@@ -69,17 +69,17 @@ object WaterFrame {
     /**
      * 板内一个喷头的状态。
      *
-     * `status` 位义来自反编译的 `STATUS_door_bits.md` / `DoorStatusConfirmThread`，
-     * 并与 1F 2/3 号、1F/2F 4 号、2F 1 号的实测一致：
-     * - `0x01` 占用（板子登记/使能）；
-     * - `0x02` 水控板被动同步；
-     * - `0x04` **现场开关**（人按下电磁阀才置位；`F4 B2 AA` 不置这一位）；
-     * - `0x07` = 三者都有；`0x03` = 占用+同步（现场开关未按/无水）；`0x00` = 无占用。
+     * `status` 位义以现场实测为准（见 `docs/DECISIONS.md`「水控板现场实测」）。
+     * 反编译文档把 `0x02` 叫被动同步、`0x04` 叫用户手动物理开关，与现场相反：
+     * - `0x01` 开阀位（App 分配或远程 `F4 B2 AA` 置位）；
+     * - `0x02` **电磁阀按钮位**（现场按阀翻转；`0x00→0x02→0x00`）；
+     * - `0x04` **出水位**（开阀位已置且按钮由关变开时出现，`allOpenTime` 随之增长）；
+     * - `0x07` = 三者都有；`0x03` = 开阀+按钮（尚未出水）；`0x00` = 关阀。
      *
-     * 因此 `F4 B2 AA` 只登记占用，**不直接出水**；真正出水仍要现场按电磁阀。
-     * `bathSeconds` 是板子的 bathTime（源码称已洗浴时间，但只登记占用时它也会走，
-     * 界面因此称“板计时”）；`allOpenSeconds` 是累计开阀时间。两者均按
-     * `high*255+low` 解析；远程登记时实测 `allOpenSeconds` 不增长。
+     * 远程 `F4 B2 AA` 只置 `0x01`，不置 `0x02/0x04`；远程 `F4 B2 00` 清
+     * `0x01/0x04`，不清 `0x02`。`bathSeconds` 对应 `bathTime`，开阀位存在时就会走；
+     * `allOpenSeconds` 对应 `allOpenTime`，出水位存在时才走。两者均按
+     * `high*255+low` 解析。
      */
     data class DoorStatus(val boardDoor: Int, val status: Int, val bathSeconds: Int, val allOpenSeconds: Int)
 
@@ -100,7 +100,7 @@ object WaterFrame {
         val returnCode: Int get() = if (data.isEmpty()) -1 else data[0].toInt() and 0xFF
     }
 
-    /** 登记占用 payload：`F4 B2 01 AA <boardDoor>`；板子置 0x01，不直接出水。 */
+    /** 开阀 payload：`F4 B2 01 AA <boardDoor>`；板子置 0x01，不直接出水。 */
     fun openPayload(boardDoor: Int): ByteArray = byteArrayOf(
         0xF4.toByte(),
         CMD_SWITCH.toByte(),
@@ -109,7 +109,7 @@ object WaterFrame {
         boardDoor.toByte(),
     )
 
-    /** 关阀/断水 payload：`F4 B2 01 00 <boardDoor>`；清 0x04/0x02。 */
+    /** 关阀/断水 payload：`F4 B2 01 00 <boardDoor>`；清 0x01/0x04，不清 0x02 按钮位。 */
     fun closePayload(boardDoor: Int): ByteArray = byteArrayOf(
         0xF4.toByte(),
         CMD_SWITCH.toByte(),

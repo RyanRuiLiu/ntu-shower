@@ -41,10 +41,10 @@ internal interface WaterBoard {
  *
  * ## 状态位
  *
- * 客户端只返回板子的原始状态字节；把位翻译成"占用/同步/现场开关"是 UI/调用方的事。
- * 位义与实测见 [WaterFrame.DoorStatus]：`0x01` 占用、`0x02` 同步、`0x04` 现场开关，
- * `0x07` 三者、`0x03` 占用+同步（现场开关未按/无水）、`0x00` 无占用。
- * 注意 `open` 只登记占用，真正出水仍需现场按电磁阀；这是板子的硬件行为。
+ * 客户端只返回板子的原始状态字节；把位翻译成“开阀/电磁阀按钮/出水”是 UI/调用方的事。
+ * 位义与实测见 [WaterFrame.DoorStatus]：`0x01` 开阀位、`0x02` 电磁阀按钮位、
+ * `0x04` 出水位，`0x07` 三者、`0x03` 开阀+按钮（未出水）、`0x00` 关阀。
+ * 注意 `open` 只置开阀位，真正出水仍需现场按电磁阀；这是板子的硬件行为。
  */
 class WaterBoardClient(private val connectTimeoutMs: Int = 2_000, private val readTimeoutMs: Int = 3_000) : WaterBoard {
 
