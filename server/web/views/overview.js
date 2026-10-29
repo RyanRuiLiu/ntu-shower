@@ -14,6 +14,7 @@ import { DOOR_STATES } from '../core/contract.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
 import { outcomeText, problemText, report } from '../core/outcome.js'
 import { store, subscribe } from '../core/store.js'
+import { toast } from '../core/toast.js'
 
 /**
  * 七个状态的中文名。键取自契约（core/contract.js），文案与小程序一致：同一批
@@ -49,6 +50,76 @@ const KPI = [
 
 /** 上一次渲染时各喷头的状态，用于判断"这个喷头刚变了"。 */
 let previousStates = new Map()
+
+/**
+ * 水控板直控的页面状态：最近一次 `water.status` 的结构化结果。
+ *
+ * 与会话状态（`store.doors`）是两层事实：这里只存板子的 `F4 B1/F4 B3`，不合并、
+ * 不覆盖卡片上的会话状态。刷新是手动的；开/关成功后再读一次状态，仍不是同步。
+ */
+let waterState = { deviceId: '', at: '', boards: [], error: '' }
+
+/** 正在发送的开/关：`doorNo:action`，用于按钮禁用，避免同一喷头连点。 */
+let waterPending = new Set()
+
+function isAdmin() {
+  return store.runtime.length > 0
+}
+
+function waterKey(doorNo, action) {
+  return `${doorNo}:${action}`
+}
+
+/** 找当前设备最近一次刷新里的某逻辑喷头；没有刷新过/设备不一致时返回 null。 */
+function waterDoor(doorNo) {
+  if (waterState.deviceId !== store.deviceId || !waterState.at) return null
+  for (const board of waterState.boards) {
+    const door = (board.doors || []).find((item) => item.door_no === doorNo)
+    if (door) return { board, door }
+  }
+  return null
+}
+
+/**
+ * 板报状态位的可读文案。
+ *
+ * 位义来自反编译源码（`dbGUIDE.md` / `BathMainActivity` 用第 5 位判断电磁阀开关、
+ * 第 7 位判断占用）并与实测一致：`0x04` 阀开、`0x02` 同步、`0x01` 占用；
+ * `0x07` 三者、`0x03` 占用+同步（阀关/无水）、`0x00` 全关。
+ * 只翻已知的三位；出现其他位就显示“未知状态”，不猜、不把它映射成浴室 App 的会话状态。
+ */
+function waterStatusText(status) {
+  if (status & ~0x07) return '未知状态'
+  const parts = []
+  if (status & 0x04) parts.push('阀开')
+  if (status & 0x02) parts.push('同步')
+  if (status & 0x01) parts.push('占用')
+  return parts.length ? parts.join(' · ') : '全关'
+}
+
+function doorWaterLine(door) {
+  const found = waterDoor(door.door_no)
+  if (!found) return ''
+  const value = found.door
+  return `
+      <div class="door-water">
+        <span class="water-label">水控板</span>
+        <span class="water-state">${esc(waterStatusText(value.status))}</span>
+        <span class="water-meta">已洗 ${esc(fmtDuration(value.bath_s))} · 累计开阀 ${esc(fmtDuration(value.allopen_s))}</span>
+      </div>`
+}
+
+function doorWaterButtons(door) {
+  if (!isAdmin()) return ''
+  const doorNo = door.door_no
+  const opening = waterPending.has(waterKey(doorNo, 'open'))
+  const closing = waterPending.has(waterKey(doorNo, 'close'))
+  return `
+      <div class="water-actions">
+        <button type="button" class="btn btn-sm" data-water="open" data-door="${esc(doorNo)}" ${opening ? 'disabled' : ''}>开阀</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-water="close" data-door="${esc(doorNo)}" ${closing ? 'disabled' : ''}>关阀</button>
+      </div>`
+}
 
 function renderKpi(doors) {
   const counts = { total: doors.length }
@@ -177,6 +248,8 @@ function renderDoors(doors) {
           </div>
           ${certLine}
           ${grid}
+          ${doorWaterLine(door)}
+          ${doorWaterButtons(door)}
         </div>`
     })
     .join('')
@@ -227,6 +300,7 @@ function paint() {
     fill.style.setProperty('--ratio', `${fill.dataset.ratio}%`)
   }
   $('doors').innerHTML = renderDoors(store.doors)
+  renderWaterInfo()
   // 闪一下就把标记撤掉，否则下次重排还会带着它
   for (const card of $('doors').querySelectorAll('.door.flash')) {
     setTimeout(() => card.classList.remove('flash'), 1000)
@@ -437,6 +511,120 @@ function stopTaskBoard() {
   }
 }
 
+/**
+ * 水控板信息卡：只显示结构化的 waterList/板配置（F4 B1），不显示 raw。
+ *
+ * 6F 的板子自身是 24 门/30 分钟，而 waterList 只用 7 门：这里同时显示
+ * `应用喷头 1–7（7 个）` 与 `板配置 24 门/最长 30 分钟`，不把两者混成一个数字。
+ */
+function renderWaterInfo() {
+  const card = $('waterCard')
+  if (!card) return
+  const admin = isAdmin()
+  card.hidden = !admin
+  const info = $('waterInfo')
+  if (!info) return
+  if (!admin) {
+    info.innerHTML = ''
+    return
+  }
+  if (waterState.deviceId !== store.deviceId || !waterState.at) {
+    info.innerHTML = waterState.error
+      ? `<div class="empty">${esc(waterState.error)}</div>`
+      : '<div class="empty">尚未刷新水控板信息</div>'
+    return
+  }
+  const boards = waterState.boards || []
+  if (!boards.length) {
+    info.innerHTML = '<div class="empty">未读到水控板</div>'
+    return
+  }
+  const rows = boards
+    .map((board) => {
+      const config = board.config || {}
+      const used = `${board.start}–${board.start + board.count - 1}（${board.count} 个）`
+      const configText = config.door_num
+        ? `板配置 ${config.door_num} 门 / 最长 ${config.bath_min} 分钟`
+        : '板配置未读到'
+      return `
+        <div class="water-board">
+          <div class="water-board-head">${esc(board.name || board.code || board.ip)}<span class="muted">${esc(board.code || '')}</span></div>
+          <div class="water-board-meta">
+            <span>${esc(board.ip)}:${esc(board.port)}</span>
+            <span>POS ${esc(board.pos)}</span>
+            <span>应用喷头 ${esc(used)}</span>
+            <span>${esc(configText)}</span>
+          </div>
+        </div>`
+    })
+    .join('')
+  info.innerHTML = `<div class="water-refresh muted">上次刷新 ${esc(fmtDateTime(waterState.at))}</div>${rows}`
+}
+
+/**
+ * 读当前设备的水控板信息：waterList 的板 + F4 B1 配置 + F4 B3 前 N 门状态。
+ *
+ * `announce` 为 false 时只更新页面、不写结果区——开/关成功后用它把板状态刷新到
+ * 卡片上；这仍然只是板子的当下读数，不是与浴室 App 同步。
+ */
+async function refreshWater(announce = true) {
+  if (!store.deviceId) {
+    if (announce) report('resWater', '失败 · 请先在顶栏选择设备', 'err')
+    return
+  }
+  const deviceId = store.deviceId
+  if (announce) report('resWater', '正在读取水控板…', 'info')
+  try {
+    const result = await api.waterStatus(deviceId)
+    if (deviceId !== store.deviceId) return
+    if (result.status !== 'ok') {
+      waterState = { deviceId, at: '', boards: [], error: outcomeText(result) }
+      if (announce) report('resWater', outcomeText(result), 'err')
+      paint()
+      return
+    }
+    waterState = {
+      deviceId,
+      at: new Date(serverNowMs()).toISOString(),
+      boards: result.data?.boards || [],
+      error: '',
+    }
+    if (announce) report('resWater', `已刷新 ${waterState.boards.length} 块水控板`, 'ok')
+    paint()
+  } catch (error) {
+    if (deviceId !== store.deviceId) return
+    waterState = { deviceId, at: '', boards: [], error: problemText(error) }
+    if (announce) report('resWater', problemText(error), 'err')
+    paint()
+  }
+}
+
+/** 卡片上的开阀/关阀：admin 才能看到按钮，服务端仍会再校验。 */
+async function onWaterButton(event) {
+  const button = event.target.closest('[data-water]')
+  if (!button || button.disabled) return
+  const doorNo = Number(button.dataset.door)
+  const action = button.dataset.water
+  if (!store.deviceId || !doorNo || (action !== 'open' && action !== 'close')) return
+  const key = waterKey(doorNo, action)
+  if (waterPending.has(key)) return
+  waterPending.add(key)
+  paint()
+  try {
+    const result =
+      action === 'open'
+        ? await api.waterOpen(store.deviceId, doorNo)
+        : await api.waterClose(store.deviceId, doorNo)
+    toast(outcomeText(result))
+    if (result.status === 'ok') await refreshWater(false)
+  } catch (error) {
+    toast(problemText(error))
+  } finally {
+    waterPending.delete(key)
+    paint()
+  }
+}
+
 let dispose = disposer()
 
 export const overviewView = {
@@ -482,6 +670,16 @@ export const overviewView = {
         </div>
       </div>
 
+      <div class="act-card" id="waterCard" hidden>
+        <div class="act-title">水控板直控</div>
+        <div class="btn-row">
+          <button type="button" class="btn" id="btnRefreshWater">刷新水控板信息</button>
+        </div>
+        <div class="result" id="resWater"></div>
+        <div id="waterInfo" class="water-info"><div class="empty">尚未刷新水控板信息</div></div>
+        <div class="muted">手动开/关不建会话；卡片上的会话状态仍来自浴室 App。</div>
+      </div>
+
       <div class="act-card task-board">
         <div class="act-title">后台任务</div>
         <div id="taskBoard"><div class="empty">正在加载…</div></div>
@@ -496,6 +694,15 @@ export const overviewView = {
     dispose.add(listen($('btnPhoto'), 'click', doPhoto))
     dispose.add(listen($('btnAssign'), 'click', doAssign))
     dispose.add(listen($('btnSettle'), 'click', doSettle))
+    // 水控板直控：刷新按钮 + 卡片上的开/关（admin；服务端仍会校验）
+    dispose.add(listen($('btnRefreshWater'), 'click', () => refreshWater(true)))
+    dispose.add(listen($('doors'), 'click', onWaterButton))
+    dispose.add(subscribe('runtime', () => paint()))
+    dispose.add(subscribe('device', () => {
+      waterPending = new Set()
+      waterState = { deviceId: store.deviceId, at: '', boards: [], error: '' }
+      paint()
+    }))
 
     previousStates = new Map()
     paint()

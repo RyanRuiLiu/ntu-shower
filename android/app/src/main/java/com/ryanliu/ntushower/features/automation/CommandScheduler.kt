@@ -8,6 +8,7 @@ import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.features.remote.ScreenCapture
 import com.ryanliu.ntushower.features.voice.VoicePlaySpec
 import com.ryanliu.ntushower.features.voice.VoicePlayer
+import com.ryanliu.ntushower.features.water.WaterHandler
 import com.ryanliu.ntushower.transport.OutcomeStatus
 import com.ryanliu.ntushower.transport.ReasonCodes
 import org.json.JSONObject
@@ -20,6 +21,7 @@ enum class CommandChannel {
     CAPTURE,
     VOICE,
     PREFETCH,
+    WATER,
 }
 
 /** 调度器产出的命令结果（与 session.command_result payload 对应）。 */
@@ -47,6 +49,7 @@ class CommandScheduler(
     private val captureExecutor: Executor = Executors.newSingleThreadExecutor(),
     private val voiceExecutor: Executor = Executors.newSingleThreadExecutor(),
     private val prefetchExecutor: Executor = Executors.newSingleThreadExecutor(),
+    private val waterExecutor: Executor = Executors.newSingleThreadExecutor(),
 ) {
 
     sealed class Command(val id: String) {
@@ -99,6 +102,18 @@ class CommandScheduler(
 
         /** 把音频排入低优先级后台预下载队列，不播放、不等待网络。 */
         class PrepareVoice(id: String, val params: JSONObject) : Command(id)
+
+        /**
+         * 水控板直控：开/关某个逻辑喷头。
+         *
+         * 目标板/板内门号在设备端由 waterList 解析；服务端只给逻辑门号。这条路径
+         * 不建会话、不碰浴室 App 的界面与数据库，和 session.* 是并列通路。
+         */
+        class WaterOpen(id: String, val doorNo: Int) : Command(id)
+        class WaterClose(id: String, val doorNo: Int) : Command(id)
+
+        /** 读设备 waterList 里每块板的配置与状态（F4 B1 + F4 B3）。 */
+        class WaterStatus(id: String) : Command(id)
     }
 
     private val automationQueue = SerialCommandQueue<Command>()
@@ -113,6 +128,10 @@ class CommandScheduler(
     // 预下载只把素材排入后台队列、立即返回；单独排队，播放永远不用等它。
     private val prefetchQueue = SerialCommandQueue<Command>()
 
+    // 水控板 TCP 是独立执行路径：板子请求-响应短、但会与 App 轮询共用串行线；
+    // 单独排队，绝不让开/关阀排在截图或界面操作后面。
+    private val waterQueue = SerialCommandQueue<Command>()
+
     fun enqueue(command: Command, expireAtMs: Long) {
         when (channelOf(command)) {
             // 图像采集资源独立，不占用自动化队列——否则一条慢截图会把
@@ -126,6 +145,11 @@ class CommandScheduler(
 
             CommandChannel.PREFETCH -> dispatch(command, prefetchQueue, expireAtMs) {
                 runPrefetch(it)
+            }
+
+            // 板子 TCP 独立执行器：开关阀/读状态不与界面、截图、语音互堵
+            CommandChannel.WATER -> dispatch(command, waterQueue, expireAtMs) {
+                runWater(it)
             }
 
             // 读节点树走自动化队列：它读的就是那份 UI 节点树，与 ui.touch / ui.key
@@ -264,6 +288,38 @@ class CommandScheduler(
                 }
             } finally {
                 prefetchQueue.complete()?.let { runPrefetch(it) }
+            }
+        }
+    }
+
+    /**
+     * 执行一条水控板命令，结束后放行队列中的下一条。
+     *
+     * 与采集/语音同构：回报只发一次；失败原因由 [WaterHandler] 映射到
+     * `water.*` 原因码。这里不重试、不自动补关阀——一次动作一个结果。
+     */
+    private fun runWater(command: Command) {
+        waterExecutor.execute {
+            var reported = false
+            try {
+                onOutcome(WaterHandler.execute(command))
+                reported = true
+            } catch (e: Throwable) {
+                if (reported) {
+                    Log.w(TAG, "水控板结果已回报，收尾失败：${e.message}", e)
+                } else {
+                    Log.e(TAG, "water crashed: ${e.message}", e)
+                    onOutcome(
+                        CommandOutcome(
+                            command.id,
+                            OutcomeStatus.FAILED,
+                            ReasonCodes.DEVICE_INTERNAL_ERROR,
+                            "设备端内部错误",
+                        ),
+                    )
+                }
+            } finally {
+                waterQueue.complete()?.let { runWater(it) }
             }
         }
     }
@@ -517,6 +573,7 @@ class CommandScheduler(
             is Command.Photo, is Command.Screen -> CommandChannel.CAPTURE
             is Command.PlayVoice -> CommandChannel.VOICE
             is Command.PrepareVoice -> CommandChannel.PREFETCH
+            is Command.WaterOpen, is Command.WaterClose, is Command.WaterStatus -> CommandChannel.WATER
             else -> CommandChannel.AUTOMATION
         }
     }

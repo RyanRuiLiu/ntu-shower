@@ -230,6 +230,49 @@
   color: var(--amber);
 }
 
+/* ── 水控板直控 ─────────────────────────────────────────────
+   与浴室 App 的会话状态是两层事实，必须一眼分开：会话状态用上面的状态标签，
+   水控板用下面这条带左侧竖线的浅蓝区。不合并、不互相覆盖。 */
+
+.door-water {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+  padding: 8px 0 0 10px;
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  border-left: 2px solid var(--blue);
+}
+
+.water-label {
+  padding: 1px 6px;
+  color: var(--blue);
+  background: var(--blue-bg);
+  border-radius: var(--radius-xs);
+  font-size: var(--fs-chip);
+  font-weight: 600;
+}
+
+/* 板报状态是硬件事实，用强调色而不是会话状态里的任何一色 */
+.water-state {
+  color: var(--accent);
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.water-meta {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+}
+
+.water-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
 /* ── 控制操作 ───────────────────────────────────────────── */
 
 /*
@@ -279,6 +322,54 @@
   width: 100%;
   padding: 8px 12px;
   font: 14px var(--font-mono);
+}
+
+/* 水控板信息：一块板一段，板与板之间发丝线分隔；所有机器读数等宽。 */
+.water-info {
+  margin-top: 12px;
+}
+
+.water-refresh {
+  margin-bottom: 8px;
+  font-size: var(--fs-small);
+}
+
+.water-board {
+  padding: 10px 12px;
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.water-board + .water-board {
+  margin-top: 8px;
+}
+
+.water-board-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.water-board-head .muted {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  font-weight: 400;
+}
+
+.water-board-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  color: var(--dim);
+  font-size: var(--fs-small);
+}
+
+.water-board-meta span {
+  font-family: var(--font-mono);
 }
 
 /* ── 拍照结果 ───────────────────────────────────────────── */

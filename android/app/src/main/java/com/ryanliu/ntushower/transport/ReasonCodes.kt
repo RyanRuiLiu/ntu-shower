@@ -125,6 +125,21 @@ object ReasonCodes {
     /** 截屏失败 */
     const val SCREEN_CAPTURE_FAILED = "screen.capture_failed"
 
+    /** 找不到该喷头的板/门映射 */
+    const val WATER_TARGET_NOT_FOUND = "water.target_not_found"
+
+    /** 水控板不可达 */
+    const val WATER_BOARD_UNREACHABLE = "water.board_unreachable"
+
+    /** 水控板未在时限内回应 */
+    const val WATER_TIMEOUT = "water.timeout"
+
+    /** 水控板回包不合法 */
+    const val WATER_FRAME_INVALID = "water.frame_invalid"
+
+    /** 水控板拒绝了该操作 */
+    const val WATER_BOARD_REJECTED = "water.board_rejected"
+
     /** 播报参数不合法 */
     const val VOICE_PARAMS_INVALID = "voice.params_invalid"
 
