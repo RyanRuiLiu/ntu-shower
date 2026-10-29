@@ -43,7 +43,7 @@ WATER_OPEN = "water.open"
 WATER_CLOSE = "water.close"
 """关阀/断水：params.door_no 为逻辑喷头号；向板子发 F4 B2（0x00）。
 
-实测会清掉现场开关位 0x04 与同步位 0x02；有卡的喷头可能保留占用位 0x01。"""
+实测会清掉现场开关位 0x04 与同步位 0x02；已现场开过水的喷头，关阀后占用位 0x01 可能保留。"""
 
 WATER_STATUS = "water.status"
 """读水控板信息：对设备 waterList 里的每块板发 F4 B1（板配置）与 F4 B3（状态）。
