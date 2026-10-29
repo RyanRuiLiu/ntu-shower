@@ -92,19 +92,6 @@ function waterTagText(status) {
   return '未开阀'
 }
 
-function doorWaterDetail(door) {
-  const found = waterDoor(door.door_no)
-  if (!found) return ''
-  const value = found.door
-  // `bath_s` 是板子的 bathTime：只登记占用时也会走，不能当成“洗了多久”；
-  // `allopen_s` 才是累计开阀（现场开关按下）的时长。两者分开显示。
-  return `
-      <div class="door-grid">
-        <div class="kv door-cell"><span class="k">板计时</span><span class="v">${esc(fmtDuration(value.bath_s))}</span></div>
-        <div class="kv door-cell"><span class="k">累计开阀</span><span class="v">${esc(fmtDuration(value.allopen_s))}</span></div>
-      </div>`
-}
-
 /**
  * 头部下方独立一行：左水控状态，右开阀/关阀。
  *
@@ -258,7 +245,6 @@ function renderDoors(doors) {
           ${doorWaterControls(door)}
           ${certLine}
           ${grid}
-          ${doorWaterDetail(door)}
         </div>`
     })
     .join('')
