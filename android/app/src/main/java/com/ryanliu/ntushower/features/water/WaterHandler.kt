@@ -17,12 +17,12 @@ import org.json.JSONObject
  * - 板坐标/门数来自 [WaterTargetResolver]（`data.xml` 的 waterList），不是服务端下发；
  * - 板配置 `F4 B1` 只进 `data.boards[].config` 供页面展示，不参与控制；
  * - 板状态 `F4 B3` 只取 waterList 的 `count` 条；6F 的板报 N=24 时，后 17 条
- *   **不返回、不展示**（App 的 `t_doorlist` 也只有 7 行）。
+ *   **不返回、不展示**（App 的 waterList 只用 7 门）。
  *
  * ## 物理/协议位义（实测）
  *
  * 反编译源码（`STATUS_door_bits.md` / `DoorStatusConfirmThread`）与 1F 2/3 号、
- * 远程 4 号、2F 1 号实测一致：`0x01` 占用、`0x02` 同步、`0x04` 现场开关，
+ * 1F/2F 4 号、2F 1 号实测一致：`0x01` 占用、`0x02` 同步、`0x04` 现场开关，
  * `0x07` 三者、`0x03` 占用+同步（现场开关未按/无水）、`0x00` 无占用。
  * `water.open` 只登记占用，**不直接出水**；真正出水仍需现场按电磁阀。
  * 这里原样返回 status，页面负责翻译。
