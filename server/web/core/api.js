@@ -82,6 +82,13 @@ export const api = {
   settle: (deviceId, value) => send(devicePath(deviceId, '/settle'), post(value)),
   photo: (deviceId) => send(devicePath(deviceId, '/photo'), post()),
 
+  // ── 水控板直控（admin）──
+  // 目标设备在路径里，请求体只有逻辑喷头号；板坐标在设备端由 waterList 解析。
+  // 开/关不建会话、不写浴室 App 库；status 读的是板配置（F4 B1）与板状态（F4 B3）。
+  waterOpen: (deviceId, doorNo) => send(devicePath(deviceId, '/water/open'), post({ door_no: doorNo })),
+  waterClose: (deviceId, doorNo) => send(devicePath(deviceId, '/water/close'), post({ door_no: doorNo })),
+  waterStatus: (deviceId) => send(devicePath(deviceId, '/water/status'), post({})),
+
   // ── 设备 ──
   // devices: 精简清单（含本身份的 actions）；runtime: 运维档案（admin）
   devices: () => send(`${API_V1}/devices`),

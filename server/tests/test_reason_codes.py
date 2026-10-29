@@ -20,7 +20,8 @@ SCHEMA_DIR = Path(__file__).resolve().parents[2] / "protocol" / "schema"
 
 #: 原因码命名空间清单（显式）：前缀表达"问题归谁"，而非代码模块。
 #: proto 帧本身不合法；device 设备侧；server 服务端侧；command 命令生命周期；
-#: door 业务规则；ui 界面操作；camera 与 screen 采集。不在此列即登记错误。
+#: door 业务规则；ui 界面操作；camera 与 screen 采集；voice 播报；water 水控板直控。
+#: 不在此列即登记错误。
 NAMESPACES: tuple[str, ...] = (
     "proto",
     "device",
@@ -31,11 +32,12 @@ NAMESPACES: tuple[str, ...] = (
     "camera",
     "screen",
     "voice",
+    "water",
 )
 NAMESPACE_SET = frozenset(NAMESPACES)
 
 #: 设备专属的命名空间：这些码只应由设备端产生。
-DEVICE_ONLY_NAMESPACES = frozenset({"ui", "camera", "screen", "voice"})
+DEVICE_ONLY_NAMESPACES = frozenset({"ui", "camera", "screen", "voice", "water"})
 
 #: 原因码字面量。只认已登记命名空间，消息类型（`door.snapshot`）与动作名（`ui.dump`）
 #: 会命中，后面用消息类型清单与 ALL_ACTIONS 减掉。允许数字是为了 `a11y`。

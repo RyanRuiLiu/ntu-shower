@@ -69,6 +69,7 @@ OBJECT_LABELS = {
     "bridge": "调试通道",
     "ui": "设备界面（无障碍）",
     "freelist": "免费名单",
+    "water": "水控板直控",
 }
 
 

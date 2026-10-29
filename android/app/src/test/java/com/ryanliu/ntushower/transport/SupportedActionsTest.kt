@@ -32,6 +32,9 @@ class SupportedActionsTest {
             "freelist.write",
             "voice.play",
             "voice.prepare",
+            "water.open",
+            "water.close",
+            "water.status",
             "bridge.open",
             "bridge.close",
             "ui.dump",
@@ -66,6 +69,9 @@ class SupportedActionsTest {
         assertTrue(SupportedActions.FREELIST_WRITE in SupportedActions.ALL)
         assertTrue(SupportedActions.VOICE_PLAY in SupportedActions.ALL)
         assertTrue(SupportedActions.VOICE_PREPARE in SupportedActions.ALL)
+        assertTrue(SupportedActions.WATER_OPEN in SupportedActions.ALL)
+        assertTrue(SupportedActions.WATER_CLOSE in SupportedActions.ALL)
+        assertTrue(SupportedActions.WATER_STATUS in SupportedActions.ALL)
     }
 
     @Test
