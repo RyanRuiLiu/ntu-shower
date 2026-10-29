@@ -55,7 +55,7 @@ object WaterFrame {
      * 板内一个喷头的状态。
      *
      * `status` 位义来自反编译的 `STATUS_door_bits.md` / `DoorStatusConfirmThread`，
-     * 并与 1F 2/3 号、远程 4 号、2F 1 号的实测一致：
+     * 并与 1F 2/3 号、1F/2F 4 号、2F 1 号的实测一致：
      * - `0x01` 占用（板子登记/使能）；
      * - `0x02` 水控板被动同步；
      * - `0x04` **现场开关**（人按下电磁阀才置位；`F4 B2 AA` 不置这一位）；
