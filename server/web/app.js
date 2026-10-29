@@ -179,7 +179,7 @@ function waterInfoRows() {
         .join('')
     })
     .join('')
-  return `${rows}<div class="kv"><span class="k">上次刷新</span><span class="v">${esc(fmtDateTime(current.at))}</span></div>`
+  return rows
 }
 
 function renderDeviceInfo() {
