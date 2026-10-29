@@ -6,8 +6,8 @@
 - 本模块直连水控板（设备端读 `data.xml` 的 waterList 拿板坐标），**不建会话、不写
   浴室 App 数据库、不与 App 状态同步**。两者是并列通路，不是主备。
 
-`water.open` 只登记占用（板子置 0x01），**不直接出水**；现场按下电磁阀才会置
-0x04 出水。`water.close` 会清 0x04/0x02，真正断水；已现场开过水的喷头，关阀后 0x01 可能保留。
+`water.open` 只置开阀位（0x01），**不直接出水**；0x02 是电磁阀按钮位，0x04 是
+出水位，现场按下电磁阀才出现。`water.close` 清 0x01/0x04 断水，不清 0x02。
 
 ## 数据源（设备端）
 
@@ -42,7 +42,7 @@ router = APIRouter(prefix="/api/v1/devices", dependencies=[Depends(require_admin
 
 @router.post("/{device_id}/water/open")
 async def open_valve(device_id: str, req: WaterDoorRequest) -> CommandOutcome:
-    """登记指定喷头的占用；**不直接出水**，真正出水仍需现场按电磁阀。"""
+    """置指定喷头的开阀位；**不直接出水**，真正出水仍需现场按电磁阀。"""
     return await device_action(
         device_id,
         actions.WATER_OPEN,

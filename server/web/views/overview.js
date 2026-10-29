@@ -66,47 +66,32 @@ function waterKey(doorNo, action) {
 /**
  * 板报状态位的可读文案。
  *
- * 位义来自反编译源码（`STATUS_door_bits.md` / `DoorStatusConfirmThread`）并与实测一致：
- * `0x01` 占用（板子登记/使能）、`0x02` 被动同步、`0x04` 现场开关（手动按下才出水）。
- * `0x07` 三者、`0x03` 占用+同步（现场开关未按/无水）、`0x00` 无占用。
- * 有开阀位而没有现场开关位时补一句“未出水”，让“登记了但没按阀”一眼可辨。
- * 只翻已知的三位；出现其他位就显示“未知状态”，不猜、不把它映射成浴室 App 的会话状态。
+ * 位义以现场实测为准（见 `docs/DECISIONS.md`「水控板现场实测」）：
+ * `0x01` 开阀位、`0x02` 电磁阀按钮位、`0x04` 出水位；
+ * `0x07` 三者、`0x03` 开阀+按钮（未出水）、`0x00` 关阀。
+ * 反编译文档的 0x02/0x04 位名与现场相反。
+ * 出现未定义的高位就显示“未定义位”，不猜、不映射成会话状态。
  */
 function waterStatusText(status) {
-  if (status & ~0x07) return '未知状态'
+  if (status & ~0x07) return '未定义位'
   const parts = []
   if (status & 0x01) parts.push('开阀')
-  if (status & 0x02) parts.push('同步')
-  if (status & 0x04) parts.push('现场开关')
-  else if (status & 0x01) parts.push('未出水')
-  else parts.push('未开阀')
-  return parts.join(' · ')
+  if (status & 0x02) parts.push('电磁阀按钮')
+  if (status & 0x04) parts.push('出水')
+  return parts.length ? parts.join(' · ') : '关阀'
 }
 
-/** 短文案给底部状态标签；完整位义放在 title。 */
-function waterTagText(status) {
-  if (status & ~0x07) return '未知'
-  if (status & 0x04) return '出水'
-  if (status & 0x01) return '未出水'
-  if (status & 0x02) return '同步'
-  return '未开阀'
-}
-
-/**
- * 头部下方独立一行：左水控状态，右开阀/关阀。
- *
- * 头部只留编号、浴室状态和上次使用时间；这一行位置固定，不会因为状态文案长短
- * 把上次使用时间挤走，也不压到卡片底部。
- */
 function doorWaterDetail(door) {
   const found = waterDoor(door.door_no)
-  if (!found) return ''
-  const value = found.door
+  // 管理员即使还没读到水控数据，也占住这两行：刷新完成前后卡片高度不跳。
+  if (!found && !isAdmin()) return ''
+  const allopen = found ? fmtDuration(found.door.allopen_s) : PLACEHOLDER
+  const bath = found ? fmtDuration(found.door.bath_s) : PLACEHOLDER
   // 这两个是水控板自己的计时，和会话的淋浴时长/开阀时间不是同一口径；标签明确带“水控板”。
   return `
       <div class="door-grid">
-        <div class="kv door-cell"><span class="k">水控板开阀时长</span><span class="v">${esc(fmtDuration(value.allopen_s))}</span></div>
-        <div class="kv door-cell"><span class="k">水控板淋浴时长</span><span class="v">${esc(fmtDuration(value.bath_s))}</span></div>
+        <div class="kv door-cell"><span class="k">水控板开阀时长</span><span class="v">${esc(allopen)}</span></div>
+        <div class="kv door-cell"><span class="k">水控板淋浴时长</span><span class="v">${esc(bath)}</span></div>
       </div>`
 }
 
@@ -115,15 +100,15 @@ function doorWaterControls(door) {
   const admin = isAdmin()
   if (!found && !admin) return ''
   const status = found
-    ? `<span class="badge" title="${esc(waterStatusText(found.door.status))}">水控板 ${esc(waterTagText(found.door.status))}</span>`
-    : '<span class="badge">水控板 未刷新</span>'
+    ? `<span class="badge">水控板 ${esc(waterStatusText(found.door.status))}</span>`
+    : '<span class="badge">水控板 未读取</span>'
   const doorNo = door.door_no
   const opening = waterPending.has(waterKey(doorNo, 'open'))
   const closing = waterPending.has(waterKey(doorNo, 'close'))
   const buttons = admin
     ? `<div class="btn-row">
-        <button type="button" class="btn btn-sm" data-water="open" data-door="${esc(doorNo)}" title="只置开阀位；真正出水需现场按电磁阀" ${opening ? 'disabled' : ''}>开阀</button>
-        <button type="button" class="btn btn-ghost btn-sm" data-water="close" data-door="${esc(doorNo)}" title="关阀会断水；浴室 App 可能按现场关水更新会话；已现场开过水的喷头可能保留开阀位" ${closing ? 'disabled' : ''}>关阀</button>
+        <button type="button" class="btn btn-sm" data-water="open" data-door="${esc(doorNo)}" title="只登记；现场按下电磁阀才有水" ${opening ? 'disabled' : ''}>开阀</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-water="close" data-door="${esc(doorNo)}" title="关阀会断水；浴室 App 可能按现场关水更新会话；已现场开过水的喷头可能保留登记" ${closing ? 'disabled' : ''}>关阀</button>
       </div>`
     : ''
   return `<div class="door-controls">${status}${buttons}</div>`

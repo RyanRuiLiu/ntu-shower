@@ -62,7 +62,7 @@ class WaterFrameTest {
     @Test
     fun `parses 1F status frame with the live bits`() {
         // 1F 关闭 2/3 后：door1 0x07，door2 0x01，door3 0x00，door5 0x01，door6 0x07。
-        // 位义：0x01 占用、0x02 同步、0x04 现场开关（见 WaterFrame.DoorStatus）。
+        // 位义：0x01 开阀、0x02 电磁阀按钮、0x04 出水（见 WaterFrame.DoorStatus）。
         val frames = WaterFrame.parseFrames(
             hex(
                 "5A 3B BF 02 00 00 00 00 00 00 00 14 00 2C 00 07 00 00 13 06 01 00 00 00 00 00 00 00 " +
@@ -107,7 +107,7 @@ class WaterFrameTest {
 
     @Test
     fun `parses 6F board-reported 24 doors while the site has only seven`() {
-        // 6F 板自报 24 门，但现场实际只有 7 个喷头；前 7 条里 2/3/5 号在计时，其余空闲。
+        // 6F 板自报 24 门，但现场实际只有 7 个喷头；前 7 条里 2/3/5 号有状态，其余空闲。
         val raw = hex(
             "9A 13 38 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00" +
                 "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00" +

@@ -21,10 +21,10 @@ import org.json.JSONObject
  *
  * ## 物理/协议位义（实测）
  *
- * 反编译源码（`STATUS_door_bits.md` / `DoorStatusConfirmThread`）与 1F 2/3 号、
- * 1F/2F 4 号、2F 1 号实测一致：`0x01` 占用、`0x02` 同步、`0x04` 现场开关，
- * `0x07` 三者、`0x03` 占用+同步（现场开关未按/无水）、`0x00` 无占用。
- * `water.open` 只登记占用，**不直接出水**；真正出水仍需现场按电磁阀。
+ * 现场实测（见 `docs/DECISIONS.md`「水控板现场实测」）：
+ * `0x01` 开阀位、`0x02` 电磁阀按钮位、`0x04` 出水位；`0x07` 三者、
+ * `0x03` 开阀+按钮（未出水）、`0x00` 关阀。反编译文档的 0x02/0x04 位名与现场相反。
+ * `water.open` 只置开阀位，**不直接出水**；真正出水仍需现场按电磁阀。
  * 这里原样返回 status，页面负责翻译。
  */
 object WaterHandler {
@@ -83,7 +83,7 @@ object WaterHandler {
                 .put("board", boardJson(target.board))
                 .put("ack", true)
                 .put("raw", response.raw.toHex())
-            val message = if (open) "已登记占用；出水需现场按电磁阀" else "已关阀（断水）"
+            val message = if (open) "已开阀；现场按下电磁阀才出水" else "已关阀（断水）"
             CommandOutcome(commandId, OutcomeStatus.OK, "", message, data)
         } catch (e: WaterBoardException) {
             Log.w(TAG, "水控板${if (open) "开" else "关"}阀失败：${e.message}")

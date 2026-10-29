@@ -163,7 +163,7 @@ function renderDevicePicker() {
 function waterInfoRows() {
   const current = waterForDevice()
   if (!current) {
-    const text = water.loading ? '刷新中…' : water.error || '尚未刷新'
+    const text = water.loading ? '读取中…' : water.error || '未读取'
     return `<div class="kv"><span class="k">水控板</span><span class="v">${esc(text)}</span></div>`
   }
   const rows = current.boards
