@@ -129,12 +129,14 @@ def test_same_channel_queues_second_command(fresh_db: str, monkeypatch: pytest.M
 
     async def flow() -> tuple[dict[str, Any], dict[str, Any]]:
         first = asyncio.create_task(
-            service.send_command_and_wait("dev-busy", actions.CAMERA_CAPTURE, {}, timeout_s=0.3)
+            service.send_command_and_wait("dev-busy", actions.CAMERA_CAPTURE, {}, timeout_s=0.5)
         )
         await asyncio.sleep(0.05)
         assert service.is_device_busy("dev-busy", actions.CHANNEL_CAPTURE)
 
-        second = await service.send_command_and_wait("dev-busy", actions.CAMERA_CAPTURE, {}, timeout_s=0.3)
+        # 第二条的超时必须长于第一条的等待时间：否则它在排队期间就用完预算，
+        # 根本不会下发，"同通道排队"这条断言就变成了时序赌博（CI 慢机实际输过）。
+        second = await service.send_command_and_wait("dev-busy", actions.CAMERA_CAPTURE, {}, timeout_s=1.0)
         return second, await first
 
     second, first = asyncio.run(flow())
