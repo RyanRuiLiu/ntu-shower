@@ -21,9 +21,11 @@ import org.json.JSONObject
  *
  * ## 物理/协议位义（实测）
  *
- * 反编译源码（`dbGUIDE.md` / `BathMainActivity`）与 1F 2/3 号、远程 4 号、2F 1 号
- * 实测一致：`0x04` 阀开、`0x02` 同步、`0x01` 占用，`0x07` 三者、
- * `0x03` 占用+同步（阀关/无水）、`0x00` 全关。这里原样返回 status，页面负责翻译。
+ * 反编译源码（`STATUS_door_bits.md` / `DoorStatusConfirmThread`）与 1F 2/3 号、
+ * 远程 4 号、2F 1 号实测一致：`0x01` 占用、`0x02` 同步、`0x04` 现场开关，
+ * `0x07` 三者、`0x03` 占用+同步（现场开关未按/无水）、`0x00` 无占用。
+ * `water.open` 只登记占用，**不直接出水**；真正出水仍需现场按电磁阀。
+ * 这里原样返回 status，页面负责翻译。
  */
 object WaterHandler {
 

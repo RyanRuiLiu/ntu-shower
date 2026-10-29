@@ -54,15 +54,16 @@ object WaterFrame {
     /**
      * 板内一个喷头的状态。
      *
-     * `status` 位义来自反编译的 `dbGUIDE.md` / `BathMainActivity`（它用第 5 位判断
-     * 电磁阀开关、第 7 位判断占用），并与 1F 2/3 号、远程 4 号、2F 1 号的实测一致：
-     * - `0x04` 电磁阀开关（阀开）；
-     * - `0x02` 同步位；
-     * - `0x01` 占用（卡/账号存在）；
-     * - `0x07` = 三者都有；`0x03` = 占用+同步（阀关/无水）；`0x00` = 全关。
+     * `status` 位义来自反编译的 `STATUS_door_bits.md` / `DoorStatusConfirmThread`，
+     * 并与 1F 2/3 号、远程 4 号、2F 1 号的实测一致：
+     * - `0x01` 占用（板子登记/使能）；
+     * - `0x02` 水控板被动同步；
+     * - `0x04` **现场开关**（人按下电磁阀才置位；`F4 B2 AA` 不置这一位）；
+     * - `0x07` = 三者都有；`0x03` = 占用+同步（现场开关未按/无水）；`0x00` = 无占用。
      *
+     * 因此 `F4 B2 AA` 只登记占用，**不直接出水**；真正出水仍要现场按电磁阀。
      * `bathSeconds` 是已洗浴时间、`allOpenSeconds` 是累计开阀时间（源码注释），
-     * 均按 `high*255+low` 解析。
+     * 均按 `high*255+low` 解析；远程登记时 `allOpenSeconds` 不增长。
      */
     data class DoorStatus(val boardDoor: Int, val status: Int, val bathSeconds: Int, val allOpenSeconds: Int)
 
