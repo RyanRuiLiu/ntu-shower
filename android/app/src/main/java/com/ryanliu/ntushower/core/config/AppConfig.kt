@@ -42,7 +42,7 @@ object AppConfig {
      *
      * 水控板直控只用其中的 `waterList`（板 IP/端口/起始门号/门数/编码/名称）与
      * `BathControlPosno`（协议 POS）。**不要读 `usercode`/`seedkey`**——那是制卡密钥，
-     * 与开阀无关；整份 XML 也不进日志。
+     * 与授权出水无关；整份 XML 也不进日志。
      *
      * 同一文件里还有旧默认值 `BathControlIP=192.168.16.222`、`DoorCount=48`，那些
      * 不是服务器下发的 waterList，水控板直控明确不读它们。

@@ -27,10 +27,10 @@ package com.ryanliu.ntushower.features.water
  * 不暴露批量动作。`count=0` 也会被 ack 0 接受且不改变状态——ack 0 只表示帧被
  * 接受，不表示一定产生了动作。
  *
- * 高位 `0x08–0x80` 在六台全量扫描中未出现；解析原样保留，页面遇到就显示“未知状态”。
+ * 高位 `0x08–0x80` 在六台全量扫描中未出现；解析原样保留，页面遇到就显示“未定义位”。
  * 板子的返回码实测：未知命令字节（B4–BF、C0、FF）回 `data[0]=01`；B2 的非
  * `AA/00` 标志（0x01/0x02/0x04/0x08/0x10/0x20/0x40/0x55/0x80/0xFF）回
- * `data[0]=02`，状态不变。也就是说 **只有 `AA`（登记）与 `00`（关阀）是有效
+ * `data[0]=02`，状态不变。也就是说 **只有 `AA`（授权出水）与 `00`（断水）是有效
  * 操作**，没有任何 B2 标志能远程置 0x04；0x04 仍只能现场按电磁阀。未知命令
  * 带 payload 的情况未测。
  *
@@ -41,7 +41,7 @@ package com.ryanliu.ntushower.features.water
  * [WaterBoardClient] 负责——不要在解析器里假设"一次 read 就是一帧"。
  *
  * 门序：`F4 B3` 的每条记录按板内门号 1..N 排列；`DoorStatus.boardDoor` 就是
- * 这个 1-based 门号。N 是**板子自报**，可能是错的（5F/6F 自报 24，现场实际 7 个
+ * 这个 1-based 门号。N 是**板子自报**，可能是错的（2F/5F/6F 自报 24，现场实际 7 个
  * 喷头）；逻辑门号只按浴室服务器下发的 waterList 前 `nozzlenumber` 条换算，
  * 即 `waterList.startnumber + boardDoor - 1`，由 [WaterTargetResolver] 负责。
  */
@@ -70,16 +70,16 @@ object WaterFrame {
      * 板内一个喷头的状态。
      *
      * `status` 位义以现场实测为准（见 `docs/DECISIONS.md`「水控板现场实测」）。
-     * 反编译文档把 `0x02` 叫被动同步、`0x04` 叫用户手动物理开关，与现场相反：
-     * - `0x01` 开阀位（App 分配或远程 `F4 B2 AA` 置位）；
-     * - `0x02` **电磁阀按钮位**（现场按阀翻转；`0x00→0x02→0x00`）；
-     * - `0x04` **出水位**（开阀位已置且按钮由关变开时出现，`allOpenTime` 随之增长）；
-     * - `0x07` = 三者都有；`0x03` = 开阀+按钮（尚未出水）；`0x00` = 关阀。
+     * 反编译文档的 0x02/0x04 位名与现场相反，以现场为准：
+     * - `0x01` 授权位（App 分配或远程 `F4 B2 AA` 置位）；
+     * - `0x02` 按钮位（现场电磁阀按钮翻转；`0x00→0x02→0x00`）；
+     * - `0x04` 出水位（授权位已置且按钮由关变开时出现，`allOpenTime` 随之增长）；
+     * - `0x07` = 三者都有；`0x03` = 授权+按钮（尚未出水）；`0x00` = 关闭。
      *
      * 远程 `F4 B2 AA` 只置 `0x01`，不置 `0x02/0x04`；远程 `F4 B2 00` 清
-     * `0x01/0x04`，不清 `0x02`。`bathSeconds` 对应 `bathTime`，开阀位存在时就会走；
-     * `allOpenSeconds` 对应 `allOpenTime`，出水位存在时才走。两者均按
-     * `high*255+low` 解析。
+     * `0x01/0x04`，不清 `0x02`。`bathSeconds` 对应 `bathTime`，授权位存在时就会走
+     * （授权计时）；`allOpenSeconds` 对应 `allOpenTime`，出水位存在时才走（淋浴时长）。
+     * 两者均按 `high*255+low` 解析。
      */
     data class DoorStatus(val boardDoor: Int, val status: Int, val bathSeconds: Int, val allOpenSeconds: Int)
 
@@ -100,7 +100,7 @@ object WaterFrame {
         val returnCode: Int get() = if (data.isEmpty()) -1 else data[0].toInt() and 0xFF
     }
 
-    /** 开阀 payload：`F4 B2 01 AA <boardDoor>`；板子置 0x01，不直接出水。 */
+    /** 授权出水 payload：`F4 B2 01 AA <boardDoor>`；板子置 0x01，不直接出水。 */
     fun openPayload(boardDoor: Int): ByteArray = byteArrayOf(
         0xF4.toByte(),
         CMD_SWITCH.toByte(),
@@ -109,7 +109,7 @@ object WaterFrame {
         boardDoor.toByte(),
     )
 
-    /** 关阀/断水 payload：`F4 B2 01 00 <boardDoor>`；清 0x01/0x04，不清 0x02 按钮位。 */
+    /** 断水 payload：`F4 B2 01 00 <boardDoor>`；清 0x01/0x04，不清 0x02 按钮位。 */
     fun closePayload(boardDoor: Int): ByteArray = byteArrayOf(
         0xF4.toByte(),
         CMD_SWITCH.toByte(),

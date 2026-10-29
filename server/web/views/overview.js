@@ -15,7 +15,17 @@ import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
 import { outcomeText, problemText, report } from '../core/outcome.js'
 import { store, subscribe } from '../core/store.js'
 import { toast } from '../core/toast.js'
-import { refreshWater, subscribeWater, waterDoor } from '../core/water.js'
+import {
+  canAuthorize,
+  canCut,
+  refreshWater,
+  subscribeWater,
+  WATER_COPY,
+  WATER_STATE,
+  waterDoor,
+  waterStatusText,
+  waterStatusTitle,
+} from '../core/water.js'
 
 /**
  * 七个状态的中文名。键取自契约（core/contract.js），文案与小程序一致：同一批
@@ -52,7 +62,7 @@ const KPI = [
 /** 上一次渲染时各喷头的状态，用于判断"这个喷头刚变了"。 */
 let previousStates = new Map()
 
-/** 正在发送的开/关：`doorNo:action`，用于按钮禁用，避免同一喷头连点。 */
+/** 正在发送的授权出水/断水：`doorNo:action`，用于按钮禁用，避免同一喷头连点。 */
 let waterPending = new Set()
 
 function isAdmin() {
@@ -63,35 +73,18 @@ function waterKey(doorNo, action) {
   return `${doorNo}:${action}`
 }
 
-/**
- * 板报状态位的可读文案。
- *
- * 位义以现场实测为准（见 `docs/DECISIONS.md`「水控板现场实测」）：
- * `0x01` 开阀位、`0x02` 电磁阀按钮位、`0x04` 出水位；
- * `0x07` 三者、`0x03` 开阀+按钮（未出水）、`0x00` 关阀。
- * 反编译文档的 0x02/0x04 位名与现场相反。
- * 出现未定义的高位就显示“未定义位”，不猜、不映射成会话状态。
- */
-function waterStatusText(status) {
-  if (status & ~0x07) return '未定义位'
-  const parts = []
-  if (status & 0x01) parts.push('开阀')
-  if (status & 0x02) parts.push('电磁阀按钮')
-  if (status & 0x04) parts.push('出水')
-  return parts.length ? parts.join(' · ') : '关阀'
-}
-
 function doorWaterDetail(door) {
   const found = waterDoor(door.door_no)
   // 管理员即使还没读到水控数据，也占住这两行：刷新完成前后卡片高度不跳。
   if (!found && !isAdmin()) return ''
-  const allopen = found ? fmtDuration(found.door.allopen_s) : PLACEHOLDER
-  const bath = found ? fmtDuration(found.door.bath_s) : PLACEHOLDER
-  // 这两个是水控板自己的计时，和会话的淋浴时长/开阀时间不是同一口径；标签明确带“水控板”。
+  const flow = found ? fmtDuration(found.door.allopen_s) : PLACEHOLDER
+  const auth = found ? fmtDuration(found.door.bath_s) : PLACEHOLDER
+  // 水控板自己的计时：淋浴时长=出水位时间，授权计时=授权位时间；与会话的
+  // 淋浴时长/分配时长不是同一口径，标签必须带“水控板”。
   return `
       <div class="door-grid">
-        <div class="kv door-cell"><span class="k">水控板开阀时长</span><span class="v">${esc(allopen)}</span></div>
-        <div class="kv door-cell"><span class="k">水控板淋浴时长</span><span class="v">${esc(bath)}</span></div>
+        <div class="kv door-cell"><span class="k" title="出水位存在时增长；手动停水后冻结，再次出水接着累计；授权清除后归零">水控板淋浴时长</span><span class="v">${esc(flow)}</span></div>
+        <div class="kv door-cell"><span class="k" title="从授权位出现开始计时；手动停水后继续；授权清除后归零">水控板授权计时</span><span class="v">${esc(auth)}</span></div>
       </div>`
 }
 
@@ -99,16 +92,18 @@ function doorWaterControls(door) {
   const found = waterDoor(door.door_no)
   const admin = isAdmin()
   if (!found && !admin) return ''
-  const status = found
-    ? `<span class="badge">水控板 ${esc(waterStatusText(found.door.status))}</span>`
-    : '<span class="badge">水控板 未读取</span>'
+  const statusText = found ? waterStatusText(found.door.status) : WATER_STATE.unknown.label
+  const statusTitle = found ? waterStatusTitle(found.door.status) : WATER_STATE.unknown.title
+  const status = `<span class="badge" title="${esc(statusTitle)}">水控板 ${esc(statusText)}</span>`
   const doorNo = door.door_no
   const opening = waterPending.has(waterKey(doorNo, 'open'))
   const closing = waterPending.has(waterKey(doorNo, 'close'))
+  const authorizeEnabled = canAuthorize(found ? found.door.status : null)
+  const cutEnabled = canCut(found ? found.door.status : null)
   const buttons = admin
     ? `<div class="btn-row">
-        <button type="button" class="btn btn-sm" data-water="open" data-door="${esc(doorNo)}" title="只登记；现场按下电磁阀才有水" ${opening ? 'disabled' : ''}>开阀</button>
-        <button type="button" class="btn btn-ghost btn-sm" data-water="close" data-door="${esc(doorNo)}" title="关阀会断水；浴室 App 可能按现场关水更新会话；已现场开过水的喷头可能保留登记" ${closing ? 'disabled' : ''}>关阀</button>
+        <button type="button" class="btn btn-sm" data-water="open" data-door="${esc(doorNo)}" title="${esc(WATER_COPY.authorizeTitle)}" ${opening || !authorizeEnabled ? 'disabled' : ''}>${esc(WATER_COPY.authorize)}</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-water="close" data-door="${esc(doorNo)}" title="${esc(WATER_COPY.cutTitle)}" ${closing || !cutEnabled ? 'disabled' : ''}>${esc(WATER_COPY.cut)}</button>
       </div>`
     : ''
   return `<div class="door-controls">${status}${buttons}</div>`
@@ -503,7 +498,21 @@ function stopTaskBoard() {
   }
 }
 
-/** 卡片上的开阀/关阀：admin 才能看到按钮，服务端仍会再校验。 */
+/** 卡片上的授权出水/断水：admin 才能看到按钮，服务端仍会再校验。 */
+function waterActionToast(action, status) {
+  if (!Number.isInteger(status) || (status & ~0x07) !== 0) {
+    return action === 'open' ? WATER_COPY.authorizeDone : WATER_COPY.cutDone
+  }
+  const low = status & 0x07
+  if (action === 'open') {
+    if (low === 0x01) return WATER_COPY.authorizeWaitButton
+    if (low === 0x03) return WATER_COPY.authorizeWaitReset
+    return WATER_COPY.authorizeDone
+  }
+  if (low === 0x02) return WATER_COPY.cutButtonOn
+  return WATER_COPY.cutDone
+}
+
 async function onWaterButton(event) {
   const button = event.target.closest('[data-water]')
   if (!button || button.disabled) return
@@ -519,8 +528,14 @@ async function onWaterButton(event) {
       action === 'open'
         ? await api.waterOpen(store.deviceId, doorNo)
         : await api.waterClose(store.deviceId, doorNo)
-    toast(outcomeText(result))
-    if (result.status === 'ok') await refreshWater(store.deviceId)
+    if (result.status !== 'ok') {
+      toast(outcomeText(result))
+      return
+    }
+    // 先刷新再提示：结果文案按板上实际状态选，避免“已出水”与“待按电磁阀”说反。
+    await refreshWater(store.deviceId)
+    const found = waterDoor(doorNo)
+    toast(waterActionToast(action, found ? found.door.status : null))
   } catch (error) {
     toast(problemText(error))
   } finally {

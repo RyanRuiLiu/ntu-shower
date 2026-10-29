@@ -39,7 +39,7 @@ class WaterHandlerTest {
 
         assertEquals(OutcomeStatus.OK, outcome.status)
         assertEquals("", outcome.reasonCode)
-        assertTrue(outcome.terminalMessage.contains("已开阀"))
+        assertTrue(outcome.terminalMessage.contains("已授权出水"))
         assertTrue(fake.openCalled)
         assertFalse(fake.closeCalled)
         val data = requireNotNull(outcome.data)
@@ -63,7 +63,7 @@ class WaterHandlerTest {
         )
 
         assertEquals(OutcomeStatus.OK, outcome.status)
-        assertTrue(outcome.terminalMessage.contains("已关阀"))
+        assertTrue(outcome.terminalMessage.contains("已断水"))
         assertTrue(fake.closeCalled)
         assertFalse(fake.openCalled)
     }
@@ -90,7 +90,7 @@ class WaterHandlerTest {
         )
 
         assertEquals(ReasonCodes.WATER_BOARD_REJECTED, outcome.reasonCode)
-        assertTrue(outcome.terminalMessage.contains("关阀"))
+        assertTrue(outcome.terminalMessage.contains("断水"))
     }
 
     @Test

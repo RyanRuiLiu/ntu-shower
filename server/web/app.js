@@ -20,7 +20,7 @@ import { promptClockSet, restartBathApp } from './core/device-actions.js'
 import { $, esc, listen, PLACEHOLDER } from './core/dom.js'
 import { problemText, report } from './core/outcome.js'
 import { toast } from './core/toast.js'
-import { refreshWater, subscribeWater, water, waterForDevice } from './core/water.js'
+import { refreshWater, subscribeWater, water, waterForDevice, WATER_COPY } from './core/water.js'
 import {
   currentDevice,
   currentRuntime,
@@ -163,8 +163,9 @@ function renderDevicePicker() {
 function waterInfoRows() {
   const current = waterForDevice()
   if (!current) {
-    const text = water.loading ? '读取中…' : water.error || '未读取'
-    return `<div class="kv"><span class="k">水控板</span><span class="v">${esc(text)}</span></div>`
+    const text = water.loading ? WATER_COPY.loading : water.error ? WATER_COPY.failed : WATER_COPY.notRead
+    const title = water.error ? ` title="${esc(water.error)}"` : ''
+    return `<div class="kv"><span class="k">水控板</span><span class="v"${title}>${esc(text)}</span></div>`
   }
   const rows = current.boards
     .map((board) => {
@@ -173,7 +174,7 @@ function waterInfoRows() {
         ['水控板', `${board.name || board.code || board.ip}${board.code ? `（${board.code}）` : ''}`],
         ['地址', `${board.ip}:${board.port}`],
         ['POS', board.pos],
-        ['喷头', used],
+        ['喷头数', used],
       ]
         .map(([key, value]) => `<div class="kv"><span class="k">${esc(key)}</span><span class="v">${esc(value)}</span></div>`)
         .join('')
