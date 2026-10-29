@@ -98,6 +98,18 @@ function waterTagText(status) {
  * 头部只留编号、浴室状态和上次使用时间；这一行位置固定，不会因为状态文案长短
  * 把上次使用时间挤走，也不压到卡片底部。
  */
+function doorWaterDetail(door) {
+  const found = waterDoor(door.door_no)
+  if (!found) return ''
+  const value = found.door
+  // 这两个是水控板自己的计时，和会话的淋浴时长/开阀时间不是同一口径；标签明确带“水控板”。
+  return `
+      <div class="door-grid">
+        <div class="kv door-cell"><span class="k">水控板开阀时长</span><span class="v">${esc(fmtDuration(value.allopen_s))}</span></div>
+        <div class="kv door-cell"><span class="k">水控板淋浴时长</span><span class="v">${esc(fmtDuration(value.bath_s))}</span></div>
+      </div>`
+}
+
 function doorWaterControls(door) {
   const found = waterDoor(door.door_no)
   const admin = isAdmin()
@@ -243,6 +255,7 @@ function renderDoors(doors) {
             </span>
           </div>
           ${doorWaterControls(door)}
+          ${doorWaterDetail(door)}
           ${certLine}
           ${grid}
         </div>`
