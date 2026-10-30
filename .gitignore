@@ -1,17 +1,28 @@
 # ── 密钥与本地配置（绝不入库）──────────────────────────────
-config/keystore/*.keystore
+*.keystore
+*.jks
+*.p12
+*.pfx
 server/.env
 .env
+.env.*
+!.env.example
+!**/.env.example
 android/gradle.properties
 android/local.properties
+
+# ── 安装包与发布物（由发布流程管理，不入库）─────────────────
+*.apk
+*.aab
 
 # ── Python 构建产物与缓存 ──────────────────────────────────
 __pycache__/
 *.py[cod]
 *.egg-info/
 .eggs/
-server/.venv/
+.venv*/
 venv/
+node_modules/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
@@ -40,6 +51,8 @@ Thumbs.db
 # ── 临时文件 ──────────────────────────────────────────────
 *.log
 *.tmp
+*.orig
+*.rej
 # 本地质量门输出（报告随 CI 产生，不入库）。
 # 用 *quality*.txt 而非 quality_*.txt：实际文件名是 android_quality.txt，
 # 前缀式规则匹配不到，该文件因此被误入库并跟了很久。
