@@ -69,6 +69,20 @@ textarea:focus {
   border-color: var(--accent);
 }
 
+/* 键盘焦点在深色背景上必须看得见（WCAG 2.2 AA 2.4.7）：全站一个形状与颜色，
+   鼠标点击不显示外框，避免每点一下都出现一圈 */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 input::placeholder,
 textarea::placeholder {
   color: var(--muted);
@@ -83,9 +97,15 @@ select {
   cursor: pointer;
 }
 
-label {
+label,
+.field-label {
   font-size: var(--fs-small);
   color: var(--dim);
+}
+
+/* 没有可关联控件的字段标题（勾选组、值展示）：用 span 而不是空挂 for 的 label */
+.field-label {
+  display: block;
 }
 
 /* ── 滚动条：与暗色主题一致 ─────────────────────────────── */
@@ -140,6 +160,6 @@ label {
   text-align: center;
 }
 
-[hidden] {
-  display: none !important;
+html [hidden] {
+  display: none;
 }

@@ -47,7 +47,6 @@ def put_identity(
         "access.identity-put",
         "身份已登记",
         kind=kind.value,
-        identity=identity,
         capabilities=",".join(capabilities),
     )
     return record
@@ -67,7 +66,6 @@ def update_identity(
         "access.identity-put",
         "身份已登记",
         kind=kind.value,
-        identity=identity,
         capabilities=",".join(capabilities),
     )
     return record
@@ -82,7 +80,7 @@ def revoke_identity(identity: str) -> bool:
     """撤销授权；该标识立即失去全部能力。"""
     removed = repository.delete_identity(identity)
     if removed:
-        log_event("INFO", "access.identity-revoked", "身份已吊销", identity=identity)
+        log_event("INFO", "access.identity-revoked", "身份已吊销")
     return removed
 
 

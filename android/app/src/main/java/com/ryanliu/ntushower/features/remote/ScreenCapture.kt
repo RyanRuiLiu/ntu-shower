@@ -7,6 +7,7 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.util.Base64
+import android.util.Log
 import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.shell.RootShell
 import java.io.ByteArrayOutputStream
@@ -59,6 +60,7 @@ object ScreenCapture {
             jpeg?.let { Base64.encodeToString(it, Base64.NO_WRAP) }
         } catch (e: Exception) {
             File(videoPath).delete()
+            Log.w(TAG, "screen capture failed: ${e.message}")
             null
         }
     }
@@ -94,6 +96,7 @@ object ScreenCapture {
             }
             return null
         } catch (e: Exception) {
+            Log.w(TAG, "decode first frame failed: ${e.message}")
             return null
         } finally {
             runCatching { codec?.stop() }
@@ -173,5 +176,7 @@ object ScreenCapture {
             output,
         )
         output.toByteArray()
-    }.getOrNull()
+    }.onFailure { Log.w(TAG, "encode JPEG failed: ${it.message}") }.getOrNull()
+
+    private const val TAG = "ScreenCapture"
 }

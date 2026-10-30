@@ -8,13 +8,14 @@
  */
 import { api } from './api.js'
 import { serverNowMs } from './clock.js'
+import { NEED_DEVICE } from './copy.js'
 import { outcomeText, problemText } from './outcome.js'
 import { emit, store, subscribe } from './store.js'
 
 /**
  * 水控板状态与文案的唯一出处。
  *
- * 位义以现场实测为准（见 `docs/DECISIONS.md`「水控板现场实测」）：
+ * 位义以现场实测为准（见 `docs/evidence/2026-10-30-water-board-2f.md`）：
  * `0x01` 授权位、`0x02` 按钮位、`0x04` 出水位。
  * 正常状态只有 `0x00/0x01/0x02/0x03/0x07`；`0x04–0x06` 现场未出现，
  * `0x08–0x80` 未定义。页面不把位名拼成状态，也不把水控板状态解释成会话状态。
@@ -141,7 +142,7 @@ export function subscribeWater(fn) {
  * 状态本身已写入 [water]，订阅者会收到。
  */
 export async function refreshWater(deviceId = store.deviceId) {
-  if (!deviceId) return { ok: false, message: '失败 · 请先选择设备' }
+  if (!deviceId) return { ok: false, message: `失败 · ${NEED_DEVICE}` }
   if (water.loading && water.deviceId === deviceId) return { ok: false, message: WATER_COPY.refreshing }
   setWater({ ...water, deviceId, loading: true, error: '' })
   try {

@@ -8,7 +8,7 @@ INFO 级日志被静默丢弃。按 Twelve-Factor 写 stdout 不写文件，收�
 event（给机器检索的稳定代号）、trace_id 与 request_id（有值才输出，与 api_call
 审计行互通）、其余属性逐键并入顶层。
 
-日志如实记录、不脱敏：单运维者工具，内容由调用方给什么写什么。
+stdout 日志不写口令、令牌、完整学号与身份标识；审计表的原文保留与访问控制见 docs/SECURITY.md 与 core/audit.py。
 """
 
 import contextvars

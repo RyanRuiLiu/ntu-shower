@@ -31,7 +31,12 @@ class DoorSnapshotSender(context: Context, private val onDoorsRead: (DoorReading
     /** 发件箱里最旧的一条待确认帧。 */
     private data class OutboxRow(val id: Long, val snapshotId: String, val payload: String)
 
-    private val db: SQLiteDatabase = AgentDatabase.get(context)
+    /**
+     * 应用上下文；发件箱只在工作线程读写，构造发生在主线程，所以连接推迟到第一次使用，
+     * 不在构造期打开数据库。
+     */
+    private val appContext = context.applicationContext
+    private val db: SQLiteDatabase by lazy { AgentDatabase.get(appContext) }
 
     /**
      * 上一次上报的喷头状态指纹；`null` 表示"还没有指纹"。

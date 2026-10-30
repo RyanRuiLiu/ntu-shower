@@ -55,7 +55,7 @@ MANUAL_EVENT_PREFIX = "manual:"
 
 #: 「全部学号」规则试听/手动推送时用的示例学号：数字变量要能念出内容，
 #: 不能用非数字字符串把 cert_no 段跳过。
-SAMPLE_CERT_NO = "2530110057"
+SAMPLE_CERT_NO = "2026000003"
 
 _tasks: set[asyncio.Task[None]] = set()
 

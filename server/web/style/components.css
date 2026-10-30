@@ -1,6 +1,6 @@
 /* 组件：按钮、字段、结果区、徽标、标签值、信息面板、表格、喷头卡片、KPI、节点树。
  *
- * 命名一律用 `.块` 与 `.块-元素`，状态用 `.is-*` 或语义化后缀。七个视图共用这一份，
+ * 命名一律用 `.块` 与 `.块-元素`，状态用 `.is-*` 或语义化后缀。八个视图共用这一份，
  * 视图里不得再自造按钮或表格样式。
  */
 
@@ -233,25 +233,6 @@
   background: var(--blue-bg);
 }
 
-/* ── 占位符插入片：长得像徽标、行为像按钮，点击插入到输入框光标处 ── */
-
-.ph-chip {
-  display: inline-block;
-  margin: 0 2px 2px 0;
-  padding: 1px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--elevated);
-  font: var(--fs-chip) var(--font-mono);
-  color: var(--dim);
-  cursor: pointer;
-}
-
-.ph-chip:hover {
-  color: var(--blue);
-  border-color: var(--blue);
-}
-
 /* ── 标签 + 值的一行 ────────────────────────────────────── */
 
 /*
@@ -313,11 +294,15 @@
   align-items: center;
 }
 
-/* 页签（服务端业务/设备下发，以及设备那页的全部设备/单台设备），样式与审计页标签同族 */
+/* 页签（服务端业务/设备下发，以及设备那页的全部设备/单台设备），样式与审计页标签同族。
+   元素是 button：Enter 与空格原生可用；背景与边框清零，外观仍由本类决定 */
 .cfg-tab {
   padding: 4px 10px;
+  border: 0;
   border-bottom: 2px solid transparent;
+  background: transparent;
   color: var(--dim);
+  font: inherit;
   font-size: var(--fs-small);
   font-weight: 600;
   cursor: pointer;
@@ -393,11 +378,15 @@
   color: var(--amber);
 }
 
-/* 回落按钮：仅覆盖态的键有，贴着徽标 */
+/* 回落按钮：仅覆盖态的键有。放在字段标题行里时靠右，与标题拉开 */
 .cfg-reset {
   margin-left: 6px;
-  padding: 1px 6px !important;
+  padding: 1px 6px;
   vertical-align: 1px;
+}
+
+.field-row .cfg-reset {
+  margin-left: auto;
 }
 
 /* 大区分隔：服务端业务 / 设备下发，各自一套小卡片网格；标题由页签承担 */
@@ -446,11 +435,21 @@
   overflow: auto;
 }
 
-/* 标签：面板头里的两组数据源切换，激活项用主色下边线标出 */
+/* 标签组：一排可切换的审计类别 */
+.audit-tabs {
+  display: flex;
+  align-items: center;
+}
+
+/* 标签：面板头里的两组数据源切换，激活项用主色下边线标出。
+   元素是 button：Enter 与空格原生可用；背景与边框清零，外观仍由本类决定 */
 .audit-tab {
   padding: 4px 10px;
+  border: 0;
   border-bottom: 2px solid transparent;
+  background: transparent;
   color: var(--dim);
+  font: inherit;
   font-size: var(--fs-small);
   font-weight: 600;
   cursor: pointer;
@@ -480,6 +479,12 @@ tr.audit-row.is-selected td {
   background: var(--accent-bg-strong);
 }
 
+/* 行可聚焦：外框画在行内缘，避免把相邻行挤开 */
+tr.audit-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 /* 详情卡：标签 + 全量折行的值（长值省略号一截就失去了可比对性），点卡复制。
    详情面板在右栏，列宽窄，卡片改单列纵向排 */
 #detailPanel .detail-grid {
@@ -488,11 +493,17 @@ tr.audit-row.is-selected td {
   gap: var(--sp-2);
 }
 
+/* 详情卡是按钮：点与回车都复制，元素形态不再靠 div 模拟 */
 .detail-card {
+  display: block;
+  width: 100%;
   padding: 6px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg);
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
   transition: border-color var(--transition);
 }
@@ -502,6 +513,7 @@ tr.audit-row.is-selected td {
 }
 
 .detail-card .k {
+  display: block;
   margin-bottom: 2px;
   color: var(--muted);
   font-size: var(--fs-micro);
@@ -510,6 +522,7 @@ tr.audit-row.is-selected td {
 }
 
 .detail-card .v {
+  display: block;
   overflow-wrap: anywhere;
   font-family: var(--font-mono);
   font-size: var(--fs-chip);

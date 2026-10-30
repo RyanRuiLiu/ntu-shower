@@ -22,7 +22,10 @@ import java.security.MessageDigest
  * 旧版本把缓存放在 `/sdcard/ntu-shower/voice`。新实例初始化时删除旧目录，并清掉
  * 私有目录里上次中断留下的 `.part` 文件；文件超上限时按最后修改时刻淘汰。
  */
-class VoiceClipStore(private val client: OkHttpClient, private val dir: File) {
+class VoiceClipStore(private val clientProvider: () -> OkHttpClient, private val dir: File) {
+
+    /** 下载才需要 HTTP 客户端；构造发生在主线程，TLS 上下文读盘推迟到第一次下载。 */
+    private val client: OkHttpClient by lazy(clientProvider)
 
     sealed class ClipFetch {
         data class Ready(val file: File, val downloaded: Boolean) : ClipFetch()
@@ -41,12 +44,21 @@ class VoiceClipStore(private val client: OkHttpClient, private val dir: File) {
         activeCall?.cancel()
     }
 
+    /** 缓存目录首次使用前的清理；由 [ensure] 在后台线程触发，避免构造期做文件 IO。 */
+    private var initialized = false
+
     init {
+        // 旧公共缓存可能有大量文件；删目录放后台，不阻塞服务启动。
+        Thread({ removeLegacyCache() }, "voice-legacy-cleanup").apply { isDaemon = true }.start()
+    }
+
+    @Synchronized
+    private fun initializeIfNeeded() {
+        if (initialized) return
         dir.mkdirs()
         dir.listFiles { file -> file.isFile && file.name.endsWith(".part") }?.forEach { it.delete() }
         prune(dir, emptySet())
-        // 旧公共缓存可能有大量文件；删目录放后台，不阻塞服务启动。
-        Thread({ removeLegacyCache() }, "voice-legacy-cleanup").apply { isDaemon = true }.start()
+        initialized = true
     }
 
     private fun removeLegacyCache() {
@@ -68,7 +80,7 @@ class VoiceClipStore(private val client: OkHttpClient, private val dir: File) {
         keep: Set<String> = emptySet(),
         shouldAbort: () -> Boolean = { false },
     ): ClipFetch {
-        dir.mkdirs()
+        initializeIfNeeded()
         val target = File(dir, "${spec.clipId}.mp3")
         val keepNames = keep + target.name
         if (target.isFile && target.length() == spec.sizeBytes && sha256Of(target) == spec.sha256) {
@@ -94,7 +106,7 @@ class VoiceClipStore(private val client: OkHttpClient, private val dir: File) {
                 ClipFetch.Canceled -> return ClipFetch.Canceled
             }
         }
-        return last!!
+        return requireNotNull(last) { "download attempts exhausted without a result" }
     }
 
     /** 一次全新的下载（临时文件 → 校验 → 原子落盘）；只返回失败，成功走 [ensure] 的返回。 */

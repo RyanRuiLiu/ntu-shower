@@ -129,14 +129,15 @@ class ShellChannel(private val name: String) {
         val stamp = System.nanoTime()
         val marker = "__DONE_${stamp}_${UUID.randomUUID().toString().take(8)}__"
         val pidFile = "/data/local/tmp/ntushower-$name-$stamp.pid"
+        val input = requireNotNull(stdin) { "root shell stdin unavailable after ensureShell" }
         return try {
             // 用 write(ByteArray) 而不是 writeBytes(String)。
             //
             // `writeBytes` 的语义是"逐字符写出并**丢弃高 8 位**"，中文命令到了设备就变成
             // 一串 ASCII 噪声。真机上验证过：`echo 测试` 实际执行的是 `echo K-`——因为
             // 「测」是 U+6D4B、「试」是 U+8BD5，低 8 位分别落到 0x4B 与 0xD5。
-            stdin!!.write(wrap(command, marker, pidFile).toByteArray(Charsets.UTF_8))
-            stdin!!.flush()
+            input.write(wrap(command, marker, pidFile).toByteArray(Charsets.UTF_8))
+            input.flush()
             when (val captured = readUntil(marker, timeoutMs, pidFile)) {
                 null -> Result("命令超过 ${timeoutMs}ms 未返回", timedOut = true)
                 else -> Result(captured.output, captured.exitCode)

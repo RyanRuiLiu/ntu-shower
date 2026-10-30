@@ -13,6 +13,7 @@ import { api } from '../core/api.js'
 import { hasIdentity } from '../core/api.js'
 import { codeCell } from '../core/cells.js'
 import { fmtFullDateTime } from '../core/clock.js'
+import { REBOOT_CONFIRM } from '../core/copy.js'
 import { promptClockSet, restartBathApp } from '../core/device-actions.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
 import { outcomeText, problemText, report } from '../core/outcome.js'
@@ -25,7 +26,7 @@ function renderTable() {
     return
   }
   if (store.runtime.length === 0) {
-    $('deviceTable').innerHTML = '<div class="empty">暂无设备接入</div>'
+    $('deviceTable').innerHTML = '<div class="empty">暂无设备接入；设备首次连接后在此显示</div>'
     return
   }
   const rows = store.runtime
@@ -261,7 +262,7 @@ async function doAppRestart() {
 
 /** 重启整机：设备离线一段时间，重连后由全貌帧重建现态。这是四个里最重的一个，排在最后。 */
 async function doReboot() {
-  if (!window.confirm('重启设备？整机会重启，期间设备离线，进行中的会话会中断。')) return
+  if (!window.confirm(REBOOT_CONFIRM)) return
   report('maintResult', '正在重启设备…', 'info')
   try {
     const result = await api.reboot(store.deviceId)
@@ -430,7 +431,7 @@ export const devicesView = {
           <span class="panel-title">设备日志</span>
           <span class="panel-note" id="logStatus">在线可现读最新；离线时看上次上送</span>
           <div class="panel-tools">
-            <select id="inLogKind">
+            <select id="inLogKind" aria-label="日志种类">
               <option value="device">device.log</option>
               <option value="crash">crash.log</option>
               <option value="ota">ota-install.log</option>
@@ -511,19 +512,18 @@ export const devicesView = {
             </div>
 
             <div class="field" id="bridgeSteps" hidden>
-              <label>在本机执行以下两条命令</label>
+              <span class="field-label">在本机执行以下两条命令</span>
               <div class="field-row">
-                <input class="mono" id="bridgeTunnelCmd" type="text" readonly>
-                <button type="button" class="btn btn-ghost btn-sm" data-copy="bridgeTunnelCmd">复制</button>
+                <input class="mono" id="bridgeTunnelCmd" type="text" readonly aria-label="SSH 隧道命令">
+                <button type="button" class="btn btn-ghost btn-sm" data-copy="bridgeTunnelCmd"
+                  aria-label="复制 SSH 隧道命令">复制</button>
               </div>
               <div class="field-row">
-                <input class="mono" id="bridgeAdbCmd" type="text" readonly>
-                <button type="button" class="btn btn-ghost btn-sm" data-copy="bridgeAdbCmd">复制</button>
+                <input class="mono" id="bridgeAdbCmd" type="text" readonly aria-label="ADB 连接命令">
+                <button type="button" class="btn btn-ghost btn-sm" data-copy="bridgeAdbCmd"
+                  aria-label="复制 ADB 连接命令">复制</button>
               </div>
-              <div class="muted">
-                第一条命令需保持运行，用于将服务器端口转发至本机；第二条请在另一终端中执行。
-                连接成功后，<code class="mono">adb devices</code> 中将出现该设备。
-              </div>
+              <div class="muted">第一条命令需保持运行，用于将服务器端口转发至本机；第二条请在另一终端中执行。</div>
             </div>
           </div>
         </section>

@@ -12,7 +12,7 @@ WATER = REPO / "server/web/core/water.js"
 OVERVIEW = REPO / "server/web/views/overview.js"
 APP = REPO / "server/web/app.js"
 HANDLER = REPO / "android/app/src/main/java/com/ryanliu/ntushower/features/water/WaterHandler.kt"
-DECISIONS = REPO / "docs/DECISIONS.md"
+WATER_EVIDENCE = REPO / "docs/evidence/2026-10-30-water-board-2f.md"
 
 
 def read(path: Path) -> str:
@@ -94,8 +94,7 @@ def test_device_terminal_messages() -> None:
 
 
 def test_decisions_water_section_has_no_old_terms() -> None:
-    src = read(DECISIONS)
-    section = src.split("## 水控板现场实测", 1)[1].split("## 测试与质量", 1)[0]
+    section = read(WATER_EVIDENCE)
     for old in ("开阀位", "电磁阀按钮位", "物理开关", "被动同步", "只登记", "登记占用"):
         assert old not in section, f"现场实测节仍有旧词：{old}"
     for word in ("授权位", "按钮位", "出水位", "授权出水", "断水", "水控板授权计时", "水控板淋浴时长"):

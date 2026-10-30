@@ -4,7 +4,9 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.Log
 import com.ryanliu.ntushower.BuildConfig
 import com.ryanliu.ntushower.core.a11y.A11yRuntime
@@ -61,6 +63,9 @@ class AgentService : Service() {
     private val worker = Executors.newSingleThreadExecutor()
     private val otaScheduler = Executors.newSingleThreadScheduledExecutor()
 
+    /** 工作线程读盘完成后回到主线程刷新依赖配置的组件。 */
+    private val mainHandler = Handler(Looper.getMainLooper())
+
     /**
      * 维护命令执行器。
      *
@@ -108,6 +113,13 @@ class AgentService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // onDestroy 之后同一实例再次收到 onStartCommand 属于异常生命周期：执行器已关闭，
+        // 继续走初始化会抛 RejectedExecutionException。停止自身，让系统重建实例。
+        if (worker.isShutdown) {
+            Log.e(TAG, "onStartCommand after destroy; stopping service")
+            stopSelf()
+            return START_NOT_STICKY
+        }
         // 每次拉起都核对无障碍链路：看门狗周期（watchdog_interval_s，默认 60 秒）就是
         // 巡检周期。总开关被系统置 0 时本服务会失去无障碍这个自举锚点，看门狗的拉起
         // 是它仅剩的恢复机会——只在首次初始化时核对，这种情况下一次都不会执行。
@@ -132,7 +144,19 @@ class AgentService : Service() {
             // 先用上次落盘的那份配置：设备重启后要过 DNS、TLS 与首帧往返才拿得到新配置，
             // 中间那几秒（网络不通时则是一直）该用上次的值，而不是编译进 APK 的默认值。
             // 没有缓存（首次安装、或读不出来）时保持默认值，随后被 hello_ack 覆盖。
-            ConfigCache.load(this)?.let { RuntimeConfig.apply(it) }
+            //
+            // 读盘不在主线程；网关也等它读完再连接——否则 hello_ack 可能先到，
+            // 随后被这份旧缓存盖回去。
+            worker.execute {
+                ConfigCache.load(this@AgentService)?.let { RuntimeConfig.apply(it) }
+                // TLS 上下文要读密钥库：在这里建客户端，连接本身仍回主线程发起
+                client.warmUp()
+                mainHandler.post {
+                    if (worker.isShutdown) return@post
+                    syncConfigDependents()
+                    client.connect()
+                }
+            }
             // 先造遮盖层，再造就绪时读取遮盖状态的控制器，最后造读数发送器：
             // 遮盖层回调引用稍后初始化的 notice/statusLine，遮罩只在自动化流程中显示，
             // 构造期不会回调。
@@ -152,14 +176,14 @@ class AgentService : Service() {
                 // 不占 voice 命令槽。缓存放应用私有 filesDir，不进 /sdcard；旧公共缓存由
                 // store 初始化时删除。
                 VoiceClipStore(
-                    HttpClientFactory.create(this, readTimeoutSeconds = 30, callTimeoutSeconds = 60),
+                    { HttpClientFactory.create(applicationContext, readTimeoutSeconds = 30, callTimeoutSeconds = 60) },
                     File(filesDir, "voice"),
                 ),
                 deviceLog,
             )
             scheduler = CommandScheduler(overlay, voicePlayer, onOutcome = { outcome -> sendOutcome(outcome) })
             client = GatewayClient(this, callback)
-            client.connect()
+            // 连接由上面的缓存读取完成后发起：先拿到上次的配置，再接受 hello_ack
             worker.execute { voicePlayer.restorePendingVolume() }
             startDoorMonitor()
             startWatchdog()
@@ -181,7 +205,7 @@ class AgentService : Service() {
             Log.i(TAG, "gateway connected, trusted=$trusted")
             // hello_ack 里的配置已经由 GatewayClient 写进 RuntimeConfig，这里做两件事：
             // 落到依赖配置的组件上，以及存一份供下次启动直接用。
-            ConfigCache.save(this@AgentService, config)
+            worker.execute { ConfigCache.save(this@AgentService, config) }
             syncConfigDependents()
             if (trusted) {
                 // 日志上送（见 LogShipper）：离线期间的故障现场随回连自动到服务端
@@ -335,7 +359,7 @@ class AgentService : Service() {
         val revision = envelope.payload.optInt("revision", 0)
         // 配置统一入口：全部键回写 RuntimeConfig，随后刷新依赖配置的组件并存一份给下次启动
         RuntimeConfig.apply(config)
-        ConfigCache.save(this, config)
+        worker.execute { ConfigCache.save(this, config) }
         configRevision = revision
         syncConfigDependents()
         client.refreshHeartbeat()
@@ -390,7 +414,6 @@ class AgentService : Service() {
         if (otaUpdater == null) {
             otaUpdater = OtaUpdater(
                 this,
-                HttpClientFactory.create(this, readTimeoutSeconds = 60),
                 onProgress = { version, stage, detail ->
                     Log.i(TAG, "ota $version $stage $detail")
                     if (client.isReady()) {
@@ -459,7 +482,7 @@ class AgentService : Service() {
      * 重建监视器）都用它——那是同一种职责（"数据库变了就采集并上报"），写两份迟早分叉。
      */
     private fun startDoorMonitor() {
-        monitor?.stopWatching()
+        monitor?.shutdown()
         monitor = DoorMonitor {
             worker.execute {
                 if (trusted) {
@@ -474,7 +497,7 @@ class AgentService : Service() {
 
     /** 配置变更后重建监视器（防抖窗口等值可能已变），拉起逻辑与首次启动完全一致。 */
     private fun restartDoorMonitor() {
-        monitor?.stopWatching()
+        monitor?.shutdown()
         startDoorMonitor()
     }
 
@@ -532,15 +555,18 @@ class AgentService : Service() {
         otaCheckFuture?.cancel(false)
         logShipFuture?.cancel(false)
         otaScheduler.shutdownNow()
+        mainHandler.removeCallbacksAndMessages(null)
         worker.shutdownNow()
         maintenanceExecutor.shutdownNow()
         terminatingExecutor.shutdownNow()
+        if (::scheduler.isInitialized) scheduler.shutdown()
+        if (::overlay.isInitialized) overlay.destroy()
         if (::notice.isInitialized) notice.destroy()
         if (::statusLine.isInitialized) statusLine.destroy()
         if (::voicePlayer.isInitialized) voicePlayer.shutdown()
         closeAdbBridge("service destroyed")
         client.disconnect()
-        monitor?.stopWatching()
+        monitor?.shutdown()
         RootShell.destroy()
         super.onDestroy()
     }

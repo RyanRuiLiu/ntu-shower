@@ -437,7 +437,8 @@ def test_link_events_record_connect_and_disconnect(client: TestClient, fresh_db:
         events = [row["event"] for row in rows]
         if events == [LINK_ONLINE, LINK_OFFLINE] or time.monotonic() > deadline:
             break
-        time.sleep(0.01)
+        # 只让出执行权：结果由服务端线程写入，读库本身不产生等待
+        time.sleep(0)
     assert events == [LINK_ONLINE, LINK_OFFLINE]
 
 
@@ -553,6 +554,20 @@ def test_device_log_upload_is_stored_and_queryable(
     r = client.get(f"/api/v1/devices/{device}/logs?kind=ota", headers=admin_headers)
     assert r.status_code == 200
     assert r.json()["content"] == "Success\n"
+
+
+def test_device_log_upload_rejects_oversized_content(
+    client: TestClient, admin_headers: dict[str, str], fresh_db: str
+) -> None:
+    """日志上送有 64 KiB 上限：超限回 link.error，不写入数据库。"""
+    with helpers.trusted_online(client, "dev-log-too-large", admin_headers) as ws:
+        ws.send_text(helpers.frame("device.log_upload", {"kind": "device", "content": "x" * (64 * 1024 + 1)}))
+        err = helpers.recv_until(ws, "link.error")
+        assert err["payload"]["code"] == "proto.bad_json"
+        ws.send_text(helpers.frame("link.ping", {"sender_time": now_rfc3339()}))
+        helpers.recv_until(ws, "link.pong")
+
+    assert client.get("/api/v1/devices/dev-log-too-large/logs?kind=device", headers=admin_headers).status_code == 404
 
 
 def test_device_log_upload_requires_trusted_and_valid_kind(
