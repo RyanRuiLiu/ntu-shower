@@ -36,7 +36,7 @@ git config fetch.prune true
 - `pull.ff only` 禁止拉取时生成合并提交，历史保持线性。
 - `fetch.prune true` 在拉取时清理远端已删除的分支。
 
-合并请求由 CI 对基线之后的每个提交运行同一钩子；本地钩子可被 `--no-verify` 绕过，CI 不会。
+合并请求由 CI 对基线之后的每个提交与 PR 标题运行同一钩子；本地钩子可被 `--no-verify` 绕过，CI 不会。
 
 ## 服务端开发
 
