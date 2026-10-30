@@ -1,0 +1,32 @@
+#!/bin/sh
+# 按 STANDARDS.md §4.3 校验提交信息。启用：git config core.hooksPath .githooks
+set -eu
+
+message_file=${1:?缺少提交信息文件参数}
+subject=$(sed -e 's/^#.*$//' -e '/^[[:space:]]*$/d' "$message_file" | sed -n '1p')
+
+if [ -z "$subject" ]; then
+    echo "提交信息为空。" >&2
+    exit 1
+fi
+
+pattern='^(feat|fix|docs|refactor|test|build|ci|chore|perf|style|revert)(\([a-z0-9-]+\))?: .+'
+if ! printf '%s\n' "$subject" | grep -Eq "$pattern"; then
+    echo "提交信息不符合 Conventional Commits：$subject" >&2
+    echo "格式：<类型>(<范围>): <摘要>；类型见 STANDARDS.md §4.3。" >&2
+    exit 1
+fi
+
+summary=${subject#*: }
+length=$(printf '%s' "$summary" | wc -m | tr -d ' ')
+if [ "$length" -gt 72 ]; then
+    echo "提交摘要 $length 字，超过 72 字上限。" >&2
+    exit 1
+fi
+
+case "$summary" in
+    *. | *。)
+        echo "提交摘要不以句号结尾。" >&2
+        exit 1
+        ;;
+esac
