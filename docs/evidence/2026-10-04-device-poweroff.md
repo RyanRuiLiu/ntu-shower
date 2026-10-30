@@ -6,7 +6,7 @@
 > 这份为什么留在这里而不是并进代码注释：设备的开关机定时**不在本仓库任何一行生产代码里**
 > ——`SmdtService`、`/dev/McuCom`、浴室 App 与框架 smdt 服务之间的整条调用链都在设备上，
 > 而那台设备的 APK 没有源码。反编译与实测是仅有的两条路，这份就是那两条路的记录；
-> 并进注释意味着它只服务一个调用点，而它服务的是"以后再有人要碰关机这件事"。
+> 并进注释意味着它只服务一个调用点，而它服务的是"后续有人要碰关机这件事"。
 
 ---
 
@@ -37,7 +37,7 @@ md5 逐位一致）。它在本机的位置：`ntu-bathapp-reverse/apks/SmdtServ
 
 ## 2. 调用链
 
-```
+```text
 浴室 App  WelcomeActivity:716
           smdt.smdtSetTimingSwitchMachine(BathParams.autoCloseTime,
                                           BathParams.autoOpenTime, "1")
@@ -65,7 +65,7 @@ md5 逐位一致）。它在本机的位置：`ntu-bathapp-reverse/apks/SmdtServ
 
 参数落位实测（读 `SmdtService` 自己的 SQLite）：
 
-```
+```text
 smdt_service 表 →  1 | 10:55 | 23:58 | 1
                    ↑smdt_id ↑on_time ↑off_time ↑power_state
 state 表        →  1
@@ -156,13 +156,13 @@ static { System.loadLibrary("posix"); }
 
 命令：
 
-```
+```text
 am startservice -n com.cpb.smdt_service/.Smdt_service -e start 10:55 -e stop 23:58 -e smdt 1
 ```
 
 输出：
 
-```
+```text
 Starting service: Intent { cmp=com.cpb.smdt_service/.Smdt_service (has extras) }
 I/Smdt_service( 1182): SMDT_service Switch machine onStart
 I/Smdt_service( 1182): NOW:,START10:55,STOP23:58
@@ -186,13 +186,13 @@ I/DataforHandle( 1182): For the set of parameters==10===57===14===35
 
 命令（transaction 6 = `smdtSetPowerOffOnAlarm`，参数顺序同 AIDL 声明）：
 
-```
+```text
 service call smdt 6 s16 "23:58" s16 "10:55" s16 "1"
 ```
 
 输出：
 
-```
+```text
 Result: Parcel(00000000    '....')
 I/MyReceiver( 1182): Received com.smdt.spot.autoboot, Start switch machine
 I/MyReceiver( 1182): Start switch machine,start:10:55,stop:23:58
@@ -212,7 +212,7 @@ I/DataforHandle( 1182): For the set of parameters==10===57===14===28
 
 ### 4.3 跨日拨钟实验（09:24）
 
-```
+```text
 设备钟  →  2026-10-05 00:01:00        （跨日）
 重下发  →  For the set of parameters==10===57===23===57
 拨回    →  2026-10-04 09:24:45
@@ -227,7 +227,7 @@ I/DataforHandle( 1182): For the set of parameters==10===57===14===28
 
 ### 4.4 一次真实的关机事件（10-04）
 
-```
+```text
 09:35:47Z(=本地 09:35:47)  clock.set "2026-10-04 23:53:40"     ← 最后一次改钟，未跨日
 09:41:01Z(=本地 09:41:01)  offline                               ← 5 分 14 秒后设备断线
 ```
@@ -294,7 +294,7 @@ insert into smdt_service values(1,'9:00','11:00','0');
 
 ## 6. 设备与文件（实测命令输出）
 
-```
+```text
 service list                     →  11  smdt: [android.app.smdt.ISmdtManager]
 ps                               →  system 504 system_server
                                     u0_a42 1182 com.cpb.smdt_service
@@ -316,12 +316,12 @@ dumpsys alarm 头部                       →  Next shutdown wakeup: 0
 
 来自 `/sdcard/datalook/log/Params_*.txt` 与其中的 `V8下载参数` 行：
 
-```
-读取参数[autoOpenTime:10:55][autoCloseTime:23:58][closepassword:123456]
+```text
+读取参数[autoOpenTime:10:55][autoCloseTime:23:58][closepassword:<已脱敏>]
 
 V8下载参数[...,maxbathtime:1200,maxinspacetime:300,maxbathspacetime:300,
-           supportoffline:1,offlinenum:5,posserverIp:192.168.16.69,
-           posserverPort:5500,price:0.3888888888888889,poscode:5026]
+           supportoffline:1,offlinenum:5,posserverIp:<已脱敏>,
+           posserverPort:5500,price:<已脱敏>,poscode:<已脱敏>]
 
 CommandList: [{"CommandLength":"4","CommandKey":"A0","CommandValue":"00002359"}]
 ```
@@ -333,7 +333,7 @@ CommandList: [{"CommandLength":"4","CommandKey":"A0","CommandValue":"00002359"}]
 
 ## 8. 设备上可用的工具（实测）
 
-```
+```text
 有：busybox-smp（含 base64）、sqlite3、grep、dumpsys、logcat、am、service、ps、dd
 无：base64、wc、head、unzip
 ```
@@ -357,7 +357,7 @@ CommandList: [{"CommandLength":"4","CommandKey":"A0","CommandValue":"00002359"}]
 - ~~**§4.4 那次关机的前因**~~ → 已定论：**没有任何一次 `settings()` 被触发**。拨钟
   本身就是触发器，见 §11。
 - ~~**`CommandList` 的实际消费者**~~ → 排除了 `smdt_mydownload`（全包无
-  McuCom/CommandList/poweronoff 痕迹）与框架 `SmdtService`（见 §11）。剩下唯一可能
+  McuCom/CommandList/poweronoff 痕迹）与框架 `SmdtService`（见 §11）。剩下唯一候选
   是"V8 平台下发了但本部署无人消费"：观测到的关机跟随 SmdtService 的 23:58，而不是
   CommandList 的 23:59。
 - ~~**框架侧实现**~~ → 已拉取 `services.jar` 并反编译：`com.android.server.SmdtService`
@@ -404,7 +404,7 @@ mcugetcmdvalue（本驱动未实现，全部 -1）、`0xA8` mcusetcmd；`enable`
 
 **日常节律的实证**（生产库按天首末帧，2026-09-20 起的常规日）：
 
-```
+```text
 每天首帧  02:56–03:00Z  = 北京 10:56–11:00   ← autoOpenTime 10:55，MCU 自动上电
 每天末帧  15:03–15:58Z  = 北京 23:03–23:58   ← autoCloseTime 23:58，MCU 断主电
 ```
@@ -440,7 +440,7 @@ LD_LIBRARY_PATH=/system/lib dalvikvm -cp /data/local/tmp/mcu.jar mcu.Main on <on
 - **拨过已布防的截止时刻 = 立即断电**；回拨 = 等量推迟。两者都是钟面判定。
 - 紧急停用定时：`service call smdt 6 s16 "23:58" s16 "10:55" s16 "0"`（enable=0）；
   恢复第三参给 `"1"`。注意 AIDL 与 `am startservice` 都覆盖 SmdtService 的 SQLite，
-  且冷启动可能静默丢失——发完查 SQLite 与 logcat 确认。
+  且冷启动存在静默丢失的情况——发完查 SQLite 与 logcat 确认。
 - `configure.xml` 里的 `AutoOpenTime=08:20/AutoCloseTime=17:35` **不生效**：运行时
   以 V8 下载参数（10:55/23:58）为准，`SmdtService` 库里落的也是后者。
 - V8 平台真实地址：configure.xml `serverIP = http://210.29.68.22` + `serverPort=80`，

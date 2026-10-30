@@ -21,8 +21,8 @@ from app.modules.tasks.routes import set_membership as set_membership_endpoint
 from app.modules.tasks.spec import TASKS, TASKS_BY_KEY
 
 TASKS_IDENTITY = "tasks-identity-0001"
-CERT_NO = "99990052"
-OTHER_CERT_NO = "99990057"
+CERT_NO = "2026000001"
+OTHER_CERT_NO = "2026000003"
 
 
 @pytest.fixture

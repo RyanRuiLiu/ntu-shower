@@ -13,6 +13,7 @@ import com.ryanliu.ntushower.transport.OutcomeStatus
 import com.ryanliu.ntushower.transport.ReasonCodes
 import org.json.JSONObject
 import java.util.concurrent.Executor
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 /** 命令执行队列的归属；与服务端 `ACTION_CHANNELS` 的通道划分一一对应。 */
@@ -114,6 +115,12 @@ class CommandScheduler(
 
         /** 读设备 waterList 里每块板的配置与状态（F4 B1 + F4 B3）。 */
         class WaterStatus(id: String) : Command(id)
+    }
+
+    /** 停止全部执行器；Service 销毁时调用。注入的执行器如果不是 ExecutorService，由调用方负责。 */
+    fun shutdown() {
+        listOf(automationExecutor, captureExecutor, voiceExecutor, prefetchExecutor, waterExecutor)
+            .forEach { (it as? ExecutorService)?.shutdownNow() }
     }
 
     private val automationQueue = SerialCommandQueue<Command>()

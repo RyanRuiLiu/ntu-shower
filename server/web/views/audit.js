@@ -8,7 +8,8 @@
  *
  * 表格只放关键列；点行选中，右侧详情面板常驻显示该行全部字段——详情在右栏常驻，
  * 比对几行时眼睛不用上下跑。详情面板遍历行对象的全部键渲染，后台加列自动出现，
- * 点值即复制，另有整行 JSON 复制。
+ * 点值即复制，另有整行 JSON 复制。标签与行都能用键盘操作：标签间用方向键，
+ * 行组只有一个 Tab 停靠点，行内用方向键移动、Enter 或空格查看详情。
  *
  * 动作名、原因码、功能名、结果名一律**照原样显示**：这是开发者页面，读它的人要拿这些值
  * 去日志里搜（`background-task.settled`、`feature=renew_wait`），翻译成中文反而搜不到。
@@ -33,14 +34,14 @@ function copy(text, what) {
   )
 }
 
-/** 详情卡：标签 + 全量折行的值，点卡即复制。空值不渲染。 */
+/** 详情卡：标签 + 全量折行的值，点卡即复制。空值不渲染。按钮元素让键盘同样能触发。 */
 function detailCard(key, value) {
   if (value === null || value === undefined || value === '') return ''
   const text = String(value)
-  return `<div class="detail-card" data-copy-value="${esc(text)}" title="点击复制">
-      <div class="k">${esc(key)}</div>
-      <div class="v mono">${esc(text)}</div>
-    </div>`
+  return `<button type="button" class="detail-card" data-copy-value="${esc(text)}" title="点击复制">
+      <span class="k">${esc(key)}</span>
+      <span class="v mono">${esc(text)}</span>
+    </button>`
 }
 
 function renderDetail(row, title) {
@@ -133,32 +134,65 @@ const state = { tab: 'api', rows: {}, selected: {} }
 function renderRows() {
   const tab = TABS[state.tab]
   const rows = state.rows[state.tab] || []
-  if (rows.length === 0) return '<div class="empty">暂无匹配记录</div>'
+  if (rows.length === 0) return '<div class="empty">暂无匹配记录；调整筛选条件</div>'
   const head = ['时间', ...tab.headers].map((title) => `<th>${esc(title)}</th>`).join('')
+  // 行组只有一个 Tab 停靠点（选中行，未选时是第一行）：几百行不该变成几百个 Tab。
+  // 组内移动用方向键，选中用 Enter 或空格。
+  const selectedIndex = state.selected[state.tab]
+  const tabStop = selectedIndex >= 0 && selectedIndex < rows.length ? selectedIndex : 0
   const body = rows
     .map((row, index) => {
       const cells = tab
         .cells(row)
         .map((html) => `<td>${html}</td>`)
         .join('')
-      const selected = index === state.selected[state.tab] ? ' is-selected' : ''
-      return `<tr class="audit-row${selected}" data-row="${index}">
+      const selected = index === selectedIndex
+      return `<tr class="audit-row${selected ? ' is-selected' : ''}" data-row="${index}"
+        tabindex="${index === tabStop ? 0 : -1}" aria-selected="${selected}">
         <td class="mono">${esc(fmtFullDateTime(tab.time(row)))}</td>${cells}</tr>`
     })
     .join('')
   return `<table class="table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`
 }
 
+/**
+ * 重画表格。行是键盘可聚焦的，整表重画会丢掉焦点与滚动位置——两者都要按重画前
+ * 的状态还原，否则用方向键翻看时列表会跳回顶部。
+ */
 function rerenderTable() {
-  $('auditTable').innerHTML = renderRows()
+  const box = $('auditTable')
+  const scrollTop = box.scrollTop
+  const focusedRow = box.contains(document.activeElement)
+    ? document.activeElement.closest('[data-row]')?.dataset.row
+    : undefined
+  box.innerHTML = renderRows()
+  box.scrollTop = scrollTop
+  if (focusedRow !== undefined) box.querySelector(`[data-row="${focusedRow}"]`)?.focus()
 }
 
-function selectRow(index) {
+function selectRow(index, { focus = false } = {}) {
   state.selected[state.tab] = index
   rerenderTable()
+  if (focus) $('auditTable').querySelector(`[data-row="${index}"]`)?.focus()
   const row = (state.rows[state.tab] || [])[index]
   const deviceSuffix = row?.device_id ? ` · ${deviceName(row.device_id)}` : ''
   renderDetail(row, `${TABS[state.tab].label}详情${deviceSuffix}`)
+}
+
+/** 切到某个审计类别：按钮状态、表格内容与详情面板一起换。 */
+function activateTab(root, key) {
+  if (state.tab === key) return
+  state.tab = key
+  state.selected = {}
+  root.querySelectorAll('.audit-tab').forEach((item) => {
+    const active = item.dataset.tab === key
+    item.classList.toggle('is-active', active)
+    item.setAttribute('aria-selected', String(active))
+    item.tabIndex = active ? 0 : -1
+  })
+  $('auditTable').setAttribute('aria-labelledby', `auditTab-${key}`)
+  rerenderTable()
+  renderDetail(null, '')
 }
 
 async function reload() {
@@ -202,23 +236,29 @@ export const auditView = {
       <div class="audit-split">
         <section class="panel">
           <div class="panel-head">
-            ${Object.entries(TABS)
-              .map(
-                ([key, tab]) =>
-                  `<span class="audit-tab${key === state.tab ? ' is-active' : ''}" data-tab="${key}" title="${esc(tab.title)}">${esc(tab.label)}</span>`,
-              )
-              .join('')}
-            <span class="panel-note">点击行查看详情</span>
+            <div class="audit-tabs" role="tablist" aria-label="审计类别">
+              ${Object.entries(TABS)
+                .map(
+                  ([key, tab]) =>
+                    `<button type="button" class="audit-tab${key === state.tab ? ' is-active' : ''}"
+                      id="auditTab-${key}" role="tab" data-tab="${key}"
+                      aria-selected="${key === state.tab}" aria-controls="auditTable"
+                      tabindex="${key === state.tab ? 0 : -1}" title="${esc(tab.title)}">${esc(tab.label)}</button>`,
+                )
+                .join('')}
+            </div>
+            <span class="panel-note">点击或回车查看详情</span>
             <div class="panel-tools">
-              <select id="inScope">
+              <select id="inScope" aria-label="审计范围">
                 <option value="all">全部设备</option>
                 <option value="device">当前设备</option>
               </select>
-              <input id="inLimit" type="number" min="1" max="500" value="50">
+              <input id="inLimit" type="number" min="1" max="500" value="50" aria-label="审计条数上限">
               <button type="button" class="btn btn-ghost btn-sm" id="btnReload">刷新</button>
             </div>
           </div>
-          <div class="panel-body flush" id="auditTable"></div>
+          <div class="panel-body flush" id="auditTable" role="tabpanel"
+            aria-labelledby="auditTab-${state.tab}"></div>
         </section>
 
         <section class="panel" id="detailPanel">
@@ -237,18 +277,55 @@ export const auditView = {
       }),
     )
 
-    // 标签用委托：`[data-tab]` 上的 closest 会把 panel-head 里的下拉与按钮挡在外面
+    // 行组只有一个 Tab 停靠点：方向键在行间移动，Enter 与空格等同点击
     dispose.add(
-      listen(root.querySelector('.panel-head'), 'click', (event) => {
-        const tab = event.target.closest('.audit-tab')
-        if (!tab || state.tab === tab.dataset.tab) return
-        state.tab = tab.dataset.tab
-        state.selected = {}
-        root.querySelectorAll('.audit-tab').forEach((item) => {
-          item.classList.toggle('is-active', item.dataset.tab === state.tab)
+      listen(table, 'keydown', (event) => {
+        const row = event.target.closest('[data-row]')
+        if (!row) return
+        const rows = [...table.querySelectorAll('[data-row]')]
+        const position = rows.indexOf(row)
+        let next = -1
+        if (event.key === 'ArrowDown') next = Math.min(position + 1, rows.length - 1)
+        else if (event.key === 'ArrowUp') next = Math.max(position - 1, 0)
+        else if (event.key === 'Home') next = 0
+        else if (event.key === 'End') next = rows.length - 1
+        else if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          selectRow(Number(row.dataset.row), { focus: true })
+          return
+        }
+        if (next < 0) return
+        event.preventDefault()
+        rows.forEach((item) => {
+          item.tabIndex = -1
         })
-        rerenderTable()
-        renderDetail(null, '')
+        rows[next].tabIndex = 0
+        rows[next].focus()
+      }),
+    )
+
+    // 标签用委托：`[data-tab]` 上的 closest 会把 panel-head 里的下拉与按钮挡在外面。
+    // 按钮原生响应 Enter/空格；方向键与 Home/End 按标签组的惯例在标签间移动。
+    const tabList = root.querySelector('[role="tablist"]')
+    dispose.add(
+      listen(tabList, 'click', (event) => {
+        const tab = event.target.closest('.audit-tab')
+        if (tab) activateTab(root, tab.dataset.tab)
+      }),
+    )
+    dispose.add(
+      listen(tabList, 'keydown', (event) => {
+        const keys = Object.keys(TABS)
+        const current = keys.indexOf(state.tab)
+        let next = -1
+        if (event.key === 'ArrowRight') next = (current + 1) % keys.length
+        else if (event.key === 'ArrowLeft') next = (current - 1 + keys.length) % keys.length
+        else if (event.key === 'Home') next = 0
+        else if (event.key === 'End') next = keys.length - 1
+        if (next < 0) return
+        event.preventDefault()
+        activateTab(root, keys[next])
+        tabList.querySelector(`[data-tab="${keys[next]}"]`)?.focus()
       }),
     )
 

@@ -26,6 +26,8 @@ import com.ryanliu.ntushower.features.automation.BathAppGuard
 import com.ryanliu.ntushower.features.automation.BathAppPage
 import com.ryanliu.ntushower.features.automation.ContentEvent
 import java.io.File
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 无障碍服务实体：UI 操作原语与页面事件流。
@@ -48,13 +50,25 @@ class A11yService :
 
     private val deviceLog = DeviceLog(File(AppConfig.WORK_DIR))
 
+    /**
+     * 事件回调在主线程；写日志、守护决策与 root shell 都排到这条单线程上。
+     * 单线程同时保证 [guard] 的调用顺序与事件到达顺序一致。
+     */
+    private val worker = Executors.newSingleThreadExecutor()
+
+    /** 绑定后的首次前台判断是异步的；一旦收到窗口事件，以事件为准，避免旧结果盖回去。 */
+    private val windowEventSeen = AtomicBoolean(false)
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         A11yRuntime.bind(this)
-        deviceLog.lifecycle("a11y.connected", "component=A11yService")
+        worker.execute { deviceLog.lifecycle("a11y.connected", "component=A11yService") }
         Log.i(TAG, "connected")
         enableViewIdReporting()
-        A11yRuntime.bathAppInForeground = isBathAppInForeground()
+        windowEventSeen.set(false)
+        worker.execute {
+            if (!windowEventSeen.get()) A11yRuntime.bathAppInForeground = isBathAppInForeground()
+        }
         // 自举主服务：无障碍绑定是本设备上唯一可靠的开机拉起锚点——
         // DS83X ROM 不投递 BOOT_COMPLETED（真机实测 + 旧项目同结论），
         // 系统开机后主动重绑已启用的无障碍服务（不受 stopped 状态影响）。
@@ -82,6 +96,7 @@ class A11yService :
         // 本应用只有覆盖窗口，没有浴室 App 页面语义：提示窗与遮盖层的窗口/文字事件
         // 不能被当成浴室 App 退出，也不应推动 BathAppPage 重算。
         if (pkg == packageName) return
+        windowEventSeen.set(true)
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
             // 只入队，不在这里算。重算要做同步 IPC，而本回调跑在**主线程**上——真机上正是
             // 这条路径把主线程按住，让看门狗的广播排不上队、超时后进程被系统以 ANR 杀掉。
@@ -102,10 +117,10 @@ class A11yService :
                 // 回到前台即清除退出历史与冷却：不论此前是否处于冷却期，
                 // App 能回到前台就说明它自己活过来了。此前只在冷却期清除，
                 // 会让未达阈值的退出记录残留，导致下次退出提前触发冷却。
-                guard.onForeground()
+                worker.execute { guard.onForeground() }
             } else if (A11yRuntime.bathAppInForeground) {
                 A11yRuntime.bathAppInForeground = false
-                handleBathAppExit(pkg)
+                worker.execute { handleBathAppExit(pkg) }
             }
         }
     }
@@ -147,7 +162,9 @@ class A11yService :
 
     override fun onDestroy() {
         A11yRuntime.unbind()
-        deviceLog.lifecycle("a11y.disconnected", "component=A11yService")
+        worker.execute { deviceLog.lifecycle("a11y.disconnected", "component=A11yService") }
+        // 让已排队的日志写完，不再接受新任务；主线程不被文件 IO 占住
+        worker.shutdown()
         // 自动化完全依赖本服务，服务销毁时它不可能还在跑。不复位的话这个标志会停在 true，
         // 而 BathAppGuard 据此不再拉起浴室 App——那正是界面能力的自举锚点，
         // 一次服务重绑就会让设备从此不再自愈。

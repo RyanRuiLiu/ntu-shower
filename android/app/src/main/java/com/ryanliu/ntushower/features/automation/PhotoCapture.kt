@@ -15,6 +15,7 @@ import android.util.Base64
 import android.util.Log
 import com.ryanliu.ntushower.core.clock.Uptime
 import java.io.ByteArrayOutputStream
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * 拍照：Camera1 API，预览帧单次捕获 → NV21 → JPEG → Base64。
@@ -55,19 +56,19 @@ object PhotoCapture {
             size?.let { params.setPreviewSize(it.width, it.height) }
             camera.parameters = params
 
-            var captured: ByteArray? = null
+            val captured = AtomicReference<ByteArray?>(null)
             camera.setOneShotPreviewCallback { data, camera1 ->
-                captured = data
+                captured.set(data)
                 camera1.stopPreview()
             }
             camera.startPreview()
             val deadline = Uptime.nowMs() + PREVIEW_TIMEOUT_MS
-            while (captured == null && Uptime.nowMs() < deadline) {
+            while (captured.get() == null && Uptime.nowMs() < deadline) {
                 Thread.sleep(POLL_INTERVAL_MS)
             }
             camera.stopPreview()
 
-            val yuv = captured ?: return null
+            val yuv = captured.get() ?: return null
             // 尺寸要回读**相机实际采纳的**，而不是我们请求的：`setPreviewSize` 不保证被接受
             // （相机常把它夹取到最接近的支持尺寸）。拿请求值去解析 YUV，轻则画面错位花屏、
             // 重则 `YuvImage` 直接抛异常——两者都被上层收敛成 `camera.capture_failed`，

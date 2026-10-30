@@ -1,5 +1,6 @@
 """测试共享工具：协议帧构造、设备档案登记、可信在线连接、网关连接替身、APK 合成。"""
 
+import asyncio
 import io
 import json
 import struct
@@ -112,10 +113,19 @@ class FakeGatewayWS:
 
     def __init__(self) -> None:
         self.sent: list[str] = []
+        # 由 send_text 置位；测试用 wait_for_sent 等到帧真的发出，不靠固定时长。
+        self._sent_event = asyncio.Event()
 
     async def send_text(self, data: str) -> bool:
         self.sent.append(data)
+        self._sent_event.set()
         return True
+
+    async def wait_for_sent(self, count: int = 1) -> None:
+        """等到至少发出 [count] 帧。事件循环内推进，不读墙上时钟。"""
+        while len(self.sent) < count:
+            self._sent_event.clear()
+            await self._sent_event.wait()
 
     def last_frame(self) -> dict[str, Any]:
         return dict(json.loads(self.sent[-1]))

@@ -18,7 +18,7 @@ import { toast } from '../core/toast.js'
 
 const WILDCARD = '*'
 /** 「全部学号」试听时用的示例学号：数字变量需要能念出内容，不能传非数字串。 */
-const SAMPLE_CERT_NO = '99990057'
+const SAMPLE_CERT_NO = '2026000003'
 
 let spec = null
 let events = []
@@ -54,7 +54,7 @@ function fmtMs(ms) {
 
 function fmtSize(bytes) {
   const value = Number(bytes || 0)
-  return value < 1024 * 1024 ? `${Math.max(1, Math.round(value / 1024))} KB` : `${(value / (1024 * 1024)).toFixed(1)} MB`
+  return value < 1024 * 1024 ? `${Math.max(1, Math.round(value / 1024))} KiB` : `${(value / (1024 * 1024)).toFixed(1)} MiB`
 }
 
 function sampleCert(certs) {
@@ -208,7 +208,7 @@ function renderRules() {
   const list = visibleRules()
   $('voiceCount').textContent = rules.length > 0 ? `共 ${rules.length} 条` : ''
   if (list.length === 0) {
-    $('voiceTable').innerHTML = '<div class="empty">暂无匹配的语音规则</div>'
+    $('voiceTable').innerHTML = '<div class="empty">暂无匹配的语音规则；调整筛选或新建规则</div>'
     return
   }
   const rows = list
@@ -257,7 +257,7 @@ function deliveryBadge(value) {
 function renderDeliveries() {
   $('voiceDeliveryCount').textContent = deliveries.length > 0 ? `最近 ${deliveries.length} 条` : ''
   if (deliveries.length === 0) {
-    $('voiceDeliveryTable').innerHTML = '<div class="empty">暂无播报记录</div>'
+    $('voiceDeliveryTable').innerHTML = '<div class="empty">暂无播报记录；触发一次事件或使用规则推送</div>'
     return
   }
   const rows = deliveries
@@ -307,21 +307,23 @@ function renderSegments() {
           .join('')
         controls.push(`<span class="seg-kind">音频</span>`)
         controls.push(
-          `<select data-seg-field="asset" data-index="${index}">${options}</select>`,
+          `<select data-seg-field="asset" data-index="${index}"
+            aria-label="第 ${index + 1} 段的音频素材">${options}</select>`,
         )
       } else if (segment.kind === 'digits') {
         controls.push(`<span class="seg-kind">数字</span>`)
         controls.push(
-          `<select data-seg-field="source" data-index="${index}">
+          `<select data-seg-field="source" data-index="${index}"
+            aria-label="第 ${index + 1} 段的数字来源">
             <option value="door_no"${segment.source === 'door_no' ? ' selected' : ''}>喷头号（按数值）</option>
             <option value="cert_no"${segment.source === 'cert_no' ? ' selected' : ''}>学号（逐位）</option>
           </select>`,
         )
         if (segment.source === 'cert_no') {
           controls.push(
-            `<input type="number" min="1" max="10" data-seg-field="length" data-index="${index}" value="${
-              segment.length || ''
-            }" placeholder="全部位数">`,
+            `<input type="number" min="1" max="10" data-seg-field="length" data-index="${index}"
+              value="${segment.length || ''}" placeholder="全部位数"
+              aria-label="第 ${index + 1} 段取学号的位数（留空为全部位数）">`,
           )
         } else {
           controls.push('<span class="muted">按数值</span>')
@@ -329,18 +331,18 @@ function renderSegments() {
       } else {
         controls.push(`<span class="seg-kind">停顿</span>`)
         controls.push(
-          `<input type="number" min="100" max="5000" step="100" data-seg-field="pause" data-index="${index}" value="${segment.ms}">`,
+          `<input type="number" min="100" max="5000" step="100" data-seg-field="pause" data-index="${index}"
+            value="${segment.ms}" aria-label="第 ${index + 1} 段停顿时长（毫秒）">`,
         )
         controls.push('<span class="muted">毫秒</span>')
       }
       controls.push(`<div class="btn-row">
-        <button type="button" class="btn btn-ghost btn-sm" data-seg-act="up" data-index="${index}" ${
-          index === 0 ? 'disabled' : ''
-        }>↑</button>
-        <button type="button" class="btn btn-ghost btn-sm" data-seg-act="down" data-index="${index}" ${
-          index === segments.length - 1 ? 'disabled' : ''
-        }>↓</button>
-        <button type="button" class="btn btn-danger btn-sm" data-seg-act="remove" data-index="${index}">移除</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-seg-act="up" data-index="${index}"
+          aria-label="上移第 ${index + 1} 段" ${index === 0 ? 'disabled' : ''}>↑</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-seg-act="down" data-index="${index}"
+          aria-label="下移第 ${index + 1} 段" ${index === segments.length - 1 ? 'disabled' : ''}>↓</button>
+        <button type="button" class="btn btn-danger btn-sm" data-seg-act="remove" data-index="${index}"
+          aria-label="移除第 ${index + 1} 段">移除</button>
       </div>`)
       return `<div class="seg-row">${controls.join('')}</div>`
     })
@@ -371,7 +373,8 @@ function eventChecksHtml(selected) {
             </label>`,
         )
         .join('')
-      return `<div class="check-group"><span class="muted">${esc(phase)}</span><div class="btn-row">${boxes}</div></div>`
+      return `<div class="check-group" role="group" aria-label="${esc(phase)}">
+        <span class="muted">${esc(phase)}</span><div class="btn-row">${boxes}</div></div>`
     })
     .join('')
 }
@@ -386,27 +389,30 @@ function readEventSelection() {
 
 const WEEKDAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 
-function timeWindowRowHtml(value) {
+function timeWindowRowHtml(value, index) {
   const selected = value?.days?.length ? value.days : [1, 2, 3, 4, 5, 6, 7]
   const days = WEEKDAYS.map(
-    (label, index) => `<label class="weekday-option">
-        <input type="checkbox" data-window-day="${index + 1}" ${selected.includes(index + 1) ? 'checked' : ''}>
+    (label, dayIndex) => `<label class="weekday-option">
+        <input type="checkbox" data-window-day="${dayIndex + 1}" ${selected.includes(dayIndex + 1) ? 'checked' : ''}>
         <span>${label}</span>
       </label>`,
   ).join('')
   return `<div class="time-window" data-window>
-      <div class="weekday-options">${days}</div>
+      <div class="weekday-options" role="group" aria-label="第 ${index + 1} 个时段的星期">${days}</div>
       <div class="btn-row">
-        <input type="time" data-window-start value="${esc(value?.start || '')}" aria-label="开始时刻">
+        <input type="time" data-window-start value="${esc(value?.start || '')}"
+          aria-label="第 ${index + 1} 个时段的开始时刻">
         <span class="muted">至</span>
-        <input type="time" data-window-end value="${esc(value?.end || '')}" aria-label="结束时刻">
-        <button type="button" class="btn btn-danger btn-sm" data-remove-window>移除</button>
+        <input type="time" data-window-end value="${esc(value?.end || '')}"
+          aria-label="第 ${index + 1} 个时段的结束时刻">
+        <button type="button" class="btn btn-danger btn-sm" data-remove-window
+          aria-label="移除第 ${index + 1} 个时段">移除</button>
       </div>
     </div>`
 }
 
 function renderTimeWindows(windows) {
-  $('voiceTimeWindows').innerHTML = windows.map((window) => timeWindowRowHtml(window)).join('')
+  $('voiceTimeWindows').innerHTML = windows.map((window, index) => timeWindowRowHtml(window, index)).join('')
 }
 
 function updateTimeWindowState() {
@@ -425,7 +431,10 @@ function addTimeWindowRow(window = null) {
     report('voiceResult', `失败 · 最多 ${spec.max_time_windows} 个时段`, 'err')
     return
   }
-  $('voiceTimeWindows').insertAdjacentHTML('beforeend', timeWindowRowHtml(window))
+  $('voiceTimeWindows').insertAdjacentHTML(
+    'beforeend',
+    timeWindowRowHtml(window, $('voiceTimeWindows').children.length),
+  )
 }
 
 function readTimeWindows() {
@@ -835,9 +844,9 @@ export const voiceView = {
               <label for="voiceAssetName">上传固定音频（MP3/WAV/OGG/M4A 等，服务端统一转 MP3）</label>
               <input id="voiceAssetName" type="text" maxlength="40" placeholder="素材名称，例如：请使用">
               <div class="btn-row">
-                <input id="voiceAssetFile" type="file" accept="audio/*">
-                <select id="voiceAssetDigit"></select>
-                <select id="voiceAssetUnit"></select>
+                <input id="voiceAssetFile" type="file" accept="audio/*" aria-label="音频文件">
+                <select id="voiceAssetDigit" aria-label="数字素材"></select>
+                <select id="voiceAssetUnit" aria-label="单位素材"></select>
                 <button type="submit" class="btn btn-sm" id="btnVoiceAssetUpload">上传</button>
               </div>
               <div class="hint">数字素材用于规则里的「喷头号/学号」；0–9 各一段。上传后可改名，被规则引用时不能删除。</div>
@@ -853,7 +862,7 @@ export const voiceView = {
             <span class="panel-title">语音规则</span>
             <span class="panel-note" id="voiceCount"></span>
             <div class="panel-tools">
-              <select id="voiceFilterDevice"></select>
+              <select id="voiceFilterDevice" aria-label="按设备筛选语音规则"></select>
               <button type="button" class="btn btn-ghost btn-sm" id="btnVoiceReloadRules">刷新</button>
             </div>
           </div>
@@ -866,8 +875,8 @@ export const voiceView = {
           </div>
           <div class="panel-body">
             <div class="field">
-              <label>设备</label>
-              <div id="voiceScope"></div>
+              <span class="field-label" id="voiceScopeLabel">设备</span>
+              <div id="voiceScope" role="group" aria-labelledby="voiceScopeLabel"></div>
             </div>
             <div class="field">
               <label for="voiceCert">学号</label>
@@ -879,11 +888,11 @@ export const voiceView = {
               <div class="hint" id="voiceCertHint">一行一个学号；这些学号都会播这条规则。</div>
             </div>
             <div class="field">
-              <label>事件（可勾多个）</label>
-              <div id="voiceEvents"></div>
+              <span class="field-label" id="voiceEventsLabel">事件（可勾多个）</span>
+              <div id="voiceEvents" role="group" aria-labelledby="voiceEventsLabel"></div>
             </div>
-            <div class="field">
-              <label>生效时段</label>
+            <div class="field" role="group" aria-labelledby="voiceTimeLabel">
+              <span class="field-label" id="voiceTimeLabel">生效时段</span>
               <label class="field-row">
                 <input id="voiceTimeUnlimited" type="checkbox" checked>
                 <span>不限时段</span>
@@ -896,8 +905,8 @@ export const voiceView = {
             </div>
             <div class="hint">匹配优先级：设备具体 → 学号具体 → 同档集合更小 → 时段更紧。完全同优先级且目标与时段都重叠的规则不能保存。</div>
             <div class="field">
-              <label>播报分段</label>
-              <div class="seg-editor" id="voiceSegments"></div>
+              <span class="field-label" id="voiceSegmentsLabel">播报分段</span>
+              <div class="seg-editor" id="voiceSegments" role="group" aria-labelledby="voiceSegmentsLabel"></div>
               <div class="btn-row">
                 <button type="button" class="btn btn-ghost btn-sm" id="btnAddAsset">加音频</button>
                 <button type="button" class="btn btn-ghost btn-sm" id="btnAddDigits">加数字</button>

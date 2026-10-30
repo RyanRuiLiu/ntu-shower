@@ -7,7 +7,7 @@
 提前收场。这里在更早的某一刻（`extend_hours_at`，默认 23:49）：
 
 - 拨钟之前先重布一次 MCU（滚动重布的第一次，预补偿拨走的一小时）：钟被拨到越过
-  旧布防的截止即当场断电（`docs/device-poweroff.md` §11），截止必须先推走；
+  旧布防的截止即当场断电（`docs/evidence/2026-10-04-device-poweroff.md` §11），截止必须先推走；
 - 把设备钟往后拨一小时，浴室 App 的释放条件全用绝对值（`|openTime − now|`），钟一跳
   它们统统越界——**设备上所有喷头被清空**，不只是名单里的那几个；
 - 拨完之后等门清空，再替名单里的人把喷头分配回去。
@@ -521,9 +521,7 @@ async def _reassign(shift: Shift, students: dict[str, str]) -> None:
     for door_no, cert_no in shift.assignments:
         password = students.get(cert_no)
         if password is None:
-            log_event(
-                "INFO", "extend-hours.roster-changed", "他不在名单里了，不分配", device_id=device_id, cert_no=cert_no
-            )
+            log_event("INFO", "extend-hours.roster-changed", "他不在名单里了，不分配", device_id=device_id)
             continue
         if (device_id, cert_no) in _reassigned or (device_id, cert_no) in _reassign_failed:
             continue
@@ -547,7 +545,6 @@ async def _reassign(shift: Shift, students: dict[str, str]) -> None:
                 "重新分配还轮不到，下次再来",
                 device_id=device_id,
                 door_no=door_no,
-                cert_no=cert_no,
                 problem=exc.problem.code,
             )
             continue
@@ -562,7 +559,6 @@ async def _reassign(shift: Shift, students: dict[str, str]) -> None:
                 "分配没成功，这次不替他再试了",
                 device_id=device_id,
                 door_no=door_no,
-                cert_no=cert_no,
                 reason_code=result.get("reason_code") or "-",
             )
             continue
@@ -573,7 +569,6 @@ async def _reassign(shift: Shift, students: dict[str, str]) -> None:
             "已把他分配回原喷头",
             device_id=device_id,
             door_no=door_no,
-            cert_no=cert_no,
         )
 
 

@@ -106,9 +106,7 @@ def test_bridge_buffers_until_both_halves_arrive(
     nonce_first = fake_first.last_frame()["payload"]["nonce"]
     with client.websocket_connect(f"/gateway/bridge?device_id=dev-bridge-devfirst&nonce={nonce_first}") as device_ws:
         device_ws.send_bytes(b"early-device-bytes")
-        import time
-
-        time.sleep(0.2)  # 确保字节已入 pending 缓冲，而不是在 TCP 接入后直通
+        # 不等待固定时长：TCP 端有 5 秒读超时，字节无论此刻已入缓冲还是稍后到达都能收到
         with socket.create_connection(("127.0.0.1", opened["port"]), timeout=5) as tcp:
             tcp.settimeout(5)
             assert tcp.recv(1024) == b"early-device-bytes"
@@ -120,9 +118,6 @@ def test_bridge_buffers_until_both_halves_arrive(
     with socket.create_connection(("127.0.0.1", opened["port"]), timeout=5) as tcp:
         tcp.settimeout(5)
         tcp.sendall(b"early-host-bytes")
-        import time
-
-        time.sleep(0.2)  # 确保字节已入 pending 缓冲
         nonce_second = fake_second.last_frame()["payload"]["nonce"]
         with client.websocket_connect(
             f"/gateway/bridge?device_id=dev-bridge-tcpfirst&nonce={nonce_second}"

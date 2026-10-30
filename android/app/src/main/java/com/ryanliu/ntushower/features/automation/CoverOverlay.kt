@@ -73,6 +73,12 @@ class CoverOverlay(context: Context, private val onVisibilityChanged: (Boolean) 
         MainThread.post { onVisibilityChanged(isShowingOrPending) }
     }
 
+    /** 服务销毁时撤掉窗口，不触发依赖组件回调。 */
+    fun destroy() {
+        requested = false
+        if (showing) MainThread.runAndWait { removeInternal() }
+    }
+
     /** 撤掉遮盖层。没在显示时是空操作。 */
     fun hide() {
         requested = false

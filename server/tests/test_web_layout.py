@@ -21,6 +21,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 STYLE_DIR = REPO / "server" / "web" / "style"
 NARROW = STYLE_DIR / "narrow.css"
+REDUCED_MOTION = STYLE_DIR / "reduced-motion.css"
 INDEX = REPO / "server" / "web" / "index.html"
 
 #: 断点的写法。只认这一种形状：`@media (width <= 1024px)`。换成 `max-width` 或区间写法
@@ -45,7 +46,7 @@ def test_media_queries_live_in_one_file() -> None:
     """别处的 `@media` 一律报出来：那正是这条规矩要挡的事。"""
     offenders: list[str] = []
     for path in _css_files():
-        if path == NARROW:
+        if path in (NARROW, REDUCED_MOTION):
             continue
         for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
             if "@media" in line:

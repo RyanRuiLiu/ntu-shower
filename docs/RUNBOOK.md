@@ -1,8 +1,8 @@
-# RUNBOOK.md — 运维手册
+# 运维手册
 
 本册只写**已实际执行验证过**的步骤。每步标注验证方式；未验证的步骤不得写入。
 
-## 1. 拓扑
+## 拓扑
 
 | 项 | 值 |
 |---|---|
@@ -10,11 +10,11 @@
 | 服务器 | `deploy@<deploy-host>`（SSH 密钥 `~/.ssh/<ssh-private-key>`） |
 | 应用目录 | `/opt/ntu-shower/server`（`.venv`、`data/`、`.env` 均在此，均不入库） |
 | 备份目录 | `/opt/ntu-shower-backup` |
-| 运行时 | Python **3.10.12**（`.venv`）——与 CI 测试版本一致，见 §2 注意事项 |
+| 运行时 | Python **3.10.12**（`.venv`）——与 CI 测试版本一致，见「注意事项」 |
 | 服务单元 | `ntu-shower.service`（uvicorn，Type=simple，Restart=always） |
 | 备份单元 | `ntu-shower-backup.timer`（每日 00:00，`Persistent=true`） |
 
-## 2. 痕迹取回（出问题时按设备 + 时间段还原现场）
+## 痕迹取回（出问题时按设备 + 时间段还原现场）
 
 三层痕迹，以 `command_id` 与 `trace_id` 贯通（标准见 docs/DECISIONS.md「可观测性」）：
 
@@ -39,10 +39,10 @@ journalctl -u ntu-shower --since "-1h" | grep '"trace_id":"<trace-id>"'
 保留期：`api_call` 90 天（`audit_retention_days`）每日自动清理；OTA 发布保留
 最近 5 个（`ota_release_keep`）。设备端各落盘文件全部有界，无需人工清理。
 
-## 3. 部署
+## 部署
 
 ```bash
-# ① 本地：门禁必须全绿（命令见 README「质量门」，与 CI 逐条对应，此处不复述）
+# ① 本地：门禁必须全绿（命令见 CONTRIBUTING「质量门」，与 CI 逐条对应，此处不复述）
 
 # ② 本地：打包（务必排除运行时数据与本地配置）
 #
@@ -81,9 +81,8 @@ ssh <deploy-host> 'sudo NT_TARBALL=/tmp/server_deploy.tar.gz bash /tmp/deploy.sh
 
 # ⑤ 人工复核
 #
-# healthz 只回 `{"status":"ok",...,"version":"0.4.23"}`，而版本号冻结在 0.4.23
-# （它要与 android 的 versionName 对齐，不随服务端改动走）——**所以它证明不了这次部署**。
-# 要确认新代码真的上去了，查这次改动的特征串：见脚本输出与其后 `journalctl` 的日志。
+# healthz 只回 `{"status":"ok",...,"version":"<APP_VERSION>"}`；版本号证明服务在运行，
+# 不证明本次部署生效。确认新代码时看本次变更的特征串与 `journalctl` 的日志。
 ssh <deploy-host> 'journalctl -u ntu-shower -n 20 --no-pager'      # 无异常栈启动
 # 设备是否重连：看日志出现 "WebSocket /gateway/device [accepted]"
 ```
@@ -97,7 +96,7 @@ ssh <deploy-host> 'ls -1t /opt/ntu-shower/backups/server-*.tar.gz | head'
 ssh <deploy-host> 'sudo NT_ROLLBACK=/opt/ntu-shower/backups/server-<时间戳>.tar.gz bash /tmp/deploy.sh --rollback'
 ```
 
-### 注意事项（均为踩过的坑）
+### 注意事项
 
 - **必须用生产 Python 预检**：本地 3.13 通过不代表生产 3.10 通过。
   曾发生 `typing.TypedDict` 在 3.10 + pydantic 2.13 下被拒（要求 `typing_extensions.TypedDict`），
@@ -141,7 +140,7 @@ ssh <deploy-host> 'curl -sS -H "X-Identity: <admin身份标识>" http://127.0.0.
 旧 TTS 片段目录 `data/voice/clips/` 随之清理；旧音效源文件保留在 `data/voice/effects/`。
 规则保存返回 `invalid-voice-rule` 时，先看返回的缺失素材或缺失数字，不要在页面上反复重试。
 
-## 4. 备份与恢复
+## 备份与恢复
 
 ### 自动备份（数据库）
 
@@ -194,7 +193,7 @@ PY
 keystore 的可用性验证：从备份副本执行 `gradlew assembleRelease` 能签名成功
 即证明副本可用（签名不匹配的 APK 无法覆盖安装在网设备）。
 
-## 5. 故障处置
+## 故障处置
 
 ### OTA 反复下载同一个版本（已发生过一次）
 
@@ -227,7 +226,7 @@ ssh <deploy-host> 'systemctl is-active ntu-shower; journalctl -u ntu-shower -n 4
 ```
 
 - 日志出现 `PydanticUserError` / `ImportError` → 部署了与本机解释器版本不匹配的代码，
-  按 §2 回滚。`deploy.sh` 的第 1 步（生产解释器预检）本该拦住它——若它没拦住，先查那一步
+  按部署章节的回滚步骤。`deploy.sh` 的第 1 步（生产解释器预检）本该拦住它——若它没拦住，先查那一步
   是否被跳过。
 
 ### 设备能力集（capabilities）
@@ -245,13 +244,13 @@ ssh <deploy-host> 'curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.1
 ssh <deploy-host> 'curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/devices/runtime'
 ```
 
-注意 `online` 字段是**最后一次上报值**，与内存中的活动连接可能不一致；
+注意 `online` 字段是**最后一次上报值**，与内存中的活动连接分开判断；
 以日志中是否有该设备的 `WebSocket /gateway/device [accepted]` 为准。
 
 ### 语音播报不响
 
 1. **规则是否匹配**：设备、学号两个维度各自具体或「全部」（`*`），具体压过通配
-   （先设备、后学号维度），同档内设备集合更小者优先、再比学号集合；「全部学号」的规则可能把这个学号
+   （先设备、后学号维度），同档内设备集合更小者优先、再比学号集合；「全部学号」的规则若把这个学号
    放进了排除名单；规则停用或没有规则就不会下发。看 `/api/v1/voice/deliveries`
    有没有对应记录。
 2. **事件是否过期**：`voice_event_max_age_s` 默认 60 秒，离线积压导致过期会跳过；
@@ -295,7 +294,7 @@ curl -X POST -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/d
 `bridge_max_lifetime_s` 默认 3600 秒）。**隧道本身没有空闲超时**，只靠寿命上限兜着——
 调试通道不该无限期开着。
 
-## 6. 日常任务
+## 日常任务
 
 ### 发布新 APK
 
@@ -318,7 +317,7 @@ curl -X POST -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/d
 0.4.39/83，设备 `pm install` Success 而版本不变，永远"有新版"。
 
 处置顺序：**先下架止血**（`DELETE /api/v1/ota/releases/<version>`，设备停手回到当前
-版本），再查原因。服务端发布接口现在会解析 APK 内容版本并拒绝不一致的发布——那条
+版本），再查原因。服务端发布接口会解析 APK 内容版本并拒绝不一致的发布——那条
 路走通了说明发布本身没问题；设备端同一版本重试 3 次后也会停在
 `ota.attempts-exhausted`（device.log，设备页可见），恢复方式是修正发布后重推。
 

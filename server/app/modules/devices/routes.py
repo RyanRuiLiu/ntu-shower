@@ -219,7 +219,10 @@ async def set_clock(device_id: str, req: DeviceClockSetRequest) -> CommandOutcom
 
 @admin_router.post("/{device_id}/power/schedule")
 async def schedule_power(device_id: str, req: DevicePowerScheduleRequest) -> CommandOutcome:
-    """重布设备定时开关机（off_at 断电、on_at 上电，设备表盘 HH:MM）。见 docs/device-poweroff.md。"""
+    """重布设备定时开关机（off_at 断电、on_at 上电，设备表盘 HH:MM）。
+
+    现场依据见 docs/evidence/2026-10-04-device-poweroff.md。
+    """
     return await device_action(
         device_id,
         actions.POWER_SCHEDULE,
