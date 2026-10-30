@@ -10,6 +10,7 @@
 import { api } from '../core/api.js'
 import { deviceCell } from '../core/cells.js'
 import { elapsedSince, fmtDateTime, fmtDuration, fmtTime, serverNowMs } from '../core/clock.js'
+import { NEED_DEVICE } from '../core/copy.js'
 import { DOOR_STATES } from '../core/contract.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
 import { outcomeText, problemText, report } from '../core/outcome.js'
@@ -337,7 +338,7 @@ async function doSettle() {
 
 async function doPhoto() {
   if (!store.deviceId) {
-    report('resPhoto', '失败 · 请先在顶栏选择设备', 'err')
+    report('resPhoto', `失败 · ${NEED_DEVICE}`, 'err')
     return
   }
   report('resPhoto', '正在拍照…', 'info')
@@ -418,7 +419,7 @@ function renderTaskBoard(data) {
                   shift.pending.length === 0
                     ? ''
                     : `<div class="task-sub">待分配 ${shift.pending.length} 人：${shift.pending
-                        .map((item) => `#${item.door_no} ${item.cert_no}`)
+                        .map((item) => `#${esc(item.door_no)} ${esc(item.cert_no)}`)
                         .join('  ')}</div>`
                 return `
                 <div class="task-entry">

@@ -64,8 +64,14 @@ class GatewayClient(context: Context, private val callback: Callback) {
     private val handler = Handler(Looper.getMainLooper())
     private val deviceId = DeviceIdentity.deviceId(context)
 
-    // WebSocket 长连接不设读超时；HTTP 客户端配置（DNS/TLS/套件）单一来源见 HttpClientFactory
-    private val client: OkHttpClient = HttpClientFactory.create(context, readTimeoutSeconds = 0)
+    /**
+     * WebSocket 长连接不设读超时；HTTP 客户端配置（DNS/TLS/套件）单一来源见
+     * [HttpClientFactory]。构造推迟到 [warmUp] 或首次 [connect]：构造发生在主线程，
+     * 而 TLS 上下文要读密钥库，不该在那里建。
+     */
+    private val client: OkHttpClient by lazy {
+        HttpClientFactory.create(context.applicationContext, readTimeoutSeconds = 0)
+    }
 
     private var heartbeatRunnable: Runnable? = null
     private var handshakeRunnable: Runnable? = null
@@ -113,6 +119,11 @@ class GatewayClient(context: Context, private val callback: Callback) {
         is javax.net.ssl.SSLException -> "tls"
         is java.net.ConnectException, is java.net.SocketTimeoutException -> "tcp"
         else -> "error:${t.javaClass.simpleName}"
+    }
+
+    /** 在后台线程预建 HTTP 客户端（TLS 上下文读盘），把首次构造移出主线程。 */
+    fun warmUp() {
+        client.newBuilder()
     }
 
     fun connect() {

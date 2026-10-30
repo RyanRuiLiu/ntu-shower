@@ -52,7 +52,7 @@ def _reject_duplicate_session(device_id: str, cert_no: str) -> None:
     """同一学号已有活跃会话则拒绝。"""
     door_no = doors_service.open_session_door(device_id, cert_no)
     if door_no is not None:
-        raise ApiProblemError(DUPLICATE_SESSION, f"学号 {cert_no} 已在喷头 {door_no} 有进行中的会话")
+        raise ApiProblemError(DUPLICATE_SESSION, f"该学号已在喷头 {door_no} 有进行中的会话")
 
 
 def _reject_overload(result: CommandOutcome) -> CommandOutcome:
@@ -84,7 +84,7 @@ async def perform_settle(device_id: str, req: SettleRequest) -> CommandOutcome:
     """结算的领域逻辑。"""
     require_trusted_online_device(device_id)
     if not doors_service.is_occupied(device_id, req.cert_no):
-        raise ApiProblemError(NO_OCCUPIED_DOOR, f"学号 {req.cert_no} 没有正在使用的喷头")
+        raise ApiProblemError(NO_OCCUPIED_DOOR, "该学号没有正在使用的喷头")
     result = await service.send_command_and_wait(
         device_id,
         actions.SESSION_SETTLE,

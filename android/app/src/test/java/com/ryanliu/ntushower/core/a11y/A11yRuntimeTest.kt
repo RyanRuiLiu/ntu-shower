@@ -7,6 +7,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 /**
@@ -46,6 +47,11 @@ class A11yRuntimeTest {
         assertTrue(A11yRuntime.automationInProgress)
         A11yRuntime.automationInProgress = false
         assertFalse(A11yRuntime.automationInProgress)
+
+        A11yRuntime.bathFullLaunchPending = true
+        assertTrue(A11yRuntime.bathFullLaunchPending)
+        A11yRuntime.bathFullLaunchPending = false
+        assertFalse(A11yRuntime.bathFullLaunchPending)
     }
 
     @Test
@@ -56,27 +62,37 @@ class A11yRuntimeTest {
         assertEquals(before + 1, A11yRuntime.pageChangeMark())
     }
 
-    @Test(timeout = 5_000)
-    fun `awaitPageChangeAfter wakes as soon as the count moves`() {
-        val mark = A11yRuntime.pageChangeMark()
-        Thread {
-            Thread.sleep(50)
-            A11yRuntime.onPageRefreshed()
-        }.start()
-
-        val startedAt = System.nanoTime()
-        A11yRuntime.awaitPageChangeAfter(mark, 10_000)
-
-        assertTrue("应在远小于超时的时间内返回", System.nanoTime() - startedAt < 5_000_000_000L)
+    /**
+     * 等到 [thread] 真正阻塞在 `wait` 上再返回。
+     *
+     * 断言"等待方已经睡着"才放行：通知若发生在开始等待之前，测试就没走到等待分支。
+     * 用线程状态而不是 `sleep` 做同步，慢机器上也成立。
+     */
+    private fun awaitBlocked(thread: Thread) {
+        val deadline = System.nanoTime() + 5_000_000_000L
+        while (thread.state != Thread.State.WAITING && thread.state != Thread.State.TIMED_WAITING) {
+            if (System.nanoTime() > deadline) fail("等待线程未在限时内进入阻塞")
+            Thread.yield()
+        }
     }
 
-    @Test
+    @Test(timeout = 5_000)
+    fun `awaitPageChangeAfter wakes when the count moves`() {
+        val mark = A11yRuntime.pageChangeMark()
+        val waiter = Thread { A11yRuntime.awaitPageChangeAfter(mark, 10_000) }
+        waiter.start()
+        awaitBlocked(waiter)
+        A11yRuntime.onPageRefreshed()
+        waiter.join(5_000)
+        assertFalse("计数变化后等待方应结束", waiter.isAlive)
+    }
+
+    @Test(timeout = 5_000)
     fun `awaitPageChange returns on timeout when nothing happens`() {
-        val startedAt = System.nanoTime()
-
-        A11yRuntime.awaitPageChange(50)
-
-        assertTrue("应在超时处返回而不是提前醒", System.nanoTime() - startedAt >= 40_000_000L)
+        val waiter = Thread { A11yRuntime.awaitPageChange(50) }
+        waiter.start()
+        waiter.join(5_000)
+        assertFalse("等待方应在超时后结束", waiter.isAlive)
     }
 
     // awaitPageChangeAfter 的超时分支不在 JVM 上测：它的循环按单调时钟算剩余时长，
@@ -85,14 +101,11 @@ class A11yRuntimeTest {
 
     @Test(timeout = 5_000)
     fun `awaitPageChange wakes on the next refresh`() {
-        Thread {
-            Thread.sleep(50)
-            A11yRuntime.onPageRefreshed()
-        }.start()
-
-        val startedAt = System.nanoTime()
-        A11yRuntime.awaitPageChange(10_000)
-
-        assertTrue("应在远小于超时的时间内返回", System.nanoTime() - startedAt < 5_000_000_000L)
+        val waiter = Thread { A11yRuntime.awaitPageChange(10_000) }
+        waiter.start()
+        awaitBlocked(waiter)
+        A11yRuntime.onPageRefreshed()
+        waiter.join(5_000)
+        assertFalse("刷新后等待方应结束", waiter.isAlive)
     }
 }

@@ -124,7 +124,8 @@ class WaterBoardClientTest {
 
     @Test
     fun `a silent board maps to timeout`() {
-        val server = FakeBoardServer { _, _ -> Unit }
+        // 连接保持打开但一个字节也不发：客户端读超时，而不是读到 EOF
+        val server = FakeBoardServer { conn, _ -> conn.getInputStream().read() }
         try {
             val client = WaterBoardClient(connectTimeoutMs = 500, readTimeoutMs = 200)
             assertReason(ReasonCodes.WATER_TIMEOUT) {
@@ -138,12 +139,9 @@ class WaterBoardClientTest {
     @Test
     fun `broadcast frames do not extend the overall deadline`() {
         val server = FakeBoardServer { conn, request ->
-            // 每 50ms 一帧别的 packid：单次 read 的 SO_TIMEOUT 会被不断续命，
-            // 只有整轮截止时间能让这次请求在 200ms 左右结束。
-            repeat(20) {
-                write(conn, response(request, byteArrayOf(0), packIdOffset = 1))
-                Thread.sleep(50)
-            }
+            // 持续写别的 packid：每次 read 都能拿到字节，单次 SO_TIMEOUT 会被不断续命。
+            // 只有整轮截止时间能让请求结束；写入在对端关闭后抛异常，循环随之退出。
+            while (true) write(conn, response(request, byteArrayOf(0), packIdOffset = 1))
         }
         try {
             val client = WaterBoardClient(connectTimeoutMs = 500, readTimeoutMs = 200)

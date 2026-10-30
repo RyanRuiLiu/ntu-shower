@@ -8,6 +8,8 @@ import android.os.FileObserver
 import android.util.Log
 import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.config.RuntimeConfig
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -33,14 +35,20 @@ class DoorMonitor(private val onChange: () -> Unit) :
     /** 跑的过程里又来过事件：记一笔，收尾时补跑。 */
     private val pending = AtomicBoolean(false)
 
+    /** 单线程执行器：防抖等待与采集不占主线程；销毁时可中断。 */
+    private val executor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "door-monitor").apply { isDaemon = true }
+    }
+
     override fun onEvent(event: Int, path: String?) {
         if (!DoorEventFilter.isRelevant(path, AppConfig.BATH_DB_FILE)) return
+        if (executor.isShutdown) return
         if (!running.compareAndSet(false, true)) {
             pending.set(true)
             return
         }
         Log.d(TAG, "db event 0x${event.toString(16)}, capture scheduled")
-        Thread {
+        executor.execute {
             try {
                 Thread.sleep(RuntimeConfig.reportDebounceMs)
                 // 防抖等待期间攒下的事件在这里一次消化掉
@@ -54,9 +62,15 @@ class DoorMonitor(private val onChange: () -> Unit) :
                 running.set(false)
                 // 循环退出与放开闸门之间还有一个更窄的窗口：那时事件已经设了 pending，
                 // 却没有人再回头看它。这里自己再起一轮，把它交出去。
-                if (pending.getAndSet(false)) onEvent(0, AppConfig.BATH_DB_FILE)
+                if (pending.getAndSet(false) && !executor.isShutdown) onEvent(0, AppConfig.BATH_DB_FILE)
             }
-        }.start()
+        }
+    }
+
+    /** 停掉文件监听与执行器；Service 销毁时调用。 */
+    fun shutdown() {
+        stopWatching()
+        executor.shutdownNow()
     }
 
     companion object {

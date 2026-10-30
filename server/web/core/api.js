@@ -48,7 +48,7 @@ async function send(path, options = {}) {
   syncClock(res)
   if (!res.ok) {
     const problem = await res.json().catch(() => null)
-    const error = new Error(problem?.detail || problem?.title || `HTTP ${res.status}`)
+    const error = new Error(problem?.detail || problem?.title || `服务端返回了无法解析的错误（HTTP ${res.status}），请查看服务端日志后重试。`)
     error.status = res.status
     error.problem = problem
     throw error

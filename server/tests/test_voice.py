@@ -32,6 +32,13 @@ UNIT_NAMES = ["十", "百", "千", "万"]
 MATCH_LOCAL = datetime(2026, 1, 5, 12, 0)
 
 
+async def _drain_background() -> None:
+    """等 `service._tasks` 里的后台任务全部结束，并让 done 回调把它们移出集合。"""
+    while service._tasks:
+        await asyncio.gather(*list(service._tasks), return_exceptions=True)
+        await asyncio.sleep(0)
+
+
 @pytest.fixture
 def voice_devices(fresh_db: str) -> None:
     helpers.register_trusted_device(DEVICE_ID)
@@ -765,7 +772,7 @@ def test_preview_resolves_digits_pauses_and_truncation(
     response = client.post(
         "/api/v1/voice/preview",
         headers=admin_headers,
-        json={"segments": segments, "event": "assigned", "door_no": 105, "cert_no": "A99990057"},
+        json={"segments": segments, "event": "assigned", "door_no": 105, "cert_no": "A2026000057"},
     )
     assert response.status_code == 200, response.text
     body = response.json()
@@ -987,7 +994,7 @@ def test_prepare_worker_sends_clips_and_swallows_failure(
 
     async def run() -> None:
         service._spawn_prepare(DEVICE_ID, clips)
-        await asyncio.sleep(0.05)
+        await _drain_background()
 
     asyncio.run(run())
     assert [action for action, _params in calls] == ["voice.prepare"]
@@ -1002,7 +1009,7 @@ def test_prepare_worker_sends_clips_and_swallows_failure(
 
     async def run_failure() -> None:
         service._spawn_prepare(DEVICE_ID, clips)
-        await asyncio.sleep(0.05)
+        await _drain_background()
 
     asyncio.run(run_failure())
     assert service._tasks == set()
@@ -1024,7 +1031,8 @@ def test_task_done_logs_exception(monkeypatch: pytest.MonkeyPatch) -> None:
         task = asyncio.get_running_loop().create_task(_raise())
         service._tasks.add(task)
         task.add_done_callback(service._task_done)
-        await asyncio.sleep(0.05)
+        await asyncio.gather(task, return_exceptions=True)
+        await asyncio.sleep(0)
 
     asyncio.run(run())
     assert ("ERROR", "voice.task-failed") in errors
@@ -1194,7 +1202,7 @@ def test_schedule_events_creates_task_and_survives_without_loop(
     async def run() -> None:
         event = _event(now_rfc3339())
         service.schedule_events((event,))
-        await asyncio.sleep(0.05)
+        await _drain_background()
         assert seen == [(event,)]
         assert service._tasks == set()
 
@@ -1532,12 +1540,11 @@ def test_task_done_ignores_cancelled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(service, "log_event", lambda _level, key, _message, **_kwargs: errors.append(key))
 
     async def run() -> None:
-        task = asyncio.get_running_loop().create_task(asyncio.sleep(10))
+        task = asyncio.get_running_loop().create_task(asyncio.Event().wait())
         task.cancel()
-        await asyncio.sleep(0)
-        service._task_done(task)
         with pytest.raises(asyncio.CancelledError):
             await task
+        service._task_done(task)
 
     asyncio.run(run())
     assert errors == []

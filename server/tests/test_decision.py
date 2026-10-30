@@ -25,14 +25,14 @@ NOW = "2026-10-05T12:00:00.000Z"
 
 BASE_CONFIG: dict[str, object] = {
     "renew_wait_enabled": True,
-    "renew_wait_students": {"99990052": "000000", "99990053": "111111"},
+    "renew_wait_students": {"2026000001": "000000", "2026000002": "111111"},
     "renew_wait_threshold_s": 270,
     "renew_wait_max_duration_s": 1200,
     "renew_session_enabled": True,
-    "renew_session_students": {"99990052": "000000"},
+    "renew_session_students": {"2026000001": "000000"},
     "renew_session_threshold_s": 1140,
     "auto_settle_enabled": True,
-    "auto_settle_students": {"99990052": "000000"},
+    "auto_settle_students": {"2026000001": "000000"},
     "auto_settle_pause_threshold_s": 60,
 }
 
@@ -43,7 +43,7 @@ def candidate(**overrides: object) -> Candidate:
         session_id=7,
         device_id="dev-1",
         door_no=3,
-        cert_no="99990052",
+        cert_no="2026000001",
         state=DoorState.WAITING,
         assigned_at="2026-10-05T11:55:00.000Z",
         paused_at="",
@@ -78,10 +78,10 @@ def test_password_of_comes_from_that_features_own_roster() -> None:
     所以不存在"名单里有他、却没有他的密码"那种静默不执行——代价是同一个学号开两个功能
     要在两份名单里各写一遍。
     """
-    assert password_of(BASE_CONFIG, FEATURE_RENEW_WAIT, "99990052") == "000000"
-    assert password_of(BASE_CONFIG, FEATURE_RENEW_WAIT, "99990053") == "111111"
-    # 99990053 只开了预约续期，所以会话续期那份名单里没有他
-    assert password_of(BASE_CONFIG, FEATURE_RENEW_SESSION, "99990053") == ""
+    assert password_of(BASE_CONFIG, FEATURE_RENEW_WAIT, "2026000001") == "000000"
+    assert password_of(BASE_CONFIG, FEATURE_RENEW_WAIT, "2026000002") == "111111"
+    # 2026000002 只开了预约续期，所以会话续期那份名单里没有他
+    assert password_of(BASE_CONFIG, FEATURE_RENEW_SESSION, "2026000002") == ""
     assert password_of(BASE_CONFIG, FEATURE_AUTO_SETTLE, "9999") == ""
 
 
@@ -174,7 +174,7 @@ def test_auto_settle_needs_a_close_time() -> None:
 
 def test_other_students_are_untouched() -> None:
     """名单是"允许对谁动手"的唯一出处；名单里没有就什么都不做。"""
-    assert decide(candidate(cert_no="2530999999"), BASE_CONFIG, NOW) is None
+    assert decide(candidate(cert_no="2026000006"), BASE_CONFIG, NOW) is None
 
 
 def test_disabled_feature_is_not_considered() -> None:
@@ -250,7 +250,7 @@ def test_recheck_reports_every_kind_of_change() -> None:
 
     assert recheck(None, expected, trigger, BASE_CONFIG, NOW) == "会话已结束"
     assert recheck(candidate(session_id=8), expected, trigger, BASE_CONFIG, NOW) == "换了会话"
-    assert recheck(candidate(cert_no="99990053"), expected, trigger, BASE_CONFIG, NOW) == "换了人"
+    assert recheck(candidate(cert_no="2026000002"), expected, trigger, BASE_CONFIG, NOW) == "换了人"
     assert recheck(candidate(state=DoorState.BATHING), expected, trigger, BASE_CONFIG, NOW) == (
         "状态已变（waiting → bathing）"
     )
@@ -260,6 +260,6 @@ def test_recheck_reports_every_kind_of_change() -> None:
 
 def test_still_allowed_is_the_same_question_asked_before_sending() -> None:
     """复查到下单之间隔着一次取数与一次排队，所以下单前要再问一次。"""
-    assert still_allowed("99990052", FEATURE_RENEW_WAIT, BASE_CONFIG) is None
-    assert still_allowed("99990052", FEATURE_AUTO_SETTLE, BASE_CONFIG) is None
+    assert still_allowed("2026000001", FEATURE_RENEW_WAIT, BASE_CONFIG) is None
+    assert still_allowed("2026000001", FEATURE_AUTO_SETTLE, BASE_CONFIG) is None
     assert still_allowed("9999", FEATURE_RENEW_WAIT, BASE_CONFIG) == "不在名单里"

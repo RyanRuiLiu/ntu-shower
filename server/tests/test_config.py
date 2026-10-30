@@ -41,20 +41,20 @@ def test_update_global_keeps_the_keys_it_did_not_touch(fresh_db: str) -> None:
     回传完整的全局有效配置。只回传要改的那一项，管理员设过的开关会因为"没出现在输入里"
     而被当成等于默认值剔掉——表现是"我加个人进名单，自动结算被关了"。
     """
-    store.put_global_overrides({"auto_settle_enabled": True, "auto_settle_students": {"99990052": "000000"}})
+    store.put_global_overrides({"auto_settle_enabled": True, "auto_settle_students": {"2026000001": "000000"}})
 
     store.update_global(
-        lambda config: {**config, "auto_settle_students": {"99990052": "000000", "99990057": "111111"}}
+        lambda config: {**config, "auto_settle_students": {"2026000001": "000000", "2026000003": "111111"}}
     )
 
     effective = store.global_effective()
     assert effective["auto_settle_enabled"] is True
-    assert effective["auto_settle_students"] == {"99990052": "000000", "99990057": "111111"}
+    assert effective["auto_settle_students"] == {"2026000001": "000000", "2026000003": "111111"}
 
 
 def test_update_global_drops_a_roster_emptied_back_to_default(fresh_db: str) -> None:
     """名单清空到等于默认值时那个键从覆盖里消失，回落默认——语义相同。"""
-    store.put_global_overrides({"auto_settle_students": {"99990052": "000000"}})
+    store.put_global_overrides({"auto_settle_students": {"2026000001": "000000"}})
 
     store.update_global(lambda config: {**config, "auto_settle_students": {}})
 
@@ -75,10 +75,10 @@ PRODUCTION_OVERRIDES = {
     "extend_hours_enabled": True,
     "automation_trace_enabled": True,
     "time_sync_enabled": True,
-    "auto_settle_students": {"99990052": "000000"},
-    "renew_session_students": {"99990057": "111111"},
-    "renew_wait_students": {"99990053": "000000"},
-    "extend_hours_students": {"2217110058": "111111"},
+    "auto_settle_students": {"2026000001": "000000"},
+    "renew_session_students": {"2026000003": "111111"},
+    "renew_wait_students": {"2026000002": "000000"},
+    "extend_hours_students": {"2026000004": "111111"},
 }
 
 
@@ -91,7 +91,7 @@ def test_update_global_keeps_every_override_that_production_actually_has(fresh_d
     before = store.get_global_overrides()[1]
     assert before == PRODUCTION_OVERRIDES, "夹具没能完整写进库里，后面的比对就不成立"
 
-    new_cert = "99990099"
+    new_cert = "2026000005"
     store.update_global(
         lambda config: {
             **config,

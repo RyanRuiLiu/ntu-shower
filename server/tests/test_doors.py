@@ -360,7 +360,7 @@ def test_stream_door_update_carries_full_state_matching_rest(client: TestClient,
     """door.update 载荷是该设备完整现态行，与 GET /doors 逐字节同构（单一来源证明）。"""
     device_id = "dev-stream-door"
     with client.websocket_connect("/api/v1/stream") as ws:
-        service.process_snapshot(device_id, _snapshot([_door(1, card_no=1001, cert_no="99990052")]))
+        service.process_snapshot(device_id, _snapshot([_door(1, card_no=1001, cert_no="2026000001")]))
         message = json.loads(ws.receive_text())
 
     assert message["type"] == "door.update"
@@ -599,11 +599,11 @@ def test_occupant_falls_back_to_acc_no_when_cert_no_is_blank(fresh_db: str) -> N
     当成"无人认领"，按人统计时凭空多出一个空身份。
     """
     device_id = "dev-occupant"
-    service.process_snapshot(device_id, _snapshot([_door(1, card_no=0, cert_no="", acc_no="1010209501")]))
+    service.process_snapshot(device_id, _snapshot([_door(1, card_no=0, cert_no="", acc_no="7000000001")]))
 
     session = repository.get_open_session(device_id, 1)
     assert session is not None
-    assert session["cert_no"] == "1010209501"
+    assert session["cert_no"] == "7000000001"
 
 
 def test_derivation_failure_returns_ok_and_keeps_the_raw_frame(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:

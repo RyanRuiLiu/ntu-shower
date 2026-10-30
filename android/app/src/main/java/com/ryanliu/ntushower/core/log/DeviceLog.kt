@@ -30,15 +30,8 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * 写失败一律吞掉（[CappedLogFile] 的约定）：日志比不上命令本身重要。
  */
-class DeviceLog(dir: File, private val maxBytes: Long = CappedLogFile.DEFAULT_MAX_BYTES) {
+class DeviceLog(private val dir: File, private val maxBytes: Long = CappedLogFile.DEFAULT_MAX_BYTES) {
     private val file = File(dir, FILE_NAME)
-
-    init {
-        // 自己的落点自己建：新装设备上这个目录不存在（2026-10-06 首批新设备实测，
-        // device.log 整个缺失）。写失败虽被吞掉，但"没日志"这件事不该等某次启动
-        // 流程顺路补——谁写谁建，与其他落盘者（OTA 下载、崩溃处理器）同一规矩。
-        dir.mkdirs()
-    }
 
     /** 命令被受理（重复接收记 [duplicate]，见 AgentService 的幂等接收）。 */
     fun received(commandId: String, action: String, duplicate: Boolean = false) {
@@ -110,6 +103,9 @@ class DeviceLog(dir: File, private val maxBytes: Long = CappedLogFile.DEFAULT_MA
     }
 
     private fun write(entry: JSONObject, severity: String) {
+        // 自己的落点自己建，但不在构造期做：DeviceLog 由常驻服务在主线程构造，
+        // 而目录创建是文件系统调用。放在第一次写之前，仍是"谁写谁建"。
+        dir.mkdirs()
         entry.put("ts", Clock.wallClockRfc3339())
         entry.put("uptime_ms", Uptime.nowMs())
         entry.put("severity", severity)

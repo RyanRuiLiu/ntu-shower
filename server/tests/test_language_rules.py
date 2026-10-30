@@ -40,9 +40,6 @@ BANNED = (
 
 #: 允许出现的地方，每条都要有理由。
 EXEMPT = {
-    "AGENTS.md": "列明禁令本身",
-    "android/app/src/main/java/com/ryanliu/ntushower/core/dns/DnsResolver.kt": "声明无缓存、无次等取值",
-    "docs/ARCHITECTURE.md": "禁令写在架构总览里",
     "server/tests/test_language_rules.py": "本文件",
 }
 

@@ -197,7 +197,10 @@ def _cleanup_generated_clips() -> None:
     """旧 TTS 合成缓存是孤儿；旧 effect 文件保留（已导入新表）。"""
     clips = Path(settings.voice_dir) / "clips"
     if clips.is_dir():
-        shutil.rmtree(clips, ignore_errors=True)
+        try:
+            shutil.rmtree(clips)
+        except OSError as exc:
+            log_event("WARNING", "voice.legacy-cleanup-failed", "旧 TTS 缓存清理失败", path=str(clips), reason=str(exc))
     tmp = audio.tmp_dir()
     if tmp.is_dir():
         for path in tmp.glob("*"):
@@ -394,7 +397,6 @@ def matching_rules(device_id: str, cert_no: str, event: str, local: datetime) ->
             "voice.rule-ambiguous",
             "同优先级规则同时命中，拒绝随机选择",
             device_id=device_id,
-            cert_no=cert_no,
             event=event,
             local_time=local.isoformat(timespec="minutes"),
             rule_ids=[int(hits[0][1]["id"]), int(hits[1][1]["id"])],

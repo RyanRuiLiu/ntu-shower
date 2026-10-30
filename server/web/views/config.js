@@ -24,6 +24,7 @@
  * 前端另抄一份。
  */
 import { api } from '../core/api.js'
+import { NEED_DEVICE } from '../core/copy.js'
 import { problemText, report } from '../core/outcome.js'
 import { $, disposer, esc, listen } from '../core/dom.js'
 import { store, subscribe } from '../core/store.js'
@@ -80,10 +81,15 @@ function controlHtml(spec, value, id, isOverridden) {
     `<button type="button" class="btn btn-ghost btn-sm cfg-reset" data-reset-one="${esc(spec.key)}" title="恢复这一项为默认值">恢复默认</button>`
   if (spec.kind === 'bool') {
     const checked = value ? 'checked' : ''
-    return `<label class="field-row" for="${esc(id)}">
-        <input id="${esc(id)}" type="checkbox" data-key="${esc(spec.key)}" data-kind="bool" ${checked}>
-        <span>${esc(spec.title)}${badgeHtml}</span>${resetButton}
-      </label>${desc}`
+    return `<div class="field">
+        <div class="field-row">
+          <label class="field-row" for="${esc(id)}">
+            <input id="${esc(id)}" type="checkbox" data-key="${esc(spec.key)}" data-kind="bool" ${checked}>
+            <span>${esc(spec.title)}${badgeHtml}</span>
+          </label>
+          ${resetButton}
+        </div>
+      </div>${desc}`
   }
   if (spec.kind === 'weekdays') {
     const selected = new Set(String(value || '').split(',').filter(Boolean))
@@ -92,8 +98,12 @@ function controlHtml(spec, value, id, isOverridden) {
         `<label class="weekday-option"><input type="checkbox" value="${option.value}" ${selected.has(option.value) ? 'checked' : ''}>${option.label}</label>`,
     ).join('')
     return `<div class="field">
-        <label>${esc(spec.title)}${badgeHtml}${resetButton}</label>
-        <div class="weekday-options" id="${esc(id)}" data-key="${esc(spec.key)}" data-kind="weekdays">${boxes}</div>
+        <div class="field-row">
+          <span class="field-label" id="${esc(id)}-label">${esc(spec.title)}${badgeHtml}</span>
+          ${resetButton}
+        </div>
+        <div class="weekday-options" id="${esc(id)}" role="group" aria-labelledby="${esc(id)}-label"
+             data-key="${esc(spec.key)}" data-kind="weekdays">${boxes}</div>
       </div>${desc}`
   }
   if (spec.kind === 'text_map') {
@@ -101,8 +111,11 @@ function controlHtml(spec, value, id, isOverridden) {
       .map(([mapKey, mapValue]) => `${mapKey}=${mapValue}`)
       .join('\n')
     return `<div class="field">
-        <label for="${esc(id)}">${esc(spec.title)}${badgeHtml}${resetButton}
-          <span class="muted"> · 一行一个：学号=密码</span></label>
+        <div class="field-row">
+          <label for="${esc(id)}">${esc(spec.title)}${badgeHtml}
+            <span class="muted"> · 一行一个：学号=密码</span></label>
+          ${resetButton}
+        </div>
         <textarea id="${esc(id)}" data-key="${esc(spec.key)}" data-kind="text_map" rows="3"
                   spellcheck="false" placeholder="学号=密码">${esc(lines)}</textarea>
       </div>${desc}`
@@ -115,19 +128,28 @@ function controlHtml(spec, value, id, isOverridden) {
         .map((choice) => `<option value="${esc(choice)}" ${choice === value ? 'selected' : ''}>${esc(choice)}</option>`)
         .join('')
       return `<div class="field">
-        <label for="${esc(id)}">${esc(spec.title)}${badgeHtml}${resetButton}</label>
+        <div class="field-row">
+          <label for="${esc(id)}">${esc(spec.title)}${badgeHtml}</label>
+          ${resetButton}
+        </div>
         <select id="${esc(id)}" data-key="${esc(spec.key)}" data-kind="text">${options}</select>
       </div>${desc}`
     }
     return `<div class="field">
-        <label for="${esc(id)}">${esc(spec.title)}${badgeHtml}${resetButton}</label>
+        <div class="field-row">
+          <label for="${esc(id)}">${esc(spec.title)}${badgeHtml}</label>
+          ${resetButton}
+        </div>
         <input id="${esc(id)}" type="text" data-key="${esc(spec.key)}" data-kind="text"
                value="${esc(value)}" spellcheck="false">
       </div>${desc}`
   }
   if (spec.kind === 'time') {
     return `<div class="field">
-        <label for="${esc(id)}">${esc(spec.title)}${badgeHtml}${resetButton}</label>
+        <div class="field-row">
+          <label for="${esc(id)}">${esc(spec.title)}${badgeHtml}</label>
+          ${resetButton}
+        </div>
         <input id="${esc(id)}" type="time" data-key="${esc(spec.key)}" data-kind="time"
                value="${esc(value)}" step="60">
       </div>${desc}`
@@ -136,7 +158,10 @@ function controlHtml(spec, value, id, isOverridden) {
     const min = spec.minimum === null ? '' : `min="${spec.minimum}"`
     const max = spec.maximum === null ? '' : `max="${spec.maximum}"`
     return `<div class="field">
-        <label for="${esc(id)}">${esc(spec.title)}${spec.unit ? `（${esc(spec.unit)}）` : ''}${badgeHtml}${resetButton}</label>
+        <div class="field-row">
+          <label for="${esc(id)}">${esc(spec.title)}${spec.unit ? `（${esc(spec.unit)}）` : ''}${badgeHtml}</label>
+          ${resetButton}
+        </div>
         <input id="${esc(id)}" type="number" data-key="${esc(spec.key)}" data-kind="int"
                value="${esc(value)}" ${min} ${max}>
       </div>${desc}`
@@ -246,17 +271,39 @@ function readForm() {
   return config
 }
 
-/** 页签与按钮文案：都跟着（分区 + 编辑目标）走，一处写完。 */
+/**
+ * 页签与按钮文案：都跟着（分区 + 编辑目标）走，一处写完。
+ *
+ * 两组页签整体重建，焦点与它的位置在重建前记下、重建后放回——否则键盘用户按下
+ * 回车切换分区后，焦点掉到页面开头。
+ */
 function refreshChrome() {
+  const active = document.activeElement
+  const focusedSection = active?.dataset?.section ?? null
+  const focusedTarget = active?.dataset?.target ?? null
   const perDevice = sectionIsPerDevice(section)
   $('cfgSections').innerHTML = SECTIONS.map(
     ([key, title]) =>
-      `<span class="cfg-tab${key === section ? ' is-active' : ''}" data-section="${esc(key)}">${esc(title)}</span>`,
+      `<button type="button" class="cfg-tab${key === section ? ' is-active' : ''}"
+        data-section="${esc(key)}" aria-pressed="${key === section}">${esc(title)}</button>`,
   ).join('')
   $('cfgTargets').innerHTML = perDevice
-    ? `<span class="cfg-tab${target === 'global' ? ' is-active' : ''}" data-target="global">全部设备（全局默认）</span>
-       <span class="cfg-tab${target === 'device' ? ' is-active' : ''}" data-target="device">单台设备（覆盖）</span>`
+    ? `<button type="button" class="cfg-tab${target === 'global' ? ' is-active' : ''}"
+         data-target="global" aria-pressed="${target === 'global'}">全部设备（全局默认）</button>
+       <button type="button" class="cfg-tab${target === 'device' ? ' is-active' : ''}"
+         data-target="device" aria-pressed="${target === 'device'}">单台设备（覆盖）</button>`
     : ''
+  let restored = null
+  if (focusedSection !== null) {
+    restored = $('cfgSections').querySelector(`[data-section="${CSS.escape(focusedSection)}"]`)
+  } else if (focusedTarget !== null) {
+    restored = $('cfgTargets').querySelector(`[data-target="${CSS.escape(focusedTarget)}"]`)
+  }
+  // 编辑目标组在切到非设备分区后整组消失，此时把焦点放到当前分区的页签上
+  if (!restored && (focusedSection !== null || focusedTarget !== null)) {
+    restored = $('cfgSections').querySelector('.is-active')
+  }
+  restored?.focus()
 }
 
 /** 切分区；切到不按设备区分的分区时把编辑目标收回全局。 */
@@ -264,6 +311,7 @@ function setSection(next) {
   if (section === next) return
   section = next
   if (!sectionIsPerDevice(section)) target = 'global'
+  refreshChrome()
   reload()
 }
 
@@ -276,7 +324,7 @@ async function reload() {
   try {
     if (sectionIsPerDevice(section) && target === 'device') {
       if (!store.deviceId) {
-        $('configGrid').innerHTML = '<div class="empty">请先在顶栏选择设备</div>'
+        $('configGrid').innerHTML = `<div class="empty">${esc(NEED_DEVICE)}</div>`
         $('cfgNote').textContent = ''
         $('btnSave').textContent = '保存'
         refreshChrome()
@@ -338,9 +386,7 @@ async function save() {
 function setTarget(next) {
   if (target === next) return
   target = next
-  document.querySelectorAll('.cfg-tab').forEach((tab) => {
-    tab.classList.toggle('is-active', tab.dataset.target === target)
-  })
+  refreshChrome()
   reload()
 }
 
@@ -354,8 +400,8 @@ export const configView = {
     root.innerHTML = `
       <section class="panel">
         <div class="panel-head">
-          <span class="cfg-tabs" id="cfgSections"></span>
-          <span class="cfg-tabs" id="cfgTargets"></span>
+          <div class="cfg-tabs" id="cfgSections" role="group" aria-label="配置分区"></div>
+          <div class="cfg-tabs" id="cfgTargets" role="group" aria-label="编辑目标"></div>
           <span class="panel-note" id="cfgNote"></span>
           <div class="panel-tools">
             <button type="button" class="btn btn-ghost btn-sm" id="btnResetAll">全部恢复默认</button>
