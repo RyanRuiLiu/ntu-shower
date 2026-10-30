@@ -20,6 +20,17 @@
 
 密钥、令牌、签名口令与生产配置不得写入仓库、脚本参数或文档。签名材料由密钥保管方提供。
 
+## Git 设置
+
+克隆后执行一次：
+
+```bash
+git config core.hooksPath .githooks
+git config core.autocrlf input
+```
+
+第一条启用 `.githooks/commit-msg`，按 `STANDARDS.md` §4.3 校验提交信息；第二条让工作区与索引都使用 LF，换行规则仍以 `.gitattributes` 为准。
+
 ## 服务端开发
 
 ```bash
