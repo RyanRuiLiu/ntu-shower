@@ -21,7 +21,9 @@ COLOR = re.compile(r"(?<![\w-])#[0-9a-fA-F]{3,8}\b|rgba?\(")
 BLANK_HEADER = re.compile(r"<th>\s*</th>")
 BARE_ACTION_HEADER = re.compile(r"<th>操作</th>")
 BUTTON_TAG = re.compile(r"<button\b[^>]*>")
-BUTTON_CLASSES = ("btn", "ph-chip", "tree-restore")
+#: 动作按钮必须复用 .btn；下列是非动作控件，各有自己的组件类（页签、详情卡、
+#: 面包屑、菜单项、右面板恢复把手）。
+BUTTON_CLASSES = ("btn", "tree-restore", "audit-tab", "cfg-tab", "detail-card", 'class="crumb"', 'class="item"')
 FONT_SIZE = re.compile(r"font-size:\s*(?![^\n]*var\(--fs-)")
 RADIUS = re.compile(r"border-radius:\s*(?![^\n]*(?:var\(--radius|\b0\b))")
 TRANSITION = re.compile(r"transition:\s*(?![^\n]*var\(--transition)")
@@ -69,7 +71,7 @@ def test_tables_have_labeled_action_headers() -> None:
 
 
 def test_buttons_use_shared_classes() -> None:
-    """按钮只能复用 .btn 体系；插入片与树恢复把手是两个已登记的特例。"""
+    """动作按钮只能复用 .btn 体系；页签、详情卡、面包屑与菜单项按组件类登记。"""
     offenders: list[str] = []
     for path in (WEB / "views").glob("*.js"):
         text = path.read_text(encoding="utf-8")

@@ -254,7 +254,6 @@ def _record(
         message,
         device_id=subject.device_id,
         door_no=subject.door_no,
-        cert_no=subject.cert_no,
         feature=subject.feature,
         **extra,
     )

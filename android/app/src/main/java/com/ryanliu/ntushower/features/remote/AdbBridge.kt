@@ -32,8 +32,10 @@ class AdbBridge(
 ) {
 
     private val client: OkHttpClient = HttpClientFactory.create(appContext, readTimeoutSeconds = 0)
-    private var ws: WebSocket? = null
-    private var adbSocket: Socket? = null
+
+    @Volatile private var ws: WebSocket? = null
+
+    @Volatile private var adbSocket: Socket? = null
 
     /** 桥接建立成功（两端都已连通）。 */
     @Volatile
@@ -62,10 +64,14 @@ class AdbBridge(
         if (!closed.compareAndSet(false, true)) return
         try {
             ws?.cancel()
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Log.w(TAG, "cancel websocket failed: ${e.message}")
+        }
         try {
             adbSocket?.close()
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Log.w(TAG, "close adbd socket failed: ${e.message}")
+        }
         onClosed(reason)
     }
 
@@ -93,7 +99,12 @@ class AdbBridge(
         override fun onOpen(webSocket: WebSocket, response: Response) {
             ready = true
             Log.i(TAG, "bridge established: server <-> adbd")
-            pumpAdbToServer(webSocket, adbSocket!!)
+            val adb = adbSocket
+            if (adb == null) {
+                close("adbd socket missing")
+                return
+            }
+            pumpAdbToServer(webSocket, adb)
         }
 
         override fun onMessage(webSocket: WebSocket, bytes: ByteString) {

@@ -44,6 +44,6 @@ def test_cardinal_rejects_out_of_range() -> None:
 
 
 def test_student_id_ignores_trailing_letter() -> None:
-    assert "".join(numbers.digit_chars("99990057A")) == "99990057"
-    assert "".join(numbers.digit_chars("99990057a")) == "99990057"
-    assert "".join(numbers.digit_chars("99990057")) == "99990057"
+    assert "".join(numbers.digit_chars("2026000007A")) == "2026000007"
+    assert "".join(numbers.digit_chars("2026000007a")) == "2026000007"
+    assert "".join(numbers.digit_chars("2026000007")) == "2026000007"

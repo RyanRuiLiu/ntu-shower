@@ -19,6 +19,7 @@ venv/
 .coverage.*
 htmlcov/
 coverage.xml
+coverage.json
 
 # ── 服务端运行时数据 ──────────────────────────────────────
 server/data/

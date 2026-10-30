@@ -1,6 +1,6 @@
 name: ci
 
-# 与 README「质量门」小节逐条对应：本地跑绿即 CI 跑绿。
+# 与 CONTRIBUTING「质量门」小节逐条对应：本地跑绿即 CI 跑绿。
 on:
   push:
     branches: [main]

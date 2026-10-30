@@ -51,7 +51,9 @@ class ShowerApp : Application() {
                     Uptime.nowMs() + RESTART_DELAY_MS,
                     pending,
                 )
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                Log.e(TAG, "restart alarm failed: ${e.message}", e)
+            }
             defaultHandler?.uncaughtException(thread, throwable)
             android.os.Process.killProcess(android.os.Process.myPid())
             System.exit(10)

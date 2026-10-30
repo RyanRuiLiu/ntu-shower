@@ -14,6 +14,7 @@
  * 画面与结构都不轮询：定时拉取会让设备持续编码，也挤占采集通道。
  */
 import { api } from '../core/api.js'
+import { NEED_DEVICE, REBOOT_CONFIRM } from '../core/copy.js'
 import { INPUT_CHANNELS, UI_KEYS } from '../core/contract.js'
 import { problemText, statusLabel } from '../core/outcome.js'
 import { $, disposer, esc, listen } from '../core/dom.js'
@@ -58,6 +59,8 @@ if (!INPUT_CHANNELS.includes(inputChannel)) inputChannel = 'clipboard'
 let children = new Map()
 /** 折叠起来的节点索引。 */
 let collapsed = new Set()
+/** 树里拥有 Tab 停靠点的节点索引；-1 表示尚未确定，渲染时落到第一个可见节点。 */
+let treeFocus = -1
 /** 当前选中的节点索引；-1 表示未选。 */
 let selected = -1
 /** 最近一次读到的原始 XML，过滤时重渲染用。 */
@@ -165,10 +168,30 @@ function matches(node, search) {
   return haystack.includes(search.term)
 }
 
+/** 当前可见（未被折叠隐藏）的节点索引，文档顺序。 */
+function visibleIndexes() {
+  const result = []
+  const walk = (index) => {
+    result.push(index)
+    if (!collapsed.has(index)) for (const kid of children.get(index) || []) walk(kid)
+  }
+  for (const root of children.get(-1) || []) walk(root)
+  return result
+}
+
 function renderTree() {
+  const box = $('treeContent')
   const search = parseSearch($('treeSearch').value)
   const hit = new Set(nodes.filter((node) => matches(node, search)).map((node) => node.index))
   const filtering = Boolean(search.term)
+
+  // 重画会换掉整棵 DOM：滚动位置与焦点按重画前的状态还原，翻看深层节点时列表才不跳回顶部
+  const scrollTop = box.scrollTop
+  const focused = box.contains(document.activeElement) ? document.activeElement.closest('.node') : null
+  const focusedIndex = focused ? Number(focused.dataset.index) : null
+  if (focusedIndex !== null) treeFocus = focusedIndex
+  const visible = visibleIndexes()
+  const tabStop = visible.includes(treeFocus) ? treeFocus : (visible[0] ?? -1)
 
   const lines = []
   const walk = (index) => {
@@ -200,8 +223,11 @@ function renderTree() {
     ].join('')
 
     lines.push(
-      `<div class="${classes.join(' ')}" data-index="${index}" data-depth="${node.depth}">
-        <span class="node-toggle" data-toggle="${index}">${kids.length > 0 ? (isCollapsed ? '▶' : '▼') : '·'}</span>
+      `<div class="${classes.join(' ')}" data-index="${index}" data-depth="${node.depth}"
+        role="treeitem" aria-level="${node.depth + 1}" aria-selected="${index === selected}"
+        ${kids.length > 0 ? `aria-expanded="${!isCollapsed}"` : ''}
+        tabindex="${index === tabStop ? 0 : -1}">
+        <span class="node-toggle" data-toggle="${index}" aria-hidden="true">${kids.length > 0 ? (isCollapsed ? '▶' : '▼') : '·'}</span>
         <span class="node-label">${label}</span>
       </div>`,
     )
@@ -209,10 +235,17 @@ function renderTree() {
   }
   for (const root of children.get(-1) || []) walk(root)
 
-  $('treeContent').innerHTML = lines.join('') || '<div class="empty">暂无节点</div>'
+  box.innerHTML = lines.join('') || '<div class="empty">暂无节点</div>'
+  box.scrollTop = scrollTop
   // 缩进是运行时几何值：只写深度变量，间距公式留在 CSS 令牌里
-  for (const row of $('treeContent').querySelectorAll('.node[data-depth]')) {
+  for (const row of box.querySelectorAll('.node[data-depth]')) {
     row.style.setProperty('--depth', row.dataset.depth)
+  }
+  if (focusedIndex !== null) {
+    const target =
+      box.querySelector(`.node[data-index="${focusedIndex}"]`) ??
+      box.querySelector(`.node[data-index="${tabStop}"]`)
+    if (target) target.focus()
   }
   $('treeCount').textContent = filtering ? `${hit.size} / ${nodes.length}` : `${nodes.length} 个节点`
 }
@@ -229,8 +262,8 @@ function renderBreadcrumb(index) {
     cursor = node.parent
   }
   $('breadcrumb').innerHTML = trail
-    .map(({ index: at, label }) => `<span data-jump="${at}">${esc(label)}</span>`)
-    .join('<span class="sep">›</span>')
+    .map(({ index: at, label }) => `<button type="button" class="crumb" data-jump="${at}">${esc(label)}</button>`)
+    .join('<span class="sep" aria-hidden="true">›</span>')
 }
 
 function renderProps(node) {
@@ -298,7 +331,7 @@ function selectNode(index) {
 
 async function requireDevice() {
   if (!store.deviceId) {
-    setOpState('请先在顶栏选择设备', 'err')
+    setOpState(NEED_DEVICE, 'err')
     return null
   }
   return store.deviceId
@@ -333,7 +366,7 @@ async function act(label, run, options = {}) {
  * 的失败还会把状态栏染红，看上去像是重启失败了。
  */
 async function rebootDevice() {
-  if (!window.confirm('重启设备？整机会重启，期间设备离线，进行中的会话会中断。')) return
+  if (!window.confirm(REBOOT_CONFIRM)) return
   await act('重启设备', (deviceId) => api.reboot(deviceId), { refresh: false })
 }
 
@@ -582,17 +615,89 @@ function clearSwipe() {
 // ── 右键菜单 ───────────────────────────────────────────────
 
 let ctxIndex = -1
+/** 菜单的触发位置；关闭时按它把焦点还回去（键盘用户不能在菜单消失后掉到页面开头）。 */
+let ctxReturnFocus = null
 
 function showContextMenu(clientX, clientY, index) {
   ctxIndex = index
   const menu = $('ctxMenu')
+  ctxReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
   menu.hidden = false
   menu.style.setProperty('--x', `${Math.min(clientX, window.innerWidth - menu.offsetWidth)}px`)
   menu.style.setProperty('--y', `${Math.min(clientY, window.innerHeight - menu.offsetHeight)}px`)
+  menu.querySelector('.item')?.focus()
 }
 
-function hideContextMenu() {
-  $('ctxMenu').hidden = true
+function hideContextMenu({ restoreFocus = false } = {}) {
+  const menu = $('ctxMenu')
+  const returnFocus = ctxReturnFocus
+  ctxReturnFocus = null
+  if (menu.hidden) return
+  menu.hidden = true
+  if (restoreFocus && returnFocus?.isConnected) returnFocus.focus()
+}
+
+/** 树的焦点移动：只改停靠点与 DOM 焦点，不改变选中项——选中由 Enter 决定。 */
+function focusTreeIndex(index) {
+  treeFocus = index
+  $('treeContent').querySelector(`.node[data-index="${index}"]`)?.focus()
+}
+
+/** 键盘在树内移动：上下走可见节点，左右折叠/展开，Enter 选中，空格折叠。 */
+function handleTreeKey(event) {
+  const row = event.target.closest('.node')
+  if (!row) return
+  const index = Number(row.dataset.index)
+  const rows = [...$('treeContent').querySelectorAll('.node')]
+  const position = rows.indexOf(row)
+  const kids = children.get(index) || []
+  const isCollapsed = collapsed.has(index)
+
+  if ((event.key === 'F10' && event.shiftKey) || event.key === 'ContextMenu') {
+    event.preventDefault()
+    selectNode(index)
+    const focusedRow = $('treeContent').querySelector(`.node[data-index="${index}"]`)
+    const rect = focusedRow.getBoundingClientRect()
+    showContextMenu(rect.left + 12, rect.top + rect.height, index)
+    return
+  }
+
+  if (event.key === 'ArrowDown' && position < rows.length - 1) {
+    event.preventDefault()
+    focusTreeIndex(Number(rows[position + 1].dataset.index))
+  } else if (event.key === 'ArrowUp' && position > 0) {
+    event.preventDefault()
+    focusTreeIndex(Number(rows[position - 1].dataset.index))
+  } else if (event.key === 'ArrowRight') {
+    event.preventDefault()
+    if (kids.length > 0 && isCollapsed) {
+      collapsed.delete(index)
+      renderTree()
+      focusTreeIndex(index)
+    } else if (kids.length > 0) {
+      focusTreeIndex(kids[0])
+    }
+  } else if (event.key === 'ArrowLeft') {
+    event.preventDefault()
+    if (kids.length > 0 && !isCollapsed) {
+      collapsed.add(index)
+      renderTree()
+      focusTreeIndex(index)
+    } else {
+      const parent = nodes[index]?.parent ?? -1
+      if (parent >= 0) focusTreeIndex(parent)
+    }
+  } else if (event.key === 'Enter') {
+    event.preventDefault()
+    selectNode(index)
+    focusTreeIndex(index)
+  } else if (event.key === ' ' && kids.length > 0) {
+    event.preventDefault()
+    if (isCollapsed) collapsed.delete(index)
+    else collapsed.add(index)
+    renderTree()
+    focusTreeIndex(index)
+  }
 }
 
 function copy(text, what) {
@@ -693,16 +798,17 @@ export const inspectorView = {
 
         <div class="tree-panel" id="treePanel">
           <div class="panel-header">
-            <span class="panel-title-btn" id="panelCollapse" title="收起右侧面板，画面占满整行">界面树</span>
+            <button type="button" class="panel-title-btn" id="panelCollapse"
+              aria-controls="treePanel" aria-expanded="true" title="收起右侧面板，画面占满整行">界面树</button>
             <span class="count" id="treeCount"></span>
             <span class="actions">
               <button type="button" class="btn btn-ghost btn-sm" data-act="collapse" title="折叠选中节点的子树">[-]</button>
               <button type="button" class="btn btn-ghost btn-sm" data-act="expand" title="展开全部">[+]</button>
             </span>
           </div>
-          <input type="text" class="tree-search" id="treeSearch" placeholder="搜索  class:Button  text:确认  id:btn  …">
+          <input type="text" class="tree-search" id="treeSearch" placeholder="搜索  class:Button  text:确认  id:btn  …" aria-label="搜索界面树">
           <div class="breadcrumb" id="breadcrumb"></div>
-          <div class="tree-content" id="treeContent"><div class="empty">点击「界面树」加载</div></div>
+          <div class="tree-content" id="treeContent" role="tree" aria-label="界面节点树"><div class="empty">点击「界面树」加载</div></div>
 
           <div class="prop-panel">
             <div class="prop-header">属性</div>
@@ -733,7 +839,7 @@ export const inspectorView = {
               <button type="button" class="btn btn-ghost btn-sm" data-channel="clipboard" title="剪贴板粘贴：支持中文；同一字段第二次插入会多一个空格（ROM 行为）">粘贴</button>
               <button type="button" class="btn btn-ghost btn-sm" data-channel="keys" title="按键注入：无多余空格问题，仅支持英文、数字与符号">按键</button>
             </span>
-            <input type="text" id="textInput" placeholder="输入文本后按回车发送">
+            <input type="text" id="textInput" placeholder="输入文本后按回车发送" aria-label="输入文本">
             <button type="button" class="btn btn-sm" data-act="send">发送</button>
           </div>
         </div>
@@ -742,19 +848,20 @@ export const inspectorView = {
       <!-- 右面板收起后的恢复把手：贴在画面区右缘 -->
       <button type="button" class="tree-restore" id="treeRestore" title="展开界面树面板" hidden>‹ 界面树</button>
 
-      <div class="ctx-menu" id="ctxMenu" hidden>
-        <div class="item" data-ctx="tap">点击元素<span class="shortcut">双击</span></div>
-        <div class="item" data-ctx="long-tap">长按元素</div>
-        <div class="item" data-ctx="copy-id">复制 resource-id</div>
-        <div class="item" data-ctx="copy-text">复制文本</div>
-        <div class="item" data-ctx="copy-desc">复制内容描述</div>
-        <div class="item" data-ctx="copy-class">复制类名</div>
-        <div class="item" data-ctx="copy-bounds">复制范围</div>
-        <div class="item" data-ctx="copy-center">复制中心坐标</div>
+      <div class="ctx-menu" id="ctxMenu" role="menu" aria-label="节点操作" hidden>
+        <button type="button" class="item" role="menuitem" tabindex="-1" data-ctx="tap">点击元素<span class="shortcut" aria-hidden="true">双击</span></button>
+        <button type="button" class="item" role="menuitem" tabindex="-1" data-ctx="long-tap">长按元素</button>
+        <button type="button" class="item" role="menuitem" tabindex="-1" data-ctx="copy-id">复制 resource-id</button>
+        <button type="button" class="item" role="menuitem" tabindex="-1" data-ctx="copy-text">复制文本</button>
+        <button type="button" class="item" role="menuitem" tabindex="-1" data-ctx="copy-desc">复制内容描述</button>
+        <button type="button" class="item" role="menuitem" tabindex="-1" data-ctx="copy-class">复制类名</button>
+        <button type="button" class="item" role="menuitem" tabindex="-1" data-ctx="copy-bounds">复制范围</button>
+        <button type="button" class="item" role="menuitem" tabindex="-1" data-ctx="copy-center">复制中心坐标</button>
       </div>`
 
     dispose = disposer()
     selected = -1
+    treeFocus = -1
     currentXml = ''
     nodes = []
     children = new Map()
@@ -816,10 +923,13 @@ export const inspectorView = {
     // 右面板收起/恢复：收起后画面占满整行；百分比高亮随图片尺寸自动跟随，无需重算
     const treePanel = $('treePanel')
     const treeRestore = $('treeRestore')
+    const collapseButton = $('panelCollapse')
     dispose.add(
-      listen($('panelCollapse'), 'click', () => {
+      listen(collapseButton, 'click', () => {
         treePanel.hidden = true
         treeRestore.hidden = false
+        collapseButton.setAttribute('aria-expanded', 'false')
+        treeRestore.focus()
         clearSwipe()
       }),
     )
@@ -827,6 +937,8 @@ export const inspectorView = {
       listen(treeRestore, 'click', () => {
         treePanel.hidden = false
         treeRestore.hidden = true
+        collapseButton.setAttribute('aria-expanded', 'true')
+        collapseButton.focus()
         clearSwipe()
       }),
     )
@@ -880,9 +992,14 @@ export const inspectorView = {
           return
         }
         const row = event.target.closest('.node')
-        if (row) selectNode(Number(row.dataset.index))
+        if (row) {
+          treeFocus = Number(row.dataset.index)
+          selectNode(treeFocus)
+        }
       }),
     )
+
+    dispose.add(listen($('treeContent'), 'keydown', handleTreeKey))
 
     dispose.add(
       listen($('treeContent'), 'dblclick', (event) => {
@@ -1042,12 +1159,31 @@ export const inspectorView = {
     dispose.add(() => screenObserver.disconnect())
 
     // ── 右键菜单 ──
+    const ctxMenu = $('ctxMenu')
     dispose.add(
-      listen($('ctxMenu'), 'click', (event) => {
+      listen(ctxMenu, 'keydown', (event) => {
+        const items = [...ctxMenu.querySelectorAll('.item')]
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          hideContextMenu({ restoreFocus: true })
+          return
+        }
+        if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+        event.preventDefault()
+        const current = items.indexOf(document.activeElement)
+        let next = 0
+        if (event.key === 'ArrowDown') next = (current + 1) % items.length
+        else if (event.key === 'ArrowUp') next = (current - 1 + items.length) % items.length
+        else if (event.key === 'End') next = items.length - 1
+        items[next]?.focus()
+      }),
+    )
+    dispose.add(
+      listen(ctxMenu, 'click', (event) => {
         const item = event.target.closest('[data-ctx]')
         if (!item) return
         const node = nodes[ctxIndex]
-        hideContextMenu()
+        hideContextMenu({ restoreFocus: true })
         if (!node) return
         const box = boundsOf(node)
         switch (item.dataset.ctx) {
@@ -1084,7 +1220,7 @@ export const inspectorView = {
         }
       }),
     )
-    dispose.add(listen(document, 'click', hideContextMenu))
+    dispose.add(listen(document, 'click', () => hideContextMenu()))
 
     dispose.add(
       subscribe('view', (id) => {
@@ -1100,6 +1236,7 @@ export const inspectorView = {
     nodes = []
     children = new Map()
     collapsed = new Set()
+    treeFocus = -1
     currentXml = ''
   },
 }
