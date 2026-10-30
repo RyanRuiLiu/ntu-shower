@@ -27,9 +27,14 @@
 ```bash
 git config core.hooksPath .githooks
 git config core.autocrlf input
+git config pull.ff only
+git config fetch.prune true
 ```
 
-第一条启用 `.githooks/commit-msg`，按 `STANDARDS.md` §4.3 校验提交信息；第二条让工作区与索引都使用 LF，换行规则仍以 `.gitattributes` 为准。
+- `core.hooksPath` 启用 `.githooks/commit-msg`，按 `STANDARDS.md` §4.3 校验提交信息。
+- `core.autocrlf input` 让工作区与索引都使用 LF，换行规则仍以 `.gitattributes` 为准。
+- `pull.ff only` 禁止拉取时生成合并提交，历史保持线性。
+- `fetch.prune true` 在拉取时清理远端已删除的分支。
 
 ## 服务端开发
 
@@ -128,6 +133,7 @@ cd android
 3. 运行全量质量门。
 4. 构建发布物并校验校验和与签名。
 5. 按 `docs/RUNBOOK.md` 执行部署、部署后验证与回滚准备。
+6. 创建带注释的 `v<版本>` 标签并推送；用 `CHANGELOG.md` 对应章节创建 GitHub Release。
 
 发布准备步骤属于本文件；生产部署与回滚步骤属于 `docs/RUNBOOK.md`。两者不得互相复制命令。
 
