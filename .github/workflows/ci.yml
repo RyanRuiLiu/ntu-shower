@@ -24,7 +24,7 @@ jobs:
       - name: Check commit messages
         if: github.event_name == 'pull_request'
         run: |
-          range=$(git log --format=%s "origin/${{ github.base_ref }}..HEAD")
+          range=$(git log --no-merges --format=%s "origin/${{ github.base_ref }}..HEAD")
           if [ -z "$range" ]; then
             exit 0
           fi
