@@ -102,11 +102,32 @@ def _lock_for(device_id: str, channel: str) -> asyncio.Lock:
 
 @contextlib.asynccontextmanager
 async def _acquire_with_deadline(lock: asyncio.Lock, deadline: float) -> AsyncIterator[None]:
-    """在截止时刻前取得通道锁；超时抛 asyncio.TimeoutError。"""
+    """在截止时刻前取得通道锁；超时抛 asyncio.TimeoutError。
+
+    不用 `wait_for(lock.acquire())`：Python 3.10 的 `wait_for` 在取消与锁已取得的
+    边界上会吞掉取消并继续执行，调用方明明取消了命令，命令却仍被下发、锁仍被占住。
+    这里显式持有获取任务，取消与超时都先收尾再抛出。
+    """
     remaining = deadline - asyncio.get_running_loop().time()
     if remaining <= 0:
         raise asyncio.TimeoutError
-    await asyncio.wait_for(lock.acquire(), timeout=remaining)
+    acquire = asyncio.ensure_future(lock.acquire())
+    try:
+        done, _ = await asyncio.wait({acquire}, timeout=remaining)
+    except asyncio.CancelledError:
+        acquire.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await acquire
+        if acquire.done() and not acquire.cancelled() and acquire.result():
+            lock.release()
+        raise
+    if not done:
+        acquire.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await acquire
+        if acquire.done() and not acquire.cancelled() and acquire.result():
+            lock.release()
+        raise asyncio.TimeoutError
     try:
         yield
     finally:

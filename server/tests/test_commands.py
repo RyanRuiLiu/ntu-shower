@@ -55,6 +55,41 @@ def test_channel_lock_wait_counts_toward_deadline(fresh_db: str) -> None:
     assert result["reason_code"] == reason_codes.DEADLINE_EXCEEDED.code
 
 
+def test_zero_timeout_never_dispatches(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """预算为零：连通道锁都不等，命令不下发，审计记超时。"""
+    fake = _online(monkeypatch, "dev-zero")
+
+    result = asyncio.run(service.send_command_and_wait("dev-zero", actions.CAMERA_CAPTURE, {}, timeout_s=0))
+
+    assert result["status"] == outcomes.TIMEOUT.value
+    assert result["reason_code"] == reason_codes.DEADLINE_EXCEEDED.code
+    assert fake.sent == []
+
+
+def test_cancel_while_waiting_for_channel_lock(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """等锁期间取消：任务以取消收尾，锁仍由原持有者掌握，不被误释放。"""
+    device_id = "dev-cancel-lock"
+    _online(monkeypatch, device_id)
+
+    async def flow() -> None:
+        lock = service._lock_for(device_id, actions.CHANNEL_MAINTENANCE)
+        await lock.acquire()
+        try:
+            task = asyncio.create_task(service.send_command_and_wait(device_id, actions.DEVICE_EXEC, {}, timeout_s=5))
+            await _wait_until(lambda: service.is_device_busy(device_id, actions.CHANNEL_MAINTENANCE))
+            # 让任务从"计数已增"走到真正等待锁
+            await asyncio.sleep(0)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert lock.locked()
+        finally:
+            lock.release()
+
+    asyncio.run(flow())
+    assert not service.is_device_busy(device_id, actions.CHANNEL_MAINTENANCE)
+
+
 def test_round_trip_success(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """命令完整往返：下发 session.command → 设备回执 → 结果透传。"""
     fake = _online(monkeypatch, "dev-roundtrip")
@@ -229,8 +264,11 @@ def test_cancel_while_sending_releases_channel(fresh_db: str, monkeypatch: pytes
     """下发阶段被取消：通道立刻解除占用，审计以 command.aborted 收尾。"""
     device_id = "dev-cancel"
 
+    send_started = asyncio.Event()
+
     async def hanging_send(target: str, data: str) -> bool:
-        # 永不完成的下发：调用方只能靠取消脱身
+        # 下发已经开始、永不完成：调用方只能靠取消脱身
+        send_started.set()
         await asyncio.Event().wait()
         return True
 
@@ -238,7 +276,7 @@ def test_cancel_while_sending_releases_channel(fresh_db: str, monkeypatch: pytes
 
     async def flow() -> None:
         task = asyncio.create_task(service.send_command_and_wait(device_id, actions.DEVICE_EXEC, {}, timeout_s=1))
-        await _wait_until(lambda: service.is_device_busy(device_id, actions.CHANNEL_MAINTENANCE))
+        await asyncio.wait_for(send_started.wait(), timeout=5)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
