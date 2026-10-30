@@ -103,8 +103,16 @@ async def device_bridge(ws: WebSocket) -> None:
 
     # 冲缓冲：pending_to_device 是"发往设备"的字节（TCP 先收、设备 WS 未就绪）
     if bridge.pending_to_device:
-        with contextlib.suppress(Exception):
-            await ws.send_bytes(bytes(bridge.pending_to_device))
+        try:
+            await asyncio.wait_for(ws.send_bytes(bytes(bridge.pending_to_device)), timeout=5.0)
+        except (WebSocketDisconnect, RuntimeError, asyncio.TimeoutError) as exc:
+            log_event(
+                "WARNING",
+                "bridge.flush-failed",
+                "桥缓冲发送失败，丢弃本次缓冲",
+                device_id=device_id,
+                reason=type(exc).__name__,
+            )
         bridge.pending_to_device.clear()
 
     reason = "tunnel closed"
@@ -130,7 +138,18 @@ async def device_bridge(ws: WebSocket) -> None:
                 _append(bridge.pending_to_tcp, data)
                 continue
             tcp_writer.write(data)
-            await tcp_writer.drain()
+            try:
+                await asyncio.wait_for(tcp_writer.drain(), timeout=5.0)
+            except asyncio.TimeoutError:
+                reason = "tcp write stalled"
+                log_event(
+                    "WARNING",
+                    "bridge.tcp-drain-timeout",
+                    "ADB 客户端停止读取，回收桥",
+                    device_id=device_id,
+                    generation=bridge.generation,
+                )
+                break
     except WebSocketDisconnect:
         # 设备断开：桥的正常结束路径之一
         reason = "device disconnected"

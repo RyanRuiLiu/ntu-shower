@@ -37,7 +37,8 @@ def _titles(path: Path) -> list[str]:
 
 
 def _strip_ordinal(title: str) -> str:
-    """去掉「1. 」这类编号，让引用与标题可按正文比对。"""
+    """去掉「1. 」与「ADR-0001: 」这类前缀，让引用与标题可按正文比对。"""
+    title = re.sub(r"^ADR-\d{4}:\s*", "", title)
     return re.sub(r"^\d+[.、]\s*", "", title).strip()
 
 

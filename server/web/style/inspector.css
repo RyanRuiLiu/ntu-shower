@@ -325,8 +325,15 @@
   background: var(--bg);
 }
 
-/* 面板标题可点击：整块收起右侧面板的入口 */
+/* 面板标题可点击：整块收起右侧面板的入口。元素是 button，外观与标题一致 */
 .panel-title-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
   cursor: pointer;
   user-select: none;
 }
@@ -386,20 +393,25 @@
   scrollbar-width: none;
 }
 
-.breadcrumb span {
+/* 面包屑每一节都是按钮：点击与回车都能跳转，元素形态不靠 span 模拟 */
+.breadcrumb .crumb {
   flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: none;
   color: var(--dim);
+  font: inherit;
   cursor: pointer;
 }
 
-.breadcrumb span:hover {
+.breadcrumb .crumb:hover {
   color: var(--accent);
 }
 
 .breadcrumb .sep {
+  flex-shrink: 0;
   margin: 0 3px;
   color: var(--muted);
-  cursor: default;
 }
 
 .tree-content {
@@ -435,6 +447,11 @@
 
 .node:hover {
   background: var(--accent-bg);
+}
+
+/* 滚动容器会裁掉向外扩的外框，焦点框画在节点内缘 */
+.node:focus-visible {
+  outline-offset: -2px;
 }
 
 .node.is-clickable {
@@ -638,13 +655,19 @@
   box-shadow: var(--shadow-panel);
 }
 
+/* 菜单项是 button：键盘进入菜单后可用方向键移动、回车触发 */
 .ctx-menu .item {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
+  width: 100%;
   padding: 6px 14px;
+  border: 0;
+  background: none;
   color: var(--dim);
+  font: inherit;
   font-size: var(--fs-small);
+  text-align: left;
   cursor: pointer;
   transition: all var(--transition);
 }

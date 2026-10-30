@@ -6,8 +6,12 @@
 基础设施，下沉到 core 后依赖方向严格向下。
 """
 
+import asyncio
+
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
+
+SEND_TIMEOUT_S = 5.0
 
 
 class ConnectionManager:
@@ -64,9 +68,9 @@ class ConnectionManager:
         if ws is None:
             return False
         try:
-            await ws.send_text(data)
-        except (WebSocketDisconnect, RuntimeError):
-            # 连接在发送瞬间断开：Starlette 抛 RuntimeError 的语义即"连接不可用"
+            await asyncio.wait_for(ws.send_text(data), timeout=SEND_TIMEOUT_S)
+        except (WebSocketDisconnect, RuntimeError, asyncio.TimeoutError):
+            # 连接在发送瞬间断开，或对端停止读取：返回 False，让调用方按离线处理。
             return False
         return True
 

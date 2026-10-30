@@ -8,6 +8,7 @@ import com.ryanliu.ntushower.core.clock.Clock
 import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.identity.DeviceIdentity
 import com.ryanliu.ntushower.core.log.DeviceLog
+import com.ryanliu.ntushower.core.net.HttpClientFactory
 import com.ryanliu.ntushower.core.shell.RootShell
 import com.ryanliu.ntushower.transport.OtaContract
 import okhttp3.OkHttpClient
@@ -31,13 +32,14 @@ import java.security.MessageDigest
 // TooManyFunctions：检查、退避、尝试计数、下载、脱手安装是同一条生命周期的五件事，
 // 拆开只会让"一次 OTA 到底经过几步"更难一屏读完
 @Suppress("TooManyFunctions")
-class OtaUpdater(
-    context: Context,
-    private val client: OkHttpClient,
-    private val onProgress: (version: String, stage: String, detail: String) -> Unit,
-) {
+class OtaUpdater(context: Context, private val onProgress: (version: String, stage: String, detail: String) -> Unit) {
 
     private val appContext = context.applicationContext
+
+    /** APK 下载读超时 60 秒。客户端推迟到第一次检查再建：构造发生在主线程，不该读密钥库。 */
+    private val client: OkHttpClient by lazy {
+        HttpClientFactory.create(appContext, readTimeoutSeconds = 60)
+    }
 
     /** OTA 的步骤落设备统一日志（device.log）：安装是脱手的，事后只有这里能查。 */
     private val deviceLog = DeviceLog(File(AppConfig.WORK_DIR))
@@ -145,12 +147,14 @@ class OtaUpdater(
 
     private fun applyUpdate(manifest: JSONObject) {
         val version = manifest.getString("version")
-        if (!Regex(OtaContract.VERSION_PATTERN).matches(version)) {
-            // 版本号参与文件名构造，所以这里先按允许的形状校验一遍：设备这一侧自己成立，
-            // 不依赖服务端先拦
-            throw IllegalStateException("unexpected version format: $version")
+        val manifestPath = manifest.getString("url")
+        val expectedPath = "/api/v1/ota/releases/$version/download"
+        // 版本号参与文件名与下载路径构造；下载地址只接受服务端在同一版本下生成的固定路径。
+        // 设备这一侧同时校验两者，不接受绝对 URL、userinfo、上级路径或版本格式漂移。
+        if (!Regex(OtaContract.VERSION_PATTERN).matches(version) || manifestPath != expectedPath) {
+            throw IllegalStateException("unexpected manifest: version=$version url=$manifestPath")
         }
-        val url = "https://${BuildConfig.SERVER_DOMAIN}${manifest.getString("url")}"
+        val url = "https://${BuildConfig.SERVER_DOMAIN}$expectedPath"
         val expectedSha256 = manifest.getString("sha256")
         val expectedSize = manifest.getLong("size")
 

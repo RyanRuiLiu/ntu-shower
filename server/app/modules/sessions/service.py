@@ -1,8 +1,10 @@
 """命令下发与结果等待：asyncio Future 加超时（单 worker 语义下安全）。"""
 
 import asyncio
+import contextlib
 import json
 import uuid
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 from app.core import actions, outcomes, protocol, reason_codes
@@ -98,6 +100,19 @@ def _lock_for(device_id: str, channel: str) -> asyncio.Lock:
     return lock
 
 
+@contextlib.asynccontextmanager
+async def _acquire_with_deadline(lock: asyncio.Lock, deadline: float) -> AsyncIterator[None]:
+    """在截止时刻前取得通道锁；超时抛 asyncio.TimeoutError。"""
+    remaining = deadline - asyncio.get_running_loop().time()
+    if remaining <= 0:
+        raise asyncio.TimeoutError
+    await asyncio.wait_for(lock.acquire(), timeout=remaining)
+    try:
+        yield
+    finally:
+        lock.release()
+
+
 def _supported_actions(device_id: str) -> list[str]:
     """设备在 link.hello 中声明的能力集合；未声明或设备不存在时为空。"""
     device = devices_service.get_device(device_id)
@@ -171,7 +186,7 @@ async def _send_and_wait(
     # 排队与执行共用一个时间预算：等锁的时间也算在内
     deadline = loop.time() + timeout_s
     try:
-        async with _lock_for(device_id, channel):
+        async with _acquire_with_deadline(_lock_for(device_id, channel), deadline):
             remaining = deadline - loop.time()
             if remaining <= 0:
                 command_audit.insert_command(
@@ -185,6 +200,17 @@ async def _send_and_wait(
                     data=None,
                 )
             return await _dispatch(command_id, device_id, action, params, remaining)
+    except asyncio.TimeoutError:
+        command_audit.insert_command(
+            command_id, device_id, action, trace_id_var.get(), json.dumps(params, ensure_ascii=False)
+        )
+        command_audit.finish(command_id, outcomes.TIMEOUT.value, reason_codes.DEADLINE_EXCEEDED.code, "")
+        return CommandOutcome(
+            status=outcomes.TIMEOUT.value,
+            reason_code=reason_codes.DEADLINE_EXCEEDED.code,
+            terminal_message="",
+            data=None,
+        )
     finally:
         left = _channel_waiting.get(key, 1) - 1
         if left > 0:

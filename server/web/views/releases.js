@@ -15,13 +15,14 @@
 import { api } from '../core/api.js'
 import { problemText, report } from '../core/outcome.js'
 import { fmtFullDateTime } from '../core/clock.js'
+import { NEED_DEVICE } from '../core/copy.js'
 import { $, disposer, esc, listen } from '../core/dom.js'
 import { store, subscribe } from '../core/store.js'
 import { toast } from '../core/toast.js'
 
 function render(list) {
   if (list.length === 0) {
-    $('releaseTable').innerHTML = '<div class="empty">暂无发布记录</div>'
+    $('releaseTable').innerHTML = '<div class="empty">暂无发布记录；使用上方表单发布一个 APK</div>'
     return
   }
   const rows = list
@@ -145,7 +146,7 @@ export const releasesView = {
         try {
           if (button.dataset.act === 'rearm') {
             if (!store.deviceId) {
-              report('releaseResult', '失败 · 请先在顶栏选择设备', 'err')
+              report('releaseResult', `失败 · ${NEED_DEVICE}`, 'err')
               return
             }
             const result = await api.rearmRelease(version, store.deviceId)

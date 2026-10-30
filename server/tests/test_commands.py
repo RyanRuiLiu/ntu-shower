@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -25,6 +26,35 @@ def _resolve_ok(frame: dict[str, Any], terminal_message: str = "已分配") -> N
     )
 
 
+async def _wait_until(predicate: Callable[[], bool], timeout_s: float = 5.0) -> None:
+    """在事件循环内让出执行权，直到条件成立。不用固定时长等待。"""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_s
+    while not predicate():
+        if loop.time() > deadline:
+            message = "条件未在限时内成立"
+            raise AssertionError(message)
+        await asyncio.sleep(0)
+
+
+def test_channel_lock_wait_counts_toward_deadline(fresh_db: str) -> None:
+    """等通道锁的时间计入命令超时：锁被占用时按 deadline 返回 timeout。"""
+
+    async def flow() -> dict[str, Any]:
+        lock = service._lock_for("dev-lock", actions.ACTION_CHANNELS[actions.SESSION_ASSIGN])
+        await lock.acquire()
+        try:
+            return await service.send_command_and_wait(
+                "dev-lock", actions.SESSION_ASSIGN, {"door_no": 1}, timeout_s=0.01
+            )
+        finally:
+            lock.release()
+
+    result = asyncio.run(flow())
+    assert result["status"] == outcomes.TIMEOUT.value
+    assert result["reason_code"] == reason_codes.DEADLINE_EXCEEDED.code
+
+
 def test_round_trip_success(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """命令完整往返：下发 session.command → 设备回执 → 结果透传。"""
     fake = _online(monkeypatch, "dev-roundtrip")
@@ -33,7 +63,7 @@ def test_round_trip_success(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> N
         task = asyncio.create_task(
             service.send_command_and_wait("dev-roundtrip", actions.SESSION_ASSIGN, {"door_no": 1}, timeout_s=5)
         )
-        await asyncio.sleep(0.05)
+        await fake.wait_for_sent()
         command = json.loads(fake.sent[0])
         assert command["type"] == "session.command"
         assert command["payload"]["action"] == "session.assign"
@@ -131,7 +161,7 @@ def test_same_channel_queues_second_command(fresh_db: str, monkeypatch: pytest.M
         first = asyncio.create_task(
             service.send_command_and_wait("dev-busy", actions.CAMERA_CAPTURE, {}, timeout_s=0.5)
         )
-        await asyncio.sleep(0.05)
+        await fake.wait_for_sent()
         assert service.is_device_busy("dev-busy", actions.CHANNEL_CAPTURE)
 
         # 第二条的超时必须长于第一条的等待时间：否则它在排队期间就用完预算，
@@ -158,7 +188,9 @@ def test_full_queue_is_rejected_as_overloaded(fresh_db: str, monkeypatch: pytest
             asyncio.create_task(service.send_command_and_wait("dev-full", actions.CAMERA_CAPTURE, {}, timeout_s=0.5))
             for _ in range(service.CHANNEL_QUEUE_MAX)
         ]
-        await asyncio.sleep(0.05)
+        await _wait_until(
+            lambda: service._channel_waiting.get(("dev-full", actions.CHANNEL_CAPTURE), 0) >= service.CHANNEL_QUEUE_MAX
+        )
         overflow = await service.send_command_and_wait("dev-full", actions.CAMERA_CAPTURE, {}, timeout_s=0.5)
         for task in running:
             await task
@@ -181,8 +213,7 @@ def test_channels_do_not_block_each_other(fresh_db: str, monkeypatch: pytest.Mon
         photo = asyncio.create_task(
             service.send_command_and_wait("dev-lane", actions.CAMERA_CAPTURE, {}, timeout_s=0.3)
         )
-        await asyncio.sleep(0.05)
-        assert service.is_device_busy("dev-lane", actions.CHANNEL_CAPTURE)
+        await _wait_until(lambda: service.is_device_busy("dev-lane", actions.CHANNEL_CAPTURE))
         exec_result = await service.send_command_and_wait(
             "dev-lane", actions.DEVICE_EXEC, {"command": "echo hi"}, timeout_s=0.3
         )
@@ -199,15 +230,15 @@ def test_cancel_while_sending_releases_channel(fresh_db: str, monkeypatch: pytes
     device_id = "dev-cancel"
 
     async def hanging_send(target: str, data: str) -> bool:
-        await asyncio.sleep(3600)
+        # 永不完成的下发：调用方只能靠取消脱身
+        await asyncio.Event().wait()
         return True
 
     monkeypatch.setattr(manager, "send_to", hanging_send)
 
     async def flow() -> None:
         task = asyncio.create_task(service.send_command_and_wait(device_id, actions.DEVICE_EXEC, {}, timeout_s=1))
-        await asyncio.sleep(0.05)
-        assert service.is_device_busy(device_id, actions.CHANNEL_MAINTENANCE)
+        await _wait_until(lambda: service.is_device_busy(device_id, actions.CHANNEL_MAINTENANCE))
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
@@ -227,7 +258,7 @@ def test_exec_data_is_audited_but_media_is_not(fresh_db: str, monkeypatch: pytes
 
     async def flow() -> dict[str, Any]:
         task = asyncio.create_task(service.send_command_and_wait("dev-exec", actions.DEVICE_EXEC, {}, timeout_s=5))
-        await asyncio.sleep(0.05)
+        await fake.wait_for_sent()
         command = json.loads(fake.sent[0])
         service.resolve(
             str(command["id"]),
@@ -241,7 +272,7 @@ def test_exec_data_is_audited_but_media_is_not(fresh_db: str, monkeypatch: pytes
 
     async def flow_photo() -> None:
         task = asyncio.create_task(service.send_command_and_wait("dev-photo", actions.CAMERA_CAPTURE, {}, timeout_s=5))
-        await asyncio.sleep(0.05)
+        await media.wait_for_sent()
         command = json.loads(media.sent[0])
         service.resolve(
             str(command["id"]),
@@ -280,7 +311,7 @@ def test_terminal_message_from_device_is_preserved(fresh_db: str, monkeypatch: p
         task = asyncio.create_task(
             service.send_command_and_wait("dev-msg", actions.SESSION_SETTLE, {"cert_no": "C"}, timeout_s=5)
         )
-        await asyncio.sleep(0.05)
+        await fake.wait_for_sent()
         command = json.loads(fake.sent[0])
         service.resolve(
             str(command["id"]),
@@ -302,7 +333,7 @@ def test_config_push_ack_round_trip(fresh_db: str, monkeypatch: pytest.MonkeyPat
 
     async def flow() -> dict[str, Any]:
         task = asyncio.create_task(service.push_config_update("dev-push", 2, {"heartbeat_interval_s": 45}, timeout_s=5))
-        await asyncio.sleep(0.05)
+        await fake.wait_for_sent()
         update = json.loads(fake.sent[0])
         assert update["type"] == "config.update"
         assert update["payload"]["revision"] == 2
@@ -339,7 +370,7 @@ def test_outcome_frame_uses_protocol_envelope_shape(fresh_db: str, monkeypatch: 
         task = asyncio.create_task(
             service.send_command_and_wait("dev-envelope", actions.CAMERA_CAPTURE, {}, timeout_s=5)
         )
-        await asyncio.sleep(0.05)
+        await fake.wait_for_sent()
         command = json.loads(fake.sent[0])
         _resolve_ok(command, "拍照完成")
         return await task

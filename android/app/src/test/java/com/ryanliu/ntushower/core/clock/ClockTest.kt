@@ -6,6 +6,7 @@ import org.junit.Test
 import java.text.SimpleDateFormat
 import java.util.TimeZone
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class ClockTest {
 
@@ -39,7 +40,7 @@ class ClockTest {
                 done.countDown()
             }.start()
         }
-        done.await()
+        assertTrue("八个线程都应在限时内结束", done.await(5, TimeUnit.SECONDS))
         assertEquals(0, errors.get())
     }
 

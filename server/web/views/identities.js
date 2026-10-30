@@ -78,7 +78,7 @@ function capabilityChecksHtml(selected) {
 function render(list) {
   $('identityCount').textContent = list.length > 0 ? `共 ${list.length} 条` : ''
   if (list.length === 0) {
-    $('identityTable').innerHTML = '<div class="empty">暂无身份记录</div>'
+    $('identityTable').innerHTML = '<div class="empty">暂无身份记录；使用右侧表单登记身份</div>'
     return
   }
   const rows = list
@@ -307,8 +307,8 @@ export const identitiesView = {
         </div>
         <div class="panel-body">
           <div class="field" id="kindField">
-            <label>来源类型</label>
-            <div class="btn-row">
+            <span class="field-label" id="kindLabel">来源类型</span>
+            <div class="btn-row" role="radiogroup" aria-labelledby="kindLabel">
               <label class="field-row">
                 <input type="radio" name="identityKind" id="inKindWeb" value="web" checked>
                 <span>网页用户（标识可自定义或由服务端生成）</span>
@@ -320,7 +320,7 @@ export const identitiesView = {
             </div>
           </div>
           <div class="field" id="editingIdentityRow" hidden>
-            <label>身份标识（不可修改）</label>
+            <span class="field-label">身份标识（不可修改）</span>
             <div class="field-row">
               <code class="mono" id="editingIdentityValue"></code>
               <span class="muted" id="editingKindValue"></span>
@@ -335,12 +335,12 @@ export const identitiesView = {
             <input id="inOpenid" type="text" class="mono" spellcheck="false">
           </div>
           <div class="field">
-            <label>能力位</label>
-            <div id="capBox"></div>
+            <span class="field-label" id="capLabel">能力位</span>
+            <div id="capBox" role="group" aria-labelledby="capLabel"></div>
           </div>
           <div class="field">
-            <label>设备作用域</label>
-            <div id="formScope"></div>
+            <span class="field-label" id="formScopeLabel">设备作用域</span>
+            <div id="formScope" role="group" aria-labelledby="formScopeLabel"></div>
           </div>
           <div class="field">
             <label for="inLabel">备注（用途）</label>

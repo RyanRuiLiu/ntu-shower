@@ -1,6 +1,6 @@
 """应用版本单一来源。
 
-三处版本号必须一致（OTA 强制要求，见 AGENTS.md）：
+三处版本号必须一致（OTA 强制要求，见 STANDARDS.md §4.4）：
 - 本文件 APP_VERSION
 - server/pyproject.toml 的 [project] version
 - android/app/build.gradle.kts 的 versionName

@@ -29,6 +29,8 @@ object Clock {
             }
     }
 
+    private fun currentFormatter(): SimpleDateFormat = requireNotNull(formatter.get()) { "RFC 3339 formatter missing" }
+
     /** 设备墙钟此刻（**不是服务端轴**；要权威时刻用 [ServerClock.nowRfc3339]）。 */
     fun wallClockRfc3339(): String = formatRfc3339(Date())
 
@@ -36,7 +38,7 @@ object Clock {
      * 把给定的时刻格式化为协议时间。格式串因此只在本文件出现一份：浴室 App 的本地
      * 时间转协议时间（features.doors 的 DoorRaw）用的就是这里。
      */
-    fun formatRfc3339(date: Date): String = formatter.get()!!.format(date)
+    fun formatRfc3339(date: Date): String = currentFormatter().format(date)
 
     /**
      * 解析服务端输出的 RFC 3339 毫秒字符串（Z 后缀，与服务端 core/clock.py 的输出
@@ -44,7 +46,7 @@ object Clock {
      * 业务语义，这里不记日志（core 层不依赖任何日志设施）。
      */
     fun parseRfc3339(value: String): Date? = try {
-        formatter.get()!!.parse(value)
+        currentFormatter().parse(value)
     } catch (e: Exception) {
         null
     }

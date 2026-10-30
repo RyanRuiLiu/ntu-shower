@@ -259,6 +259,9 @@ async def _handle_frame(
         if kind not in ("device", "crash", "ota") or not isinstance(content, str):
             await ws.send_text(protocol.error(reason_codes.BAD_JSON.code, "日志上送形状不对", reply_to=frame_id))
             return
+        if len(content.encode("utf-8")) > 64 * 1024:
+            await ws.send_text(protocol.error(reason_codes.BAD_JSON.code, "日志内容超过 64 KiB", reply_to=frame_id))
+            return
         # 落库即回执（无需回帧）：失败回执反而让设备重发同一份大内容；真失败时下一轮
         # 握手会重新上送，日志是幂等的现态读数，不是队列
         await run_in_threadpool(devices_service.record_log_upload, device_id, kind, content)

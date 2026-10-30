@@ -33,7 +33,7 @@ CONFIG: dict[str, object] = {
     "extend_hours_at": "23:49",
     "extend_shift_minutes": 15,
     "extend_hours_zone_offset_minutes": 480,
-    "extend_hours_students": {"2530110052": "000000", "2217110057": "111111"},
+    "extend_hours_students": {"2026000001": "000000", "2026000003": "111111"},
     "power_off_at": "23:58",
     "power_on_at": "10:55",
     "time_sync_enabled": True,
@@ -81,12 +81,12 @@ def _prepare(
     return server_now
 
 
-def _with_session(open_time: str, cert_no: str = "2530110052", door_no: int = 3) -> None:
+def _with_session(open_time: str, cert_no: str = "2026000001", door_no: int = 3) -> None:
     """造一场未结束的会话：分配了、还没开阀。"""
     doors_service.process_snapshot(
         DEVICE,
         _frame(
-            captured_at=open_time, card_no=0, cert_no=cert_no, acc_no="1010209501", open_time=open_time, door_no=door_no
+            captured_at=open_time, card_no=0, cert_no=cert_no, acc_no="7000000001", open_time=open_time, door_no=door_no
         ),
     )
 
@@ -96,7 +96,7 @@ def _clear_door(captured_at: str, door_no: int = 3) -> None:
     doors_service.process_snapshot(DEVICE, _frame(captured_at=captured_at, card_no=0, cert_no="", door_no=door_no))
 
 
-def _shift(shifted_at: str, assignments: tuple[tuple[int, str], ...] = ((3, "2530110052"),)) -> "extend_hours.Shift":
+def _shift(shifted_at: str, assignments: tuple[tuple[int, str], ...] = ((3, "2026000001"),)) -> "extend_hours.Shift":
     """一次拨钟的载体：`_reassign` 靠 `shifted_at` 分辨"拨钟前的残留会话"与"已经放回的"。"""
     return extend_hours.Shift(device_id=DEVICE, shifted_at=shifted_at, assignments=assignments)
 
@@ -105,7 +105,7 @@ def _shift(shifted_at: str, assignments: tuple[tuple[int, str], ...] = ((3, "253
 
 
 def test_one_row_per_device_and_clear_removes_it(fresh_db: str) -> None:
-    repository.record(DEVICE, "2026-10-05T15:49:00.000Z", [{"door_no": 3, "cert_no": "2530110052"}])
+    repository.record(DEVICE, "2026-10-05T15:49:00.000Z", [{"door_no": 3, "cert_no": "2026000001"}])
 
     assert repository.get(DEVICE) is not None
     assert [row["device_id"] for row in repository.list_shifted()] == [DEVICE]
@@ -235,7 +235,7 @@ def test_the_row_keeps_who_was_where(fresh_db: str, monkeypatch: pytest.MonkeyPa
 
     row = repository.get(DEVICE)
     assert row is not None
-    assert repository.parse_assignments(row) == [{"door_no": 5, "cert_no": "2530110052"}]
+    assert repository.parse_assignments(row) == [{"door_no": 5, "cert_no": "2026000001"}]
 
 
 def test_shift_landing_guard_refuses_to_land_inside_the_hostile_window(
@@ -267,7 +267,7 @@ def test_extension_rolls_the_deadline_every_tick(fresh_db: str, monkeypatch: pyt
     repository.record(
         DEVICE,
         shift_rfc3339("2026-10-06T00:50:00.000Z", -ZONE_MINUTES * 60) or "",
-        [{"door_no": 3, "cert_no": "2530110052"}],
+        [{"door_no": 3, "cert_no": "2026000001"}],
     )
 
     asyncio.run(extend_hours.tick_once())
@@ -288,7 +288,7 @@ def test_restore_waits_until_past_midnight(fresh_db: str, monkeypatch: pytest.Mo
     repository.record(
         DEVICE,
         shift_rfc3339("2026-10-05T23:55:00.000Z", -ZONE_MINUTES * 60 - 1200) or "",
-        [{"door_no": 3, "cert_no": "2530110052"}],
+        [{"door_no": 3, "cert_no": "2026000001"}],
     )
 
     asyncio.run(extend_hours.tick_once())
@@ -307,7 +307,7 @@ def test_restore_happens_once_midnight_passed_and_nobody_is_occupying(
     """
     sent: list[tuple[str, object]] = []
     _prepare(monkeypatch, "2026-10-06T00:45:00.000Z", sent, skew_s=SKEW_FAST_S)
-    repository.record(DEVICE, "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2530110052"}])
+    repository.record(DEVICE, "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2026000001"}])
 
     asyncio.run(extend_hours.tick_once())
 
@@ -325,7 +325,7 @@ def test_restore_holds_while_someone_is_still_occupying(fresh_db: str, monkeypat
     会话。滚动续写照常，人不受扰。"""
     sent: list[tuple[str, object]] = []
     _prepare(monkeypatch, "2026-10-06T00:45:00.000Z", sent, skew_s=SKEW_FAST_S)
-    repository.record(DEVICE, "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2530110052"}])
+    repository.record(DEVICE, "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2026000001"}])
     _with_session("2026-10-06T00:40:00.000Z")
 
     asyncio.run(extend_hours.tick_once())
@@ -365,7 +365,7 @@ def test_on_frame_assigns_back_who_is_missing(fresh_db: str, monkeypatch: pytest
     repository.record(
         DEVICE,
         "2026-10-05T23:50:00.000Z",
-        [{"door_no": 3, "cert_no": "2530110052"}, {"door_no": 5, "cert_no": "9999999999"}],
+        [{"door_no": 3, "cert_no": "2026000001"}, {"door_no": 5, "cert_no": "9999999999"}],
     )
 
     async def body() -> None:
@@ -376,7 +376,7 @@ def test_on_frame_assigns_back_who_is_missing(fresh_db: str, monkeypatch: pytest
     asyncio.run(body())
 
     # 名单里没有的那个学号被跳过，名单里有的那个拿回原来的喷头
-    assert assigned == [(3, "2530110052", "000000")]
+    assert assigned == [(3, "2026000001", "000000")]
 
 
 def test_reassign_skips_someone_already_occupying(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -398,7 +398,7 @@ def test_reassign_skips_someone_already_occupying(fresh_db: str, monkeypatch: py
     asyncio.run(extend_hours._reassign(_shift("2026-10-05T23:50:00.000Z"), roster(CONFIG, "extend_hours_students")))
 
     assert assigned == []
-    assert (DEVICE, "2530110052") in extend_hours._reassigned
+    assert (DEVICE, "2026000001") in extend_hours._reassigned
 
 
 def test_reassign_waits_for_a_leftover_session_from_before_the_shift(
@@ -424,13 +424,13 @@ def test_reassign_waits_for_a_leftover_session_from_before_the_shift(
     # 拨钟后第一次（门还占着）：不分配，且**不标记**——下一次还要再来
     asyncio.run(extend_hours._reassign(shift, roster(CONFIG, "extend_hours_students")))
     assert assigned == []
-    assert (DEVICE, "2530110052") not in extend_hours._reassigned
+    assert (DEVICE, "2026000001") not in extend_hours._reassigned
 
     # 浴室端清场之后：放回原喷头，并把这一次记成"已成立"
     _clear_door("2026-10-05T23:50:01.000Z")
     asyncio.run(extend_hours._reassign(shift, roster(CONFIG, "extend_hours_students")))
-    assert assigned == [(3, "2530110052")]
-    assert (DEVICE, "2530110052") in extend_hours._reassigned
+    assert assigned == [(3, "2026000001")]
+    assert (DEVICE, "2026000001") in extend_hours._reassigned
 
 
 # ── 生命周期 ──────────────────────────────────────────────────────────────
@@ -493,7 +493,7 @@ def test_power_failure_after_shift_keeps_the_row_and_retries(fresh_db: str, monk
     repository.record(
         DEVICE,
         shift_rfc3339("2026-10-05T23:50:00.000Z", -ZONE_MINUTES * 60 - 120) or "",
-        [{"door_no": 3, "cert_no": "2530110052"}],
+        [{"door_no": 3, "cert_no": "2026000001"}],
     )
 
     async def half(_device_id: str, action: str, _params: object, **_kw: object) -> object:
@@ -520,7 +520,7 @@ def test_restore_rearm_failure_keeps_the_row_for_retry(fresh_db: str, monkeypatc
     # shifted_at 是真实轴上的拨钟时刻（10 月 5 日 23:49:30 北京）：午夜已过
     _prepare(monkeypatch, "2026-10-06T00:45:00.000Z", sent, skew_s=SKEW_FAST_S)
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
-    repository.record(DEVICE, "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2530110052"}])
+    repository.record(DEVICE, "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2026000001"}])
 
     async def half(_device_id: str, action: str, params: object, **_kw: object) -> object:
         if action == actions.POWER_SCHEDULE and params.get("off_at") == "23:58":
@@ -561,7 +561,7 @@ def test_on_frame_ignores_a_row_with_nothing_to_assign(fresh_db: str, monkeypatc
 def test_on_frame_needs_a_roster(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z")
     monkeypatch.setitem(CONFIG, "extend_hours_students", {})
-    repository.record(DEVICE, "2026-10-05T23:50:00.000Z", [{"door_no": 3, "cert_no": "2530110052"}])
+    repository.record(DEVICE, "2026-10-05T23:50:00.000Z", [{"door_no": 3, "cert_no": "2026000001"}])
 
     extend_hours.on_frame(DEVICE)
 
@@ -577,7 +577,7 @@ def test_reassign_reports_a_failed_command(fresh_db: str, monkeypatch: pytest.Mo
     events: list[str] = []
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z")
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
-    repository.record(DEVICE, "2026-10-05T23:50:00.000Z", [{"door_no": 3, "cert_no": "2530110052"}])
+    repository.record(DEVICE, "2026-10-05T23:50:00.000Z", [{"door_no": 3, "cert_no": "2026000001"}])
 
     async def failed(_device_id: str, _req: AssignRequest) -> dict[str, object]:
         return {"status": "timeout", "reason_code": "server.deadline-exceeded", "terminal_message": "", "data": None}
@@ -602,7 +602,7 @@ def test_a_refused_command_is_not_marked_as_a_failure(fresh_db: str, monkeypatch
     events: list[str] = []
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z")
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
-    repository.record(DEVICE, "2026-10-05T23:50:00.000Z", [{"door_no": 3, "cert_no": "2530110052"}])
+    repository.record(DEVICE, "2026-10-05T23:50:00.000Z", [{"door_no": 3, "cert_no": "2026000001"}])
 
     async def refusing(_device_id: str, _req: AssignRequest) -> object:
         raise ApiProblemError(DOOR_NOT_FREE, "喷头 3 当前状态：bathing")
@@ -622,7 +622,7 @@ def test_a_refused_command_is_not_marked_as_a_failure(fresh_db: str, monkeypatch
 def test_a_failed_command_is_not_tried_again(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """命令发了而没成 = 失败，同一个人不再试——每轮再发一遍不会有不同的结果。"""
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z")
-    repository.record(DEVICE, "2026-10-05T23:50:00.000Z", [{"door_no": 3, "cert_no": "2530110052"}])
+    repository.record(DEVICE, "2026-10-05T23:50:00.000Z", [{"door_no": 3, "cert_no": "2026000001"}])
     attempts: list[int] = []
 
     async def failed(_device_id: str, _req: AssignRequest) -> object:
@@ -646,8 +646,8 @@ def test_the_failure_memory_is_cleared_when_the_extension_ends(fresh_db: str, mo
     _prepare(monkeypatch, "2026-10-06T00:45:00.000Z", skew_s=SKEW_FAST_S)
     # shifted_at 是真实轴上的拨钟时刻（10 月 5 日 23:49:30 北京）：午夜已过、无人占用
     repository.record(DEVICE, "2026-10-05T15:49:30.000Z", [])
-    extend_hours._reassign_failed.add((DEVICE, "2530110052"))
-    extend_hours._reassigned.add((DEVICE, "2530110052"))
+    extend_hours._reassign_failed.add((DEVICE, "2026000001"))
+    extend_hours._reassigned.add((DEVICE, "2026000001"))
 
     asyncio.run(extend_hours.tick_once())
 
@@ -678,7 +678,7 @@ def test_runtime_correction_skipped_during_extension(fresh_db: str, monkeypatch:
     """
     sent: list[tuple[str, object]] = []
     _prepare(monkeypatch, "2026-10-05T23:55:00.000Z", sent, skew_s=SKEW_FAST_S)
-    repository.record(DEVICE, "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2530110052"}])
+    repository.record(DEVICE, "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2026000001"}])
 
     asyncio.run(extend_hours.tick_once())
 
@@ -796,7 +796,7 @@ def test_roll_power_warns_without_skew_record(fresh_db: str, monkeypatch: pytest
     _prepare(monkeypatch, "2026-10-06T00:50:00.000Z", sent, skew_s=SKEW_FAST_S)
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
     device_clock.clear()
-    repository.record(DEVICE, "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2530110052"}])
+    repository.record(DEVICE, "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2026000001"}])
 
     asyncio.run(extend_hours.tick_once())
 
@@ -886,7 +886,7 @@ def test_tick_clears_the_shift_row_of_a_delisted_device(fresh_db: str, monkeypat
 
     monkeypatch.setattr(extend_hours.sessions_service, "send_command_and_wait", fake_send)
     # 不经 _prepare：dev-gone 故意不注册进设备表
-    repository.record("dev-gone", "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2530110052"}])
+    repository.record("dev-gone", "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2026000001"}])
 
     asyncio.run(extend_hours.tick_once())
 
@@ -921,11 +921,11 @@ def test_reassign_is_one_shot_per_extension(fresh_db: str, monkeypatch: pytest.M
     assert len(attempts) == 1
 
     # 他拨钟之后自己重新开了会话，同样算"已成立"：之后哪怕会话结束（他走了），也不再重新预约
-    extend_hours._reassigned.discard((DEVICE, "2530110052"))
+    extend_hours._reassigned.discard((DEVICE, "2026000001"))
     _with_session("2026-10-05T23:55:00.000Z")
     asyncio.run(extend_hours._reassign(shift, students))
     assert len(attempts) == 1
-    assert (DEVICE, "2530110052") in extend_hours._reassigned
+    assert (DEVICE, "2026000001") in extend_hours._reassigned
 
 
 def test_rolling_rearm_is_throttled_within_the_interval(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -938,7 +938,7 @@ def test_rolling_rearm_is_throttled_within_the_interval(fresh_db: str, monkeypat
     repository.record(
         DEVICE,
         shift_rfc3339("2026-10-06T00:50:00.000Z", -ZONE_MINUTES * 60) or "",
-        [{"door_no": 3, "cert_no": "2530110052"}],
+        [{"door_no": 3, "cert_no": "2026000001"}],
     )
 
     asyncio.run(extend_hours.tick_once())
