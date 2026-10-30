@@ -18,6 +18,24 @@ jobs:
         working-directory: server
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 提交信息检查要读到基线之后的所有提交
+          fetch-depth: 0
+      - name: Check commit messages
+        if: github.event_name == 'pull_request'
+        run: |
+          range=$(git log --no-merges --format=%s "origin/${{ github.base_ref }}..HEAD")
+          if [ -z "$range" ]; then
+            exit 0
+          fi
+          status=0
+          while IFS= read -r subject; do
+            printf '%s' "$subject" > /tmp/commit-msg
+            if ! sh ../.githooks/commit-msg /tmp/commit-msg; then
+              status=1
+            fi
+          done <<< "$range"
+          exit $status
       - uses: actions/setup-python@v5
         with:
           # 与生产运行时一致，同时是 pyproject 声明的最低支持版本：
