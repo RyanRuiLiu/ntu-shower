@@ -45,7 +45,7 @@
 ## 生产边界
 
 - 生产机为 `deploy@<deploy-host>`，服务为 `ntu-shower`。
-- 旧系统 `ntu-remote-shower` 未下线；使用独立的库、服务与端口，不得改动。
+- 旧系统 `ntu-remote-shower` 已下线，归档副本不再维护，也不得部署。
 - 生产机只读。允许的动作只有：读查询、看日志、`systemctl status`，以及 `docs/RUNBOOK.md` 写明的运维动作与经明确授权的数据修正。
 - 不在生产机上运行测试、演练、重算或临时脚本。需要验证时把数据副本取回本地。
 - `deploy/` 是 nginx、systemd、备份与部署脚本的唯一事实来源；不得在服务器上直接改配置。
