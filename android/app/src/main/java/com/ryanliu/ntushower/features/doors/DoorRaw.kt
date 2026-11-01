@@ -48,7 +48,7 @@ data class DoorRaw(
      * 网页端显示的淋浴时长又是拿 `inTime` 与当前时刻自己算的。放进指纹会让"只有累计值
      * 不同"的两帧被判成变化，白白多传一份内容相同、语义也相同的帧。
      *
-     * 依据是 `ntu-remote-shower/dbGUIDE.md`：浴室 App 在**洗浴期间根本不写库**
+     * 依据是 `ntu-bathapp-reverse/notes/2026-06-21-doorlist-schema.md`：浴室 App 在**洗浴期间根本不写库**
      * （`DoorStatusConfirmThread` 每秒轮询，但只在四个超时条件之一满足时才落 SQL）。
      * `bathTime` 仅在用户关阀暂停那一刻写一次，在释放喷头时归零。所以这条**不是**
      * "省掉每秒的流量"——那种流量本来就不存在——只是让指纹只包含真正决定状态的那几项。
