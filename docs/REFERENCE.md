@@ -44,7 +44,7 @@
 
 > **能不能删，看它是不是"重配得回来"**：支撑层是配置与档案（重配一遍就有）；原始层与派生层
 > 是设备报过的原话与从它算出来的历史（会话、段、状态事件、帧）——**删了就回不来**，统计口径
-> 全靠它攒着。开发阶段重建库（见 `AGENTS.md`）动的是支撑层与空表；**生产上的历史数据任何
+> 全靠它攒着。开发阶段重建库（见 `CONTRIBUTING.md` 的「服务端开发」）动的是支撑层与空表；**生产上的历史数据任何
 > 情况下都不删**。
 
 原始层为什么必须在：派生规则一旦发现缺陷、或需要新增先前未预见的指标，没有原始帧就永久无法重算。旧系统只留了原始帧，那 100 天今天才能重放。
@@ -516,7 +516,7 @@ GET      /api/v1/audit/background-task-runs          后台任务审计    admin
 
 ### 契约的唯一出处
 
-`protocol/schema/*.json`（17 份，含中文 `description`）。Kotlin 与 JavaScript 都不能 import Python，所以另两端拿到的是**生成产物**，由 `server/tools/sync_contracts.py` 生成、`test_contract_sync.py` 断言逐字节相同。**改契约就是改那 17 份里的源**，不要手改生成物。
+`protocol/schema/*.json`（含中文 `description`）。Kotlin 与 JavaScript 都不能 import Python，所以另两端拿到的是**生成产物**，由 `server/tools/sync_contracts.py` 生成、`test_contract_sync.py` 断言逐字节相同。**改契约就是改 schema 里的源**，不要手改生成物。
 
 ---
 
@@ -707,7 +707,7 @@ App 里自己输学号，设备把它带在帧里报上来（`usage_session.cert
 - **五种段长来源强度不同**，统计必须分开看。
 - **截断过的段（`capped`）不等于"真的洗了那么久"**。
 - **结束原因不可判**，别写"这是超时释放/主动出门"。
-- **`CREATE TABLE IF NOT EXISTS` 意味着已存在的库不会跟着 DDL 变**——改 DDL 要重建库（开发阶段的取向，见 `AGENTS.md`）。若本地库报"没有某一列"，那是它落后了，删了重建。
+- **`CREATE TABLE IF NOT EXISTS` 意味着已存在的库不会跟着 DDL 变**——改 DDL 要重建库（开发阶段的取向，见 `CONTRIBUTING.md` 的「服务端开发」）。若本地库报"没有某一列"，那是它落后了，删了重建。
 
 **接口**
 

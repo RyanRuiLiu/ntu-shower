@@ -72,11 +72,7 @@ scp deploy/scripts/deploy.sh iseekdream.com:/tmp/
 # /opt/ntu-shower/backups）→ 保留 .venv／data／ota_releases／.env、其余全删后再解包
 # → requirements.txt 变过才装依赖 → 启动并验证（is-active + /healthz）。
 # 任一步失败自动回滚；预检放在停服之前，所以预检不过时服务一直没停过、无需回滚。
-#
-# **"保留四项、其余全删"是刻意的**：以前是 `rm -rf app tests`，只能清那两个目录，
-# `web/`、`tools/` 只解压覆盖——仓库里删掉的文件会永久留在服务器上。实际已攒下两处：
-# `web/core/log.js`（已删的孤儿）与 `scripts/`（改名成 `tools/` 前的旧目录）。
-# 保留清单与理由写在脚本头部注释里。
+# 保留项清单与"其余全删"的理由写在脚本头部注释里。
 ssh iseekdream.com 'sudo NT_TARBALL=/tmp/server_deploy.tar.gz bash /tmp/deploy.sh'
 
 # ⑤ 人工复核
@@ -103,24 +99,24 @@ ssh iseekdream.com 'sudo NT_ROLLBACK=/opt/ntu-shower/backups/server-<时间戳>.
   本地全绿而线上启动即崩——`deploy.sh` 的第 1 步就是为此存在的，而且它排在停服之前，
   预检失败时服务一直没停过。
 - 打包排除 `.env`：服务器的 `.env` 是唯一副本，被覆盖将导致管理面令牌丢失。
-- 改 `requirements.txt` 后需在服务器执行 `.venv/bin/pip install -r requirements.txt`；
-  仅改业务代码则不需要。
+- `requirements.txt` 变化时 `deploy.sh` 自己装依赖；只改业务代码不需要另跑 `pip install`。
 - 配置（nginx / systemd / backup）的唯一事实来源是 `deploy/`，**不要在服务器上直接改**；
   改法与同步命令见 `deploy/README.md`。
 
-### 表结构变过的那一次：把历史数据带进新结构
+### 表结构变更的落地
 
-**只做一次**，且**已在生产备份副本上演练过**（2026-10-04：36168 帧 → 会话 5625 / 段 9676，
-越界检查全 0，**帧数一帧不少**）。做完之后只走上面的常规流程，历史数据不再动。
-
-顺序见 `deploy/README.md` 的「一次性」一节。三条要点：
+改 `server/app/core/db.py` 的 DDL 后，已存在的库不会跟着变，按下列顺序落地
+（2026-10-04 在生产备份副本上演练：36168 帧 → 会话 5625 / 段 9676，越界检查全 0，
+帧数一帧不少）：
 
 - **原始层只加列**：`ALTER TABLE door_snapshot ADD COLUMN device_clock TEXT`——老帧就该留空，
   它们确实没有这一列，那不是"缺数据"；
-- **派生层连表结构一起重建**：`tools.rebuild_derived` 会 `DROP` 那四张表再建、再由原始层
+- **派生层连表结构一起重建**：`python -m tools.rebuild_derived --db data/ntu-shower.db` 会 `DROP` 那四张表再建、再由原始层
   重算。只 `ALTER` 原始层**不够**——`CREATE TABLE IF NOT EXISTS` 不会去改一张已存在的表，
   旧结构会让重算在第一帧就撞上"没有这一列"；
-- **核对**：`tools.audit_timeline --db data/ntu-shower.db`，**帧数必须与合并前一致**。
+- **核对**：`python -m tools.audit_timeline --db data/ntu-shower.db`，**帧数必须与变更前一致**。
+
+以上命令在 `server/` 下执行，用生产解释器 `.venv/bin/python`。
 
 ### 语音播报前置（voice，启用时一次性）
 
@@ -135,9 +131,8 @@ ssh iseekdream.com 'curl -sS -H "X-Identity: <admin身份标识>" http://127.0.0
 ```
 
 `ffmpeg_available=true` 才能上传素材；`digits` 列出已标记的 0–9 数字素材，含数字变量的
-规则要求 0–9 齐全。素材文件在 `data/voice/assets/`，按内容哈希命名，随 `data/` 保留。
-旧版本的音效会在首次启动新代码时一次性导入素材库，旧规则/投递/合成缓存表被删除，
-旧 TTS 片段目录 `data/voice/clips/` 随之清理；旧音效源文件保留在 `data/voice/effects/`。
+规则要求 0–9 齐全。素材文件在 `data/voice/assets/`，按内容哈希命名，随 `data/` 保留；
+历史音效源文件在 `data/voice/effects/`。
 规则保存返回 `invalid-voice-rule` 时，先看返回的缺失素材或缺失数字，不要在页面上反复重试。
 
 ## 备份与恢复
@@ -168,7 +163,7 @@ Get-FileHash config/keystore/ntu-shower.keystore -Algorithm SHA256    # 本地
 ssh iseekdream.com 'sha256sum /opt/ntu-shower-backup/ntu-shower.keystore'
 ```
 
-### 恢复演练（**已执行，2026-09-30**）
+### 恢复演练
 
 数据库备份在临时位置实际还原过一次，验证脚本与结果如下（不碰生产）：
 
@@ -195,7 +190,7 @@ keystore 的可用性验证：从备份副本执行 `gradlew assembleRelease` �
 
 ## 故障处置
 
-### OTA 反复下载同一个版本（已发生过一次）
+### OTA 反复下载同一个版本
 
 **症状**：日志每数秒一轮 `WebSocket accepted → GET /ota/manifest → GET /api/v1/ota/releases/<版本>/download`，
 设备被反复重装。
