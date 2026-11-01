@@ -372,11 +372,11 @@ R 表示执行，A 表示最终负责，C 表示需咨询，I 表示需知会。
 
 ### 4.7 二进制与大文件
 
-1. 代码仓库不得存放安装包、数据库备份、日志、构建缓存与运行数据。
+1. 安装包、数据库备份、日志、构建缓存与运行数据不得进入版本控制。
 2. 必要的图标、字体等小体积静态资源可以入库；必须记录来源、许可证与用途。
 3. 可编辑源文件与生成资源同时入库时，必须记录生成命令。
 4. 发布物存放在发布区或制品库，必须有校验和；签名安装包必须保留签名信息。
-5. 不可复现的现场证据数据存放在仓库外；`docs/evidence/` 只保存结论、方法、索引与校验和。
+5. 不可复现的现场证据数据存放在版本控制之外；`docs/evidence/` 只保存结论、方法、索引与校验和。
 
 ### 4.8 密钥与配置
 
@@ -524,13 +524,14 @@ R 表示执行，A 表示最终负责，C 表示需咨询，I 表示需知会。
 | 入口与流程文档 | `README.md`、`CONTRIBUTING.md`、`STANDARDS.md`、`CHANGELOG.md`、`AGENTS.md` |
 | 许可证 | `LICENSE` |
 | 自动化配置 | `.github/workflows/` |
-| 版本控制配置 | `.gitignore`、`.gitattributes` |
+| 版本控制配置 | `.gitignore`、`.gitattributes`、`.githooks/` |
 | 详细文档 | `docs/` |
 | 协议契约 | `protocol/` |
 | 服务端 | `server/` |
 | 设备端 | `android/` |
 | 部署资产 | `deploy/` |
 | 仓库级工具 | `tools/` |
+| 数据备份 | `backups/`（不入库，见 §4.7） |
 | 密钥目录 | `config/`（内容不入库） |
 
 ### 6.2 目标结构
@@ -544,6 +545,7 @@ R 表示执行，A 表示最终负责，C 表示需咨询，I 表示需知会。
 ├── AGENTS.md
 ├── LICENSE
 ├── .github/workflows/
+├── .githooks/
 ├── docs/
 │   ├── ARCHITECTURE.md
 │   ├── REFERENCE.md
@@ -576,6 +578,7 @@ R 表示执行，A 表示最终负责，C 表示需咨询，I 表示需知会。
 │   └── README.md
 ├── config/
 │   └── keystore/        # 不入库
+├── backups/             # 数据备份与 SHA256SUMS；备份不入库
 └── tools/
 ```
 
@@ -619,7 +622,7 @@ R 表示执行，A 表示最终负责，C 表示需咨询，I 表示需知会。
 ### 6.5 模块边界
 
 1. 服务端按领域划分模块；跨领域基础设施放入 `core/`。
-2. 设备端按 `core/`、`transport/`、`features/<领域>/`、`service/` 划分。
+2. 设备端按 `core/`、`transport/`、`features/<领域>/`、`service/`、`receiver/` 划分。
 3. 网页端按 `core/`、`views/`、`style/` 划分；网络访问只能经统一 API 客户端（当前为 `core/api.js`）。
 4. 一个模块只有一个变更理由；出现第二个领域的规则时拆分。
 5. 禁止通用 `utils`、`helpers`、`misc` 文件；按领域命名。

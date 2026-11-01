@@ -1,29 +1,5 @@
 # ntu-shower 架构
 
-## 迁移期的设备共存（2026-09 真机核实，**卸载前必读**）
-
-迁移期设备上装着两套系统。旧系统组件在**仍保留它的设备上**是有意保留的路径，不是残留脏数据：
-
-| 包 | 归属 | 说明 |
-|---|---|---|
-| `com.ryanliu.ntushower` | 本项目 | 主力 agent |
-| `com.ntu.remoteshower.showeragent` | 旧系统 | 迁移期保留；**2F 已卸载** |
-| `com.ntu.remoteshower.adbtunnel` | 旧系统 | 旧系统的 ADB 方案（本项目改用 443 网关透传，docs/DECISIONS.md）；**2F 已卸载** |
-| `com.datalook.bath` | 浴室 App | 被控对象，不可动 |
-
-**2026-10-25**：2F 浴室（设备标识不入文档）经人确认卸载上述两个旧包，设备上只剩本项目；
-1F/3F–6F 未动。卸载**只由人显式决定并手动执行**，不写自动卸载脚本，也不在部署流程里代为清理。
-
-**调试时必须知道的三件事**（均为真机实测结论；前两条以仍保留旧组件的设备为前提）：
-
-1. 在仍保留旧组件的设备上，旧系统的两个无障碍服务与本项目的 `A11yService`
-   **同时处于启用状态**。UI 自动化出现随机异常时，先排除旧组件干扰，再怀疑本项目代码。
-2. 旧 agent 在仍保留旧组件的设备上向**旧服务端**上报，其 `device_id` 是自定的
-   `ntu-shower-001`；本项目用真实 ANDROID_ID（如 `<device_id>`）。两套标识互不相通，
-   在旧系统数据库里按 ANDROID_ID 查不到任何东西。
-3. 两套服务端完全独立：目录、systemd 单元、nginx 站点、端口（桥接 15555 vs 15655）、
-   数据库全部分开，代码互不引用。**本项目不读取、不写入、不依赖旧系统的任何资源。**
-
 ## 系统全景
 
 ```text
@@ -49,7 +25,7 @@
 - 设备无 DNS（系统 DNS 配的 8.8.8.8 被校园网封锁）；114.114.114.114 的 UDP/TCP 53 实测可用 → APK 内置 DNS 解析器，**以域名为唯一主键，不使用缓存、次等解析路径或硬编码地址**
 - TLS 上限 TLSv1.2，最强套件 ECDHE-ECDSA/RSA-AES-CBC；**最小配置**（强制 TLSv1.2 + 默认套件 + 打包 ISRG X1/X2）对 nginx 443 / ECDSA 证书实测握手成功
 - **OkHttp 套件陷阱（真机 E2E 实测发现）**：OkHttp 默认白名单中 ECDHE-ECDSA 仅含 GCM 系列，而本设备只有 CBC——对 ECDSA 证书握手必然失败（对 RSA 证书反而能通，这是旧系统侥幸可用的原因）。解法：显式 ConnectionSpec 放行 ECDHE-ECDSA/RSA-CBC + GCM，见 `transport/GatewayClient.kt`
-- 服务端单张 ECDSA 通配符证书；旧系统为迁就 4.4 而维护的 RSA 证书在新系统中不存在
+- 服务端单张 ECDSA 通配符证书
 
 ## 服务端平面
 
@@ -104,7 +80,7 @@
 com.ryanliu.ntushower
 ├── core/       配置（域名锚点/运行时配置）、身份、内置 DNS、TLS、HTTP 工厂、root shell、性能日志
 ├── transport/  协议编解码（MessageCodec 单一来源）、网关客户端（连接/认证/心跳/重连）
-├── features/   doors 采集上报 / automation A11y 自动化（含遮盖层）/ notice 屏幕提示 / statusline 楼层状态行 / overlay 共用浮层窗口 / voice 语音播报 / selfmanage 自更新与无障碍启用
+├── features/   doors 采集上报 / automation A11y 自动化（含遮盖层）/ notice 屏幕提示 / statusline 楼层状态行 / overlay 共用浮层窗口 / voice 语音播报 / water 水控板直控 / remote 调试通道与截屏 / selfmanage 自更新与无障碍启用
 ├── service/    AgentService 主服务 / A11yService 无障碍实体
 ├── receiver/   覆盖安装自启（MY_PACKAGE_REPLACED）与开机广播（标准 ROM 路径）
 └── ShowerApp   崩溃捕获
@@ -139,7 +115,7 @@ com.ryanliu.ntushower
 
 **两处例外**：`link.pong` 的 `device_time` 与帧载荷里的 `device_clock`，都是设备墙钟上的当前
 读数，但经过设备侧格式化、呈 RFC 3339 形态。格式不改变它们的轴——它们必须与 `t_doorlist` 的
-墙钟同源，所以取墙钟；用途见 `core/device_clock.py`。除这两处，上报的时刻一律走锚定。
+墙钟同源，所以取墙钟；用途见 `server/app/core/device_clock.py`。除这两处，上报的时刻一律走锚定。
 
 ### 三条换算规则
 
@@ -174,7 +150,7 @@ closed_at   = close_time + skew@关这一段那一刻
 就凭空长出十分钟。改用逐个平移，再用"设备轴差 vs 观测差"交叉校验把被污染的段认出来
 （见 `service._close_segment`）。
 
-偏差本身从哪来，见 `core/device_clock.py`——那里是它的唯一出处。
+偏差本身从哪来，见 `server/app/core/device_clock.py`——那里是它的唯一出处。
 
 **三、算不出真实值时，与浴室 App 同口径。**
 
@@ -192,7 +168,7 @@ bathTime             各段累加，每次关阀时 += |inTime − now|
 
 当偏差还无从确定或设备离线（差值里混进了与使用无关的时间）时，本项目**按同样的公式、用第一条
 与第二条给出的时刻重算**，得到与浴室 App 一致的数字，并如实标明这一段不可信。"无从确定"的
-判据在 `core/device_clock.py`。
+判据在 `server/app/core/device_clock.py`。
 
 ### 离线与重启
 
@@ -237,3 +213,20 @@ bathTime             各段累加，每次关阀时 += |inTime − now|
 
 证书指纹（SHA-256，OTA 时设备端校验用）：`72ac1447302225b16a621be9461c6202c4796f787acc780b376b75c2572b7fb5`
 
+## 设备上的旧系统组件（卸载前必读）
+
+迁移期设备上仍有旧系统组件。它们在**仍保留它的设备上**是有意保留的路径，不是残留脏数据：
+
+| 包 | 归属 | 说明 |
+|---|---|---|
+| `com.ryanliu.ntushower` | 本项目 | 主力 agent |
+| `com.ntu.remoteshower.showeragent` | 旧系统 | 迁移期保留；**2F 已卸载** |
+| `com.ntu.remoteshower.adbtunnel` | 旧系统 | 迁移期保留；**2F 已卸载** |
+| `com.datalook.bath` | 浴室 App | 被控对象，不可动 |
+
+**2026-10-25**：2F 浴室（设备标识不入文档）经人确认卸载上述两个旧包，设备上只剩本项目；
+1F/3F–6F 未动。卸载**只由人显式决定并手动执行**，不写自动卸载脚本，也不在部署流程里代为清理。
+
+**调试时必须知道的一件事**（真机实测结论，以仍保留旧组件的设备为前提）：旧系统的两个无障碍服务
+与本项目的 `A11yService` **同时处于启用状态**。UI 自动化出现随机异常时，先排除旧组件干扰，
+再怀疑本项目代码。**本项目不读取、不写入、不依赖旧系统的任何资源。**
