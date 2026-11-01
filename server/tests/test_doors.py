@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from tests import helpers
+from tests import device_link, frames
 
 from app.core import db, device_clock
 from app.core.clock import rfc3339_after
@@ -154,7 +154,7 @@ def test_live_time_fields_are_on_the_server_axis(fresh_db: str) -> None:
 def test_session_owner_change_closes_old_and_opens_new(fresh_db: str) -> None:
     """占用者中途变化：先结旧账再开新账，两个人的时长不并入同一条记录。"""
     device_id = "dev-swap-00001"
-    helpers.register_trusted_device(device_id)
+    device_link.register_trusted_device(device_id)
     doors = [_door(1, card_no=100, cert_no="A", open_time=rfc3339_after(-30), in_time=rfc3339_after(-25))]
     service.process_snapshot(device_id, _snapshot(doors))
     first = repository.get_open_session(device_id, 1)
@@ -183,7 +183,7 @@ def test_snapshot_records_missing_doors_and_skips_nonpositive_door_no(fresh_db: 
     recorded = db.get_conn().execute("SELECT doors FROM door_snapshot WHERE snapshot_id = ?", ("s",)).fetchall()
     assert [row["doors"] for row in recorded] == ["[]"]
 
-    helpers.register_trusted_device(device_id)
+    device_link.register_trusted_device(device_id)
     result = service.process_snapshot(device_id, _snapshot([_door(0), _door(1)]))
     assert result.processed == 1
 
@@ -236,7 +236,7 @@ def test_last_used_returns_the_most_recent(fresh_db: str) -> None:
 def test_doors_api_exposes_last_used(fresh_db: str) -> None:
     """喷头列表带"上次使用"三个字段；从没用过的喷头给空值与 0。"""
     device_id = "dev-last-used-4"
-    helpers.register_trusted_device(device_id)
+    device_link.register_trusted_device(device_id)
 
     t0 = "2026-09-30T12:00:00.000Z"
     t1 = "2026-09-30T12:01:00.000Z"
@@ -339,7 +339,7 @@ def test_doors_api_is_public_empty_and_filtered(client: TestClient, fresh_db: st
     assert client.get("/api/v1/doors").json() == []
 
     device_id = "dev-doors-1"
-    helpers.register_trusted_device(device_id)
+    device_link.register_trusted_device(device_id)
     service.process_snapshot(device_id, _snapshot([_door(2)]))
 
     doors = client.get("/api/v1/doors", params={"device_id": device_id}).json()
@@ -375,8 +375,8 @@ def test_stream_pushes_device_update(client: TestClient, fresh_db: str) -> None:
     """设备经网关接入即向订阅者推 device.update（精简载荷）。"""
     device_id = "dev-stream-device"
     with client.websocket_connect("/api/v1/stream") as ws, client.websocket_connect("/gateway/device") as device_ws:
-        device_ws.send_text(helpers.hello_frame(device_id))
-        helpers.recv_until(device_ws, "link.hello_ack")
+        device_ws.send_text(frames.hello_frame(device_id))
+        frames.recv_until(device_ws, "link.hello_ack")
         message = json.loads(ws.receive_text())
 
     assert message["type"] == "device.update"

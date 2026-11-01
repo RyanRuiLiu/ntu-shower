@@ -1,9 +1,9 @@
 """设备连接注册表：一个 device_id 一条活动连接，重连顶替旧连接。
 
-放在 core 而非 gateway：它被 devices / sessions / ota / bridge / config 等多个
-领域作为"设备在不在线"的唯一事实来源读取，而 gateway.routes 又依赖那些领域的
-服务——留在 gateway 包里会构成 modules ↔ gateway 的包级循环。它是无依赖的
-基础设施，下沉到 core 后依赖方向严格向下。
+放在 core 而非网关模块：它被 devices / sessions / ota / bridge / config 等多个
+领域作为"设备在不在线"的唯一事实来源读取，而网关路由又依赖那些领域的服务——
+留在网关包里会构成 `gateway.routes → devices.service → gateway.*` 的模块环。
+它是无依赖的基础设施，下沉到 core 后依赖方向严格向下。
 """
 
 import asyncio

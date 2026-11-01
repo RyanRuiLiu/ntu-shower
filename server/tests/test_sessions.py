@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from tests import helpers
+from tests import device_link, frames
 
 from app.modules.doors import service as doors_service
 from app.modules.doors.schemas import ASSIGNABLE_STATES, DoorState
@@ -64,8 +64,8 @@ def test_assign_rejects_untrusted_device(client: TestClient, ops_headers: dict[s
     """设备存在但未信任是 403：客户端要能区分"不存在"与"未授权"。"""
     device_id = "dev-untrusted-1"
     with client.websocket_connect("/gateway/device") as ws:
-        ws.send_text(helpers.hello_frame(device_id))
-        helpers.recv_until(ws, "link.hello_ack")
+        ws.send_text(frames.hello_frame(device_id))
+        frames.recv_until(ws, "link.hello_ack")
 
     r = client.post(
         f"/api/v1/devices/{device_id}/assign",
@@ -111,7 +111,7 @@ def test_assign_rejects_unassignable_door_states(
     raw: dict[str, object],
 ) -> None:
     """不可分配的状态一律 409，且在下发命令之前就拒（设备不必在线应答）。"""
-    with helpers.trusted_online(client, TRUSTED, admin_headers):
+    with device_link.trusted_online(client, TRUSTED, admin_headers):
         _seed_door(TRUSTED, 1, **raw)
         r = client.post(f"/api/v1/devices/{TRUSTED}/assign", json=ASSIGN_PAYLOAD, headers=ops_headers)
 
@@ -125,7 +125,7 @@ def test_assign_reports_unreported_door_as_not_found(
     admin_headers: dict[str, str],
 ) -> None:
     """喷头从未被上报是 404：编号打错与"喷头被占用"是两回事。"""
-    with helpers.trusted_online(client, TRUSTED, admin_headers):
+    with device_link.trusted_online(client, TRUSTED, admin_headers):
         _seed_door(TRUSTED, 1)
         r = client.post(
             f"/api/v1/devices/{TRUSTED}/assign",
@@ -142,7 +142,7 @@ def test_settle_rejected_without_occupied_door(
     ops_headers: dict[str, str],
     admin_headers: dict[str, str],
 ) -> None:
-    with helpers.trusted_online(client, TRUSTED, admin_headers):
+    with device_link.trusted_online(client, TRUSTED, admin_headers):
         r = client.post(
             f"/api/v1/devices/{TRUSTED}/settle", json={"cert_no": "NOBODY", "password": "P"}, headers=ops_headers
         )
@@ -157,7 +157,7 @@ def test_assign_rejects_duplicate_session(
     admin_headers: dict[str, str],
 ) -> None:
     """同一学号已有活跃会话时再分配被拒（409 duplicate-session）。"""
-    with helpers.trusted_online(client, TRUSTED, admin_headers):
+    with device_link.trusted_online(client, TRUSTED, admin_headers):
         _seed_door(
             TRUSTED,
             3,
@@ -184,7 +184,7 @@ def test_admin_identity_shares_user_endpoints(
     admin_headers: dict[str, str],
 ) -> None:
     """管理台凭 session/photo 能力位调用同一路径：与用户面同源同错（perform_* 只有一份）。"""
-    with helpers.trusted_online(client, TRUSTED, admin_headers):
+    with device_link.trusted_online(client, TRUSTED, admin_headers):
         _seed_door(TRUSTED, 1, card_no=1001)
         user_plane = client.post(f"/api/v1/devices/{TRUSTED}/assign", json=ASSIGN_PAYLOAD, headers=ops_headers)
         admin_plane = client.post(f"/api/v1/devices/{TRUSTED}/assign", json=ASSIGN_PAYLOAD, headers=admin_headers)
@@ -199,7 +199,7 @@ def test_assign_round_trip_returns_device_outcome(
     admin_headers: dict[str, str],
 ) -> None:
     """完整往返：空闲喷头预检通过 → session.assign 下发 → 设备回执透传给调用方。"""
-    with helpers.trusted_online(client, TRUSTED, admin_headers) as ws:
+    with device_link.trusted_online(client, TRUSTED, admin_headers) as ws:
         _seed_door(TRUSTED, 1)
         outcome: dict[str, Any] = {}
 
@@ -208,11 +208,11 @@ def test_assign_round_trip_returns_device_outcome(
 
         thread = Thread(target=call)
         thread.start()
-        command = helpers.recv_until(ws, "session.command")
+        command = frames.recv_until(ws, "session.command")
         assert command["payload"]["action"] == "session.assign"
         assert command["payload"]["params"] == ASSIGN_PAYLOAD
         ws.send_text(
-            helpers.frame(
+            frames.frame(
                 "session.command_result",
                 {"status": "ok", "reason_code": "", "terminal_message": "已分配", "data": None},
                 reply_to=command["id"],
