@@ -30,8 +30,8 @@
 | 末端 | `libposix.so` → `/dev/McuCom` | 源码 `posix.java`、`DataforHandle.java:108-110` |
 
 `SmdtService.apk` 的 md5：`eb92c5c5107bceeb2d93fff649c991e1`（设备侧 md5sum 与本地解码后
-md5 逐位一致）。它在本机的位置：`ntu-bathapp-reverse/apks/SmdtService.apk`，
-完整解包产物在 `ntu-bathapp-reverse/output/jadx-smdt-full/`。
+md5 逐位一致）。它在本机的位置：`ntu-bathapp-reverse/samples/SmdtService.apk`，
+完整解包产物在 `ntu-bathapp-reverse/exports/output/jadx-smdt-full/`。
 
 ---
 
@@ -347,8 +347,8 @@ CommandList: [{"CommandLength":"4","CommandKey":"A0","CommandValue":"00002359"}]
 
 | 路径 | 说明 |
 |---|---|
-| `ntu-bathapp-reverse/apks/SmdtService.apk` | 28409 字节，md5 `eb92c5c5107bceeb2d93fff649c991e1` |
-| `ntu-bathapp-reverse/output/jadx-smdt-full/` | 完整解包（9 个 java + manifest + res） |
+| `ntu-bathapp-reverse/samples/SmdtService.apk` | 28409 字节，md5 `eb92c5c5107bceeb2d93fff649c991e1` |
+| `ntu-bathapp-reverse/exports/output/jadx-smdt-full/` | 完整解包（9 个 java + manifest + res） |
 
 ---
 
