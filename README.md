@@ -1,6 +1,6 @@
 # ntu-shower
 
-寄生在浴室中控设备上的控制系统。设备端只读浴室 App 的 `t_doorlist` 一张表，通过无障碍服务操作浴室 App 界面，并维护浴室 App 启动时读取的免费名单；服务端汇聚多台设备，提供 HTTP API、WebSocket 推送与网页管理台。旧系统 `ntu-remote-shower` 已下线，归档副本见 `_archive/2026/ntu-remote-shower`。
+寄生在浴室中控设备上的控制系统。设备端只读浴室 App 的 `t_doorlist` 一张表，通过无障碍服务操作浴室 App 界面，并维护浴室 App 启动时读取的免费名单；服务端汇聚多台设备，提供 HTTP API、WebSocket 推送与网页管理台。旧系统 `ntu-remote-shower` 已下线，归档副本见 `../../archive/2026/ntu-remote-shower`。
 
 ## 系统组成
 
