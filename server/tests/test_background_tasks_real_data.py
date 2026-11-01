@@ -13,7 +13,7 @@ from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from tests import helpers
+from tests import device_link
 
 from app.core import device_clock, outcomes
 from app.core.clock import now_rfc3339, seconds_between
@@ -450,5 +450,5 @@ def test_a_real_shape_ends_in_a_settle(
 
         assert [action for action, _params in calls] == ["session.settle"]
 
-    with helpers.trusted_online(client, "dev-1", admin_headers):
+    with device_link.trusted_online(client, "dev-1", admin_headers):
         asyncio.run(body())

@@ -13,20 +13,20 @@ import contextlib
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.concurrency import run_in_threadpool
 
-from ..core import audit, protocol, reason_codes
-from ..core.clock import now_rfc3339, rfc3339_ago
-from ..core.connections import manager
-from ..core.logging import log_event
-from ..core.protocol import JsonObject, as_int, list_of, payload_of, text_of
-from ..modules.config import store as config_store
-from ..modules.devices import service as devices_service
-from ..modules.devices.schemas import LINK_OFFLINE, LINK_ONLINE
-from ..modules.doors import service as doors_service
-from ..modules.extend_hours import service as extend_hours_service
-from ..modules.ota import repository as ota_repository
-from ..modules.sessions import scheduler as sessions_scheduler
-from ..modules.sessions import service as sessions_service
-from ..modules.voice import service as voice_service
+from ...core import audit, protocol, reason_codes
+from ...core.clock import now_rfc3339, rfc3339_ago
+from ...core.connections import manager
+from ...core.logging import log_event
+from ...core.protocol import JsonObject, as_int, list_of, payload_of, text_of
+from ..config import store as config_store
+from ..devices import service as devices_service
+from ..devices.schemas import LINK_OFFLINE, LINK_ONLINE
+from ..doors import service as doors_service
+from ..extend_hours import service as extend_hours_service
+from ..ota import repository as ota_repository
+from ..sessions import scheduler as sessions_scheduler
+from ..sessions import service as sessions_service
+from ..voice import service as voice_service
 
 router = APIRouter()
 

@@ -6,7 +6,7 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from tests import helpers
+from tests import device_link
 
 from app.core.problems import CAPABILITY_DENIED, ApiProblemError
 from app.modules.access import service
@@ -151,7 +151,7 @@ def test_wildcard_scope_passes_guard_for_any_device(
     """作用域 ["*"] 的身份对任何设备放行：请求穿过全部守卫，落到喷头预检。"""
     from app.core.connections import manager
 
-    helpers.register_trusted_device("dev-any-0001")
+    device_link.register_trusted_device("dev-any-0001")
     monkeypatch.setattr(manager, "_connections", {"dev-any-0001": object()})
     from app.modules.access import repository
     from app.modules.access.identity import IdentityKind
@@ -220,7 +220,7 @@ def test_put_identity_edit_takes_effect_immediately(
     """PUT 编辑热生效：守卫每个请求实时查库，无缓存；编辑不改变标识本身。"""
     from app.core.connections import manager
 
-    helpers.register_trusted_device("dev-edit-0001")
+    device_link.register_trusted_device("dev-edit-0001")
     monkeypatch.setattr(manager, "_connections", {"dev-edit-0001": object()})
 
     created = client.post(

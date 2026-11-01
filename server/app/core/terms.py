@@ -178,7 +178,7 @@ EXEMPT_FILES: dict[str, str] = {
 EXEMPT_HITS: dict[str, str] = {
     "server/web/views/devices.js:终端": "指操作者本机的 shell（「在另一终端中执行」「终端里敲命令」），不是那台机器",
     "server/app/core/audit.py:代理": "指 nginx 反向代理（真实地址在 X-Real-IP 里），与我们的程序无关",
-    "server/app/gateway/routes.py:代理": "同上：nginx 反向代理",
+    "server/app/modules/gateway/routes.py:代理": "同上：nginx 反向代理",
     "docs/REFERENCE.md:代理": "同上：nginx 反向代理（来源 IP 一节），与我们的程序无关",
     "android/app/src/test/java/com/ryanliu/ntushower/features/automation/BathAppPageTest.kt:登录": (
         "引自浴室 App 的界面原文「请先登录」，是测试夹具，不是我们的说法"

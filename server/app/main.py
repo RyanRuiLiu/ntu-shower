@@ -39,7 +39,6 @@ from .core.config import settings
 from .core.errors import install_error_handlers
 from .core.logging import configure_logging, log_event
 from .core.version import APP_VERSION
-from .gateway.routes import router as gateway_router
 from .modules.access import repository as access_repository
 from .modules.access.routes import admin_router as identities_admin_router
 from .modules.access.routes import router as identity_router
@@ -57,6 +56,7 @@ from .modules.doors.routes import router as doors_router
 from .modules.extend_hours import repository as extend_hours_repository
 from .modules.extend_hours import service as extend_hours_service
 from .modules.freelist.routes import router as freelist_router
+from .modules.gateway.routes import router as gateway_router
 from .modules.ota import repository as ota_repository
 from .modules.ota.routes import device_router as ota_device_router
 from .modules.ota.routes import router as ota_router

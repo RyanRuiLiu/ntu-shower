@@ -76,14 +76,6 @@ cp gradle.properties.example gradle.properties
 
 接口契约以 `protocol/schema/` 与代码路由为准；文档只做索引，不复制字段表。
 
-## 运行模型
-
-- 入口：`https://<public-domain>`，nginx 443 统一入口。
-- 设备身份：`device_id = ANDROID_ID`；服务端信任后才接受设备通信。
-- 访问控制：统一身份制。查看类接口公开；用户操作凭 `X-Identity` 与能力位；管理面要求 `admin` 能力位，并按设备作用域判定。
-- 配置：设备运行参数由服务端远程下发；配置键登记在服务端配置登记表中，设备端不提供本地配置入口。
-- 远程调试：`device.exec`、`screen.capture` 与 ADB 桥；调试通道按需开启并审计。
-
 ## 协作者入口
 
 AI 协作者先读 [`AGENTS.md`](AGENTS.md)，再按其中的阅读顺序进入 `CONTRIBUTING.md`、`STANDARDS.md` 与 `docs/`。人类协作者从 `CONTRIBUTING.md` 开始。

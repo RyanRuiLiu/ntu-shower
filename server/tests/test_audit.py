@@ -9,7 +9,7 @@ import io
 import json
 
 from fastapi.testclient import TestClient
-from tests import helpers
+from tests import apk, frames
 
 from app.core import audit
 from app.modules.audit import repository as command_audit
@@ -89,7 +89,7 @@ def test_multipart_request_body_is_not_stored(client: TestClient, admin_headers:
         "/api/v1/ota/releases",
         headers=admin_headers,
         data={"version": "0.1.0", "version_code": 1},
-        files={"file": ("x.apk", io.BytesIO(helpers.build_apk("0.1.0", 1)), "application/octet-stream")},
+        files={"file": ("x.apk", io.BytesIO(apk.build_apk("0.1.0", 1)), "application/octet-stream")},
     )
     assert r.status_code == 200
 
@@ -140,8 +140,8 @@ def test_gateway_lifecycle_is_recorded(client: TestClient, admin_headers: dict[s
     """设备网关接入记一行 connect（kind=gateway，status 0=连接 1=断开），可按类别过滤。"""
     device_id = "dev-gw-audit"
     with client.websocket_connect("/gateway/device") as ws:
-        ws.send_text(helpers.hello_frame(device_id))
-        helpers.recv_until(ws, "link.hello_ack")
+        ws.send_text(frames.hello_frame(device_id))
+        frames.recv_until(ws, "link.hello_ack")
 
     rows = _calls(client, admin_headers, kind="gateway")
     connect_rows = [row for row in rows if row["device_id"] == device_id and row["status_code"] == 0]

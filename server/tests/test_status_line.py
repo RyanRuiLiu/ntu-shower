@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from tests import helpers
+from tests import device_link, frames
 
 from app.core.connections import manager
 from app.modules.devices import repository as devices_repository
@@ -61,7 +61,7 @@ def test_free_count_only_counts_free_and_follows_device_order(
     monkeypatch.setattr(
         manager,
         "_connections",
-        {"dev-1f": helpers.FakeGatewayWS(), "dev-2f": helpers.FakeGatewayWS()},
+        {"dev-1f": device_link.FakeGatewayWS(), "dev-2f": device_link.FakeGatewayWS()},
     )
 
     snapshot = status_line_service._snapshot()
@@ -88,9 +88,9 @@ def test_unavailable_devices_report_no_free_count(fresh_db: str, monkeypatch: py
         manager,
         "_connections",
         {
-            "dev-untrusted": helpers.FakeGatewayWS(),
-            "dev-nodata": helpers.FakeGatewayWS(),
-            "dev-online": helpers.FakeGatewayWS(),
+            "dev-untrusted": device_link.FakeGatewayWS(),
+            "dev-nodata": device_link.FakeGatewayWS(),
+            "dev-online": device_link.FakeGatewayWS(),
         },
     )
 
@@ -128,8 +128,8 @@ def test_status_line_update_is_pushed_to_trusted_online_device(
     _register(device_id, "2F")
     _report(device_id, [_door(1), _door(2, status_raw=2)])
 
-    with helpers.trusted_online(client, device_id, admin_headers) as ws:
-        message = helpers.recv_until(ws, "status_line.update")
+    with device_link.trusted_online(client, device_id, admin_headers) as ws:
+        message = frames.recv_until(ws, "status_line.update")
 
     assert message["payload"]["floors"] == [
         {"device_id": device_id, "name": "2F", "online": True, "free": 1},
@@ -145,8 +145,8 @@ def test_device_without_door_data_still_receives_the_fleet_status(
     device_id = "dev-status-line-nodata"
     _register(device_id, "6F")
 
-    with helpers.trusted_online(client, device_id, admin_headers) as ws:
-        message = helpers.recv_until(ws, "status_line.update")
+    with device_link.trusted_online(client, device_id, admin_headers) as ws:
+        message = frames.recv_until(ws, "status_line.update")
 
     assert message["payload"]["floors"] == [
         {"device_id": device_id, "name": "6F", "online": True, "free": None},
