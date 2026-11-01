@@ -1,6 +1,6 @@
 # ntu-shower
 
-寄生在浴室中控设备上的控制系统。设备端只读浴室 App 的 `t_doorlist` 一张表，通过无障碍服务操作浴室 App 界面，并维护浴室 App 启动时读取的免费名单；服务端汇聚多台设备，提供 HTTP API、WebSocket 推送与网页管理台。旧系统 `ntu-remote-shower` 已下线，本项目不依赖其任何内容。
+寄生在浴室中控设备上的控制系统。设备端只读浴室 App 的 `t_doorlist` 一张表，通过无障碍服务操作浴室 App 界面，并维护浴室 App 启动时读取的免费名单；服务端汇聚多台设备，提供 HTTP API、WebSocket 推送与网页管理台。
 
 ## 系统组成
 
@@ -20,11 +20,15 @@
 | `STANDARDS.md` | 全生命周期工程标准 |
 | `CHANGELOG.md` | 发布历史与用户可见变更 |
 | `AGENTS.md` | AI 协作者的阅读顺序与停止条件 |
+| `.github/workflows/` | 持续集成 |
+| `.githooks/` | 提交信息校验钩子 |
 | `android/` | 设备端 APK |
 | `server/` | 服务端、测试、工具与网页端 |
 | `protocol/schema/` | 协议消息的 JSON Schema |
 | `docs/` | 架构、参考、运行手册、安全、测试与决策记录 |
 | `deploy/` | 部署资产唯一事实来源 |
+| `tools/` | 仓库级工具与时间轴参考模型 |
+| `backups/` | 本机数据备份与校验和；备份不入库 |
 | `config/keystore/` | APK 签名密钥目录；内容不入库 |
 
 ## 快速开始
