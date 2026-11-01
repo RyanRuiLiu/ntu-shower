@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from tests import helpers
+from tests import device_link, frames
 
 from app.core import actions, db
 from app.core.clock import now_rfc3339
@@ -25,7 +25,7 @@ def _put_identity(device_id: str, identity: str, capabilities: list[str], scope:
 
 def test_device_list_is_public_and_anonymous_actions_are_empty(client: TestClient, fresh_db: str) -> None:
     """精简清单公开；匿名调用 actions 恒为空数组，但字段仍在。"""
-    helpers.register_trusted_device(DEVICE_ID)
+    device_link.register_trusted_device(DEVICE_ID)
 
     r = client.get("/api/v1/devices")
 
@@ -38,7 +38,7 @@ def test_device_list_is_public_and_anonymous_actions_are_empty(client: TestClien
 
 def test_device_list_actions_follow_capabilities(client: TestClient, admin_headers: dict[str, str]) -> None:
     """带身份时 actions 按 USER_ACTIONS 算：session→assign/settle，photo→photo。"""
-    helpers.register_trusted_device(DEVICE_ID)
+    device_link.register_trusted_device(DEVICE_ID)
 
     r = client.get("/api/v1/devices", headers=admin_headers)
 
@@ -48,8 +48,8 @@ def test_device_list_actions_follow_capabilities(client: TestClient, admin_heade
 
 def test_device_list_actions_empty_outside_scope(client: TestClient, fresh_db: str) -> None:
     """作用域列表外的设备 actions 恒为空：作用域裁剪发生在服务端。"""
-    helpers.register_trusted_device("dev-in-scope-1")
-    helpers.register_trusted_device("dev-out-scope-1")
+    device_link.register_trusted_device("dev-in-scope-1")
+    device_link.register_trusted_device("dev-out-scope-1")
     headers = _put_identity("dev-in-scope-1", "scoped-dev-0001", ["session", "photo"], ["dev-in-scope-1"])
 
     items = {item["device_id"]: item for item in client.get("/api/v1/devices", headers=headers).json()}
@@ -72,7 +72,7 @@ def test_device_list_reports_online_flag(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """online 来自内存连接表而非档案表。"""
-    helpers.register_trusted_device(DEVICE_ID)
+    device_link.register_trusted_device(DEVICE_ID)
     monkeypatch.setattr(manager, "_connections", {DEVICE_ID: object()})
 
     devices = client.get("/api/v1/devices").json()
@@ -91,7 +91,7 @@ def test_runtime_requires_admin(client: TestClient, ops_headers: dict[str, str])
 
 def test_runtime_returns_full_record(client: TestClient, admin_headers: dict[str, str]) -> None:
     """GET /devices/runtime 返回完整档案：版本、信任、IP、钟偏差、在线都在。"""
-    helpers.register_trusted_device(DEVICE_ID)
+    device_link.register_trusted_device(DEVICE_ID)
 
     r = client.get("/api/v1/devices/runtime", headers=admin_headers)
 
@@ -129,7 +129,7 @@ def test_patch_device_updates_only_provided_fields(
     fresh_db: str,
 ) -> None:
     """只改传了的字段：改名不应顺手把信任位抹掉；空体是 no-op；响应是完整记录。"""
-    helpers.register_trusted_device(DEVICE_ID)
+    device_link.register_trusted_device(DEVICE_ID)
 
     trusted = client.patch(f"/api/v1/devices/{DEVICE_ID}", headers=admin_headers, json={"trusted": True})
     assert trusted.status_code == 200
@@ -166,7 +166,7 @@ def test_patch_publishes_trimmed_device_update(
     """档案修改发布 device.update 精简载荷：IP、版本、时钟偏差不进公开推送。"""
     import json
 
-    helpers.register_trusted_device(DEVICE_ID)
+    device_link.register_trusted_device(DEVICE_ID)
 
     with client.websocket_connect("/api/v1/stream") as ws:
         client.patch(f"/api/v1/devices/{DEVICE_ID}", headers=admin_headers, json={"name": "改名触发推送"})
@@ -213,7 +213,7 @@ def ready(
     monkeypatch: pytest.MonkeyPatch,
 ) -> dict[str, Any]:
     """设备已信任在线，命令往返被替身截获并记录 action/params/timeout。"""
-    helpers.register_trusted_device(DEVICE_ID)
+    device_link.register_trusted_device(DEVICE_ID)
     monkeypatch.setattr(manager, "_connections", {DEVICE_ID: object()})
 
     captured: dict[str, Any] = {}
@@ -287,7 +287,7 @@ def test_live_log_reads_from_device(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """现读日志走独立动作，返回原文、存在性与截断标记；缺失文件不是错误。"""
-    helpers.register_trusted_device(DEVICE_ID)
+    device_link.register_trusted_device(DEVICE_ID)
     monkeypatch.setattr(manager, "_connections", {DEVICE_ID: object()})
     captured: dict[str, Any] = {}
 
@@ -327,7 +327,7 @@ def test_live_log_absent_file_is_not_an_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """crash.log 只在该设备真正崩溃后才存在；present=false 要能正常返回。"""
-    helpers.register_trusted_device(DEVICE_ID)
+    device_link.register_trusted_device(DEVICE_ID)
     monkeypatch.setattr(manager, "_connections", {DEVICE_ID: object()})
 
     async def fake_send(device_id: str, action: str, params: dict[str, Any], timeout_s: float = 0.0) -> dict[str, Any]:
@@ -364,7 +364,7 @@ def test_live_log_maps_device_failure_to_problem(
     admin_headers: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    helpers.register_trusted_device(DEVICE_ID)
+    device_link.register_trusted_device(DEVICE_ID)
     monkeypatch.setattr(manager, "_connections", {DEVICE_ID: object()})
 
     async def fake_send(device_id: str, action: str, params: dict[str, Any], timeout_s: float = 0.0) -> dict[str, Any]:
@@ -388,7 +388,7 @@ def test_live_log_rejects_empty_result_data(
     admin_headers: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    helpers.register_trusted_device(DEVICE_ID)
+    device_link.register_trusted_device(DEVICE_ID)
     monkeypatch.setattr(manager, "_connections", {DEVICE_ID: object()})
 
     async def fake_send(device_id: str, action: str, params: dict[str, Any], timeout_s: float = 0.0) -> dict[str, Any]:
@@ -576,7 +576,7 @@ def test_devices_fall_back_to_natural_name_order_when_sort_orders_tie(
 
     for name in ("10F浴室", "2F浴室", "1F浴室"):
         device_id = f"dev-{name}"
-        helpers.register_trusted_device(device_id)
+        device_link.register_trusted_device(device_id)
         from app.modules.devices import repository as devices_repository
 
         devices_repository.set_name(device_id, name)
@@ -591,11 +591,11 @@ def test_newly_registered_device_appends_after_the_manual_order(
     client: TestClient, admin_headers: dict[str, str], fresh_db: str
 ) -> None:
     """新设备排到末尾：手动调好的顺序不被后来的登记顶掉。"""
-    helpers.register_trusted_device("dev-a")
-    helpers.register_trusted_device("dev-b")
+    device_link.register_trusted_device("dev-a")
+    device_link.register_trusted_device("dev-b")
     client.put("/api/v1/devices/order", json={"order": ["dev-b", "dev-a"]}, headers=admin_headers)
 
-    helpers.register_trusted_device("dev-c")
+    device_link.register_trusted_device("dev-c")
 
     body = client.get("/api/v1/devices", headers=admin_headers).json()
     assert [item["device_id"] for item in body] == ["dev-b", "dev-a", "dev-c"]
@@ -611,7 +611,7 @@ def test_device_order_is_manual_and_covers_every_listing(
     """
     for name in ("1F浴室", "2F浴室", "3F浴室"):
         device_id = f"dev-{name}"
-        helpers.register_trusted_device(device_id)
+        device_link.register_trusted_device(device_id)
         from app.modules.devices import repository as devices_repository
 
         devices_repository.set_name(device_id, name)
@@ -631,7 +631,7 @@ def test_device_order_is_manual_and_covers_every_listing(
 
 def test_device_order_rejects_unknown_devices(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:
     """顺序清单里出现未知设备整体拒绝：半排序比不排序更难看。"""
-    helpers.register_trusted_device("dev-order-a")
+    device_link.register_trusted_device("dev-order-a")
 
     resp = client.put("/api/v1/devices/order", json={"order": ["dev-order-a", "dev-not-exist"]}, headers=admin_headers)
 
@@ -647,7 +647,7 @@ def test_link_events_record_the_reasons(client: TestClient, admin_headers: dict[
     设备照常接入（reason 为空串），字段是可选的。
     """
     device_id = "dev-link-reason"
-    with helpers.trusted_online(client, device_id, admin_headers):
+    with device_link.trusted_online(client, device_id, admin_headers):
         # 老设备（hello 不带 last_offline_*）→ reason 空；夹具的信任踢会产生多轮事件，
         # 只看最后一条 online
         rows = (
@@ -662,8 +662,8 @@ def test_link_events_record_the_reasons(client: TestClient, admin_headers: dict[
     # 重连，hello 带上一次断开的原因（dns = 网线/交换机/DHCP 一类）：服务端把它记进
     # 这次 online 事件
     with client.websocket_connect("/gateway/device") as ws:
-        ws.send_text(helpers.hello_frame(device_id, last_offline_reason="dns", last_offline_at=now_rfc3339()))
-        helpers.recv_until(ws, "link.hello_ack")
+        ws.send_text(frames.hello_frame(device_id, last_offline_reason="dns", last_offline_at=now_rfc3339()))
+        frames.recv_until(ws, "link.hello_ack")
 
         rows = (
             db.get_conn()

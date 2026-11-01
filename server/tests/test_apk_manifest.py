@@ -1,6 +1,6 @@
 """APK 二进制 manifest 解析：真实块布局、两种字符串池与各类残缺输入。
 
-解析器没有官方参照实现可依赖，测试用合成 APK（`helpers.build_apk`，块布局逐段
+解析器没有官方参照实现可依赖，测试用合成 APK（`apk.build_apk`，块布局逐段
 对齐 aapt 产物）加残缺输入双向夹住；真实 APK 的解析结果已与 `aapt dump badging`
 对照验证过一次（2026-10-24，0.4.39/83 与 0.4.40/84 各一）。
 """
@@ -10,7 +10,7 @@ import struct
 import zipfile
 
 import pytest
-from tests.helpers import build_apk
+from tests.apk import build_apk
 
 from app.modules.ota import apk_manifest
 

@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from tests import helpers
+from tests import device_link
 
 from app.core import device_clock, outcomes, problems
 from app.core.clock import now_rfc3339, parse_rfc3339, rfc3339_ago, shift_rfc3339
@@ -788,7 +788,7 @@ def test_a_frame_ends_in_a_settle_then_an_assign(
         assert calls[1][1] == {"door_no": 3, "cert_no": "2026000001", "password": "000000"}
         assert scheduler._pending_assigns == {}
 
-    with helpers.trusted_online(client, "dev-1", admin_headers):
+    with device_link.trusted_online(client, "dev-1", admin_headers):
         asyncio.run(body())
 
 
@@ -814,7 +814,7 @@ def test_the_same_session_is_settled_only_once(
 
         assert [action for action, _params in calls] == ["session.settle"]
 
-    with helpers.trusted_online(client, "dev-1", admin_headers):
+    with device_link.trusted_online(client, "dev-1", admin_headers):
         asyncio.run(body())
 
 
@@ -846,7 +846,7 @@ def test_auto_settle_only_settles_and_never_reassigns(
         assert [action for action, _params in calls] == ["session.settle"]
         assert scheduler._pending_assigns == {}
 
-    with helpers.trusted_online(client, "dev-1", admin_headers):
+    with device_link.trusted_online(client, "dev-1", admin_headers):
         asyncio.run(body())
 
 
@@ -877,7 +877,7 @@ def test_a_student_outside_the_roster_is_never_touched(
         assert calls == []
         assert scheduler._workers["dev-1"].timers == {}
 
-    with helpers.trusted_online(client, "dev-1", admin_headers):
+    with device_link.trusted_online(client, "dev-1", admin_headers):
         asyncio.run(body())
 
 

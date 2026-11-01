@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
-from tests import helpers
+from tests import device_link
 
 from app.core import actions, outcomes, protocol, reason_codes
 from app.core.connections import manager
@@ -14,8 +14,8 @@ from app.modules.audit import repository as command_audit
 from app.modules.sessions import service
 
 
-def _online(monkeypatch: pytest.MonkeyPatch, device_id: str) -> helpers.FakeGatewayWS:
-    fake = helpers.FakeGatewayWS()
+def _online(monkeypatch: pytest.MonkeyPatch, device_id: str) -> device_link.FakeGatewayWS:
+    fake = device_link.FakeGatewayWS()
     monkeypatch.setattr(manager, "_connections", {device_id: fake})
     return fake
 

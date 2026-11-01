@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
-from tests import helpers
+from tests import device_link
 
 from app.core.config import settings
 from app.core.connections import manager
@@ -17,9 +17,9 @@ from app.modules.bridge.routes import _append
 DEVICE_ID = "dev-adb-1"
 
 
-def _register_online(monkeypatch: pytest.MonkeyPatch, device_id: str = DEVICE_ID) -> helpers.FakeGatewayWS:
-    helpers.register_trusted_device(device_id)
-    fake = helpers.FakeGatewayWS()
+def _register_online(monkeypatch: pytest.MonkeyPatch, device_id: str = DEVICE_ID) -> device_link.FakeGatewayWS:
+    device_link.register_trusted_device(device_id)
+    fake = device_link.FakeGatewayWS()
     monkeypatch.setattr(manager, "_connections", {device_id: fake})
     return fake
 
@@ -148,8 +148,8 @@ def test_bridge_open_reports_offline_when_send_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """连接存在但发送失败：409，且不残留 pending/active 状态。"""
-    helpers.register_trusted_device(DEVICE_ID)
-    monkeypatch.setattr(manager, "_connections", {DEVICE_ID: helpers.DeadGatewayWS()})
+    device_link.register_trusted_device(DEVICE_ID)
+    monkeypatch.setattr(manager, "_connections", {DEVICE_ID: device_link.DeadGatewayWS()})
 
     r = client.post(f"/api/v1/devices/{DEVICE_ID}/bridge/open", headers=admin_headers)
 
