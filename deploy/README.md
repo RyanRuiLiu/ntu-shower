@@ -1,40 +1,19 @@
 # deploy — 部署资产
 
-服务器运行配置的唯一事实来源。**改这里，再同步到服务器**，不要直接改服务器
-（本次入库的原因：nginx 的 WebSocket 升级头曾游离在仓库外，漏配导致用户页实时推送断连）。
+服务器运行配置的唯一事实来源。**改这里，再同步到服务器**，不要直接改服务器。
 
 ## 文件
 
 | 文件 | 服务器位置 | 生效方式 |
 |---|---|---|
-| `scripts/deploy.sh` | **不上服务器常驻**：随用随 `scp` 到 `/tmp` 再执行 | 见下「部署」 |
+| `scripts/deploy.sh` | **不上服务器常驻**：随用随 `scp` 到 `/tmp` 再执行 | 见 `docs/RUNBOOK.md`「部署」 |
 | `nginx/ntu-shower.conf` | `/etc/nginx/sites-available/ntu-shower.conf`（软链到 sites-enabled） | `nginx -t && systemctl reload nginx` |
 | `systemd/ntu-shower.service` | `/etc/systemd/system/ntu-shower.service` | `systemctl daemon-reload && systemctl restart ntu-shower` |
 | `backup/ntu-shower-backup.sh` | `/opt/ntu-shower-backup/ntu-shower-backup.sh` | 由单元调用 |
 | `backup/ntu-shower-backup.{service,timer}` | `/etc/systemd/system/` | `systemctl daemon-reload && systemctl enable --now ntu-shower-backup.timer` |
 | `publish_apk.ps1` | **不上服务器**：本地工具 | `.\deploy\publish_apk.ps1 -Identity <admin>` |
 
-**发布流程的顺序见 `docs/RUNBOOK.md`**——这里只放配置资产本身。
-
-## 部署
-
-代码替换由 `scripts/deploy.sh` 完成（停服 → 备份 → **保留四项状态目录、其余全删**后再解包
-→ 启动验证 → 失败自动回滚）。**四项保留项与"为什么不是列举要删的"写在脚本头部注释里**，
-那是它的机制说明，此处不复述。
-
-脚本**不常驻服务器**（随包发布的只有 `server/` 的内容），每次部署时送过去再执行：
-
-```bash
-scp deploy/scripts/deploy.sh <deploy-host>:/tmp/
-ssh <deploy-host> 'sudo NT_TARBALL=/tmp/server_deploy.tar.gz bash /tmp/deploy.sh'
-```
-
-回滚：
-
-```bash
-ssh <deploy-host> 'ls -1t /opt/ntu-shower/backups/server-*.tar.gz | head'
-ssh <deploy-host> 'sudo NT_ROLLBACK=/opt/ntu-shower/backups/server-<时间戳>.tar.gz bash /tmp/deploy.sh --rollback'
-```
+代码替换、回滚与部署后验证的步骤见 `docs/RUNBOOK.md`；这里只放配置资产本身与同步命令。
 
 ## 同步命令
 
