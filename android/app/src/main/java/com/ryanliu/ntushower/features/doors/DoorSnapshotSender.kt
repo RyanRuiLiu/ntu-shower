@@ -24,7 +24,7 @@ import java.util.UUID
  *
  * 上报因此只发生在**状态迁移**那一刻（进人、开阀、关阀暂停、恢复、出门清零）——这与
  * 浴室 App 的写库节奏一致：它洗浴期间根本不写，只在迁移时落 SQL（见
- * `ntu-remote-shower/dbGUIDE.md`）。实测 100 天的平均上报量是每 4 分钟一份。
+ * `ntu-bathapp-reverse/notes/2026-06-21-doorlist-schema.md`）。实测 100 天的平均上报量是每 4 分钟一份。
  */
 class DoorSnapshotSender(context: Context, private val onDoorsRead: (DoorReading) -> Unit = {}) {
 

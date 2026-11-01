@@ -2,7 +2,7 @@
 
 把三方行为各自实现成一个可执行的部件：
 
-    BathApp    浴室 App 的写库（每个方法对应一条真实 SQL，见 dbGUIDE）
+    BathApp    浴室 App 的写库（每个方法对应一条真实 SQL，见 ntu-bathapp-reverse/notes/2026-06-21-doorlist-schema.md）
     Monitor    设备端采集（1 秒防抖，窗口内的写库合并成一次读取）
     derive     服务端派生（会话与段、锚点换算、三项校验）
 
