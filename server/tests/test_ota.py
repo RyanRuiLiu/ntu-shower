@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from tests import helpers
+from tests import apk, device_link
 
 from app.core import config as config_module
 from app.modules.ota import repository, service
@@ -210,14 +210,16 @@ def test_upload_publishes_and_notifies_target_devices(
     from app.core.connections import manager
 
     monkeypatch.setattr(
-        manager, "_connections", {"dev-target-1": helpers.FakeGatewayWS(), "dev-other-9": helpers.FakeGatewayWS()}
+        manager,
+        "_connections",
+        {"dev-target-1": device_link.FakeGatewayWS(), "dev-other-9": device_link.FakeGatewayWS()},
     )
 
     r = client.post(
         "/api/v1/ota/releases",
         headers=admin_headers,
         data={"version": "0.2.5", "version_code": 7, "target": "dev-target-1"},
-        files={"file": ("ntu-shower-0.2.5.apk", io.BytesIO(helpers.build_apk("0.2.5", 7)), "application/octet-stream")},
+        files={"file": ("ntu-shower-0.2.5.apk", io.BytesIO(apk.build_apk("0.2.5", 7)), "application/octet-stream")},
     )
 
     assert r.status_code == 200
@@ -238,7 +240,7 @@ def test_upload_rejects_apk_whose_content_version_differs(
         "/api/v1/ota/releases",
         headers=admin_headers,
         data={"version": "0.4.40", "version_code": 84},
-        files={"file": ("stale.apk", io.BytesIO(helpers.build_apk("0.4.39", 83)), "application/octet-stream")},
+        files={"file": ("stale.apk", io.BytesIO(apk.build_apk("0.4.39", 83)), "application/octet-stream")},
     )
 
     assert r.status_code == 422

@@ -12,7 +12,7 @@ SKEW_FAST_S 取 -900 模拟"偏差已被测量"的状态：`_local_now` 给出�
 import asyncio
 
 import pytest
-from tests import helpers
+from tests import device_link
 
 from app.core import actions, device_clock
 from app.core.clock import shift_rfc3339
@@ -61,7 +61,7 @@ def _prepare(
     """
     device_clock.load(DEVICE, skew_s)
     # 必须登记：tick_once 遍历的是 `device` 表里的设备，没登记的话它连看都不看这台
-    helpers.register_trusted_device(DEVICE)
+    device_link.register_trusted_device(DEVICE)
     # 放回/失败/滚动限频的记忆是模块级的：上一个用例的痕迹会让这一个用例失真
     extend_hours._reassigned.clear()
     extend_hours._reassign_failed.clear()
@@ -467,9 +467,9 @@ def test_every_shift_is_logged_for_the_operator(fresh_db: str, monkeypatch: pyte
     assert "extend-hours.shifted" in events
 
 
-def test_helpers_are_available(fresh_db: str) -> None:
-    """`helpers` 的导入留住：其余用例从它取已信任设备的登记方式。"""
-    helpers.register_trusted_device(DEVICE)
+def test_registered_device_is_trusted(fresh_db: str) -> None:
+    """建档入口与生产仓储一致：经夹具登记的设备在档案里就是受信任的。"""
+    device_link.register_trusted_device(DEVICE)
     from app.modules.devices import service as devices_service
 
     record = devices_service.get_device(DEVICE)
@@ -827,8 +827,8 @@ def test_tick_advances_each_extending_device_with_its_own_config(
     此前 tick_once 把循环里最后一台的配置传给全部延长的设备——单台时侥幸正确，多设备下
     A 会拿 B 的时区与电源计划续写截止。
     """
-    helpers.register_trusted_device("dev-ext-a")
-    helpers.register_trusted_device("dev-ext-b")
+    device_link.register_trusted_device("dev-ext-a")
+    device_link.register_trusted_device("dev-ext-b")
     base = {
         "extend_hours_enabled": False,  # 不参与拨钟，只走推进
         "extend_hours_zone_offset_minutes": 480,

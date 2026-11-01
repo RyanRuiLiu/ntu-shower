@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from tests import helpers
+from tests import device_link
 
 from app.core import config as config_module
 from app.core.db import get_conn, write
@@ -378,7 +378,7 @@ def test_device_override_rejects_server_only_keys(
     monkeypatch.setattr(config_module.settings, "config_ack_timeout_s", 0.2)
     device_id = "dev-no-server-key"
 
-    with helpers.trusted_online(client, device_id, admin_headers):
+    with device_link.trusted_online(client, device_id, admin_headers):
         rejected = client.put(
             f"/api/v1/devices/{device_id}/config",
             headers=admin_headers,
@@ -442,7 +442,7 @@ def test_global_update_returns_noticed_devices(
 
     from app.core.connections import manager
 
-    monkeypatch.setattr(manager, "_connections", {"dev-cfg-anon": helpers.FakeGatewayWS()})
+    monkeypatch.setattr(manager, "_connections", {"dev-cfg-anon": device_link.FakeGatewayWS()})
     notified = client.put(
         "/api/v1/config", headers=admin_headers, json={"config": {"heartbeat_interval_s": 45}}
     ).json()["notified"]
@@ -458,7 +458,7 @@ def test_device_config_ack_round_trip(
     monkeypatch.setattr(config_module.settings, "config_ack_timeout_s", 2.0)
     outcome: dict[str, Any] = {}
 
-    with helpers.trusted_online(client, "dev-cfg-ack", admin_headers) as ws:
+    with device_link.trusted_online(client, "dev-cfg-ack", admin_headers) as ws:
 
         def call() -> None:
             outcome["r"] = client.put(
@@ -491,7 +491,7 @@ def test_device_config_lifecycle_without_ack(
     """设备在线但不应答：notified 为真、applied 为假并带原因；覆盖与删除照常落库。"""
     monkeypatch.setattr(config_module.settings, "config_ack_timeout_s", 0.2)
 
-    with helpers.trusted_online(client, "dev-cfg-1", admin_headers):
+    with device_link.trusted_online(client, "dev-cfg-1", admin_headers):
         r = client.put(
             "/api/v1/devices/dev-cfg-1/config",
             headers=admin_headers,
@@ -519,7 +519,7 @@ def test_device_config_lifecycle_without_ack(
 
 
 def test_device_config_rejected_when_offline(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:
-    helpers.register_trusted_device("dev-cfg-off")
+    device_link.register_trusted_device("dev-cfg-off")
 
     r = client.put("/api/v1/devices/dev-cfg-off/config", headers=admin_headers, json={"config": {}})
 

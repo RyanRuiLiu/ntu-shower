@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from tests import helpers
+from tests import device_link, frames
 
 from app.core.clock import now_rfc3339
 from app.core.config import settings
@@ -41,8 +41,8 @@ async def _drain_background() -> None:
 
 @pytest.fixture
 def voice_devices(fresh_db: str) -> None:
-    helpers.register_trusted_device(DEVICE_ID)
-    helpers.register_trusted_device(OTHER_DEVICE_ID)
+    device_link.register_trusted_device(DEVICE_ID)
+    device_link.register_trusted_device(OTHER_DEVICE_ID)
 
 
 @pytest.fixture
@@ -1592,9 +1592,9 @@ def test_gateway_schedules_voice_events(
     captured: list[tuple[DoorEvent, ...]] = []
     monkeypatch.setattr(service, "schedule_events", captured.append)
 
-    with helpers.trusted_online(client, "dev-gateway-voice", admin_headers) as ws:
+    with device_link.trusted_online(client, "dev-gateway-voice", admin_headers) as ws:
         ws.send_text(
-            helpers.frame(
+            frames.frame(
                 "door.snapshot",
                 {
                     "snapshot_id": "voice-gw-1",
@@ -1604,9 +1604,9 @@ def test_gateway_schedules_voice_events(
                 },
             )
         )
-        helpers.recv_until(ws, "door.snapshot_ack")
+        frames.recv_until(ws, "door.snapshot_ack")
         ws.send_text(
-            helpers.frame(
+            frames.frame(
                 "door.snapshot",
                 {
                     "snapshot_id": "voice-gw-2",
@@ -1616,7 +1616,7 @@ def test_gateway_schedules_voice_events(
                 },
             )
         )
-        helpers.recv_until(ws, "door.snapshot_ack")
+        frames.recv_until(ws, "door.snapshot_ack")
 
     assigned = [event for batch in captured for event in batch if event.kind is DoorEventKind.ASSIGNED]
     assert assigned
