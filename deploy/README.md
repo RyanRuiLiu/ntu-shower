@@ -9,7 +9,7 @@
 | `scripts/deploy.sh` | **不上服务器常驻**：随用随 `scp` 到 `/tmp` 再执行 | 见 `docs/RUNBOOK.md`「部署」 |
 | `nginx/ntu-shower.conf` | `/etc/nginx/sites-available/ntu-shower.conf`（软链到 sites-enabled） | `nginx -t && systemctl reload nginx` |
 | `systemd/ntu-shower.service` | `/etc/systemd/system/ntu-shower.service` | `systemctl daemon-reload && systemctl restart ntu-shower` |
-| `backup/ntu-shower-backup.sh` | `/opt/ntu-shower-backup/ntu-shower-backup.sh` | 由单元调用 |
+| `backup/ntu-shower-backup.sh` | `/opt/ntu-shower/scripts/ntu-shower-backup.sh` | 由单元调用 |
 | `backup/ntu-shower-backup.{service,timer}` | `/etc/systemd/system/` | `systemctl daemon-reload && systemctl enable --now ntu-shower-backup.timer` |
 | `publish_apk.ps1` | **不上服务器**：本地工具 | `.\deploy\publish_apk.ps1 -Identity <admin>` |
 
@@ -24,9 +24,9 @@ ssh root@iseekdream.com "nginx -t && systemctl reload nginx"
 scp deploy/systemd/ntu-shower.service root@iseekdream.com:/etc/systemd/system/ntu-shower.service
 ssh root@iseekdream.com "systemctl daemon-reload && systemctl restart ntu-shower"
 
-scp deploy/backup/ntu-shower-backup.sh root@iseekdream.com:/opt/ntu-shower-backup/ntu-shower-backup.sh
+scp deploy/backup/ntu-shower-backup.sh root@iseekdream.com:/opt/ntu-shower/scripts/ntu-shower-backup.sh
 scp deploy/backup/ntu-shower-backup.service deploy/backup/ntu-shower-backup.timer root@iseekdream.com:/etc/systemd/system/
-ssh root@iseekdream.com "chmod 700 /opt/ntu-shower-backup/ntu-shower-backup.sh && systemctl daemon-reload && systemctl enable --now ntu-shower-backup.timer"
+ssh root@iseekdream.com "chmod 700 /opt/ntu-shower/scripts/ntu-shower-backup.sh && systemctl daemon-reload && systemctl enable --now ntu-shower-backup.timer"
 ```
 
 ## 要点（改配置前先读）

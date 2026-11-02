@@ -10,7 +10,7 @@
 | 服务器 | `root@iseekdream.com`（SSH 密钥 `~/.ssh/iseekdream-ubuntu.pem`） |
 | 应用目录 | `/opt/ntu-shower/server`（`.venv`、`.env` 在此，均不入库；运行数据已分离至 `/opt/ntu-shower/data`） |
 | 数据目录 | `/opt/ntu-shower/data`（`ntu-shower.db`、`voice/`；属主为服务用户 `ntu-shower`） |
-| 备份目录 | `/opt/ntu-shower-backup` |
+| 备份目录 | `/var/backups/ntu-shower`（脚本 `/opt/ntu-shower/scripts/ntu-shower-backup.sh`）|
 | 运行时 | Python **3.13.x**（`.venv`，2026-11 从 3.10 升级）——与 CI 测试版本一致，见「注意事项」 |
 | 服务单元 | `ntu-shower.service`（uvicorn，Type=simple，Restart=always，以系统用户 `ntu-shower` 运行） |
 | 备份单元 | `ntu-shower-backup.timer`（每日 00:00，`Persistent=true`） |
@@ -141,7 +141,7 @@ ssh iseekdream.com 'curl -sS -H "X-Identity: <admin身份标识>" http://127.0.0
 ### 自动备份（数据库）
 
 `ntu-shower-backup.timer` 每日 00:00 执行 `VACUUM INTO` 在线备份（校验完整性后 gzip 压缩），
-滚动保留 30 份，落在 `/opt/ntu-shower-backup/ntu-shower-<时间戳>.db.gz`。
+滚动保留 14 份，落在 `/var/backups/ntu-shower/ntu-shower-<时间戳>.db.gz`。
 
 手动触发与查看：
 
@@ -156,12 +156,12 @@ keystore 是**全系统唯一长期绑定物件**：丢失意味着所有在网�
 
 ```bash
 # 备份到服务器（异地于开发机）
-scp config/keystore/ntu-shower.keystore iseekdream.com:/opt/ntu-shower-backup/
-ssh iseekdream.com 'chmod 600 /opt/ntu-shower-backup/ntu-shower.keystore'
+scp config/keystore/ntu-shower.keystore iseekdream.com:/var/backups/ntu-shower/
+ssh iseekdream.com 'chmod 600 /var/backups/ntu-shower/ntu-shower.keystore'
 
 # 校验两侧一致（指纹必须相同）
 Get-FileHash config/keystore/ntu-shower.keystore -Algorithm SHA256    # 本地
-ssh iseekdream.com 'sha256sum /opt/ntu-shower-backup/ntu-shower.keystore'
+ssh iseekdream.com 'sha256sum /var/backups/ntu-shower/ntu-shower.keystore'
 ```
 
 ### 恢复演练
@@ -169,7 +169,7 @@ ssh iseekdream.com 'sha256sum /opt/ntu-shower-backup/ntu-shower.keystore'
 数据库备份在临时位置实际还原过一次，验证脚本与结果如下（不碰生产）：
 
 ```bash
-ssh iseekdream.com 'BAK=$(ls -1t /opt/ntu-shower-backup/ntu-shower-*.db.gz | head -1)
+ssh iseekdream.com 'BAK=$(ls -1t /var/backups/ntu-shower/ntu-shower-*.db.gz | head -1)
   rm -rf /tmp/restore_test && mkdir -p /tmp/restore_test
   gunzip -c "$BAK" > /tmp/restore_test/restored.db
   /opt/ntu-shower/server/.venv/bin/python - <<PY
@@ -323,7 +323,7 @@ curl -X POST -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/d
 |---|---|
 | 服务状态 | `systemctl status ntu-shower` |
 | 实时日志 | `journalctl -u ntu-shower -f` |
-| 备份列表 | `ls -lh /opt/ntu-shower-backup/` |
+| 备份列表 | `ls -lh /var/backups/ntu-shower/` |
 | 抓设备画面 | `POST /api/v1/devices/<id>/capture`（返回 `data.image_base64`） |
 | 远程执行 shell | `POST /api/v1/devices/<id>/exec`，body `{"command": "..."}` |
 | 修改设备端时间 | `POST /api/v1/devices/<id>/clock/set`，body `{"datetime": "YYYY-MM-DD HH:MM:SS"}`（设备本地墙钟） |
