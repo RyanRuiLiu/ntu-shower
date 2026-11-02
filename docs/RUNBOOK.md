@@ -11,7 +11,7 @@
 | 应用目录 | `/opt/ntu-shower/server`（`.venv`、`.env` 在此，均不入库；运行数据已分离至 `/opt/ntu-shower/data`） |
 | 数据目录 | `/opt/ntu-shower/data`（`ntu-shower.db`、`voice/`；属主为服务用户 `ntu-shower`） |
 | 备份目录 | `/opt/ntu-shower-backup` |
-| 运行时 | Python **3.10.12**（`.venv`）——与 CI 测试版本一致，见「注意事项」 |
+| 运行时 | Python **3.13.x**（`.venv`，2026-11 从 3.10 升级）——与 CI 测试版本一致，见「注意事项」 |
 | 服务单元 | `ntu-shower.service`（uvicorn，Type=simple，Restart=always，以系统用户 `ntu-shower` 运行） |
 | 备份单元 | `ntu-shower-backup.timer`（每日 00:00，`Persistent=true`） |
 
@@ -95,10 +95,10 @@ ssh <deploy-host> 'sudo NT_ROLLBACK=/opt/ntu-shower/backups/server-<时间戳>.t
 
 ### 注意事项
 
-- **必须用生产 Python 预检**：本地 3.13 通过不代表生产 3.10 通过。
-  曾发生 `typing.TypedDict` 在 3.10 + pydantic 2.13 下被拒（要求 `typing_extensions.TypedDict`），
+- **必须用生产 Python 预检**：本地通过不代表生产通过。
+  历史教训：3.10 时代 `typing.TypedDict` 在 pydantic 2.13 下被拒（要求 `typing_extensions.TypedDict`），
   本地全绿而线上启动即崩——`deploy.sh` 的第 1 步就是为此存在的，而且它排在停服之前，
-  预检失败时服务一直没停过。
+  预检失败时服务一直没停过。2026-11 运行时升 3.13 后该坑消失，但预检流程保留。
 - 打包排除 `.env`：服务器的 `.env` 是唯一副本，被覆盖将导致管理面令牌丢失。
 - `requirements.txt` 变化时 `deploy.sh` 自己装依赖；只改业务代码不需要另跑 `pip install`。
 - 配置（nginx / systemd / backup）的唯一事实来源是 `deploy/`，**不要在服务器上直接改**；
