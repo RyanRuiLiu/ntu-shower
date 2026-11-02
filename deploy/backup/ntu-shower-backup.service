@@ -1,6 +1,6 @@
 [Unit]
 Description=NTU Shower data backup (SQLite online snapshot via VACUUM INTO)
-Documentation=file:/opt/ntu-shower/server/../../docs/RUNBOOK.md
+Documentation=file:/opt/server-config/apps/ntu-shower/README.md
 
 [Service]
 Type=oneshot

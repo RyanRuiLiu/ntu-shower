@@ -8,10 +8,11 @@
 |---|---|
 | 入口 | `https://ntu-shower.iseekdream.com`（nginx 443 → 127.0.0.1:8001） |
 | 服务器 | `root@iseekdream.com`（SSH 密钥 `~/.ssh/iseekdream-ubuntu.pem`） |
-| 应用目录 | `/opt/ntu-shower/server`（`.venv`、`data/`、`.env` 均在此，均不入库） |
+| 应用目录 | `/opt/ntu-shower/server`（`.venv`、`.env` 在此，均不入库；运行数据已分离至 `/opt/ntu-shower/data`） |
+| 数据目录 | `/opt/ntu-shower/data`（`ntu-shower.db`、`voice/`；属主为服务用户 `ntu-shower`） |
 | 备份目录 | `/opt/ntu-shower-backup` |
 | 运行时 | Python **3.10.12**（`.venv`）——与 CI 测试版本一致，见「注意事项」 |
-| 服务单元 | `ntu-shower.service`（uvicorn，Type=simple，Restart=always） |
+| 服务单元 | `ntu-shower.service`（uvicorn，Type=simple，Restart=always，以系统用户 `ntu-shower` 运行） |
 | 备份单元 | `ntu-shower-backup.timer`（每日 00:00，`Persistent=true`） |
 
 ## 痕迹取回（出问题时按设备 + 时间段还原现场）
@@ -69,7 +70,7 @@ scp deploy/scripts/deploy.sh iseekdream.com:/tmp/
 # ④ 服务器：部署
 #
 # 脚本依次做五件事：用**生产解释器**预检 → 停服并备份（保留最近 5 份到
-# /opt/ntu-shower/backups）→ 保留 .venv／data／ota_releases／.env、其余全删后再解包
+# /opt/ntu-shower/backups）→ 保留 .venv／ota_releases／.env、其余全删后再解包（数据在 /opt/ntu-shower/data，与代码目录分离）
 # → requirements.txt 变过才装依赖 → 启动并验证（is-active + /healthz）。
 # 任一步失败自动回滚；预检放在停服之前，所以预检不过时服务一直没停过、无需回滚。
 # 保留项清单与"其余全删"的理由写在脚本头部注释里。
@@ -111,10 +112,10 @@ ssh iseekdream.com 'sudo NT_ROLLBACK=/opt/ntu-shower/backups/server-<时间戳>.
 
 - **原始层只加列**：`ALTER TABLE door_snapshot ADD COLUMN device_clock TEXT`——老帧就该留空，
   它们确实没有这一列，那不是"缺数据"；
-- **派生层连表结构一起重建**：`python -m tools.rebuild_derived --db data/ntu-shower.db` 会 `DROP` 那四张表再建、再由原始层
+- **派生层连表结构一起重建**：`python -m tools.rebuild_derived --db /opt/ntu-shower/data/ntu-shower.db` 会 `DROP` 那四张表再建、再由原始层
   重算。只 `ALTER` 原始层**不够**——`CREATE TABLE IF NOT EXISTS` 不会去改一张已存在的表，
   旧结构会让重算在第一帧就撞上"没有这一列"；
-- **核对**：`python -m tools.audit_timeline --db data/ntu-shower.db`，**帧数必须与变更前一致**。
+- **核对**：`python -m tools.audit_timeline --db /opt/ntu-shower/data/ntu-shower.db`，**帧数必须与变更前一致**。
 
 以上命令在 `server/` 下执行，用生产解释器 `.venv/bin/python`。
 
@@ -202,7 +203,7 @@ keystore 的可用性验证：从备份副本执行 `gradlew assembleRelease` �
 # 诊断：发布记录与安装确认
 ssh iseekdream.com '/opt/ntu-shower/server/.venv/bin/python - <<PY
 import sqlite3
-con = sqlite3.connect("/opt/ntu-shower/server/data/ntu-shower.db")
+con = sqlite3.connect("/opt/ntu-shower/data/ntu-shower.db")
 print("release:", con.execute("SELECT version, version_code, force, target FROM ota_release").fetchall())
 print("install:", con.execute("SELECT * FROM ota_release_install").fetchall())
 PY'
