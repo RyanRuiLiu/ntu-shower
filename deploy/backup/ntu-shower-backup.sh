@@ -49,8 +49,12 @@ if result != "ok":
 PY
 chmod 600 "$target"
 
-# 滚动保留：只留最近 KEEP 份
-find "$BACKUP_DIR" -maxdepth 1 -name 'ntu-shower-*.db' -printf '%T@ %p\n' \
+# 压缩归档：SQLite 是高度重复的页结构，gzip 通常省 2/3 体积；mtime 随压缩保留
+gzip -f "$target"
+target="$target.gz"
+
+# 滚动保留：只留最近 KEEP 份（*.db 兼容历史未压缩备份，*.db.gz 为当前格式）
+find "$BACKUP_DIR" -maxdepth 1 -name 'ntu-shower-*.db*' -printf '%T@ %p\n' \
     | sort -rn \
     | awk -v keep="$KEEP" 'NR > keep { sub(/^[^ ]+ /, ""); print }' \
     | xargs -r rm --
