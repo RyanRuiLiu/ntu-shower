@@ -1,15 +1,25 @@
 # /etc/systemd/system/ntu-shower.service
 [Unit]
 Description=NTU Shower Server (gateway + api + admin + ota)
+Documentation=file:/opt/server-config/apps/ntu-shower/README.md
 After=network.target
 
 [Service]
 Type=simple
+User=ntu-shower
+Group=ntu-shower
 WorkingDirectory=/opt/ntu-shower/server
 EnvironmentFile=/opt/ntu-shower/server/.env
 ExecStart=/opt/ntu-shower/server/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001
 Restart=always
 RestartSec=3
+
+# 加固：只读系统，仅应用目录可写
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/ntu-shower
 
 [Install]
 WantedBy=multi-user.target
