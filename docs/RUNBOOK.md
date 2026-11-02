@@ -140,8 +140,8 @@ ssh iseekdream.com 'curl -sS -H "X-Identity: <admin身份标识>" http://127.0.0
 
 ### 自动备份（数据库）
 
-`ntu-shower-backup.timer` 每日 00:00 执行 `VACUUM INTO` 在线备份，
-滚动保留 30 份，落在 `/opt/ntu-shower-backup/ntu-shower-<时间戳>.db`。
+`ntu-shower-backup.timer` 每日 00:00 执行 `VACUUM INTO` 在线备份（校验完整性后 gzip 压缩），
+滚动保留 30 份，落在 `/opt/ntu-shower-backup/ntu-shower-<时间戳>.db.gz`。
 
 手动触发与查看：
 
@@ -169,9 +169,9 @@ ssh iseekdream.com 'sha256sum /opt/ntu-shower-backup/ntu-shower.keystore'
 数据库备份在临时位置实际还原过一次，验证脚本与结果如下（不碰生产）：
 
 ```bash
-ssh iseekdream.com 'BAK=$(ls -1t /opt/ntu-shower-backup/ntu-shower-*.db | head -1)
+ssh iseekdream.com 'BAK=$(ls -1t /opt/ntu-shower-backup/ntu-shower-*.db.gz | head -1)
   rm -rf /tmp/restore_test && mkdir -p /tmp/restore_test
-  cp "$BAK" /tmp/restore_test/restored.db
+  gunzip -c "$BAK" > /tmp/restore_test/restored.db
   /opt/ntu-shower/server/.venv/bin/python - <<PY
 import sqlite3
 con = sqlite3.connect("/tmp/restore_test/restored.db")
