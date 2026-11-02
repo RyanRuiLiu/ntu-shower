@@ -9,11 +9,11 @@
 set -euo pipefail
 umask 077
 
-BACKUP_DIR="${BACKUP_DIR:-/opt/ntu-shower-backup}"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/ntu-shower}"
 SERVER_DIR="${SERVER_DIR:-/opt/ntu-shower/server}"
 DB_PATH="/opt/ntu-shower/data/ntu-shower.db"
 PYTHON="$SERVER_DIR/.venv/bin/python"
-KEEP="${KEEP:-30}"
+KEEP="${KEEP:-14}"
 
 mkdir -p "$BACKUP_DIR"
 chmod 700 "$BACKUP_DIR"
