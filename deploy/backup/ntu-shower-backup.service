@@ -4,4 +4,4 @@ Documentation=file:/opt/server-config/apps/ntu-shower/README.md
 
 [Service]
 Type=oneshot
-ExecStart=/opt/ntu-shower-backup/ntu-shower-backup.sh
+ExecStart=/opt/ntu-shower/scripts/ntu-shower-backup.sh
