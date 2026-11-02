@@ -22,17 +22,21 @@
 #  `tools/` 之前的旧目录）。凡是"枚举要删的"，加一个目录就漏一个。
 #  反过来枚举要**保留的**之后，生产就等于"包里的内容 + 这几项状态"，删除天然生效。
 #
-#  ## 绝不能删的四项（仓库里没有、丢了不可恢复）
+#  ## 绝不能删的三项（仓库里没有、丢了不可恢复）
 #
 #    .venv          虚拟环境（重建要联网装依赖）
-#    data/          运行时数据库——**唯一副本**
 #    ota_releases/  已发布的安装包
 #    .env           systemd 的 EnvironmentFile，装着数据库路径等生产配置
+#
+#  运行数据（数据库、voice 素材）在 /opt/ntu-shower/data，与代码目录分离；
+#  服务以专用系统用户 ntu-shower 运行，代码与数据都归该用户。
 # ============================================================
 
 set -euo pipefail
 
 SERVER_DIR="/opt/ntu-shower/server"
+DATA_DIR="/opt/ntu-shower/data"
+SERVICE_USER="ntu-shower"
 VENV_DIR="${SERVER_DIR}/.venv"
 PYTHON="${VENV_DIR}/bin/python"
 SERVICE="ntu-shower"
@@ -48,10 +52,10 @@ log_info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
 
-# 保留四项状态目录，其余全删。备份文件在 /opt/ntu-shower/backups（本目录之外），安全。
+# 保留三项状态目录，其余全删。备份文件在 /opt/ntu-shower/backups（本目录之外），安全。
 wipe_code() {
     find "$SERVER_DIR" -mindepth 1 -maxdepth 1 \
-        ! -name '.venv' ! -name 'data' ! -name 'ota_releases' ! -name '.env' \
+        ! -name '.venv' ! -name 'ota_releases' ! -name '.env' \
         -exec rm -rf {} +
 }
 
@@ -63,6 +67,8 @@ rollback() {
     if [[ -n "$BACKUP_FILE" && -f "$BACKUP_FILE" ]]; then
         wipe_code
         tar xzf "$BACKUP_FILE" -C "$SERVER_DIR"
+        chown -R "$SERVICE_USER":"$SERVICE_USER" "$SERVER_DIR"
+        chown root:"$SERVICE_USER" "${SERVER_DIR}/.env"; chmod 640 "${SERVER_DIR}/.env"
         log_warn "已从 $BACKUP_FILE 恢复代码"
     else
         log_error "没有可用备份，代码目录停在当前状态"
@@ -126,21 +132,25 @@ systemctl stop "$SERVICE" 2>/dev/null || log_warn "服务本就未在运行"
 
 mkdir -p "$BACKUP_DIR"
 BACKUP_FILE="${BACKUP_DIR}/server-$(date +%s).tar.gz"
-# 只备代码与配置：四个保留项不会被动，重建它们要联网且体积大（.venv/data/ota_releases）
+# 只备代码与配置：三个保留项不会被动，重建它们要联网且体积大（.venv/ota_releases）
 tar czf "$BACKUP_FILE" -C "$SERVER_DIR" \
     app tests tools web pyproject.toml requirements.txt requirements-dev.txt .env.example
 ls -1t "${BACKUP_DIR}"/server-*.tar.gz 2>/dev/null | tail -n +$((BACKUP_KEEP + 1)) | xargs -r rm -f
 log_info "备份：$BACKUP_FILE"
 
 # ---- 3. 替换代码 ----
-log_info "[3/5] 替换代码（保留 .venv／data／ota_releases／.env）..."
+log_info "[3/5] 替换代码（保留 .venv／ota_releases／.env；数据在 $DATA_DIR，与代码分离）..."
 wipe_code
 tar xzf "$NT_TARBALL" -C "$SERVER_DIR"
 
-# 数据与备份含身份标识、用户记录与审计：只允许 root 读取
-chmod 700 "$SERVER_DIR/data" "$BACKUP_DIR" "$DATA_BACKUP_DIR" 2>/dev/null || true
-if [[ -d "$SERVER_DIR/data" ]]; then
-    find "$SERVER_DIR/data" -maxdepth 1 -type f \( -name '*.db' -o -name '*.db-wal' -o -name '*.db-shm' \) -exec chmod 600 {} +
+# 代码归服务用户：systemd 以 ntu-shower 运行，解包出的文件必须归它
+chown -R "$SERVICE_USER":"$SERVICE_USER" "$SERVER_DIR"
+chown root:"$SERVICE_USER" "${SERVER_DIR}/.env"; chmod 640 "${SERVER_DIR}/.env"
+
+# 数据与备份含身份标识、用户记录与审计：仅属主可读写
+chmod 700 "$DATA_DIR" "$BACKUP_DIR" "$DATA_BACKUP_DIR" 2>/dev/null || true
+if [[ -d "$DATA_DIR" ]]; then
+    find "$DATA_DIR" -maxdepth 1 -type f \( -name '*.db' -o -name '*.db-wal' -o -name '*.db-shm' \) -exec chmod 600 {} +
 fi
 if [[ -d "$DATA_BACKUP_DIR" ]]; then
     find "$DATA_BACKUP_DIR" -maxdepth 1 -type f -name '*.db*' -exec chmod 600 {} +
