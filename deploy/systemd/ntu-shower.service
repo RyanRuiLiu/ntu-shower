@@ -16,15 +16,12 @@ ExecStart=/opt/ntu-shower/server/.venv/bin/uvicorn app.main:app --host 127.0.0.1
 Restart=on-failure
 RestartSec=3
 
-# 加固：只读系统，仅应用目录可写
+# 加固基线（systemd.exec(5)）：全部置于 [Service]，[Install] 仅保留 WantedBy
 NoNewPrivileges=yes
 PrivateTmp=yes
+PrivateDevices=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=/opt/ntu-shower
-
-[Install]
-PrivateDevices=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
@@ -32,5 +29,7 @@ ProtectControlGroups=yes
 ProtectHostname=yes
 ProtectClock=yes
 RestrictSUIDSGID=yes
-WantedBy=multi-user.target
+ReadWritePaths=/opt/ntu-shower
 
+[Install]
+WantedBy=multi-user.target
