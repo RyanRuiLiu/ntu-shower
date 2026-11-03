@@ -6,6 +6,9 @@
 #
 # keystore 不在此脚本内：它是静态文件且是"全系统唯一长期绑定物件"，
 # 采用人工异地副本 + 指纹校验（见 docs/RUNBOOK.md §3），不做自动滚动。
+#
+# 原子写约定：VACUUM INTO 先落 .part，完整性校验通过才 rename；
+# gzip 后再验压缩流与解压字节数。避免失败时留下"看起来有效"的残件。
 set -euo pipefail
 umask 077
 
@@ -19,6 +22,7 @@ mkdir -p "$BACKUP_DIR"
 chmod 700 "$BACKUP_DIR"
 stamp="$(date +%Y%m%d-%H%M%S)"
 target="$BACKUP_DIR/ntu-shower-$stamp.db"
+tmpfile="$target.part"
 
 # 磁盘水位：备份与库本身都在这块盘上，写满的那天没有任何功能会替我们说话。
 # 阈值留给人工处置（清理或扩容），脚本只负责把话说出来——它每天跑一次，
@@ -28,7 +32,7 @@ if [ -n "$usage" ] && [ "$usage" -ge 85 ]; then
     echo "WARNING: 磁盘使用率已达 ${usage}%（阈值 85%），请尽快清理或扩容" >&2
 fi
 
-"$PYTHON" - "$DB_PATH" "$target" <<'PY'
+"$PYTHON" - "$DB_PATH" "$tmpfile" <<'PY'
 import sqlite3
 import sys
 
@@ -47,11 +51,24 @@ finally:
 if result != "ok":
     raise SystemExit(f"备份完整性校验未通过：{result}")
 PY
-chmod 600 "$target"
+chmod 600 "$tmpfile"
+mv "$tmpfile" "$target"
 
 # 压缩归档：SQLite 是高度重复的页结构，gzip 通常省 2/3 体积；mtime 随压缩保留
 gzip -f "$target"
 target="$target.gz"
+
+if ! gzip -t "$target"; then
+    rm -f "$target"
+    echo "backup FAILED: gzip 流校验失败" >&2
+    exit 1
+fi
+rawsize="$(gzip -dc "$target" | wc -c)"
+if [ "$rawsize" -lt 4096 ]; then
+    rm -f "$target"
+    echo "backup FAILED: 解压后仅 ${rawsize} 字节" >&2
+    exit 1
+fi
 
 # 滚动保留：只留最近 KEEP 份（*.db 兼容历史未压缩备份，*.db.gz 为当前格式）
 find "$BACKUP_DIR" -maxdepth 1 -name 'ntu-shower-*.db*' -printf '%T@ %p\n' \
@@ -59,4 +76,4 @@ find "$BACKUP_DIR" -maxdepth 1 -name 'ntu-shower-*.db*' -printf '%T@ %p\n' \
     | awk -v keep="$KEEP" 'NR > keep { sub(/^[^ ]+ /, ""); print }' \
     | xargs -r rm --
 
-echo "backup ok: $target ($(du -h "$target" | cut -f1))"
+echo "backup ok: $target ($(du -h "$target" | cut -f1), 明文 ${rawsize} 字节)"
