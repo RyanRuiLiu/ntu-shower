@@ -7,7 +7,7 @@
 
 | 项 | 值 |
 |---|---|
-| 入口 | `https://ntu-shower.iseekdream.com`（nginx 443 → 127.0.0.1:8001） |
+| 入口 | `https://ntu-shower.iseekdream.com`（nginx 443 → 127.0.0.1:8110） |
 | 服务器 | `root@iseekdream.com`（SSH 密钥 `~/.ssh/iseekdream-ubuntu.pem`） |
 | 应用目录 | `/opt/ntu-shower/server`（`.venv`、`.env` 在此，均不入库；运行数据已分离至 `/opt/ntu-shower/data`） |
 | 数据目录 | `/opt/ntu-shower/data`（`ntu-shower.db`、`voice/`；属主为服务用户 `ntu-shower`） |
@@ -23,10 +23,10 @@
 ```bash
 # ① HTTP/网关审计（谁、何时、调了什么、结果）：本机直连后端。
 #    管理面凭 admin 身份（X-Identity 头），身份在网页端"身份"页签发
-curl -s -H "X-Identity: <admin身份标识>"   "http://127.0.0.1:8001/api/v1/audit/calls?device_id=<设备>&limit=100"
+curl -s -H "X-Identity: <admin身份标识>"   "http://127.0.0.1:8110/api/v1/audit/calls?device_id=<设备>&limit=100"
 
 # ② 命令级审计（trace_id 与 ① 互通）
-curl -s -H "X-Identity: <admin身份标识>" "http://127.0.0.1:8001/api/v1/audit/commands?device_id=<设备>"
+curl -s -H "X-Identity: <admin身份标识>" "http://127.0.0.1:8110/api/v1/audit/commands?device_id=<设备>"
 
 # ③ 设备端命令痕迹（与 ② 同一 command_id 呼应）
 #    经 ops 页设备面板的命令执行，或 bridge shell：
@@ -129,7 +129,7 @@ ffmpeg 统一转成 MP3，因此只需系统有 `ffmpeg` 与 `ffprobe`（需带 
 # 系统依赖：ffmpeg / ffprobe（MP3 编码）
 ssh iseekdream.com 'ffmpeg -hide_banner -encoders | grep libmp3lame; command -v ffprobe'
 # 素材与数字状态（admin 身份）
-ssh iseekdream.com 'curl -sS -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/voice/status'
+ssh iseekdream.com 'curl -sS -H "X-Identity: <admin身份标识>" http://127.0.0.1:8110/api/v1/voice/status'
 ```
 
 `ffmpeg_available=true` 才能上传素材；`digits` 列出已标记的 0–9 数字素材，含数字变量的
@@ -210,7 +210,7 @@ print("install:", con.execute("SELECT * FROM ota_release_install").fetchall())
 PY'
 
 # 止损：下架该发布（最直接）
-curl -X DELETE -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/ota/releases/<版本>
+curl -X DELETE -H "X-Identity: <admin身份标识>" http://127.0.0.1:8110/api/v1/ota/releases/<版本>
 ```
 
 **预防**：`mark_installed_upto` 已在设备 hello 时调用（且早于 `latest_for`），
@@ -232,13 +232,13 @@ ssh iseekdream.com 'systemctl is-active ntu-shower; journalctl -u ntu-shower -n 
 **排查**：若某命令被拒且 `reason_code=device.unsupported_action`，先看设备声明里有没有它：
 
 ```bash
-ssh iseekdream.com 'curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/devices/runtime | python3 -m json.tool'
+ssh iseekdream.com 'curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.1:8110/api/v1/devices/runtime | python3 -m json.tool'
 ```
 
 ### 设备离线
 
 ```bash
-ssh iseekdream.com 'curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/devices/runtime'
+ssh iseekdream.com 'curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.1:8110/api/v1/devices/runtime'
 ```
 
 注意 `online` 字段是**最后一次上报值**，与内存中的活动连接分开判断；
@@ -276,15 +276,15 @@ ssh iseekdream.com 'curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.
 
 ```bash
 # 打开（设备侧会 root 开启 adbd）
-curl -X POST -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/devices/<id>/bridge/open
+curl -X POST -H "X-Identity: <admin身份标识>" http://127.0.0.1:8110/api/v1/devices/<id>/bridge/open
 # 本地隧道 + adb
 ssh -N -L 15655:127.0.0.1:15655 root@iseekdream.com &
 adb connect 127.0.0.1:15655 && adb devices
 
 # 查看状态：含 expires_in_s（距寿命到点还有多久）
-curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/devices/<id>/bridge
+curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.1:8110/api/v1/devices/<id>/bridge
 # 用毕关闭
-curl -X POST -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/devices/<id>/bridge/close
+curl -X POST -H "X-Identity: <admin身份标识>" http://127.0.0.1:8110/api/v1/devices/<id>/bridge/close
 ```
 
 两个上限都可配（`bridge_pair_timeout_s` 默认 30 秒——点开桥后建隧道的最长时间；

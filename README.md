@@ -43,7 +43,7 @@ cp .env.example .env
 .venv/Scripts/uvicorn app.main:app --reload --port 8000
 ```
 
-生产运行时为 Python 3.10；本机可以使用更高版本，但合并前必须在 Python 3.10 下通过质量门。
+生产运行时为 Python 3.13；本机可以使用同一版本，合并前必须在 Python 3.13 下通过质量门。
 
 ### 设备端
 

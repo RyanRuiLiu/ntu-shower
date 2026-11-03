@@ -8,7 +8,7 @@
 #  用法：sudo NT_TARBALL=/tmp/server_deploy.tar.gz bash /tmp/deploy.sh
 #
 #  本脚本行为：
-#    1. 预检：用**生产解释器**在临时目录导入新代码（本地 3.13 通过不代表生产 3.10 通过）
+#    1. 预检：用**生产解释器**在临时目录导入新代码（本地能导入不代表生产解释器能导入）
 #    2. 停服 → 备份当前代码与配置到 backups/（保留最近 5 份）
 #    3. 保留四项状态目录、其余全删，再把包解开
 #    4. requirements.txt 变过才装依赖
@@ -40,9 +40,9 @@ SERVICE_USER="ntu-shower"
 VENV_DIR="${SERVER_DIR}/.venv"
 PYTHON="${VENV_DIR}/bin/python"
 SERVICE="ntu-shower"
-HEALTH_URL="http://127.0.0.1:8001/healthz"
+HEALTH_URL="http://127.0.0.1:8110/healthz"
 BACKUP_DIR="/opt/ntu-shower/backups"
-DATA_BACKUP_DIR="/opt/ntu-shower-backup"
+DATA_BACKUP_DIR="/var/backups/ntu-shower"
 BACKUP_KEEP=5
 CHECK_DIR="/tmp/ntu-shower-deploy-check"
 NT_TARBALL="${NT_TARBALL:-/tmp/server_deploy.tar.gz}"

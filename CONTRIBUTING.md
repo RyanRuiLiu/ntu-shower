@@ -12,7 +12,7 @@
 
 | 工具 | 要求 |
 |---|---|
-| Python | 生产运行时 3.10；CI 使用 3.10 |
+| Python | 生产运行时 3.13；CI 使用 3.13 |
 | JDK | 25；`android/app/build.gradle.kts` 的编译目标为 Java 22 |
 | Android SDK | 与 `android/app/build.gradle.kts` 的编译版本一致 |
 | Git | 支持 `core.autocrlf` 与 `.gitattributes` 的版本 |
