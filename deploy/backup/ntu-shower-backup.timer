@@ -1,5 +1,5 @@
 [Unit]
-Description=Daily NTU Shower data backup
+Description=Run NTU Shower daily backup at 00:00
 
 [Timer]
 OnCalendar=daily
