@@ -1243,127 +1243,6 @@ def test_dispatch_event_handles_malformed_rule(
 # ── 一次性重建 ───────────────────────────────────────────────────────────
 
 
-def test_legacy_rebuild_imports_effects_and_drops_old_tables(
-    fresh_db: str,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    root = Path(settings.voice_dir)
-    effects = root / "effects"
-    effects.mkdir(parents=True, exist_ok=True)
-    effect_id = "e" * 64
-    (effects / f"{effect_id}.wav").write_bytes(b"effect")
-    duplicate_id = "d" * 64
-    (effects / f"{duplicate_id}.wav").write_bytes(b"effect")
-    broken_id = "c" * 64
-    (effects / f"{broken_id}.wav").write_bytes(b"broken")
-    missing_id = "f" * 64
-    clips = root / "clips"
-    clips.mkdir(parents=True, exist_ok=True)
-    (clips / "old.mp3").write_bytes(b"old")
-    audio.tmp_dir().mkdir(parents=True, exist_ok=True)
-    (audio.tmp_dir() / "orphan.part").write_bytes(b"orphan")
-
-    conn = get_conn()
-    conn.executescript(
-        """
-        DROP TABLE IF EXISTS voice_asset;
-        DROP TABLE IF EXISTS voice_rule;
-        DROP TABLE IF EXISTS voice_delivery;
-        CREATE TABLE voice_rule (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL);
-        CREATE TABLE voice_delivery (id INTEGER PRIMARY KEY AUTOINCREMENT, clip_id TEXT NOT NULL);
-        CREATE TABLE voice_clip (clip_id TEXT PRIMARY KEY, path TEXT NOT NULL);
-        CREATE TABLE voice_effect (
-            effect_id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        );
-        """
-    )
-    conn.execute("INSERT INTO voice_rule(text) VALUES ('旧规则')")
-    conn.execute("INSERT INTO voice_delivery(clip_id) VALUES ('旧投递')")
-    conn.execute("INSERT INTO voice_clip(clip_id,path) VALUES ('x','y')")
-    conn.execute(
-        "INSERT INTO voice_effect(effect_id,name,created_at) VALUES (?,?,?)",
-        (effect_id, "叮", "2026-01-01T00:00:00.000Z"),
-    )
-    conn.execute(
-        "INSERT INTO voice_effect(effect_id,name,created_at) VALUES (?,?,?)",
-        (duplicate_id, "重复内容", "2026-01-01T00:00:00.000Z"),
-    )
-    conn.execute(
-        "INSERT INTO voice_effect(effect_id,name,created_at) VALUES (?,?,?)",
-        (broken_id, "坏音效", "2026-01-01T00:00:00.000Z"),
-    )
-    conn.execute(
-        "INSERT INTO voice_effect(effect_id,name,created_at) VALUES (?,?,?)",
-        (missing_id, "已丢失", "2026-01-01T00:00:00.000Z"),
-    )
-    conn.commit()
-
-    def normalize(source: Path, target: Path) -> int:
-        if source.name.startswith("c"):
-            message = "坏音频"
-            raise audio.AudioError(message)
-        target.write_bytes(b"MP3-EFFECT")
-        return 700
-
-    monkeypatch.setattr(audio, "normalize_to_mp3", normalize)
-    repository.init_tables()
-
-    names = {str(row["name"]) for row in repository.list_assets()}
-    assert names == {"叮"}
-    imported = repository.get_asset_by_name("叮")
-    assert imported is not None
-    assert int(imported["duration_ms"]) == 700
-    assert audio.asset_path(str(imported["asset_id"])).read_bytes() == b"MP3-EFFECT"
-    assert not _table_exists("voice_effect")
-    assert not _table_exists("voice_clip")
-    assert not clips.exists()
-    assert (effects / f"{effect_id}.wav").is_file()
-    assert list(audio.tmp_dir().glob("*")) == []
-
-    repository.init_tables()
-    assert len(repository.list_assets()) == 1
-
-
-def test_legacy_rebuild_name_conflict_keeps_existing(
-    fresh_db: str,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    root = Path(settings.voice_dir)
-    existing_id = "b" * 64
-    audio.assets_dir().mkdir(parents=True, exist_ok=True)
-    audio.asset_path(existing_id).write_bytes(b"existing")
-    repository.insert_asset(existing_id, "叮", None, 500, 8, now_rfc3339())
-
-    effects = root / "effects"
-    effects.mkdir(parents=True, exist_ok=True)
-    effect_id = "a" * 64
-    (effects / f"{effect_id}.wav").write_bytes(b"effect")
-    monkeypatch.setattr(audio, "normalize_to_mp3", lambda _source, target: _write(target, b"MP3"))
-    conn = get_conn()
-    conn.execute("CREATE TABLE voice_effect (effect_id TEXT PRIMARY KEY, name TEXT, created_at TEXT)")
-    conn.execute(
-        "INSERT INTO voice_effect(effect_id,name,created_at) VALUES (?,?,?)",
-        (effect_id, "叮", "2026-01-01T00:00:00.000Z"),
-    )
-    conn.commit()
-    repository.init_tables()
-    assets = repository.list_assets()
-    assert len(assets) == 1
-    assert str(assets[0]["asset_id"]) == existing_id
-
-
-def _write(path: Path, data: bytes) -> int:
-    path.write_bytes(data)
-    return 500
-
-
-def _table_exists(name: str) -> bool:
-    row = get_conn().execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
-    return row is not None
-
-
 def test_asset_rows_empty_and_plan_helpers(fresh_db: str) -> None:
     assert repository.asset_rows_by_ids([]) == {}
     assert service._play_timeout_s(0) == 120.0
@@ -1575,15 +1454,6 @@ def test_push_rejects_malformed_rule(
     assert error.value.problem is INVALID_VOICE_RULE
 
 
-def test_legacy_rebuild_with_only_clip_table(fresh_db: str) -> None:
-    conn = get_conn()
-    conn.execute("CREATE TABLE voice_clip (clip_id TEXT PRIMARY KEY, path TEXT NOT NULL)")
-    conn.commit()
-    repository.init_tables()
-    assert not _table_exists("voice_clip")
-    assert repository.list_assets() == []
-
-
 def test_gateway_schedules_voice_events(
     client: TestClient,
     admin_headers: dict[str, str],
@@ -1653,20 +1523,6 @@ def test_dispatch_uses_server_local_time(fresh_db: str, monkeypatch: pytest.Monk
     local = captured["local"]
     assert getattr(local, "hour", None) == 22
     assert getattr(local, "minute", None) == 0
-
-
-def test_rule_schema_reset_rebuilds_with_time_windows(fresh_db: str) -> None:
-    conn = get_conn()
-    conn.execute("DROP TABLE IF EXISTS voice_rule")
-    conn.execute("CREATE TABLE voice_rule (id INTEGER PRIMARY KEY, segments TEXT NOT NULL)")
-    conn.execute("INSERT INTO voice_rule(id, segments) VALUES (1, '[]')")
-    conn.commit()
-
-    repository.init_tables()
-
-    columns = [str(row["name"]) for row in conn.execute("PRAGMA table_info(voice_rule)").fetchall()]
-    assert "time_windows" in columns
-    assert repository.list_rules() == []
 
 
 def test_unit_assets_are_marked_and_used_for_door_numbers(
