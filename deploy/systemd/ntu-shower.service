@@ -1,6 +1,8 @@
 # /etc/systemd/system/ntu-shower.service
 [Unit]
-Description=NTU Shower Server (gateway + api + admin + ota)
+StartLimitIntervalSec=60
+StartLimitBurst=5
+Description=NTU Shower application server
 Documentation=file:/opt/server-config/apps/ntu-shower/README.md
 After=network.target
 
@@ -10,8 +12,8 @@ User=ntu-shower
 Group=ntu-shower
 WorkingDirectory=/opt/ntu-shower/server
 EnvironmentFile=/opt/ntu-shower/server/.env
-ExecStart=/opt/ntu-shower/server/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001
-Restart=always
+ExecStart=/opt/ntu-shower/server/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8110
+Restart=on-failure
 RestartSec=3
 
 # 加固：只读系统，仅应用目录可写
@@ -22,4 +24,13 @@ ProtectHome=yes
 ReadWritePaths=/opt/ntu-shower
 
 [Install]
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectClock=yes
+RestrictSUIDSGID=yes
 WantedBy=multi-user.target
+
