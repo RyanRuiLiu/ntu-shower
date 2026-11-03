@@ -11,7 +11,7 @@ Type=simple
 User=ntu-shower
 Group=ntu-shower
 WorkingDirectory=/opt/ntu-shower/server
-EnvironmentFile=/opt/ntu-shower/server/.env
+EnvironmentFile=/etc/ntu-shower/ntu-shower.env
 ExecStart=/opt/ntu-shower/server/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8110
 Restart=on-failure
 RestartSec=3
@@ -29,7 +29,7 @@ ProtectControlGroups=yes
 ProtectHostname=yes
 ProtectClock=yes
 RestrictSUIDSGID=yes
-ReadWritePaths=/opt/ntu-shower
+ReadWritePaths=/var/lib/ntu-shower
 
 [Install]
 WantedBy=multi-user.target

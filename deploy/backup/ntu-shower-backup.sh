@@ -14,7 +14,7 @@ umask 077
 
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/ntu-shower}"
 SERVER_DIR="${SERVER_DIR:-/opt/ntu-shower/server}"
-DB_PATH="/opt/ntu-shower/data/ntu-shower.db"
+DB_PATH="/var/lib/ntu-shower/ntu-shower.db"
 PYTHON="$SERVER_DIR/.venv/bin/python"
 KEEP="${KEEP:-14}"
 
