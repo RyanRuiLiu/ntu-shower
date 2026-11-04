@@ -485,12 +485,14 @@ class AgentService : Service() {
         monitor?.shutdown()
         monitor = DoorMonitor {
             worker.execute {
-                if (trusted) {
-                    sender.captureAndEnqueue(client, DoorSnapshotSender.SOURCE_DB_WATCH)
-                } else if (notice.needsOccupancy()) {
-                    // 占用是本地事实：没连上服务端时也要读，只是不写发件箱。
-                    sender.readAndNotify()
-                }
+                // 喷头状态变化是客观事实，无论是否已连接都要采集入队。发件箱是本地
+                // SQLite 持久化：未连接时 flush 的 send 会失败而自然留队，重连后
+                // onConnected 里的 flush 按序补传——断网不丢数据。此前的实现把
+                // "记录"错误地绑在 `trusted` 上，断网期间的变化在入队前就被丢弃，
+                // 恢复后 seq 看似连续实则缺了整段（2026-11-03 TLS 故障暴露）。
+                // 屏幕提示的本地占用事实不受影响：captureAndEnqueue 内部已通过
+                // onDoorsRead 把读数投递给 notice/statusLine。
+                sender.captureAndEnqueue(client, DoorSnapshotSender.SOURCE_DB_WATCH)
             }
         }.also { it.startWatching() }
     }

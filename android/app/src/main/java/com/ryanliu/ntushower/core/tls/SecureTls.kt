@@ -2,7 +2,9 @@ package com.ryanliu.ntushower.core.tls
 
 import android.content.Context
 import com.ryanliu.ntushower.R
+import org.conscrypt.Conscrypt
 import java.security.KeyStore
+import java.security.Security
 import java.security.cert.CertificateException
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
@@ -12,10 +14,10 @@ import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509TrustManager
 
 /**
- * 最小现代化 TLS 配置（真机实测通过的组合，见 docs/ARCHITECTURE.md）：
- * - 强制 TLSv1.2：设备默认只启用 TLS 1.0，会被现代服务端拒绝
- * - 保持默认密码套件：实测可完成 ECDHE-ECDSA 握手，不需要旧系统的"启用全部套件"
- * - 系统信任库缺 ISRG 根：两条信任链合并成一个 KeyStore，两者同权
+ * 设备 TLS 配置：
+ * - 系统栈（API 19）实测无 AES-GCM/CHACHA20，由内置 Conscrypt（BoringSSL）提供 AEAD；
+ * - 强制 TLSv1.2：设备默认协议集是 TLS 1.0，会被现代服务端拒绝；
+ * - 系统信任库缺 ISRG 根：两条信任链合并成一个 KeyStore，两者同权。
  */
 class SecureTls(context: Context) {
 
@@ -60,7 +62,10 @@ class SecureTls(context: Context) {
     }
 
     private fun createFactory(tm: X509TrustManager): SSLSocketFactory {
-        val ctx = SSLContext.getInstance("TLS")
+        // 系统栈（API 19）没有 AEAD；Conscrypt 自带 BoringSSL，提供 TLS1.2 GCM/CHACHA20。
+        val provider = Conscrypt.newProvider()
+        Security.insertProviderAt(provider, 1)
+        val ctx = SSLContext.getInstance("TLS", provider)
         ctx.init(null, arrayOf(tm), null)
         return Tls12SocketFactory(ctx.socketFactory)
     }

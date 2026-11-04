@@ -38,8 +38,8 @@ android {
         applicationId = "com.ryanliu.ntushower"
         minSdk = 19          // 设备 ROM 固定 Android 4.4，运行时下限不可动
         targetSdk = 19       // 目标设备冻结在 4.4，无升级路径
-        versionCode = 114
-        versionName = "0.6.3"
+        versionCode = 116
+        versionName = "0.6.5"
         buildConfigField("String", "SERVER_DOMAIN", "\"${providers.gradleProperty("serverDomain").get()}\"")
         buildConfigField("String", "APP_VERSION", "\"$versionName\"")
         buildConfigField("int", "VERSION_CODE", "$versionCode")
@@ -240,6 +240,8 @@ tasks.register<JacocoReport>("jacocoUnitTestReport") {
 dependencies {
     // API 19 上可用的最新 WebSocket 客户端（4.x 起要求 API 21，见 docs/ARCHITECTURE.md）
     implementation("com.squareup.okhttp3:okhttp:3.12.13")
+    // 系统 TLS 栈（API 19）没有 AEAD；Conscrypt 自带 BoringSSL，提供 TLS1.2 GCM/CHACHA20。
+    implementation("org.conscrypt:conscrypt-android:2.5.2")
     // 格式规则集（ktlint 规则镜像）：import 顺序/空白等格式强制，与服务端 ruff format 对位
     detektPlugins("dev.detekt:detekt-rules-ktlint-wrapper:2.0.0-alpha.6")
     testImplementation("junit:junit:4.13.2")
