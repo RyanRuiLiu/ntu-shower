@@ -12,7 +12,10 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: RyanRuiLiu/.github/.github/workflows/docker.yml@6a1540b3b206dd1dff7616b27446820ebc6be158
+    uses: RyanRuiLiu/.github/.github/workflows/docker.yml@eac28728b57258e63e8f99e67238d321bf2a6809
+    with:
+      acr_registry: crpi-5rhaq5x8z5ec9tig.cn-hangzhou.personal.cr.aliyuncs.com
+      acr_namespace: ryanruiliu
     secrets:
       ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
       ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
