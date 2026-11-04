@@ -12,7 +12,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: RyanRuiLiu/.github/.github/workflows/docker.yml@bb9955f3458404655cdc85a8e2309495b5d5accf
+    uses: RyanRuiLiu/.github/.github/workflows/docker.yml@6a1540b3b206dd1dff7616b27446820ebc6be158
     secrets:
       ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
       ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
