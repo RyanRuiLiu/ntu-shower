@@ -266,6 +266,22 @@ async def _handle_frame(
         # 握手会重新上送，日志是幂等的现态读数，不是队列
         await run_in_threadpool(devices_service.record_log_upload, device_id, kind, content)
         log_event("INFO", "gateway.log-uploaded", "设备日志已上送", device_id=device_id, kind=kind)
+    elif mtype == "ota.progress":
+        if not trusted:
+            return
+        # 设备自更新的进度上报（一次性流程，设备端 AgentService 的 onProgress 发出）：
+        # 只记日志。它不落库——进度是一次性的中间态，收完即失效；"装到没有"由 hello 的
+        # version_code 回答（ota_release_install）。协议里有 Schema 而此前没有分支，
+        # 设备的每一帧进度都会收到 proto.unknown_type 错误帧，两侧日志互相指责。
+        log_event(
+            "INFO",
+            "ota.progress-reported",
+            "设备自更新进度",
+            device_id=device_id,
+            version=text_of(payload, "version"),
+            stage=text_of(payload, "stage"),
+            detail=text_of(payload, "detail"),
+        )
     else:
         await ws.send_text(protocol.error(reason_codes.UNKNOWN_TYPE.code, f"不认识的消息类型：{mtype}"))
 
