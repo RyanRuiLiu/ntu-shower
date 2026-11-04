@@ -1,0 +1,18 @@
+# 依据：GitHub Docs "Reuse workflows"
+name: docker
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  docker:
+    permissions:
+      contents: read
+      packages: write
+    uses: RyanRuiLiu/.github/.github/workflows/docker.yml@bb9955f3458404655cdc85a8e2309495b5d5accf
+    secrets:
+      ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+      ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
