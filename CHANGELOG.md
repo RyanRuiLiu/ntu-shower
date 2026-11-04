@@ -2,6 +2,10 @@
 
 本文件从 0.6.2 起按 [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) 维护。变更分类固定为 Added、Changed、Deprecated、Removed、Fixed、Security。版本号采用 [Semantic Versioning 2.0.0](https://semver.org/)。
 
+> 版本核对（2026-11-05）：`0.6.4` 从未存在于任何源码树或安装包中——版本号由
+> 0.6.3 直接升到 0.6.5（提交 d9e29d2），该节原为一次记档性条目。其内容已并入
+> 下方 0.6.5 的 Fixed；不保留一个没有对应版本状态的版本号（§4.4）。
+
 ## [Unreleased]
 
 ### Added
@@ -40,8 +44,6 @@
 - 设备端内置 Conscrypt（BoringSSL）：API 19 系统 TLS 栈实测无任何 AEAD 套件，
   仅靠系统栈无法与纯 AEAD 服务端握手。APK 现在提供 TLS1.2 AES-GCM/CHACHA20，
   服务端同步收敛为纯 AEAD，不再提供 CBC 套件。
-
-## [0.6.4] - 2026-11-03
 
 ### Fixed
 
