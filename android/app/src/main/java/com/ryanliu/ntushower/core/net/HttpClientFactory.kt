@@ -15,7 +15,7 @@ import java.util.concurrent.TimeUnit
  *
  * 套件清单说明：系统 TLS 栈（API 19）实测只有 CBC、无任何 AEAD，无法满足服务端
  * 纯 AEAD 要求。SecureTls 内置 Conscrypt（BoringSSL）后，这里只声明 AEAD 套件；
- * 不保留 CBC 兜底——服务端也不再接受 CBC。
+ * 不声明 CBC 套件——服务端也不再接受 CBC。
  */
 object HttpClientFactory {
 

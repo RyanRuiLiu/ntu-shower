@@ -15,8 +15,6 @@ from fastapi.testclient import TestClient
 from tests import device_link, frames
 
 from app.core.clock import now_rfc3339
-from app.core.config import settings
-from app.core.db import get_conn
 from app.core.problems import INVALID_VOICE_RULE, ApiProblemError
 from app.modules.devices import service as devices_service
 from app.modules.doors.events import DoorEvent, DoorEventKind
@@ -756,6 +754,37 @@ def test_ambiguous_rules_are_not_picked_by_id(
     )
     assert repository.matching_rules(DEVICE_ID, "C1", "assigned", MATCH_LOCAL) == []
     assert errors == [("voice.rule-ambiguous", first, second)]
+
+
+def test_rule_with_corrupted_time_windows_is_skipped(
+    fresh_db: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """库里时段列被外部改坏时跳过该规则并留痕，不抛错、不误播。
+
+    库可能被外部工具动过（RUNBOOK 的排查路径）。解析失败必须止在仓储层：
+    抛上去会中断整帧的事件投递，静默跳过则连"为什么没播"都查不到。
+    """
+    invalid: list[int] = []
+
+    def capture(_level: str, key: str, _message: str, **kwargs: object) -> None:
+        if key == "voice.rule-time-invalid":
+            invalid.append(int(kwargs["rule_id"]))  # type: ignore[arg-type]
+
+    monkeypatch.setattr(repository, "log_event", capture)
+    repository.insert_rule(
+        json.dumps([DEVICE_ID]),
+        json.dumps(["C1"]),
+        json.dumps(["assigned"]),
+        '{"days": [1], "start": "not-a-time"}',  # 形状像时段、值非法：解析必然失败
+        "[]",
+        "[]",
+        3,
+        True,
+        now_rfc3339(),
+    )
+    assert repository.matching_rules(DEVICE_ID, "C1", "assigned", MATCH_LOCAL) == []
+    assert len(invalid) == 1
 
 
 def test_preview_resolves_digits_pauses_and_truncation(

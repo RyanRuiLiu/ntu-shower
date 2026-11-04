@@ -302,7 +302,7 @@ async def _server_ping_loop(ws: WebSocket, device_id: str, pong_seen: asyncio.Ev
             return
         try:
             await asyncio.wait_for(pong_seen.wait(), timeout=interval)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             log_event(
                 "WARNING",
                 "gateway.pong-timeout",

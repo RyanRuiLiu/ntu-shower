@@ -10,12 +10,9 @@
 """
 
 import json
-import shutil
 from datetime import datetime
-from pathlib import Path
 from sqlite3 import Row
 
-from app.core.config import settings
 from app.core.db import get_conn, read_one, write
 from app.core.logging import log_event
 from app.modules.doors.events import DoorEvent
@@ -81,17 +78,6 @@ def init_tables() -> None:
     audio.assets_dir().mkdir(parents=True, exist_ok=True)
     audio.tmp_dir().mkdir(parents=True, exist_ok=True)
     get_conn().executescript(SCHEMA)
-
-
-def _table_exists(name: str) -> bool:
-    row = read_one("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,))
-    return row is not None
-
-
-def _columns(name: str) -> list[str]:
-    if not _table_exists(name):
-        return []
-    return [str(row["name"]) for row in get_conn().execute(f"PRAGMA table_info({name})")]
 
 
 # ── 素材 ──
@@ -255,7 +241,10 @@ def matching_rules(device_id: str, cert_no: str, event: str, local: datetime) ->
             continue
         try:
             windows = time_rules.parse_json(str(row["time_windows"]))
-        except ValueError as exc:
+        except (TypeError, ValueError) as exc:
+            # TypeError 与 ValueError 都来自解析：前者是列内容不是数组（库被外部改坏），
+            # 后者是时段值非法。两者同属"这条规则的时段不可用"，一并跳过并留痕，
+            # 不让一条坏行中断整帧的事件投递。
             log_event(
                 "ERROR",
                 "voice.rule-time-invalid",

@@ -15,7 +15,7 @@
 
 - 设备端内置 Conscrypt（BoringSSL）：API 19 系统 TLS 栈实测无任何 AEAD 套件，
   仅靠系统栈无法与纯 AEAD 服务端握手。APK 现在提供 TLS1.2 AES-GCM/CHACHA20，
-  服务端同步收敛为纯 AEAD，不再保留 CBC 兜底。
+  服务端同步收敛为纯 AEAD，不再提供 CBC 套件。
 
 ## [0.6.4] - 2026-11-03
 
