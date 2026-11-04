@@ -1,5 +1,4 @@
 # 运维手册
-> ⚠️ **运维规范唯一标准**：`server-config/STANDARDS.md`（目录/端口/备份/systemd/nginx/密钥/日志/权限/升级/部署/Git）。本文只写本项目特有事实；冲突处以标准为准。
 
 本册只写**已实际执行验证过**的步骤。每步标注验证方式；未验证的步骤不得写入。
 
@@ -9,8 +8,9 @@
 |---|---|
 | 入口 | `https://ntu-shower.iseekdream.com`（nginx 443 → 127.0.0.1:8110） |
 | 服务器 | `root@iseekdream.com`（SSH 密钥 `~/.ssh/iseekdream-ubuntu.pem`） |
-| 应用目录 | `/opt/ntu-shower/server`（`.venv`、`.env` 在此，均不入库；运行数据已分离至 `/opt/ntu-shower/data`） |
-| 数据目录 | `/opt/ntu-shower/data`（`ntu-shower.db`、`voice/`；属主为服务用户 `ntu-shower`） |
+| 应用目录 | `/opt/ntu-shower/server`（`.venv` 在此，不入库） |
+| 配置 | `/etc/ntu-shower/ntu-shower.env`（systemd `EnvironmentFile`，不入库） |
+| 数据目录 | `/var/lib/ntu-shower`（`ntu-shower.db`、`voice/`、`ota_releases/`；属主为服务用户 `ntu-shower`） |
 | 备份目录 | `/var/backups/ntu-shower`（脚本 `/opt/ntu-shower/scripts/ntu-shower-backup.sh`）|
 | 运行时 | Python **3.13.x**（`.venv`，2026-11 从 3.10 升级）——与 CI 测试版本一致，见「注意事项」 |
 | 服务单元 | `ntu-shower.service`（uvicorn，Type=simple，Restart=always，以系统用户 `ntu-shower` 运行） |
@@ -48,9 +48,10 @@ journalctl -u ntu-shower --since "-1h" | grep '"trace_id":"<trace-id>"'
 
 # ② 本地：打包（务必排除运行时数据与本地配置）
 #
-# `--exclude=.env` 是必须的，不是可选的清理项：生产的 `.env` 是 systemd 的
-# EnvironmentFile，装着数据库路径等生产配置。本地那份若混进包里会覆盖生产配置
-# （2026-10-01 实际发生过一次，表现是 systemd 反复重启、healthz 无响应）。
+# `--exclude=.env` 是必须的，不是可选的清理项：本地开发配置不属于发布物
+# （STANDARDS.md §11.1.4 发布物不得包含本地配置）。生产的配置在
+# /etc/ntu-shower/ntu-shower.env（代码目录之外，包不会碰到它）；这条排除
+# 防的是"本地 .env 混进代码目录"这种环境差异入库的形态。
 # 排除只匹配 `.env` 这个整名，`.env.example` 照常随包发布。
 tar czf server_deploy.tar.gz -C server \
     --exclude=.venv --exclude=data --exclude=ota_releases --exclude=.env \
@@ -71,7 +72,8 @@ scp deploy/scripts/deploy.sh iseekdream.com:/tmp/
 # ④ 服务器：部署
 #
 # 脚本依次做五件事：用**生产解释器**预检 → 停服并备份（保留最近 5 份到
-# /opt/ntu-shower/backups）→ 保留 .venv／ota_releases／.env、其余全删后再解包（数据在 /opt/ntu-shower/data，与代码目录分离）
+# /opt/ntu-shower/backups）→ 保留 .venv、其余全删后再解包（数据在 /var/lib/ntu-shower、
+# 配置在 /etc/ntu-shower，都在代码目录之外）
 # → requirements.txt 变过才装依赖 → 启动并验证（is-active + /healthz）。
 # 任一步失败自动回滚；预检放在停服之前，所以预检不过时服务一直没停过、无需回滚。
 # 保留项清单与"其余全删"的理由写在脚本头部注释里。
@@ -100,7 +102,7 @@ ssh iseekdream.com 'sudo NT_ROLLBACK=/opt/ntu-shower/backups/server-<时间戳>.
   历史教训：3.10 时代 `typing.TypedDict` 在 pydantic 2.13 下被拒（要求 `typing_extensions.TypedDict`），
   本地全绿而线上启动即崩——`deploy.sh` 的第 1 步就是为此存在的，而且它排在停服之前，
   预检失败时服务一直没停过。2026-11 运行时升 3.13 后该坑消失，但预检流程保留。
-- 打包排除 `.env`：服务器的 `.env` 是唯一副本，被覆盖将导致管理面令牌丢失。
+- 打包排除 `.env`：本地开发配置不属于发布物；生产配置在 `/etc/ntu-shower/ntu-shower.env`，不在包的落点内。
 - `requirements.txt` 变化时 `deploy.sh` 自己装依赖；只改业务代码不需要另跑 `pip install`。
 - 配置（nginx / systemd / backup）的唯一事实来源是 `deploy/`，**不要在服务器上直接改**；
   改法与同步命令见 `deploy/README.md`。
@@ -141,13 +143,34 @@ ssh iseekdream.com 'curl -sS -H "X-Identity: <admin身份标识>" http://127.0.0
 
 ### 自动备份（数据库）
 
-`ntu-shower-backup.timer` 每日 00:00 执行 `VACUUM INTO` 在线备份（校验完整性后 gzip 压缩），
-滚动保留 14 份，落在 `/var/backups/ntu-shower/ntu-shower-<时间戳>.db.gz`。
+`ntu-shower-backup.timer` 每日 00:00 执行 `VACUUM INTO` 在线备份：完整性校验 → gzip →
+**age 加密**（收件人公钥 `/etc/ntu-shower/backup-age.pub`）→ 产出 SHA-256 校验和边车，
+滚动保留 14 份，落在 `/var/backups/ntu-shower/ntu-shower-<时间戳>.db.gz.age`。
+盘上不留明文——备份文件含学号、凭证与审计原文，泄露时只有持有私钥的一方（密钥保管
+方，异地）能读。私钥的生成与托管方式见 `deploy/README.md`；加密是
+`STANDARDS.md` §12.4.2 的要求，age 缺失或公钥不可读时脚本直接失败，不产出明文备份。
 
 手动触发与查看：
 
 ```bash
 ssh iseekdream.com 'systemctl start ntu-shower-backup.service && journalctl -u ntu-shower-backup -n 5'
+```
+
+### 恢复演练
+
+**明文格式时代的演练记录**（2026-09-30 执行，见 Git 历史）：`integrity_check` 返回 `ok`，
+全部表可读、行数与备份时一致。**加密格式启用后按新流程重跑一次演练**是未完成项——
+未完成不掩盖，跑完并把命令与结果写回本节之前，本节的恢复步骤视为未验证（§9.10.1）。
+新流程（待现场验证后本行删除）：
+
+```bash
+# 在密钥保管方持有私钥的机器上执行；私钥不出那台机器
+ssh iseekdream.com 'cat /var/backups/ntu-shower/ntu-shower-<时间戳>.db.gz.age' > backup.db.gz.age
+ssh iseekdream.com 'cat /var/backups/ntu-shower/ntu-shower-<时间戳>.db.gz.age.sha256'
+sha256sum backup.db.gz.age   # 与边车逐位一致才继续
+age -d -i <私钥文件> -o backup.db.gz backup.db.gz.age
+gunzip -t backup.db.gz && echo "gzip 流完整"
+# 之后与明文时代相同：integrity_check + 逐表行数
 ```
 
 ### keystore（不做自动滚动）
@@ -165,30 +188,9 @@ Get-FileHash config/keystore/ntu-shower.keystore -Algorithm SHA256    # 本地
 ssh iseekdream.com 'sha256sum /var/backups/ntu-shower/ntu-shower.keystore'
 ```
 
-### 恢复演练
-
-数据库备份在临时位置实际还原过一次，验证脚本与结果如下（不碰生产）：
-
-```bash
-ssh iseekdream.com 'BAK=$(ls -1t /var/backups/ntu-shower/ntu-shower-*.db.gz | head -1)
-  rm -rf /tmp/restore_test && mkdir -p /tmp/restore_test
-  gunzip -c "$BAK" > /tmp/restore_test/restored.db
-  /opt/ntu-shower/server/.venv/bin/python - <<PY
-import sqlite3
-con = sqlite3.connect("/tmp/restore_test/restored.db")
-print("integrity:", con.execute("PRAGMA integrity_check").fetchone()[0])
-for t, in con.execute("SELECT name FROM sqlite_master WHERE type=? ORDER BY name", ("table",)).fetchall():
-    print(f"  {t:24} {con.execute(f\"SELECT COUNT(*) FROM {t}\").fetchone()[0]} 行")
-PY
-  rm -rf /tmp/restore_test'
-```
-
-**验证记录**：2026-09-30 执行，`integrity_check` 返回 `ok`，全部表可读、
-行数与备份时一致。**该步骤此后按季度重复**；任一次失败都说明备份链路已坏，
-须在下一轮之前修好。
-
 keystore 的可用性验证：从备份副本执行 `gradlew assembleRelease` 能签名成功
-即证明副本可用（签名不匹配的 APK 无法覆盖安装在网设备）。
+即证明副本可用（签名不匹配的 APK 无法覆盖安装在网设备）。恢复演练每季度执行
+一次；任一次失败都说明备份链路已坏，须在下一轮之前修好。
 
 ## 故障处置
 

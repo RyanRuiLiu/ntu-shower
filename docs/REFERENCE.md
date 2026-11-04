@@ -29,7 +29,7 @@
 服务端（本仓库）
    │  原始层落库 → 派生层算出会话与段
    ├─ HTTP /api/v1/*        给管理台与网页端
-   └─ WSS /stream           给消费端（网页端与小程序）实时推送
+   └─ WSS /api/v1/stream    给消费端（网页端与小程序）实时推送
         ▼
 消费端（网页端、status-panel 小程序）
 ```
@@ -505,7 +505,7 @@ GET      /api/v1/audit/background-task-runs          后台任务审计    admin
 |---|---|---|
 | `/gateway/device` | 设备 | 设备报帧、服务端下发命令。先 `link.hello` 声明能力，之后 `link.ping`／`link.pong` 保活并更新偏差；服务端另按现态推 `status_line.update`（各楼层空闲喷头数），设备不回执 |
 | `/gateway/bridge` | 服务端隧道 | 把设备的 ADB 端口转发出来，排障用 |
-| `/stream` | 消费端 | 实时推送，两类消息见下 |
+| `/api/v1/stream` | 消费端 | 实时推送，两类消息见下 |
 
 `/stream` 的消息类型（唯一出处 `app/core/events.py`，`server/web/core/contract.js` 由 `tools/sync_contracts.py` 生成）：
 

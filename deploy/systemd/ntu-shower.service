@@ -3,7 +3,7 @@
 StartLimitIntervalSec=60
 StartLimitBurst=5
 Description=NTU Shower application server
-Documentation=file:/opt/server-config/apps/ntu-shower/README.md
+Documentation=https://github.com/RyanRuiLiu/ntu-shower
 After=network.target
 
 [Service]

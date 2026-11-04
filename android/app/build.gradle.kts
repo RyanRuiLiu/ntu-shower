@@ -88,7 +88,8 @@ android {
         // 被测逻辑本身的分支与结果，而不是"某个框架调用恰好被 mock 了没有"。
         //
         // 代价是它也掩盖了"本不该调用框架方法"这类问题。因此纳入覆盖的类要经得起看：
-        // 真正依赖框架的那些已经列在 frameworkBoundClasses 里，不参与覆盖率门禁。
+        // 真正依赖框架的那些已经列在 frameworkBoundClasses 里，不参与覆盖率门禁；
+        // 逐条理由见该清单与本文档各处就地注释。
         unitTests.isReturnDefaultValues = true
     }
 
@@ -96,7 +97,7 @@ android {
 
 // JVM 单测覆盖率范围：只排除**真正无法在 JVM 上覆盖**的类。
 // 原则：能通过抽取纯逻辑覆盖的，就不排除——赦免清单越短，门越有意义。
-// 逐条理由见 AGENTS.md §设备端测试。
+// 逐条理由见清单内各条注释。
 val frameworkBoundClasses = listOf(
     // 应用入口与常驻服务：依赖 Looper / 系统服务
     "**/ShowerApp*",
