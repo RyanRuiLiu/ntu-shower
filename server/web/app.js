@@ -365,7 +365,7 @@ function bindTopbar() {
   })
 
   listen($('deviceInfo'), 'click', (event) => event.stopPropagation())
-listen($('deviceInfo'), 'click', onDeviceInfoAction)
+  listen($('deviceInfo'), 'click', onDeviceInfoAction)
   listen(document, 'click', () => toggleDeviceInfo(false))
   listen(document, 'keydown', (event) => {
     if (event.key === 'Escape') toggleDeviceInfo(false)

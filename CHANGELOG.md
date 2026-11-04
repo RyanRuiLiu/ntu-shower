@@ -6,8 +6,32 @@
 
 ### Added
 
+- 根目录 `LICENSE`：此前许可证缺位（按默认版权处理），现以专有声明显式登记。
 - Docker 构建资产（`Dockerfile`、`compose.yaml`、`.dockerignore`）入库：此前仅存在于本机工作区，
-  `docker.yml` 工作流在远端按可复用流程构建时缺少 Dockerfile，必然失败。
+  `docker.yml` 工作流在远端按可复用流程构建时缺少 Dockerfile。
+- 持续集成新增安全门禁：gitleaks 秘密扫描（全历史）与 pip-audit 依赖漏洞扫描
+  （OSV，高危未修复即红灯），对应工程标准 §17.3 两项"待建立"转"已执行"。
+- 设备数据库备份改为 age 加密归档并附 SHA-256 校验和；盘上不再留明文备份。
+  私钥由密钥保管方异地持有；恢复演练按新流程重跑前，恢复步骤视为未验证。
+
+### Changed
+
+- TLS 策略（纯 AEAD）由服务器全局 nginx 配置移入仓库 `deploy/nginx/ntu-shower.conf` 的
+  server 块，部署资产恢复对安全关键配置的唯一事实源地位。
+- GitHub Actions 全部按完整 commit SHA 固定（此前按主版本 tag）。
+- 设备 OTA 进度帧（`ota.progress`）服务端开始接收并记日志：协议此前只有 Schema 没有
+  分支，设备的每帧进度都会收到 `proto.unknown_type` 错误帧。
+- 服务端代码完成 ruff 0.16.9 修复与 `StrEnum` 迁移；`main` 上的质量门恢复全绿
+  （本地曾三处红灯：lint 27 项、禁词 2 处、覆盖率 95.91%）。
+
+### Fixed
+
+- 网关对接收方不认识的时段格式坏的语音规则行，跳过并留痕，不再中断整帧投递
+  （此前非数组形状的坏行会以 TypeError 冒泡）。
+- 清理指向已废弃 `server-config` 项目的全部引用（两份文档横幅与两个 systemd 单元的
+  `Documentation=`），以及 detekt 配置与构建脚本中两处不存在的小节编号。
+- 运维手册拓扑表与部署说明对齐 FHS 迁移后的实际路径（配置 `/etc/ntu-shower`、
+  数据 `/var/lib/ntu-shower`）；实时推送路径在架构与参考文档中更正为 `/api/v1/stream`。
 
 ## [0.6.5] - 2026-11-04
 
