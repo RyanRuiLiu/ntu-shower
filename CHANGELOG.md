@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- Docker 构建资产（`Dockerfile`、`compose.yaml`、`.dockerignore`）入库：此前仅存在于本机工作区，
+  `docker.yml` 工作流在远端按可复用流程构建时缺少 Dockerfile，必然失败。
+
 ## [0.6.5] - 2026-11-04
 
 ### Changed
