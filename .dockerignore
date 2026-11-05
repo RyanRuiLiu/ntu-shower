@@ -1,0 +1,15 @@
+# 依据：Docker 官方 .dockerignore 文档
+.git
+.gitignore
+.venv
+__pycache__/
+*.py[cod]
+data/
+tests/
+backups/
+.env
+server/.venv/
+server/data/
+server/backups/
+server/tests/
+server/.env

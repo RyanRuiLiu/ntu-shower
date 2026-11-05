@@ -118,6 +118,34 @@ def test_unknown_command_id_replies_error(client: TestClient, admin_headers: dic
         assert err["payload"]["code"] == "command.unknown_id"
 
 
+def test_ota_progress_is_received_not_rejected(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    fresh_db: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """设备自更新进度帧被接收并记日志，不再回 proto.unknown_type。
+
+    设备端 AgentService 在升级过程中每次进度都发 ota.progress；协议有 Schema 而此前
+    服务端没有分支，每帧进度都收到错误帧。修复后只记日志——进度是一次性中间态，
+    "装到没有"由 hello 的 version_code 回答。
+    """
+    from app.modules.gateway import routes as gateway_routes
+
+    seen: list[dict[str, str]] = []
+
+    def capture(_level: str, key: str, _message: str, **kwargs: str) -> None:
+        if key == "ota.progress-reported":
+            seen.append({name: str(kwargs[name]) for name in ("device_id", "version", "stage")})
+
+    monkeypatch.setattr(gateway_routes, "log_event", capture)
+    with device_link.trusted_online(client, "dev-ota-progress", admin_headers) as ws:
+        ws.send_text(frames.frame("ota.progress", {"version": "0.6.6", "stage": "downloading", "detail": "1/3"}))
+        _settle(ws)
+
+    assert seen == [{"device_id": "dev-ota-progress", "version": "0.6.6", "stage": "downloading"}]
+
+
 def test_unparsable_snapshot_is_acknowledged_and_recorded(
     client: TestClient, admin_headers: dict[str, str], fresh_db: str
 ) -> None:

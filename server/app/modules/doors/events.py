@@ -10,10 +10,10 @@
 """
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class DoorEventKind(str, Enum):
+class DoorEventKind(StrEnum):
     """七种播报事件。取值是跨端契约的一部分，中文名由 voice 的事件目录给出。
 
     `released` 按释放前最后一帧的占用状态拆成三种：未开阀就被释放（预约未到/续期

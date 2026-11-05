@@ -9,22 +9,23 @@
 ┌─────────────────┐   WSS /gateway/device   ┌─────────────────────────┐
 │  设备 APK        │◀═══════════════════════▶│  <public-domain> │
 │  (Android 4.4.4) │   HTTPS /api/v1/*       │  nginx 443 统一入口       │
-│  ANDROID_ID 标识 │   /ota /ops           │  ┌───────────────────┐  │
+│  ANDROID_ID 标识 │   /ota/manifest       │  ┌───────────────────┐  │
 │  自更新/自管理    │                         │  │ FastAPI 单服务进程  │  │
 └─────────────────┘                          │  └───────────────────┘  │
                                              └─────────────────────────┘
 ```
 
 前端是 `server/web/` 下的零构建静态文件，由本进程挂在根路径
-（`/api`、`/ops`、`/docs` 的路由注册在前，不会被静态文件抢走）。
+（`/api/v1`、`/ota`、`/gateway` 与 `/healthz` 的路由注册在前，不会被静态文件抢走）。
 用户面接口无需凭据即可查询状态，操作类需 `X-Identity` 标识 + 能力位。
 
 ## 已定稿的传输层事实（2026-09 真机实测）
 
 - 设备：Allwinner DS83X，Android 4.4.4（API 19），1.8G 内存，1366×768，adbd 即 root
 - 设备无 DNS（系统 DNS 配的 8.8.8.8 被校园网封锁）；114.114.114.114 的 UDP/TCP 53 实测可用 → APK 内置 DNS 解析器，**以域名为唯一主键，不使用缓存、次等解析路径或硬编码地址**
-- TLS 上限 TLSv1.2，最强套件 ECDHE-ECDSA/RSA-AES-CBC；**最小配置**（强制 TLSv1.2 + 默认套件 + 打包 ISRG X1/X2）对 nginx 443 / ECDSA 证书实测握手成功
-- **OkHttp 套件陷阱（真机 E2E 实测发现）**：OkHttp 默认白名单中 ECDHE-ECDSA 仅含 GCM 系列，而本设备只有 CBC——对 ECDSA 证书握手必然失败（对 RSA 证书反而能通，这是旧系统侥幸可用的原因）。解法：显式 ConnectionSpec 放行 ECDHE-ECDSA/RSA-CBC + GCM，见 `transport/GatewayClient.kt`
+- 系统 TLS 栈上限 TLSv1.2：`SSLSocket.supportedCipherSuites` 真机枚举 54 个，无任何 AES-GCM/CHACHA20（2026-11 实测），系统栈只能 CBC
+- 因此 APK 内置 Conscrypt（BoringSSL）提供 TLS1.2 AEAD；服务端为纯 AEAD（TLS1.3 + TLS1.2 GCM/CHACHA20），不保留 CBC
+- 实测握手：设备 ClientHello 仅 3 个 AEAD 套件（CHACHA20 / AES128-GCM / AES256-GCM），协商 CHACHA20-POLY1305
 - 服务端单张 ECDSA 通配符证书
 
 ## 服务端平面

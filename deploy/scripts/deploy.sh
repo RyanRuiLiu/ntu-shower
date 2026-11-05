@@ -8,7 +8,7 @@
 #  用法：sudo NT_TARBALL=/tmp/server_deploy.tar.gz bash /tmp/deploy.sh
 #
 #  本脚本行为：
-#    1. 预检：用**生产解释器**在临时目录导入新代码（本地 3.13 通过不代表生产 3.10 通过）
+#    1. 预检：用**生产解释器**在临时目录导入新代码（本地能导入不代表生产解释器能导入）
 #    2. 停服 → 备份当前代码与配置到 backups/（保留最近 5 份）
 #    3. 保留四项状态目录、其余全删，再把包解开
 #    4. requirements.txt 变过才装依赖
@@ -22,27 +22,29 @@
 #  `tools/` 之前的旧目录）。凡是"枚举要删的"，加一个目录就漏一个。
 #  反过来枚举要**保留的**之后，生产就等于"包里的内容 + 这几项状态"，删除天然生效。
 #
-#  ## 绝不能删的三项（仓库里没有、丢了不可恢复）
+#  ## 代码目录里只剩一项不能删
 #
 #    .venv          虚拟环境（重建要联网装依赖）
-#    ota_releases/  已发布的安装包
-#    .env           systemd 的 EnvironmentFile，装着数据库路径等生产配置
 #
-#  运行数据（数据库、voice 素材）在 /opt/ntu-shower/data，与代码目录分离；
+#  2026-11-03 按 FHS 3.0 迁移后：
+#    配置  /etc/ntu-shower/ntu-shower.env        （systemd EnvironmentFile）
+#    数据  /var/lib/ntu-shower/                  （ntu-shower.db + voice/ + ota_releases/）
+#  二者都在 $SERVER_DIR 之外，wipe_code 不会碰到。
 #  服务以专用系统用户 ntu-shower 运行，代码与数据都归该用户。
 # ============================================================
 
 set -euo pipefail
 
 SERVER_DIR="/opt/ntu-shower/server"
-DATA_DIR="/opt/ntu-shower/data"
+DATA_DIR="/var/lib/ntu-shower"
+ENV_FILE="/etc/ntu-shower/ntu-shower.env"
 SERVICE_USER="ntu-shower"
 VENV_DIR="${SERVER_DIR}/.venv"
 PYTHON="${VENV_DIR}/bin/python"
 SERVICE="ntu-shower"
-HEALTH_URL="http://127.0.0.1:8001/healthz"
+HEALTH_URL="http://127.0.0.1:8110/healthz"
 BACKUP_DIR="/opt/ntu-shower/backups"
-DATA_BACKUP_DIR="/opt/ntu-shower-backup"
+DATA_BACKUP_DIR="/var/backups/ntu-shower"
 BACKUP_KEEP=5
 CHECK_DIR="/tmp/ntu-shower-deploy-check"
 NT_TARBALL="${NT_TARBALL:-/tmp/server_deploy.tar.gz}"
@@ -55,7 +57,7 @@ log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
 # 保留三项状态目录，其余全删。备份文件在 /opt/ntu-shower/backups（本目录之外），安全。
 wipe_code() {
     find "$SERVER_DIR" -mindepth 1 -maxdepth 1 \
-        ! -name '.venv' ! -name 'ota_releases' ! -name '.env' \
+        ! -name '.venv' \
         -exec rm -rf {} +
 }
 
@@ -68,7 +70,6 @@ rollback() {
         wipe_code
         tar xzf "$BACKUP_FILE" -C "$SERVER_DIR"
         chown -R "$SERVICE_USER":"$SERVICE_USER" "$SERVER_DIR"
-        chown root:"$SERVICE_USER" "${SERVER_DIR}/.env"; chmod 640 "${SERVER_DIR}/.env"
         log_warn "已从 $BACKUP_FILE 恢复代码"
     else
         log_error "没有可用备份，代码目录停在当前状态"
@@ -103,7 +104,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 [[ -d "$SERVER_DIR" ]] || { log_error "项目目录不存在: $SERVER_DIR"; exit 1; }
 [[ -x "$PYTHON" ]]     || { log_error "虚拟环境不存在: $PYTHON"; exit 1; }
-[[ -f "${SERVER_DIR}/.env" ]] || { log_error "生产配置不存在: ${SERVER_DIR}/.env（systemd 的 EnvironmentFile）"; exit 1; }
+[[ -f "$ENV_FILE" ]] || { log_error "生产配置不存在: $ENV_FILE（systemd 的 EnvironmentFile）"; exit 1; }
 [[ -f "$NT_TARBALL" ]] || { log_error "代码包不存在: $NT_TARBALL"; exit 1; }
 
 # ---- 1. 预检（在停服之前）----
@@ -132,20 +133,22 @@ systemctl stop "$SERVICE" 2>/dev/null || log_warn "服务本就未在运行"
 
 mkdir -p "$BACKUP_DIR"
 BACKUP_FILE="${BACKUP_DIR}/server-$(date +%s).tar.gz"
-# 只备代码与配置：三个保留项不会被动，重建它们要联网且体积大（.venv/ota_releases）
+# 只备代码：.venv 重建要联网且体积大，故不备；数据与配置已在 /var/lib 与 /etc，不在备份范围
 tar czf "$BACKUP_FILE" -C "$SERVER_DIR" \
     app tests tools web pyproject.toml requirements.txt requirements-dev.txt .env.example
 ls -1t "${BACKUP_DIR}"/server-*.tar.gz 2>/dev/null | tail -n +$((BACKUP_KEEP + 1)) | xargs -r rm -f
 log_info "备份：$BACKUP_FILE"
 
 # ---- 3. 替换代码 ----
-log_info "[3/5] 替换代码（保留 .venv／ota_releases／.env；数据在 $DATA_DIR，与代码分离）..."
+log_info "[3/5] 替换代码（保留 .venv；数据在 $DATA_DIR、配置在 $ENV_FILE，均与代码分离）..."
 wipe_code
 tar xzf "$NT_TARBALL" -C "$SERVER_DIR"
 
 # 代码归服务用户：systemd 以 ntu-shower 运行，解包出的文件必须归它
 chown -R "$SERVICE_USER":"$SERVICE_USER" "$SERVER_DIR"
-chown root:"$SERVICE_USER" "${SERVER_DIR}/.env"; chmod 640 "${SERVER_DIR}/.env"
+# 配置不在代码目录：只校验权限，不改内容
+chown root:"$SERVICE_USER" "$ENV_FILE" 2>/dev/null || true
+chmod 640 "$ENV_FILE" 2>/dev/null || true
 
 # 数据与备份含身份标识、用户记录与审计：仅属主可读写
 chmod 700 "$DATA_DIR" "$BACKUP_DIR" "$DATA_BACKUP_DIR" 2>/dev/null || true
