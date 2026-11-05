@@ -8,13 +8,14 @@
 |---|---|
 | 入口 | `https://ntu-shower.iseekdream.com`（nginx 443 → 127.0.0.1:8110） |
 | 服务器 | `root@iseekdream.com`（SSH 密钥 `~/.ssh/iseekdream-ubuntu.pem`） |
-| 应用目录 | `/opt/ntu-shower/server`（`.venv` 在此，不入库） |
-| 配置 | `/etc/ntu-shower/ntu-shower.env`（systemd `EnvironmentFile`，不入库） |
-| 数据目录 | `/var/lib/ntu-shower`（`ntu-shower.db`、`voice/`、`ota_releases/`；属主为服务用户 `ntu-shower`） |
+| 运行形态 | Docker Compose（2026-11-06 起）：镜像自 ACR 拉取，`docker compose -f /opt/ntu-shower/compose.yaml up -d` |
+| 编排文件 | `/opt/ntu-shower/compose.yaml`（由仓库根 `compose.yaml` 同步；数据路径在 compose 的 `environment` 钉死） |
+| 镜像 | `crpi-5rhaq5x8z5ec9tig.cn-hangzhou.personal.cr.aliyuncs.com/ryanruiliu/ntu-shower:<tag>`（`docker.yml` 双推 GHCR/ACR；tag 双轨 `sha-<短哈希>` 与版本号） |
+| 配置 | `/etc/ntu-shower/ntu-shower.env`（容器经 `env_file` 注入，不入库） |
+| 数据目录 | `/var/lib/ntu-shower`（`ntu-shower.db`、`voice/`、`ota_releases/`；bind mount 进容器同路径，属主 `ntu-shower`=UID 997） |
 | 备份目录 | `/var/backups/ntu-shower`（脚本 `/opt/ntu-shower/scripts/ntu-shower-backup.sh`）|
-| 运行时 | Python **3.13.x**（`.venv`，2026-11 从 3.10 升级）——与 CI 测试版本一致，见「注意事项」 |
-| 服务单元 | `ntu-shower.service`（uvicorn，Type=simple，Restart=always，以系统用户 `ntu-shower` 运行） |
-| 备份单元 | `ntu-shower-backup.timer`（每日 00:00，`Persistent=true`） |
+| 旧应用目录 | `/opt/ntu-shower/server`（venv 形态，2026-11-06 起退役冻结，仅应急回滚用，见「应急回滚」） |
+| 备份单元 | `ntu-shower-backup.timer`（每日 00:00，`Persistent=true`；宿主机执行，读 `/var/lib`，与容器无关） |
 
 ## 痕迹取回（出问题时按设备 + 时间段还原现场）
 
@@ -34,8 +35,8 @@ tail -n 50 /sdcard/ntu-shower/audit.log      # JSONL：受理/重复/结果/网�
 tail -n 50 /sdcard/ntu-shower/automation.log # 自动化性能采样
 tail -n 50 /sdcard/ntu-shower/crash.log      # 崩溃现场
 
-# ④ 应用 stdout（journald，JSON 事件流，含 trace_id 可与 ① 对上）
-journalctl -u ntu-shower --since "-1h" | grep '"trace_id":"<trace-id>"'
+# ④ 应用 stdout（容器 json-file，JSON 事件流，含 trace_id 可与 ① 对上）
+ssh iseekdream.com 'docker logs ntu-shower --since 1h' | grep '"trace_id":"<trace-id>"'
 ```
 
 保留期：`api_call` 90 天（`audit_retention_days`）每日自动清理；OTA 发布保留
@@ -43,69 +44,56 @@ journalctl -u ntu-shower --since "-1h" | grep '"trace_id":"<trace-id>"'
 
 ## 部署
 
-```bash
-# ① 本地：门禁必须全绿（命令见 CONTRIBUTING「质量门」，与 CI 逐条对应，此处不复述）
-
-# ② 本地：打包（务必排除运行时数据与本地配置）
-#
-# `--exclude=.env` 是必须的，不是可选的清理项：本地开发配置不属于发布物
-# （STANDARDS.md §11.1.4 发布物不得包含本地配置）。生产的配置在
-# /etc/ntu-shower/ntu-shower.env（代码目录之外，包不会碰到它）；这条排除
-# 防的是"本地 .env 混进代码目录"这种环境差异入库的形态。
-# 排除只匹配 `.env` 这个整名，`.env.example` 照常随包发布。
-tar czf server_deploy.tar.gz -C server \
-    --exclude=.venv --exclude=data --exclude=ota_releases --exclude=.env \
-    --exclude=__pycache__ --exclude=.pytest_cache --exclude=.mypy_cache \
-    --exclude=.ruff_cache --exclude=.coverage --exclude='*.pyc' .
-scp server_deploy.tar.gz iseekdream.com:/tmp/
-
-# ②b 协议 schema 单独同步：它在 server/ 之外（服务器上是 /opt/ntu-shower/protocol），
-#     而服务端与设备端都以它为唯一事实源。漏同步会让两端对字段的理解分叉——服务端
-#     按新 schema 收、设备按旧 schema 发，而两边都不会报错。
-scp protocol/schema/*.json iseekdream.com:/opt/ntu-shower/protocol/schema/
-
-# ③ 本地：把部署脚本送到服务器
-#
-# 它不随包发布（包里只有 server/ 的内容），每次部署时送过去执行。
-scp deploy/scripts/deploy.sh iseekdream.com:/tmp/
-
-# ④ 服务器：部署
-#
-# 脚本依次做五件事：用**生产解释器**预检 → 停服并备份（保留最近 5 份到
-# /opt/ntu-shower/backups）→ 保留 .venv、其余全删后再解包（数据在 /var/lib/ntu-shower、
-# 配置在 /etc/ntu-shower，都在代码目录之外）
-# → requirements.txt 变过才装依赖 → 启动并验证（is-active + /healthz）。
-# 任一步失败自动回滚；预检放在停服之前，所以预检不过时服务一直没停过、无需回滚。
-# 保留项清单与"其余全删"的理由写在脚本头部注释里。
-ssh iseekdream.com 'sudo NT_TARBALL=/tmp/server_deploy.tar.gz bash /tmp/deploy.sh'
-
-# ⑤ 人工复核
-#
-# healthz 只回 `{"status":"ok",...,"version":"<APP_VERSION>"}`；版本号证明服务在运行，
-# 不证明本次部署生效。确认新代码时看本次变更的特征串与 `journalctl` 的日志。
-ssh iseekdream.com 'journalctl -u ntu-shower -n 20 --no-pager'      # 无异常栈启动
-# 设备是否重连：看日志出现 "WebSocket /gateway/device [accepted]"
-```
-
-**回滚**（部署后发现问题的两步）：
+2026-11-06 起服务以 Docker Compose 运行：镜像由 `docker.yml` 在 CI 构建并双推 GHCR/ACR，
+服务器只做拉取与拉起。tag 双轨：`sha-<短哈希>`（每个 main 提交各一个）与版本号（每个 `v*` 标签）。
+compose 的 `environment` 已把数据路径钉死到挂载点（`/var/lib/ntu-shower/...`），根文件系统只读。
 
 ```bash
-# 先看有哪些回滚点
-ssh iseekdream.com 'ls -1t /opt/ntu-shower/backups/server-*.tar.gz | head'
-# 回滚（同一个脚本的 --rollback 入口，走与部署相同的"保留四项、其余全删"逻辑）
-ssh iseekdream.com 'sudo NT_ROLLBACK=/opt/ntu-shower/backups/server-<时间戳>.tar.gz bash /tmp/deploy.sh --rollback'
+# ① 本地：门禁必须全绿（命令见 CONTRIBUTING「质量门」，与 CI 逐条对应，此处不复述）；
+#    合并进 main 后 CI 自动构建镜像，docker/build job 日志里查本次 tag（形如 sha-1ed250f）。
+
+# ② 服务器：预拉镜像——在停旧服务之前做，拉取期间旧服务照常运行，零停机窗口被压到切换那一步
+ssh iseekdream.com 'docker pull crpi-5rhaq5x8z5ec9tig.cn-hangzhou.personal.cr.aliyuncs.com/ryanruiliu/ntu-shower:<tag>'
+
+# ③ 本地：同步编排文件（deploy 资产唯一事实源；协议 schema 随镜像走，不再单独同步）
+scp compose.yaml iseekdream.com:/opt/ntu-shower/compose.yaml
+
+# ④ 服务器：切换。停旧 systemd 服务与拉起容器之间是唯一的停机窗口（秒级）；
+#    两者都绑 127.0.0.1:8110，不能并存。NTU_SHOWER_TAG 必填（compose 拒绝空值）。
+ssh iseekdream.com 'systemctl stop ntu-shower && cd /opt/ntu-shower && NTU_SHOWER_TAG=<tag> docker compose up -d'
+
+# ⑤ 服务器：验证。healthz 的 version 字段证明目标版本生效（不止在运行）；
+#    设备重连看容器日志的 "WebSocket /gateway/device [accepted]"——设备断电时段切机器的，
+#    次日 10:55 上电后自行回连，以日志出现 accepted 为准补一次部署后验证。
+ssh iseekdream.com 'curl -fsS http://127.0.0.1:8110/healthz; echo; docker ps --filter name=ntu-shower --format "{{.Status}}"'
+ssh iseekdream.com 'docker logs ntu-shower 2>&1 | tail -20'
+
+# ⑥ 服务器：退役旧单元（保留单元文件与 venv 作应急回滚入口，不卸载、不删除）
+ssh iseekdream.com 'systemctl disable ntu-shower'
 ```
+
+**回滚**（部署后发现问题时，回滚到上一个镜像 tag——一条命令，秒级）：
+
+```bash
+ssh iseekdream.com 'cd /opt/ntu-shower && NTU_SHOWER_TAG=<上一个tag> docker compose up -d'
+```
+
+### 应急回滚（venv+systemd 旧形态）
+
+`ntu-shower.service` 单元保留在服务器但已 disable；`/opt/ntu-shower/server` 的旧 venv 与
+代码随之冻结在切换前的版本。只在镜像路径整体不可用（ACR 与 GHCR 同时不可达）时走它：
+先 `docker compose down` 释放 8110 端口，再 `systemctl enable --now ntu-shower`。
+走这条路等于接受旧版本行为，恢复容器后应尽快切回。
 
 ### 注意事项
 
-- **必须用生产 Python 预检**：本地通过不代表生产通过。
-  历史教训：3.10 时代 `typing.TypedDict` 在 pydantic 2.13 下被拒（要求 `typing_extensions.TypedDict`），
-  本地全绿而线上启动即崩——`deploy.sh` 的第 1 步就是为此存在的，而且它排在停服之前，
-  预检失败时服务一直没停过。2026-11 运行时升 3.13 后该坑消失，但预检流程保留。
-- 打包排除 `.env`：本地开发配置不属于发布物；生产配置在 `/etc/ntu-shower/ntu-shower.env`，不在包的落点内。
-- `requirements.txt` 变化时 `deploy.sh` 自己装依赖；只改业务代码不需要另跑 `pip install`。
-- 配置（nginx / systemd / backup）的唯一事实来源是 `deploy/`，**不要在服务器上直接改**；
-  改法与同步命令见 `deploy/README.md`。
+- 运行时由镜像锁定（`python:3.13-slim`），CI 测的就是同一份依赖集；"本地通过不代表生产通过"
+  的旧预检教训由镜像同一性天然解决（历史教训：3.10 时代 `typing.TypedDict` 被
+  pydantic 拒绝，本地全绿线上即崩——那正是当年的 `deploy.sh` 预检存在的理由）。
+- 打包与依赖安装不再存在：依赖变更走 requirements.txt → CI 镜像 → pull。
+- 配置（nginx / compose / backup）的唯一事实来源是仓库 `deploy/` 与根 `compose.yaml`，
+  **不要在服务器上直接改**；改法与同步命令见 `deploy/README.md`。
+- 数据库备份在宿主机 timer 上执行、读 `/var/lib/ntu-shower`，与容器无关（加密取舍见 ADR-0018）。
 
 ### 表结构变更的落地
 
@@ -115,12 +103,17 @@ ssh iseekdream.com 'sudo NT_ROLLBACK=/opt/ntu-shower/backups/server-<时间戳>.
 
 - **原始层只加列**：`ALTER TABLE door_snapshot ADD COLUMN device_clock TEXT`——老帧就该留空，
   它们确实没有这一列，那不是"缺数据"；
-- **派生层连表结构一起重建**：`python -m tools.rebuild_derived --db /opt/ntu-shower/data/ntu-shower.db` 会 `DROP` 那四张表再建、再由原始层
+- **派生层连表结构一起重建**：`python -m tools.rebuild_derived --db /var/lib/ntu-shower/ntu-shower.db` 会 `DROP` 那四张表再建、再由原始层
   重算。只 `ALTER` 原始层**不够**——`CREATE TABLE IF NOT EXISTS` 不会去改一张已存在的表，
   旧结构会让重算在第一帧就撞上"没有这一列"；
-- **核对**：`python -m tools.audit_timeline --db /opt/ntu-shower/data/ntu-shower.db`，**帧数必须与变更前一致**。
+- **核对**：`python -m tools.audit_timeline --db /var/lib/ntu-shower/ntu-shower.db`，**帧数必须与变更前一致**。
 
-以上命令在 `server/` 下执行，用生产解释器 `.venv/bin/python`。
+以上命令经容器执行（镜像内即生产运行时）：
+
+```bash
+ssh iseekdream.com 'docker exec ntu-shower python -m tools.rebuild_derived --db /var/lib/ntu-shower/ntu-shower.db'
+ssh iseekdream.com 'docker exec ntu-shower python -m tools.audit_timeline --db /var/lib/ntu-shower/ntu-shower.db'
+```
 
 ### 语音播报前置（voice，启用时一次性）
 
@@ -128,9 +121,8 @@ ssh iseekdream.com 'sudo NT_ROLLBACK=/opt/ntu-shower/backups/server-<时间戳>.
 ffmpeg 统一转成 MP3，因此只需系统有 `ffmpeg` 与 `ffprobe`（需带 libmp3lame）：
 
 ```bash
-# 系统依赖：ffmpeg / ffprobe（MP3 编码）
-ssh iseekdream.com 'ffmpeg -hide_banner -encoders | grep libmp3lame; command -v ffprobe'
-# 素材与数字状态（admin 身份）
+# ffmpeg / ffprobe（MP3 编码）已内置于镜像（Dockerfile apt 层），无需宿主机安装；
+# 就绪状态与数字素材齐备性走接口看
 ssh iseekdream.com 'curl -sS -H "X-Identity: <admin身份标识>" http://127.0.0.1:8110/api/v1/voice/status'
 ```
 
@@ -191,7 +183,9 @@ PY
 
 **验证记录**：2026-09-30 执行，`integrity_check` 返回 `ok`，全部表可读、
 行数与备份时一致。**该步骤此后按季度重复**；任一次失败都说明备份链路已坏，
-须在下一轮之前修好。
+须在下一轮之前修好。2026-11-06 切换容器形态后，脚本中的 python 段改经容器执行
+（`ssh iseekdream.com 'gunzip -c "$BAK" | docker exec -i ntu-shower python ...'` 形态、
+数据库路径 `/var/lib/ntu-shower/ntu-shower.db`）；下一次季度演练按新形态执行并更新本节。
 
 ## 故障处置
 
@@ -205,9 +199,9 @@ PY
 
 ```bash
 # 诊断：发布记录与安装确认
-ssh iseekdream.com '/opt/ntu-shower/server/.venv/bin/python - <<PY
+ssh iseekdream.com 'docker exec ntu-shower python - <<PY
 import sqlite3
-con = sqlite3.connect("/opt/ntu-shower/data/ntu-shower.db")
+con = sqlite3.connect("/var/lib/ntu-shower/ntu-shower.db")
 print("release:", con.execute("SELECT version, version_code, force, target FROM ota_release").fetchall())
 print("install:", con.execute("SELECT * FROM ota_release_install").fetchall())
 PY'
@@ -222,12 +216,13 @@ curl -X DELETE -H "X-Identity: <admin身份标识>" http://127.0.0.1:8110/api/v1
 ### 服务起不来
 
 ```bash
-ssh iseekdream.com 'systemctl is-active ntu-shower; journalctl -u ntu-shower -n 40 --no-pager'
+ssh iseekdream.com 'docker ps -a --filter name=ntu-shower --format "{{.Status}}"; docker logs ntu-shower --tail 40'
 ```
 
-- 日志出现 `PydanticUserError` / `ImportError` → 部署了与本机解释器版本不匹配的代码，
-  按部署章节的回滚步骤。`deploy.sh` 的第 1 步（生产解释器预检）本该拦住它——若它没拦住，先查那一步
-  是否被跳过。
+- 容器反复重启（Restarting）→ 看日志首屏的异常栈；启动即崩的代码问题按部署章节回滚到
+  上一镜像 tag。镜像与 CI 测的是同一份依赖集，`PydanticUserError` / `ImportError` 这类
+  解释器版本错配在当前形态下应已绝迹——真出现说明镜像构建与 CI 不一致，先查 tag 推错没有。
+- 旧形态的 `systemctl is-active ntu-shower` 只在「应急回滚」里才有意义。
 
 ### 设备能力集（capabilities）
 
@@ -325,8 +320,8 @@ curl -X POST -H "X-Identity: <admin身份标识>" http://127.0.0.1:8110/api/v1/d
 
 | 任务 | 命令 |
 |---|---|
-| 服务状态 | `systemctl status ntu-shower` |
-| 实时日志 | `journalctl -u ntu-shower -f` |
+| 服务状态 | `ssh iseekdream.com 'docker ps --filter name=ntu-shower'` |
+| 实时日志 | `ssh iseekdream.com 'docker logs -f ntu-shower'` |
 | 备份列表 | `ls -lh /var/backups/ntu-shower/` |
 | 抓设备画面 | `POST /api/v1/devices/<id>/capture`（返回 `data.image_base64`） |
 | 远程执行 shell | `POST /api/v1/devices/<id>/exec`，body `{"command": "..."}` |

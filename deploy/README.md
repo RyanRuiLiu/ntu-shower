@@ -6,10 +6,11 @@
 
 | 文件 | 服务器位置 | 生效方式 |
 |---|---|---|
-| `scripts/deploy.sh` | **不上服务器常驻**：随用随 `scp` 到 `/tmp` 再执行 | 见 `docs/RUNBOOK.md`「部署」 |
+| 根目录 `compose.yaml` | `/opt/ntu-shower/compose.yaml` | `NTU_SHOWER_TAG=<tag> docker compose -f /opt/ntu-shower/compose.yaml up -d`（见 `docs/RUNBOOK.md`「部署」） |
 | `nginx/ntu-shower.conf` | `/etc/nginx/sites-available/ntu-shower.conf`（软链到 sites-enabled） | `nginx -t && systemctl reload nginx` |
-| `systemd/ntu-shower.service` | `/etc/systemd/system/ntu-shower.service` | `systemctl daemon-reload && systemctl restart ntu-shower` |
-| `backup/ntu-shower-backup.sh` | `/opt/ntu-shower/scripts/ntu-shower-backup.sh` | 由单元调用 |
+| `systemd/ntu-shower.service` | `/etc/systemd/system/ntu-shower.service` | **2026-11-06 起停用**（服务由 Compose 承载）；单元与 `/opt/ntu-shower/server` 的 venv 冻结保留，仅作应急回滚 |
+| `scripts/deploy.sh` | **不上服务器常驻**（Docker 形态下不再使用，保留于仓库存档） | — |
+| `backup/ntu-shower-backup.sh` | `/opt/ntu-shower/scripts/ntu-shower-backup.sh` | 由单元调用（宿主机执行，与容器无关） |
 | `backup/ntu-shower-backup.{service,timer}` | `/etc/systemd/system/` | `systemctl daemon-reload && systemctl enable --now ntu-shower-backup.timer` |
 | `publish_apk.ps1` | **不上服务器**：本地工具 | `.\deploy\publish_apk.ps1 -Identity <admin>` |
 
@@ -18,11 +19,10 @@
 ## 同步命令
 
 ```bash
+scp compose.yaml root@iseekdream.com:/opt/ntu-shower/compose.yaml
+
 scp deploy/nginx/ntu-shower.conf root@iseekdream.com:/etc/nginx/sites-available/ntu-shower.conf
 ssh root@iseekdream.com "nginx -t && systemctl reload nginx"
-
-scp deploy/systemd/ntu-shower.service root@iseekdream.com:/etc/systemd/system/ntu-shower.service
-ssh root@iseekdream.com "systemctl daemon-reload && systemctl restart ntu-shower"
 
 scp deploy/backup/ntu-shower-backup.sh root@iseekdream.com:/opt/ntu-shower/scripts/ntu-shower-backup.sh
 scp deploy/backup/ntu-shower-backup.service deploy/backup/ntu-shower-backup.timer root@iseekdream.com:/etc/systemd/system/
