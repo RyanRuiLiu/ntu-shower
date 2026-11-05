@@ -110,7 +110,7 @@ async def _acquire_with_deadline(lock: asyncio.Lock, deadline: float) -> AsyncIt
     """
     remaining = deadline - asyncio.get_running_loop().time()
     if remaining <= 0:
-        raise asyncio.TimeoutError
+        raise TimeoutError
     acquire = asyncio.ensure_future(lock.acquire())
     try:
         done, _ = await asyncio.wait({acquire}, timeout=remaining)
@@ -127,7 +127,7 @@ async def _acquire_with_deadline(lock: asyncio.Lock, deadline: float) -> AsyncIt
             await acquire
         if acquire.done() and not acquire.cancelled() and acquire.result():
             lock.release()
-        raise asyncio.TimeoutError
+        raise TimeoutError
     try:
         yield
     finally:
@@ -221,7 +221,7 @@ async def _send_and_wait(
                     data=None,
                 )
             return await _dispatch(command_id, device_id, action, params, remaining)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         command_audit.insert_command(
             command_id, device_id, action, trace_id_var.get(), json.dumps(params, ensure_ascii=False)
         )
@@ -304,7 +304,7 @@ async def _dispatch(
         )
         try:
             result = await asyncio.wait_for(pending.future, timeout=timeout_s)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             outcome = CommandOutcome(
                 status=outcomes.TIMEOUT.value,
                 reason_code=reason_codes.DEADLINE_EXCEEDED.code,
@@ -392,7 +392,7 @@ async def push_config_update(
         try:
             await asyncio.wait_for(pending.future, timeout=timeout_s)
             return ConfigPushResult(notified=True, applied=True)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return ConfigPushResult(notified=True, applied=False, reason="ack timeout")
     finally:
         # 清理覆盖整个 await 周期，理由与 _dispatch 相同；成功路径已由

@@ -27,7 +27,6 @@ def _completed(args: list[str], code: int = 0, stdout: str = "", stderr: str = "
 def test_paths_and_sha256(voice_root: Path) -> None:
     assert audio.assets_dir() == voice_root / "assets"
     assert audio.tmp_dir() == voice_root / "tmp"
-    assert audio.legacy_effects_dir() == voice_root / "effects"
     asset_id = "a" * 64
     assert audio.asset_path(asset_id) == voice_root / "assets" / f"{asset_id}.mp3"
 

@@ -10,29 +10,29 @@ RFC 3339 profile：UTC 用 "Z" 后缀（RFC 3339 §5.6），毫秒精度足以
 星期、回放选的日期）。分桶要的是一个本地的小时数，不是又一个字符串。
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 _MILLIS = "milliseconds"
 
 
 def format_rfc3339(moment: datetime) -> str:
     """把 datetime 规范化为 RFC 3339 UTC 毫秒字符串（Z 后缀）。"""
-    return moment.astimezone(timezone.utc).isoformat(timespec=_MILLIS).replace("+00:00", "Z")
+    return moment.astimezone(UTC).isoformat(timespec=_MILLIS).replace("+00:00", "Z")
 
 
 def now_rfc3339() -> str:
     """当前时刻的 RFC 3339 字符串。"""
-    return format_rfc3339(datetime.now(timezone.utc))
+    return format_rfc3339(datetime.now(UTC))
 
 
 def rfc3339_after(seconds: float) -> str:
     """当前时刻 + seconds 的 RFC 3339 字符串（命令截止时刻等）。"""
-    return format_rfc3339(datetime.now(timezone.utc) + timedelta(seconds=seconds))
+    return format_rfc3339(datetime.now(UTC) + timedelta(seconds=seconds))
 
 
 def rfc3339_ago(seconds: float) -> str:
     """当前时刻 - seconds 的 RFC 3339 字符串（由运行时长反推开机时刻等）。"""
-    return format_rfc3339(datetime.now(timezone.utc) - timedelta(seconds=seconds))
+    return format_rfc3339(datetime.now(UTC) - timedelta(seconds=seconds))
 
 
 def parse_rfc3339(text: object) -> datetime | None:

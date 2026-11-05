@@ -1,5 +1,4 @@
 # 运维手册
-> ⚠️ **运维规范唯一标准**：`server-config/STANDARDS.md`（目录/端口/备份/systemd/nginx/密钥/日志/权限/升级/部署/Git）。本文只写本项目特有事实；冲突处以标准为准。
 
 本册只写**已实际执行验证过**的步骤。每步标注验证方式；未验证的步骤不得写入。
 
@@ -7,10 +6,11 @@
 
 | 项 | 值 |
 |---|---|
-| 入口 | `https://ntu-shower.iseekdream.com`（nginx 443 → 127.0.0.1:8001） |
+| 入口 | `https://ntu-shower.iseekdream.com`（nginx 443 → 127.0.0.1:8110） |
 | 服务器 | `root@iseekdream.com`（SSH 密钥 `~/.ssh/iseekdream-ubuntu.pem`） |
-| 应用目录 | `/opt/ntu-shower/server`（`.venv`、`.env` 在此，均不入库；运行数据已分离至 `/opt/ntu-shower/data`） |
-| 数据目录 | `/opt/ntu-shower/data`（`ntu-shower.db`、`voice/`；属主为服务用户 `ntu-shower`） |
+| 应用目录 | `/opt/ntu-shower/server`（`.venv` 在此，不入库） |
+| 配置 | `/etc/ntu-shower/ntu-shower.env`（systemd `EnvironmentFile`，不入库） |
+| 数据目录 | `/var/lib/ntu-shower`（`ntu-shower.db`、`voice/`、`ota_releases/`；属主为服务用户 `ntu-shower`） |
 | 备份目录 | `/var/backups/ntu-shower`（脚本 `/opt/ntu-shower/scripts/ntu-shower-backup.sh`）|
 | 运行时 | Python **3.13.x**（`.venv`，2026-11 从 3.10 升级）——与 CI 测试版本一致，见「注意事项」 |
 | 服务单元 | `ntu-shower.service`（uvicorn，Type=simple，Restart=always，以系统用户 `ntu-shower` 运行） |
@@ -23,10 +23,10 @@
 ```bash
 # ① HTTP/网关审计（谁、何时、调了什么、结果）：本机直连后端。
 #    管理面凭 admin 身份（X-Identity 头），身份在网页端"身份"页签发
-curl -s -H "X-Identity: <admin身份标识>"   "http://127.0.0.1:8001/api/v1/audit/calls?device_id=<设备>&limit=100"
+curl -s -H "X-Identity: <admin身份标识>"   "http://127.0.0.1:8110/api/v1/audit/calls?device_id=<设备>&limit=100"
 
 # ② 命令级审计（trace_id 与 ① 互通）
-curl -s -H "X-Identity: <admin身份标识>" "http://127.0.0.1:8001/api/v1/audit/commands?device_id=<设备>"
+curl -s -H "X-Identity: <admin身份标识>" "http://127.0.0.1:8110/api/v1/audit/commands?device_id=<设备>"
 
 # ③ 设备端命令痕迹（与 ② 同一 command_id 呼应）
 #    经 ops 页设备面板的命令执行，或 bridge shell：
@@ -48,9 +48,10 @@ journalctl -u ntu-shower --since "-1h" | grep '"trace_id":"<trace-id>"'
 
 # ② 本地：打包（务必排除运行时数据与本地配置）
 #
-# `--exclude=.env` 是必须的，不是可选的清理项：生产的 `.env` 是 systemd 的
-# EnvironmentFile，装着数据库路径等生产配置。本地那份若混进包里会覆盖生产配置
-# （2026-10-01 实际发生过一次，表现是 systemd 反复重启、healthz 无响应）。
+# `--exclude=.env` 是必须的，不是可选的清理项：本地开发配置不属于发布物
+# （STANDARDS.md §11.1.4 发布物不得包含本地配置）。生产的配置在
+# /etc/ntu-shower/ntu-shower.env（代码目录之外，包不会碰到它）；这条排除
+# 防的是"本地 .env 混进代码目录"这种环境差异入库的形态。
 # 排除只匹配 `.env` 这个整名，`.env.example` 照常随包发布。
 tar czf server_deploy.tar.gz -C server \
     --exclude=.venv --exclude=data --exclude=ota_releases --exclude=.env \
@@ -71,7 +72,8 @@ scp deploy/scripts/deploy.sh iseekdream.com:/tmp/
 # ④ 服务器：部署
 #
 # 脚本依次做五件事：用**生产解释器**预检 → 停服并备份（保留最近 5 份到
-# /opt/ntu-shower/backups）→ 保留 .venv／ota_releases／.env、其余全删后再解包（数据在 /opt/ntu-shower/data，与代码目录分离）
+# /opt/ntu-shower/backups）→ 保留 .venv、其余全删后再解包（数据在 /var/lib/ntu-shower、
+# 配置在 /etc/ntu-shower，都在代码目录之外）
 # → requirements.txt 变过才装依赖 → 启动并验证（is-active + /healthz）。
 # 任一步失败自动回滚；预检放在停服之前，所以预检不过时服务一直没停过、无需回滚。
 # 保留项清单与"其余全删"的理由写在脚本头部注释里。
@@ -100,7 +102,7 @@ ssh iseekdream.com 'sudo NT_ROLLBACK=/opt/ntu-shower/backups/server-<时间戳>.
   历史教训：3.10 时代 `typing.TypedDict` 在 pydantic 2.13 下被拒（要求 `typing_extensions.TypedDict`），
   本地全绿而线上启动即崩——`deploy.sh` 的第 1 步就是为此存在的，而且它排在停服之前，
   预检失败时服务一直没停过。2026-11 运行时升 3.13 后该坑消失，但预检流程保留。
-- 打包排除 `.env`：服务器的 `.env` 是唯一副本，被覆盖将导致管理面令牌丢失。
+- 打包排除 `.env`：本地开发配置不属于发布物；生产配置在 `/etc/ntu-shower/ntu-shower.env`，不在包的落点内。
 - `requirements.txt` 变化时 `deploy.sh` 自己装依赖；只改业务代码不需要另跑 `pip install`。
 - 配置（nginx / systemd / backup）的唯一事实来源是 `deploy/`，**不要在服务器上直接改**；
   改法与同步命令见 `deploy/README.md`。
@@ -129,7 +131,7 @@ ffmpeg 统一转成 MP3，因此只需系统有 `ffmpeg` 与 `ffprobe`（需带 
 # 系统依赖：ffmpeg / ffprobe（MP3 编码）
 ssh iseekdream.com 'ffmpeg -hide_banner -encoders | grep libmp3lame; command -v ffprobe'
 # 素材与数字状态（admin 身份）
-ssh iseekdream.com 'curl -sS -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/voice/status'
+ssh iseekdream.com 'curl -sS -H "X-Identity: <admin身份标识>" http://127.0.0.1:8110/api/v1/voice/status'
 ```
 
 `ffmpeg_available=true` 才能上传素材；`digits` 列出已标记的 0–9 数字素材，含数字变量的
@@ -143,6 +145,7 @@ ssh iseekdream.com 'curl -sS -H "X-Identity: <admin身份标识>" http://127.0.0
 
 `ntu-shower-backup.timer` 每日 00:00 执行 `VACUUM INTO` 在线备份（校验完整性后 gzip 压缩），
 滚动保留 14 份，落在 `/var/backups/ntu-shower/ntu-shower-<时间戳>.db.gz`。
+备份文件含学号、凭证与审计原文，目录权限 700；加密经 ADR-0018 记录为暂不执行（§15.4 例外）。
 
 手动触发与查看：
 
@@ -164,6 +167,9 @@ ssh iseekdream.com 'chmod 600 /var/backups/ntu-shower/ntu-shower.keystore'
 Get-FileHash config/keystore/ntu-shower.keystore -Algorithm SHA256    # 本地
 ssh iseekdream.com 'sha256sum /var/backups/ntu-shower/ntu-shower.keystore'
 ```
+
+keystore 的可用性验证：从备份副本执行 `gradlew assembleRelease` 能签名成功
+即证明副本可用（签名不匹配的 APK 无法覆盖安装在网设备）。
 
 ### 恢复演练
 
@@ -187,9 +193,6 @@ PY
 行数与备份时一致。**该步骤此后按季度重复**；任一次失败都说明备份链路已坏，
 须在下一轮之前修好。
 
-keystore 的可用性验证：从备份副本执行 `gradlew assembleRelease` 能签名成功
-即证明副本可用（签名不匹配的 APK 无法覆盖安装在网设备）。
-
 ## 故障处置
 
 ### OTA 反复下载同一个版本
@@ -210,7 +213,7 @@ print("install:", con.execute("SELECT * FROM ota_release_install").fetchall())
 PY'
 
 # 止损：下架该发布（最直接）
-curl -X DELETE -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/ota/releases/<版本>
+curl -X DELETE -H "X-Identity: <admin身份标识>" http://127.0.0.1:8110/api/v1/ota/releases/<版本>
 ```
 
 **预防**：`mark_installed_upto` 已在设备 hello 时调用（且早于 `latest_for`），
@@ -232,13 +235,13 @@ ssh iseekdream.com 'systemctl is-active ntu-shower; journalctl -u ntu-shower -n 
 **排查**：若某命令被拒且 `reason_code=device.unsupported_action`，先看设备声明里有没有它：
 
 ```bash
-ssh iseekdream.com 'curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/devices/runtime | python3 -m json.tool'
+ssh iseekdream.com 'curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.1:8110/api/v1/devices/runtime | python3 -m json.tool'
 ```
 
 ### 设备离线
 
 ```bash
-ssh iseekdream.com 'curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/devices/runtime'
+ssh iseekdream.com 'curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.1:8110/api/v1/devices/runtime'
 ```
 
 注意 `online` 字段是**最后一次上报值**，与内存中的活动连接分开判断；
@@ -276,15 +279,15 @@ ssh iseekdream.com 'curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.
 
 ```bash
 # 打开（设备侧会 root 开启 adbd）
-curl -X POST -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/devices/<id>/bridge/open
+curl -X POST -H "X-Identity: <admin身份标识>" http://127.0.0.1:8110/api/v1/devices/<id>/bridge/open
 # 本地隧道 + adb
 ssh -N -L 15655:127.0.0.1:15655 root@iseekdream.com &
 adb connect 127.0.0.1:15655 && adb devices
 
 # 查看状态：含 expires_in_s（距寿命到点还有多久）
-curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/devices/<id>/bridge
+curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.1:8110/api/v1/devices/<id>/bridge
 # 用毕关闭
-curl -X POST -H "X-Identity: <admin身份标识>" http://127.0.0.1:8001/api/v1/devices/<id>/bridge/close
+curl -X POST -H "X-Identity: <admin身份标识>" http://127.0.0.1:8110/api/v1/devices/<id>/bridge/close
 ```
 
 两个上限都可配（`bridge_pair_timeout_s` 默认 30 秒——点开桥后建隧道的最长时间；

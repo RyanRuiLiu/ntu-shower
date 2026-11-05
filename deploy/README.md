@@ -35,4 +35,8 @@ ssh root@iseekdream.com "chmod 700 /opt/ntu-shower/scripts/ntu-shower-backup.sh 
   （`Upgrade` + `Connection "upgrade"` + `proxy_http_version 1.1`）：
   前者服务用户页 `/api/v1/stream`，后者服务设备网关 `/gateway/device`。
 - `proxy_read_timeout 3600s`：设备网关与实时推送都是长连接，默认 60s 会被 nginx 掐断。
-- `.env`（数据库路径等生产配置）只在服务器上，不入仓库。
+- TLS 策略（纯 AEAD，无 CBC）现在就在 `nginx/ntu-shower.conf` 的 server 块内声明：
+  证书是单张 ECDSA 通配符，`ssl_ciphers` 只列三个 AEAD ECDSA 套件（TLS 1.3 的套件
+  由 OpenSSL 默认提供，不经该指令）。不要再依赖全局 `/etc/nginx/nginx.conf` 承载
+  TLS 策略——那会让仓库失去对安全关键配置的唯一事实源。
+- `.env`（数据库路径等生产配置）只在服务器上（`/etc/ntu-shower/ntu-shower.env`），不入仓库。

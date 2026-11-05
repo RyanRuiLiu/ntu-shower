@@ -38,11 +38,6 @@ def tmp_dir() -> Path:
     return Path(settings.voice_dir) / "tmp"
 
 
-def legacy_effects_dir() -> Path:
-    """旧音效库的文件目录；只在一次性重建时读取。"""
-    return Path(settings.voice_dir) / "effects"
-
-
 def asset_path(asset_id: str) -> Path:
     return assets_dir() / f"{asset_id}.mp3"
 

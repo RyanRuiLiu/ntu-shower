@@ -11,12 +11,14 @@
 # 前提：`android/gradle.properties` 里有 serverDomain 与签名口令（见该文件的 example）。
 
 param(
-    [Parameter(Mandatory = $true)][string]$Identity,
+    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$Identity,
     [switch]$SkipBuild,
     [string]$Target = "all",
     [string]$BaseUrl = "https://ntu-shower.iseekdream.com"
 )
 
+# 严格模式（STANDARDS.md §7.8.2）：未定义变量与拼错成员名当场终止，而不是静默走 $null。
+Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path $PSScriptRoot -Parent
@@ -62,9 +64,12 @@ if ($LASTEXITCODE -ne 0) { throw "上传失败" }
 Write-Host $response
 
 # 服务端返回 notified_devices，非空即表示在线设备已收到升级通知并会自行安装重连。
+# 严格模式下访问不存在的属性会抛错：失败响应是 problem+json（没有该字段），
+# 经 PSObject.Properties 探测后再取，让"发布被拒"也走同一条可读的提示路径。
 $parsed = $response | ConvertFrom-Json
-if ($parsed.notified_devices) {
-    Write-Host "已通知 $($parsed.notified_devices.Count) 台在线设备" -ForegroundColor Green
+$notified = $parsed.PSObject.Properties['notified_devices']
+if ($null -ne $notified -and $notified.Value) {
+    Write-Host "已通知 $($notified.Value.Count) 台在线设备" -ForegroundColor Green
 } else {
-    Write-Host "没有在线设备收到通知（设备离线时可稍后由它自己拉取 manifest）" -ForegroundColor Yellow
+    Write-Host "没有在线设备收到通知（设备离线时可稍后由它自己拉取 manifest；若响应是 problem+json 则本次发布被拒，看上方返回体）" -ForegroundColor Yellow
 }
