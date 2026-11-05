@@ -1,4 +1,7 @@
 # /etc/systemd/system/ntu-shower.service
+# 自 2026-11-06 起服务由 Docker Compose 承载（compose.yaml + ACR 镜像），本单元
+# 停用（disable）并保留作应急回退入口——启用前先释放 8110 端口（docker compose down），
+# 步骤见 docs/RUNBOOK.md「应急回退」。单元指向的 /opt/ntu-shower/server 冻结在切换前版本。
 [Unit]
 StartLimitIntervalSec=60
 StartLimitBurst=5
