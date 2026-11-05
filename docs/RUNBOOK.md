@@ -143,34 +143,14 @@ ssh iseekdream.com 'curl -sS -H "X-Identity: <admin身份标识>" http://127.0.0
 
 ### 自动备份（数据库）
 
-`ntu-shower-backup.timer` 每日 00:00 执行 `VACUUM INTO` 在线备份：完整性校验 → gzip →
-**age 加密**（收件人公钥 `/etc/ntu-shower/backup-age.pub`）→ 产出 SHA-256 校验和边车，
-滚动保留 14 份，落在 `/var/backups/ntu-shower/ntu-shower-<时间戳>.db.gz.age`。
-盘上不留明文——备份文件含学号、凭证与审计原文，泄露时只有持有私钥的一方（密钥保管
-方，异地）能读。私钥的生成与托管方式见 `deploy/README.md`；加密是
-`STANDARDS.md` §12.4.2 的要求，age 缺失或公钥不可读时脚本直接失败，不产出明文备份。
+`ntu-shower-backup.timer` 每日 00:00 执行 `VACUUM INTO` 在线备份（校验完整性后 gzip 压缩），
+滚动保留 14 份，落在 `/var/backups/ntu-shower/ntu-shower-<时间戳>.db.gz`。
+备份文件含学号、凭证与审计原文，目录权限 700；加密经 ADR-0018 记录为暂不执行（§15.4 例外）。
 
 手动触发与查看：
 
 ```bash
 ssh iseekdream.com 'systemctl start ntu-shower-backup.service && journalctl -u ntu-shower-backup -n 5'
-```
-
-### 恢复演练
-
-**明文格式时代的演练记录**（2026-09-30 执行，见 Git 历史）：`integrity_check` 返回 `ok`，
-全部表可读、行数与备份时一致。**加密格式启用后按新流程重跑一次演练**是未完成项——
-未完成不掩盖，跑完并把命令与结果写回本节之前，本节的恢复步骤视为未验证（§9.10.1）。
-新流程（待现场验证后本行删除）：
-
-```bash
-# 在密钥保管方持有私钥的机器上执行；私钥不出那台机器
-ssh iseekdream.com 'cat /var/backups/ntu-shower/ntu-shower-<时间戳>.db.gz.age' > backup.db.gz.age
-ssh iseekdream.com 'cat /var/backups/ntu-shower/ntu-shower-<时间戳>.db.gz.age.sha256'
-sha256sum backup.db.gz.age   # 与边车逐位一致才继续
-age -d -i <私钥文件> -o backup.db.gz backup.db.gz.age
-gunzip -t backup.db.gz && echo "gzip 流完整"
-# 之后与明文时代相同：integrity_check + 逐表行数
 ```
 
 ### keystore（不做自动滚动）
@@ -189,8 +169,29 @@ ssh iseekdream.com 'sha256sum /var/backups/ntu-shower/ntu-shower.keystore'
 ```
 
 keystore 的可用性验证：从备份副本执行 `gradlew assembleRelease` 能签名成功
-即证明副本可用（签名不匹配的 APK 无法覆盖安装在网设备）。恢复演练每季度执行
-一次；任一次失败都说明备份链路已坏，须在下一轮之前修好。
+即证明副本可用（签名不匹配的 APK 无法覆盖安装在网设备）。
+
+### 恢复演练
+
+数据库备份在临时位置实际还原过一次，验证脚本与结果如下（不碰生产）：
+
+```bash
+ssh iseekdream.com 'BAK=$(ls -1t /var/backups/ntu-shower/ntu-shower-*.db.gz | head -1)
+  rm -rf /tmp/restore_test && mkdir -p /tmp/restore_test
+  gunzip -c "$BAK" > /tmp/restore_test/restored.db
+  /opt/ntu-shower/server/.venv/bin/python - <<PY
+import sqlite3
+con = sqlite3.connect("/tmp/restore_test/restored.db")
+print("integrity:", con.execute("PRAGMA integrity_check").fetchone()[0])
+for t, in con.execute("SELECT name FROM sqlite_master WHERE type=? ORDER BY name", ("table",)).fetchall():
+    print(f"  {t:24} {con.execute(f\"SELECT COUNT(*) FROM {t}\").fetchone()[0]} 行")
+PY
+  rm -rf /tmp/restore_test'
+```
+
+**验证记录**：2026-09-30 执行，`integrity_check` 返回 `ok`，全部表可读、
+行数与备份时一致。**该步骤此后按季度重复**；任一次失败都说明备份链路已坏，
+须在下一轮之前修好。
 
 ## 故障处置
 

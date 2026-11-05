@@ -40,5 +40,3 @@ ssh root@iseekdream.com "chmod 700 /opt/ntu-shower/scripts/ntu-shower-backup.sh 
   由 OpenSSL 默认提供，不经该指令）。不要再依赖全局 `/etc/nginx/nginx.conf` 承载
   TLS 策略——那会让仓库失去对安全关键配置的唯一事实源。
 - `.env`（数据库路径等生产配置）只在服务器上（`/etc/ntu-shower/ntu-shower.env`），不入仓库。
-- 备份加密依赖服务器安装 `age`，收件人公钥在 `/etc/ntu-shower/backup-age.pub`；
-  私钥由密钥保管方异地持有。两者缺任一，备份脚本会直接失败而不是产出明文备份。
