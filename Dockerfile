@@ -10,9 +10,17 @@ FROM python:3.13-slim
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-WORKDIR /app
+# 工作目录必须就是 server/ 包的父目录：`uvicorn app.main:app` 按相对模块路径解析，
+# systemd 形态靠 WorkingDirectory=/opt/ntu-shower/server 成立，容器形态由本行承担。
+WORKDIR /app/server
+# 语音素材上传与转码依赖 ffmpeg/ffprobe（libmp3lame；见 CONTRIBUTING「环境」），
+# slim 基镜像不带——systemd 形态装在宿主机，容器形态必须进镜像，否则
+# /voice/status 的 ffmpeg_available 恒为 false、素材上传全被拒。
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /install /usr/local
-COPY server/ ./server/
+COPY server/ ./
 
 # 依据：CIS Docker Benchmark 5.12（容器内非 root）
 # 数据目录 /var/lib/ntu-shower 属主 UID/GID 997（项目事实，ntu-shower）
