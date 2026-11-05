@@ -12,7 +12,7 @@
 
 - 服务端切换为 Docker Compose 部署：镜像由 CI 构建并双推 GHCR/ACR，服务器 `docker pull` +
   `compose up -d`；容器以非 root（UID 997）运行，根文件系统只读、能力全丢弃、端口仅绑回环。
-  旧 systemd 单元与 venv 冻结保留作应急回退；数据库备份仍在宿主机 timer 上执行。
+  旧 systemd 单元与 venv 冻结保留作应急回滚；数据库备份仍在宿主机 timer 上执行。
 - compose 为 ADB 调试桥补回环端口段映射（15655-15664）：桥接监听随服务进入容器后，
   运维的 SSH 隧道需要这段映射才能到达。
 

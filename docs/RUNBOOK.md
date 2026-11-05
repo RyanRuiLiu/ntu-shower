@@ -14,7 +14,7 @@
 | 配置 | `/etc/ntu-shower/ntu-shower.env`（容器经 `env_file` 注入，不入库） |
 | 数据目录 | `/var/lib/ntu-shower`（`ntu-shower.db`、`voice/`、`ota_releases/`；bind mount 进容器同路径，属主 `ntu-shower`=UID 997） |
 | 备份目录 | `/var/backups/ntu-shower`（脚本 `/opt/ntu-shower/scripts/ntu-shower-backup.sh`）|
-| 旧应用目录 | `/opt/ntu-shower/server`（venv 形态，2026-11-06 起退役冻结，仅应急回退用，见「应急回退」） |
+| 旧应用目录 | `/opt/ntu-shower/server`（venv 形态，2026-11-06 起退役冻结，仅应急回滚用，见「应急回滚」） |
 | 备份单元 | `ntu-shower-backup.timer`（每日 00:00，`Persistent=true`；宿主机执行，读 `/var/lib`，与容器无关） |
 
 ## 痕迹取回（出问题时按设备 + 时间段还原现场）
@@ -68,17 +68,17 @@ ssh iseekdream.com 'systemctl stop ntu-shower && cd /opt/ntu-shower && NTU_SHOWE
 ssh iseekdream.com 'curl -fsS http://127.0.0.1:8110/healthz; echo; docker ps --filter name=ntu-shower --format "{{.Status}}"'
 ssh iseekdream.com 'docker logs ntu-shower 2>&1 | tail -20'
 
-# ⑥ 服务器：退役旧单元（保留单元文件与 venv 作应急回退入口，不卸载、不删除）
+# ⑥ 服务器：退役旧单元（保留单元文件与 venv 作应急回滚入口，不卸载、不删除）
 ssh iseekdream.com 'systemctl disable ntu-shower'
 ```
 
-**回滚**（部署后发现问题时，回退到上一个镜像 tag——一条命令，秒级）：
+**回滚**（部署后发现问题时，回滚到上一个镜像 tag——一条命令，秒级）：
 
 ```bash
 ssh iseekdream.com 'cd /opt/ntu-shower && NTU_SHOWER_TAG=<上一个tag> docker compose up -d'
 ```
 
-### 应急回退（venv+systemd 旧形态）
+### 应急回滚（venv+systemd 旧形态）
 
 `ntu-shower.service` 单元保留在服务器但已 disable；`/opt/ntu-shower/server` 的旧 venv 与
 代码随之冻结在切换前的版本。只在镜像路径整体不可用（ACR 与 GHCR 同时不可达）时走它：
@@ -222,7 +222,7 @@ ssh iseekdream.com 'docker ps -a --filter name=ntu-shower --format "{{.Status}}"
 - 容器反复重启（Restarting）→ 看日志首屏的异常栈；启动即崩的代码问题按部署章节回滚到
   上一镜像 tag。镜像与 CI 测的是同一份依赖集，`PydanticUserError` / `ImportError` 这类
   解释器版本错配在当前形态下应已绝迹——真出现说明镜像构建与 CI 不一致，先查 tag 推错没有。
-- 旧形态的 `systemctl is-active ntu-shower` 只在「应急回退」里才有意义。
+- 旧形态的 `systemctl is-active ntu-shower` 只在「应急回滚」里才有意义。
 
 ### 设备能力集（capabilities）
 
