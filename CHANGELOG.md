@@ -10,6 +10,12 @@
 
 ### Added
 
+- 服务端切换为 Docker Compose 部署：镜像由 CI 构建并双推 GHCR/ACR，服务器 `docker pull` +
+  `compose up -d`；容器以非 root（UID 997）运行，根文件系统只读、能力全丢弃、端口仅绑回环。
+  旧 systemd 单元与 venv 冻结保留作应急回退；数据库备份仍在宿主机 timer 上执行。
+- compose 为 ADB 调试桥补回环端口段映射（15655-15664）：桥接监听随服务进入容器后，
+  运维的 SSH 隧道需要这段映射才能到达。
+
 - 根目录 `LICENSE`：此前许可证缺位（按默认版权处理），现以专有声明显式登记。
 - Docker 构建资产（`Dockerfile`、`compose.yaml`、`.dockerignore`）入库：此前仅存在于本机工作区，
   `docker.yml` 工作流在远端按可复用流程构建时缺少 Dockerfile。
@@ -28,6 +34,9 @@
 
 ### Fixed
 
+- 修复镜像运行时工作目录：`uvicorn app.main:app` 在容器内无法解析 `app` 包
+  （systemd 时代的 `WorkingDirectory` 依赖被带进了 Dockerfile），CI 只构建不运行故未暴露；
+  同批把 ffmpeg/ffprobe 纳入镜像（语音素材转码依赖，slim 基镜像不带）。
 - 网关对接收方不认识的时段格式坏的语音规则行，跳过并留痕，不再中断整帧投递
   （此前非数组形状的坏行会以 TypeError 冒泡）。
 - 清理指向已废弃 `server-config` 项目的全部引用（两份文档横幅与两个 systemd 单元的
