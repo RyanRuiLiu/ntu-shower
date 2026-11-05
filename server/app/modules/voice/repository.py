@@ -7,20 +7,12 @@
 规则删除不删素材；素材被规则引用时不允许删除。设备端缓存按素材哈希命中，同一个
 内容只下载一次。
 
-## 一次性重建
-
-旧版本的语音表（TTS clip、effect、text 规则、投递）与固定音频模型不兼容。首次启动新代码
-时把旧 `voice_effect` 文件导入 `voice_asset`，随后删除旧规则/投递/合成缓存表，并
-清掉生成的 TTS clip 文件；旧 effect 文件保留（已导入新表）。之后不再走这段。
 """
 
 import json
-import shutil
 from datetime import datetime
-from pathlib import Path
 from sqlite3 import Row
 
-from app.core.config import settings
 from app.core.db import get_conn, read_one, write
 from app.core.logging import log_event
 from app.modules.doors.events import DoorEvent
@@ -85,127 +77,7 @@ CREATE INDEX IF NOT EXISTS idx_voice_delivery_created
 def init_tables() -> None:
     audio.assets_dir().mkdir(parents=True, exist_ok=True)
     audio.tmp_dir().mkdir(parents=True, exist_ok=True)
-    _rebuild_legacy_if_needed()
-    _reset_rule_schema_if_outdated()
     get_conn().executescript(SCHEMA)
-
-
-def _table_exists(name: str) -> bool:
-    row = read_one("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,))
-    return row is not None
-
-
-def _columns(name: str) -> list[str]:
-    if not _table_exists(name):
-        return []
-    return [str(row["name"]) for row in get_conn().execute(f"PRAGMA table_info({name})")]
-
-
-def _reset_rule_schema_if_outdated() -> None:
-    """规则表结构换代：没有 time_windows 的旧表直接丢弃重建。
-
-    这是新表结构上线时的一次性重建，不保留旧规则；调用方应在部署前导出旧规则，
-    部署后按新结构回填。旧表若仍是旧 TTS 模型，[`_rebuild_legacy_if_needed`] 已经
-    处理过，这里只负责固定素材模型之后新增的时间列。
-    """
-    columns = _columns("voice_rule")
-    if columns and "time_windows" not in columns:
-        log_event("WARNING", "voice.rule-schema-reset", "语音规则表结构换代，清空并重建 voice_rule")
-        get_conn().execute("DROP TABLE voice_rule")
-        get_conn().commit()
-
-
-def _rebuild_legacy_if_needed() -> None:
-    """旧 TTS/音效模型 → 固定素材模型的一次性重建。"""
-    rule_columns = _columns("voice_rule")
-    delivery_columns = _columns("voice_delivery")
-    legacy = (
-        _table_exists("voice_effect")
-        or _table_exists("voice_clip")
-        or (rule_columns and "segments" not in rule_columns)
-        or (delivery_columns and "clip_id" in delivery_columns)
-    )
-    if not legacy:
-        return
-
-    log_event("WARNING", "voice.legacy-rebuild", "语音模块重建：导入旧音效并清理旧表")
-    _create_asset_table()
-    _import_legacy_effects()
-    for table in ("voice_rule", "voice_delivery", "voice_clip", "voice_effect"):
-        get_conn().execute(f"DROP TABLE IF EXISTS {table}")
-    _cleanup_generated_clips()
-    get_conn().commit()
-
-
-def _create_asset_table() -> None:
-    get_conn().execute(
-        """
-        CREATE TABLE IF NOT EXISTS voice_asset (
-            asset_id    TEXT PRIMARY KEY,
-            name        TEXT    NOT NULL UNIQUE,
-            digit       INTEGER UNIQUE,
-            duration_ms INTEGER NOT NULL,
-            size_bytes  INTEGER NOT NULL,
-            created_at  TEXT    NOT NULL
-        )
-        """
-    )
-
-
-def _import_legacy_effects() -> None:
-    from app.core.clock import now_rfc3339
-
-    if not _table_exists("voice_effect"):
-        return
-    now = now_rfc3339()
-    for row in get_conn().execute("SELECT * FROM voice_effect ORDER BY created_at").fetchall():
-        effect_id = str(row["effect_id"])
-        name = str(row["name"])
-        if get_asset_by_name(name) is not None:
-            continue
-        source = audio.legacy_effects_dir() / f"{effect_id}.wav"
-        if not source.is_file():
-            log_event("WARNING", "voice.legacy-effect-missing", "旧音效文件不存在", effect_id=effect_id)
-            continue
-        try:
-            target = audio.tmp_dir() / f"legacy-{effect_id}.mp3"
-            duration_ms = audio.normalize_to_mp3(source, target)
-            asset_id = audio.sha256_file(target)
-            final = audio.asset_path(asset_id)
-            final.parent.mkdir(parents=True, exist_ok=True)
-            if final.exists():
-                target.unlink(missing_ok=True)
-            else:
-                target.replace(final)
-            write(
-                "INSERT OR IGNORE INTO voice_asset(asset_id,name,digit,duration_ms,size_bytes,created_at)"
-                " VALUES (?,?,NULL,?,?,?)",
-                (asset_id, name, duration_ms, final.stat().st_size, now),
-            )
-        except Exception as exc:  # noqa: BLE001 — 单个旧音效失败不能挡住启动
-            log_event(
-                "WARNING",
-                "voice.legacy-effect-import-failed",
-                "旧音效导入失败",
-                effect_id=effect_id,
-                error=str(exc),
-            )
-    get_conn().commit()
-
-
-def _cleanup_generated_clips() -> None:
-    """旧 TTS 合成缓存是孤儿；旧 effect 文件保留（已导入新表）。"""
-    clips = Path(settings.voice_dir) / "clips"
-    if clips.is_dir():
-        try:
-            shutil.rmtree(clips)
-        except OSError as exc:
-            log_event("WARNING", "voice.legacy-cleanup-failed", "旧 TTS 缓存清理失败", path=str(clips), reason=str(exc))
-    tmp = audio.tmp_dir()
-    if tmp.is_dir():
-        for path in tmp.glob("*"):
-            if path.is_file():
-                path.unlink(missing_ok=True)
 
 
 # ── 素材 ──
@@ -369,7 +241,10 @@ def matching_rules(device_id: str, cert_no: str, event: str, local: datetime) ->
             continue
         try:
             windows = time_rules.parse_json(str(row["time_windows"]))
-        except ValueError as exc:
+        except (TypeError, ValueError) as exc:
+            # TypeError 与 ValueError 都来自解析：前者是列内容不是数组（库被外部改坏），
+            # 后者是时段值非法。两者同属"这条规则的时段不可用"，一并跳过并留痕，
+            # 不让一条坏行中断整帧的事件投递。
             log_event(
                 "ERROR",
                 "voice.rule-time-invalid",

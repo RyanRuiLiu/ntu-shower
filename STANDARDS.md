@@ -1,5 +1,4 @@
 # ntu-shower 工程标准
-> ⚠️ **运维规范唯一标准**：`server-config/STANDARDS.md`（目录/端口/备份/systemd/nginx/密钥/日志/权限/升级/部署/Git）。本文只写本项目特有事实；冲突处以标准为准。
 
 > 状态：规范性（目标状态）；采纳步骤见 §18。
 >
@@ -526,6 +525,7 @@ R 表示执行，A 表示最终负责，C 表示需咨询，I 表示需知会。
 | 许可证 | `LICENSE` |
 | 自动化配置 | `.github/workflows/` |
 | 版本控制配置 | `.gitignore`、`.gitattributes`、`.githooks/` |
+| Docker 构建资产 | `Dockerfile`、`compose.yaml`、`.dockerignore`（仓库根；构建上下文需要整棵仓库树，故不放入 `deploy/`） |
 | 详细文档 | `docs/` |
 | 协议契约 | `protocol/` |
 | 服务端 | `server/` |
@@ -547,6 +547,9 @@ R 表示执行，A 表示最终负责，C 表示需咨询，I 表示需知会。
 ├── LICENSE
 ├── .github/workflows/
 ├── .githooks/
+├── Dockerfile
+├── compose.yaml
+├── .dockerignore
 ├── docs/
 │   ├── ARCHITECTURE.md
 │   ├── REFERENCE.md
@@ -1775,8 +1778,8 @@ AI 不得：
 | 文档登记、入链、标题与链接 | 仓库测试 | 已执行 |
 | 不确定措辞与写死数字 | 仓库测试 | 已执行 |
 | 提交信息格式 | 提交检查 | 已执行 |
-| 秘密扫描 | 持续集成 | 待建立 |
-| 依赖漏洞扫描 | 持续集成 | 待建立 |
+| 秘密扫描 | 持续集成 | 已执行 |
+| 依赖漏洞扫描 | 持续集成 | 已执行 |
 | 可访问性自动检查 | 持续集成 | 待建立 |
 | 构建物校验和与签名 | 发布流程 | 待建立 |
 | 备份恢复演练 | 运行手册 | 已执行，按季度重复 |

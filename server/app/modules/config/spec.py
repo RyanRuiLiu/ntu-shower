@@ -10,13 +10,13 @@ scope=DEVICE 的键下发给设备，设备端 RuntimeConfig 是它的消费者�
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class ConfigKind(str, Enum):
+class ConfigKind(StrEnum):
     """取值类型。
 
-    用 `str, Enum` 而非 `StrEnum`：运行时是 Python 3.10，后者 3.11 才有。
+    `StrEnum`（3.11+）：成员即字符串值，登记表下发与校验都按取值消费。
     """
 
     INT = "int"
@@ -78,7 +78,7 @@ def format_weekdays(days: Iterable[int]) -> str:
     return ",".join(str(day) for day in sorted(set(days)))
 
 
-class ConfigScope(str, Enum):
+class ConfigScope(StrEnum):
     """归属：键由哪一端消费。"""
 
     DEVICE = "device"

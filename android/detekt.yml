@@ -30,7 +30,7 @@ style:
 
 exceptions:
   # 设备无人值守：清理与回调路径吞掉异常让服务继续跑，单次操作的对错让位于存活
-  # （有意设计，见 ADR-0022）
+  # （有意设计，见 docs/DECISIONS.md「设备端」）
   TooGenericExceptionCaught:
     active: false
   SwallowedException:

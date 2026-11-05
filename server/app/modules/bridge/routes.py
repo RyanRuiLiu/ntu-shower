@@ -105,7 +105,7 @@ async def device_bridge(ws: WebSocket) -> None:
     if bridge.pending_to_device:
         try:
             await asyncio.wait_for(ws.send_bytes(bytes(bridge.pending_to_device)), timeout=5.0)
-        except (WebSocketDisconnect, RuntimeError, asyncio.TimeoutError) as exc:
+        except (TimeoutError, WebSocketDisconnect, RuntimeError) as exc:
             log_event(
                 "WARNING",
                 "bridge.flush-failed",
@@ -140,7 +140,7 @@ async def device_bridge(ws: WebSocket) -> None:
             tcp_writer.write(data)
             try:
                 await asyncio.wait_for(tcp_writer.drain(), timeout=5.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 reason = "tcp write stalled"
                 log_event(
                     "WARNING",

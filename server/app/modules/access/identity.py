@@ -4,13 +4,13 @@
 靠它分辨名单里哪些是小程序用户、哪些是为网页签发的标识。
 """
 
-from enum import Enum
+from enum import StrEnum
 
 
-class IdentityKind(str, Enum):
+class IdentityKind(StrEnum):
     """标识来源。
 
-    用 `str, Enum` 而非 `StrEnum`：运行时是 Python 3.10，后者 3.11 才有。
+    `StrEnum`（3.11+）：成员即字符串值，入库与 OpenAPI 都按取值消费。
     """
 
     OPENID = "openid"

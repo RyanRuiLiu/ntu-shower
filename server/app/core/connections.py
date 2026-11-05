@@ -69,7 +69,7 @@ class ConnectionManager:
             return False
         try:
             await asyncio.wait_for(ws.send_text(data), timeout=SEND_TIMEOUT_S)
-        except (WebSocketDisconnect, RuntimeError, asyncio.TimeoutError):
+        except (TimeoutError, WebSocketDisconnect, RuntimeError):
             # 连接在发送瞬间断开，或对端停止读取：返回 False，让调用方按离线处理。
             return False
         return True

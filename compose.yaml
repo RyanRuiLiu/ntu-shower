@@ -1,0 +1,44 @@
+# 依据：Compose Specification（不写已废弃的 version 字段）
+services:
+  ntu-shower:
+    build:
+      context: .
+    # 依据：Docker 官方 best practices（固定不可变 tag，禁止 latest）
+    image: ntu-shower:${NTU_SHOWER_TAG:?NTU_SHOWER_TAG must be set}
+    # 依据：Docker 官方 restart policy 文档
+    restart: unless-stopped
+    # 依据：CIS Docker Benchmark 5.12（非 root）；与数据目录属主 UID/GID 997 一致
+    user: "997:997"
+    env_file:
+      # 依据：12-Factor III（Config）；由 Docker 读取并注入环境变量
+      - /etc/ntu-shower/ntu-shower.env
+    ports:
+      # 12-Factor VII（Port binding）；仅回环，由反向代理对外
+      - "127.0.0.1:8110:8110"
+    volumes:
+      # 依据：FHS 3.0 /var/lib（可变状态）；12-Factor VI（状态外置）
+      - /var/lib/ntu-shower:/var/lib/ntu-shower
+    # 依据：CIS Docker Benchmark 5.5（只读根文件系统）
+    read_only: true
+    # 依据：CIS Docker Benchmark 5.5 配套；uvicorn 需要临时目录
+    tmpfs:
+      - /tmp
+    # 依据：CIS Docker Benchmark 5.3（丢弃全部 capabilities；非 root 无需绑定特权端口）
+    cap_drop:
+      - ALL
+    # 依据：Docker 官方 security 文档（no-new-privileges）
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      # 与 Dockerfile HEALTHCHECK 一致；Dockerfile reference 默认值
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8110/healthz', timeout=2)"]
+      interval: 30s
+      timeout: 30s
+      start_period: 0s
+      retries: 3
+    logging:
+      # 依据：Docker 官方 logging driver 文档示例
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

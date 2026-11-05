@@ -39,13 +39,13 @@
 任何微信内容，只认 `X-Identity` 字符串。
 """
 
-from enum import Enum
+from enum import StrEnum
 
 
-class Capability(str, Enum):
+class Capability(StrEnum):
     """可授予的能力。用户位与管理位并列，判定同构。
 
-    用 `str, Enum` 而非 `StrEnum`：运行时是 Python 3.10，后者 3.11 才有。
+    `StrEnum`（3.11+）：成员即字符串值，OpenAPI 与跨端对账都按取值消费。
     """
 
     SESSION = "session"

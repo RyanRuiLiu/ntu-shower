@@ -2,7 +2,7 @@
 StartLimitIntervalSec=60
 StartLimitBurst=5
 Description=NTU Shower SQLite daily backup
-Documentation=file:/opt/server-config/apps/ntu-shower/README.md
+Documentation=https://github.com/RyanRuiLiu/ntu-shower
 
 [Service]
 Type=oneshot
