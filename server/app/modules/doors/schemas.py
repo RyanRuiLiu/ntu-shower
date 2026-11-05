@@ -4,12 +4,12 @@
 同一套字段，前端只写一套渲染。
 """
 
-from enum import Enum
+from enum import StrEnum
 
 from typing_extensions import TypedDict
 
 
-class DoorState(str, Enum):
+class DoorState(StrEnum):
     """喷头的派生状态，由服务端从 4 个原始整数派生（规则见 service.derive_state）。
 
     定义成枚举让 OpenAPI 生成 enum，客户端据此生成联合类型，不必手抄状态清单。

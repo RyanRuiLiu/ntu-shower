@@ -156,8 +156,11 @@ class DoorSnapshotSender(context: Context, private val onDoorsRead: (DoorReading
     /**
      * 只读一次并通知读数观察者；不更新指纹、不写发件箱。
      *
-     * 供不 `trusted` 但仍需要在本地判断占用时使用——占用是本地事实，不应因为没连上
-     * 服务端就变成未知。与 [captureAndEnqueue] 共用调用方的工作线程，天然串行。
+     * 供屏幕提示在**尚未收到过完整读数**时补读一次（看门狗路径，见
+     * AgentService.syncConfigDependents）：占用是本地事实，不应因为还没采集到
+     * 完整读数就变成未知。喷头状态变化本身的采集入队一律走 [captureAndEnqueue]，
+     * 与是否 `trusted` 无关——本方法不再承担"未连接时判断占用"的职责。
+     * 与 [captureAndEnqueue] 共用调用方的工作线程，天然串行。
      */
     fun readAndNotify() {
         onDoorsRead(DoorSnapshotReader.readAll())

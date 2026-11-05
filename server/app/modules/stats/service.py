@@ -54,7 +54,7 @@ from __future__ import annotations
 
 import statistics
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from itertools import pairwise
 from sqlite3 import Row
 
@@ -174,7 +174,7 @@ def _day_start(moment: str, offset_minutes: int) -> str:
     local = to_local(moment, offset_minutes)
     if local is None:
         return moment
-    return format_rfc3339(local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc))
+    return format_rfc3339(local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC))
 
 
 def _average(values: list[int]) -> int:
@@ -892,8 +892,8 @@ def device_replay(device_id: str, day: str, tz_offset_minutes: int) -> ReplayVie
     在东八区与在 UTC 指的不是同一段二十四小时。
     """
     local_midnight = datetime.fromisoformat(day).replace(tzinfo=timezone(timedelta(minutes=tz_offset_minutes)))
-    start = format_rfc3339(local_midnight.astimezone(timezone.utc))
-    end = format_rfc3339((local_midnight + timedelta(days=1)).astimezone(timezone.utc))
+    start = format_rfc3339(local_midnight.astimezone(UTC))
+    end = format_rfc3339((local_midnight + timedelta(days=1)).astimezone(UTC))
     rows = (
         get_conn()
         .execute(
