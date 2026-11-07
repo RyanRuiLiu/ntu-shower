@@ -43,17 +43,17 @@ from app.models import Base
 DONE: tuple[tuple[str, str], ...] = (
     ("device", "devices"),
     ("access_identity", "access_identities"),
+    ("clock_shift", "clock_shifts"),
+    ("device_config", "device_configs"),
+    ("device_link_event", "device_link_events"),
+    ("device_log", "device_logs"),
 )
 
 #: 尚未实现的表。存在即拒绝执行——半份数据比没有数据更危险。
 PLANNED: tuple[str, ...] = (
     "api_call",
     "background_task_run",
-    "clock_shift",
     "command_audit",
-    "device_config",
-    "device_link_event",
-    "device_log",
     "door_live",
     "door_snapshot",
     "door_state_event",
@@ -135,6 +135,50 @@ def copy_identities(source: sqlite3.Connection, target: sqlite3.Connection) -> N
         )
 
 
+def copy_simple(
+    source: sqlite3.Connection,
+    target: sqlite3.Connection,
+    devices: dict[str, int],
+) -> None:
+    """逐设备一行的表：`device_link_event`、`device_log`、`clock_shift`、`device_config`。
+
+    这些表没有跨表引用，只有设备外键与时间列，统一用一张映射表处理。
+    """
+    now = utcnow().replace(tzinfo=None).isoformat(sep=" ")
+    for row in source.execute(
+        "SELECT device_id, occurred_at, event, reason FROM device_link_event"
+    ).fetchall():
+        target.execute(
+            "INSERT INTO device_link_events (device_id, occurred_at, event, reason, created_at)"
+            " VALUES (?,?,?,?,?)",
+            (devices[str(row[0])], to_storage_time(row[1]), row[2], row[3] or "", now),
+        )
+    for row in source.execute(
+        "SELECT device_id, kind, content, uploaded_at FROM device_log"
+    ).fetchall():
+        target.execute(
+            "INSERT INTO device_logs (device_id, kind, content, uploaded_at, created_at)"
+            " VALUES (?,?,?,?,?)",
+            (devices[str(row[0])], row[1], row[2], to_storage_time(row[3]) or now, now),
+        )
+    for row in source.execute(
+        "SELECT device_id, shifted_at, assignments FROM clock_shift"
+    ).fetchall():
+        target.execute(
+            "INSERT INTO clock_shifts (device_id, shifted_at, assignments, updated_at)"
+            " VALUES (?,?,?,?)",
+            (devices[str(row[0])], to_storage_time(row[1]) or now, row[2] or "[]", now),
+        )
+    for row in source.execute(
+        "SELECT device_id, revision, config FROM device_config"
+    ).fetchall():
+        target.execute(
+            "INSERT INTO device_configs (device_id, revision, config, updated_at)"
+            " VALUES (?,?,?,?)",
+            (devices[str(row[0])], int(row[1]), row[2] or "{}", now),
+        )
+
+
 def verify(source: sqlite3.Connection, target: sqlite3.Connection) -> list[str]:
     problems: list[str] = []
     for old, new in DONE:
@@ -180,8 +224,9 @@ def main() -> int:
             return 3
 
         target.execute("BEGIN")
-        copy_devices(source, target)
+        devices = copy_devices(source, target)
         copy_identities(source, target)
+        copy_simple(source, target, devices)
         target.commit()
 
         for line in verify(source, target):
