@@ -96,6 +96,15 @@ def _schema_template(tmp_path_factory: pytest.TempPathFactory) -> str:
         mp.setattr(config_module.settings, "db_path", path)
         mp.setattr(config_module.settings, "ota_dir", str(base / "ota_releases"))
         init_schema()
+    # 过渡期：新数据层的表与旧表并存于同一个测试库。
+    # 已迁移的模块跑新表，未迁移的仍跑旧表，两侧互不干扰；生产上不会这样并存，
+    # 这里只是让切换可以逐域进行、每一步都有完整测试覆盖。
+    from app.db.engine import create_db_engine
+    from app.models import Base
+
+    engine = create_db_engine(f"sqlite:///{path}")
+    Base.metadata.create_all(engine)
+    engine.dispose()
     db_module.close_all_connections()  # 最后一个连接关闭即 checkpoint，WAL 落盘
     return path
 
@@ -136,12 +145,23 @@ def fresh_db(
 @pytest.fixture
 def admin_headers(fresh_db: str) -> dict[str, str]:
     """管理台调用方：admin 之外还持 session/photo——管理台要代操作用户动作。"""
-    from app.modules.access import repository as access_repository
+    from app.db.session import Database
     from app.modules.access.identity import IdentityKind
+    from app.persistence import access as access_store
 
-    access_repository.put_identity(
-        ADMIN_IDENTITY, IdentityKind.WEB, ["admin", "session", "photo"], "测试管理员", device_scope=["*"]
-    )
+    database = Database(f"sqlite:///{Path(fresh_db).as_posix()}")
+    try:
+        with database.new_session() as session:
+            access_store.put_identity(
+                session,
+                ADMIN_IDENTITY,
+                IdentityKind.WEB,
+                ["admin", "session", "photo"],
+                "测试管理员",
+                ["*"],
+            )
+    finally:
+        database.dispose()
     return {"X-Identity": ADMIN_IDENTITY}
 
 
@@ -152,13 +172,19 @@ def ops_headers(fresh_db: str) -> dict[str, str]:
     同时登记一台已信任设备 dev-test-0001：用户面操作类接口的守卫链要求设备
     存在且已信任，需要现成目标的用例直接用常量 TRUSTED_DEVICE_ID。
     """
-    from app.modules.access import repository as access_repository
+    from app.db.session import Database
     from app.modules.access.identity import IdentityKind
     from app.modules.devices import repository as devices_repository
+    from app.persistence import access as access_store
 
     devices_repository.register(TRUSTED_DEVICE_ID, "0.4.13", 57, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
     devices_repository.set_trusted(TRUSTED_DEVICE_ID, True)
-    access_repository.put_identity(OPS_IDENTITY, IdentityKind.WEB, ["session", "photo"], "测试用", device_scope=["*"])
+    database = Database(f"sqlite:///{Path(fresh_db).as_posix()}")
+    try:
+        with database.new_session() as session:
+            access_store.put_identity(session, OPS_IDENTITY, IdentityKind.WEB, ["session", "photo"], "测试用", ["*"])
+    finally:
+        database.dispose()
     return {"X-Identity": OPS_IDENTITY}
 
 

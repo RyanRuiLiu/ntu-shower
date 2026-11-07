@@ -4,16 +4,56 @@
 名单 401（unknown-identity）、缺能力位或设备不在作用域 403（capability-denied）。
 """
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 from tests import device_link
 
 from app.core.problems import CAPABILITY_DENIED, ApiProblemError
-from app.modules.access import service
 from app.modules.access.capabilities import ALL_CAPABILITIES, DEVICE_SCOPED, Capability, user_actions
 from app.modules.access.dependencies import require_capability
 from app.modules.access.identity import IdentityKind
 from app.modules.access.schemas import IdentityRecord
+from app.persistence import access as access_store
+
+
+@contextmanager
+def _store() -> Iterator[Session]:
+    """指向当前用例库的会话；名单写入与断言都走新数据层。"""
+    from app.core.config import settings
+    from app.db.session import Database
+
+    database = Database(f"sqlite:///{Path(settings.db_path).as_posix()}")
+    try:
+        with database.new_session() as session:
+            yield session
+    finally:
+        database.dispose()
+
+
+def _register(
+    identity: str,
+    kind: IdentityKind,
+    capabilities: list[str],
+    label: str = "",
+    device_scope: list[str] | None = None,
+) -> None:
+    with _store() as session:
+        access_store.put_identity(session, identity, kind, capabilities, label, device_scope)
+
+
+def _find(identity: str) -> IdentityRecord | None:
+    with _store() as session:
+        return access_store.find_identity(session, identity)
+
+
+def _count() -> int:
+    with _store() as session:
+        return len(access_store.list_identities(session))
 
 
 def _identity(capabilities: list[str], device_scope: list[str] | None = None) -> IdentityRecord:
@@ -115,10 +155,9 @@ def test_user_actions_follow_capability_matrix() -> None:
 
 def test_assign_requires_session_capability(client: TestClient, fresh_db: str) -> None:
     """只有 photo 能力位的身份对分配被拒（capability-denied，先于设备存在性检查）。"""
-    from app.modules.access import repository
     from app.modules.access.identity import IdentityKind
 
-    repository.put_identity("photo-only-0001", IdentityKind.WEB, ["photo"], "只拍照", device_scope=["*"])
+    _register("photo-only-0001", IdentityKind.WEB, ["photo"], "只拍照", device_scope=["*"])
 
     r = client.post(
         "/api/v1/devices/dev-any-0001/assign",
@@ -132,10 +171,9 @@ def test_assign_requires_session_capability(client: TestClient, fresh_db: str) -
 
 def test_photo_requires_photo_capability(client: TestClient, fresh_db: str) -> None:
     """只有 session 能力位的身份对拍照被拒。"""
-    from app.modules.access import repository
     from app.modules.access.identity import IdentityKind
 
-    repository.put_identity("session-only-001", IdentityKind.WEB, ["session"], "只分配", device_scope=["*"])
+    _register("session-only-001", IdentityKind.WEB, ["session"], "只分配", device_scope=["*"])
 
     r = client.post("/api/v1/devices/dev-any-0001/photo", headers={"X-Identity": "session-only-001"})
 
@@ -153,10 +191,9 @@ def test_wildcard_scope_passes_guard_for_any_device(
 
     device_link.register_trusted_device("dev-any-0001")
     monkeypatch.setattr(manager, "_connections", {"dev-any-0001": object()})
-    from app.modules.access import repository
     from app.modules.access.identity import IdentityKind
 
-    repository.put_identity("wildcard-000001", IdentityKind.WEB, ["session"], "通配", device_scope=["*"])
+    _register("wildcard-000001", IdentityKind.WEB, ["session"], "通配", device_scope=["*"])
 
     r = client.post(
         "/api/v1/devices/dev-any-0001/assign",
@@ -170,12 +207,9 @@ def test_wildcard_scope_passes_guard_for_any_device(
 
 def test_list_scope_blocks_device_outside_list(client: TestClient, fresh_db: str) -> None:
     """作用域限定具体设备后，对列表外设备的操作被拒。"""
-    from app.modules.access import repository
     from app.modules.access.identity import IdentityKind
 
-    repository.put_identity(
-        "scoped-0000001", IdentityKind.WEB, ["session"], "限定设备", device_scope=["dev-allow-0001"]
-    )
+    _register("scoped-0000001", IdentityKind.WEB, ["session"], "限定设备", device_scope=["dev-allow-0001"])
 
     r = client.post(
         "/api/v1/devices/dev-other-002/assign",
@@ -246,7 +280,7 @@ def test_put_identity_edit_takes_effect_immediately(
     assert updated.status_code == 200
     # 编辑沿用原标识：不得生成新标识另起一行
     assert updated.json()["identity"] == identity
-    assert len(service.list_identities()) == 2  # 管理员身份 + 该用户
+    assert _count() == 2  # 管理员身份 + 该用户
 
     after = client.post("/api/v1/devices/dev-edit-0001/assign", json=payload, headers={"X-Identity": identity})
     assert after.status_code == 403
@@ -317,7 +351,7 @@ def test_web_identity_is_issued_once_and_usable(client: TestClient, admin_header
     assert r.status_code == 200
     identity = r.json()["identity"]
     assert identity
-    found = service.resolve_identity(identity)
+    found = _find(identity)
     assert found is not None
     assert found["kind"] == "web"
     assert found["label"] == "给张三的网页入口"
@@ -356,11 +390,11 @@ def test_repeated_registration_overwrites_single_row(client: TestClient, admin_h
         json={"kind": "openid", "openid": openid, "capabilities": ["photo"], "device_scope": ["*"]},
     )
 
-    found = service.resolve_identity(openid)
+    found = _find(openid)
     assert found is not None
     assert found["capabilities"] == ["photo"]
-    assert len(service.list_identities()) == 2  # 管理员身份 + 该用户
+    assert _count() == 2  # 管理员身份 + 该用户
 
 
 def test_resolve_unknown_identity_is_none(fresh_db: str) -> None:
-    assert service.resolve_identity("nobody") is None
+    assert _find("nobody") is None

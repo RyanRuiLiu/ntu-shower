@@ -148,9 +148,7 @@ def test_derived_segment_and_touch_branches(session: Session) -> None:
     assert touched["flow_s"] == 10
     assert touched["last_seen_at"].endswith("Z")
 
-    segment_id = doors.add_derived_segment(
-        session, session_id, "dev-a", 2, T0, T0 + timedelta(seconds=10), 10, "raw"
-    )
+    segment_id = doors.add_derived_segment(session, session_id, "dev-a", 2, T0, T0 + timedelta(seconds=10), 10, "raw")
     assert segment_id > 0
     assert doors.segments_of_session(session, session_id)[0]["source"] == "derived"
 

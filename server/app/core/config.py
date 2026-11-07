@@ -1,5 +1,7 @@
 """配置：全部来自环境变量（.env），不在代码里硬编码任何环境值。"""
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -47,8 +49,12 @@ class Settings(BaseSettings):
 
     @property
     def effective_database_url(self) -> str:
-        """应用与迁移共用的连接串：显式值优先，否则由 db_path 推导。"""
-        return self.database_url or f"sqlite:///{self.db_path}"
+        """应用与迁移共用的连接串：显式值优先，否则由 db_path 推导。
+
+        `as_posix()`：Windows 下的反斜杠路径放进 `sqlite:///` 会被当成 URL 的一部分，
+        与 `Path` 解析出的文件不是同一个；统一成正斜杠，两端才指向同一份库。
+        """
+        return self.database_url or f"sqlite:///{Path(self.db_path).as_posix()}"
 
 
 settings = Settings()

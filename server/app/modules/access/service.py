@@ -10,9 +10,11 @@
 
 import secrets
 
-from app.core.logging import log_event
+from sqlalchemy.orm import Session
 
-from . import repository
+from app.core.logging import log_event
+from app.persistence import access as access_store
+
 from .identity import IdentityKind
 from .schemas import IdentityRecord
 
@@ -21,6 +23,7 @@ WEB_IDENTITY_BYTES = 32
 
 
 def put_identity(
+    session: Session,
     kind: IdentityKind,
     capabilities: list[str],
     label: str = "",
@@ -41,7 +44,7 @@ def put_identity(
         raise ValueError(message)
     if not identity:
         identity = secrets.token_urlsafe(WEB_IDENTITY_BYTES)
-    record = repository.put_identity(identity, kind, capabilities, label, device_scope)
+    record = access_store.put_identity(session, identity, kind, capabilities, label, device_scope)
     log_event(
         "INFO",
         "access.identity-put",
@@ -53,6 +56,7 @@ def put_identity(
 
 
 def update_identity(
+    session: Session,
     identity: str,
     kind: IdentityKind,
     capabilities: list[str],
@@ -60,7 +64,7 @@ def update_identity(
     device_scope: list[str] | None = None,
 ) -> IdentityRecord:
     """编辑既有标识的能力位、作用域与备注；标识本身不变，下一次请求即生效。"""
-    record = repository.put_identity(identity, kind, capabilities, label, device_scope)
+    record = access_store.put_identity(session, identity, kind, capabilities, label, device_scope)
     log_event(
         "INFO",
         "access.identity-put",
@@ -71,19 +75,19 @@ def update_identity(
     return record
 
 
-def resolve_identity(identity: str) -> IdentityRecord | None:
+def resolve_identity(session: Session, identity: str) -> IdentityRecord | None:
     """解析请求携带的标识，返回其记录；未授权返回 None。"""
-    return repository.find_identity(identity)
+    return access_store.find_identity(session, identity)
 
 
-def revoke_identity(identity: str) -> bool:
+def revoke_identity(session: Session, identity: str) -> bool:
     """撤销授权；该标识立即失去全部能力。"""
-    removed = repository.delete_identity(identity)
+    removed = access_store.delete_identity(session, identity)
     if removed:
         log_event("INFO", "access.identity-revoked", "身份已吊销")
     return removed
 
 
-def list_identities() -> list[IdentityRecord]:
+def list_identities(session: Session) -> list[IdentityRecord]:
     """名单。"""
-    return repository.list_identities()
+    return access_store.list_identities(session)

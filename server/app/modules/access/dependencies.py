@@ -24,8 +24,10 @@
 """
 
 from fastapi import Depends, Header
+from sqlalchemy.orm import Session
 
 from app.core.problems import CAPABILITY_DENIED, UNAUTHENTICATED, UNKNOWN_IDENTITY, ApiProblemError
+from app.db.deps import get_db
 
 from . import service
 from .capabilities import DEVICE_SCOPED, Capability
@@ -35,19 +37,25 @@ from .schemas import IdentityRecord
 IDENTITY_HEADER = "X-Identity"
 
 
-def optional_identity(x_identity: str | None = Header(default=None, alias=IDENTITY_HEADER)) -> IdentityRecord | None:
+def optional_identity(
+    x_identity: str | None = Header(default=None, alias=IDENTITY_HEADER),
+    session: Session = Depends(get_db),
+) -> IdentityRecord | None:
     """带标识就解析（不在名单则 401），不带就是匿名。用于按调用方裁剪视图的端点。"""
     if not x_identity:
         return None
-    caller = service.resolve_identity(x_identity)
+    caller = service.resolve_identity(session, x_identity)
     if caller is None:
         raise ApiProblemError(UNKNOWN_IDENTITY)
     return caller
 
 
-def require_identity(x_identity: str | None = Header(default=None, alias=IDENTITY_HEADER)) -> IdentityRecord:
+def require_identity(
+    x_identity: str | None = Header(default=None, alias=IDENTITY_HEADER),
+    session: Session = Depends(get_db),
+) -> IdentityRecord:
     """要求携带一个在名单里的标识，不要求具体能力。操作端点与 require_admin 的基座。"""
-    caller = optional_identity(x_identity)
+    caller = optional_identity(x_identity, session)
     if caller is None:
         raise ApiProblemError(UNAUTHENTICATED)
     return caller
