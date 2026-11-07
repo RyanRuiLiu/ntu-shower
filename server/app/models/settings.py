@@ -47,7 +47,7 @@ class ClockShift(Base):
     device_id: Mapped[int] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"), unique=True)
     shifted_at: Mapped[datetime] = mapped_column(UtcDateTime)
     restarted_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
-    assignments: Mapped[dict[str, Any]] = mapped_column(JSON)
+    assignments: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
     updated_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow, onupdate=utcnow)
 
 

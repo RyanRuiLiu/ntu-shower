@@ -62,9 +62,7 @@ def list_identities(session: Session) -> list[IdentityRecord]:
 
 
 def delete_identity(session: Session, identity: str) -> bool:
-    row = session.scalars(
-        select(AccessIdentity).where(AccessIdentity.identity == identity)
-    ).one_or_none()
+    row = session.scalars(select(AccessIdentity).where(AccessIdentity.identity == identity)).one_or_none()
     if row is None:
         return False
     session.delete(row)
