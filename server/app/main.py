@@ -39,6 +39,7 @@ from .core.config import settings
 from .core.errors import install_error_handlers
 from .core.logging import configure_logging, log_event
 from .core.version import APP_VERSION
+from .db.session import Database
 from .modules.access import repository as access_repository
 from .modules.access.routes import admin_router as identities_admin_router
 from .modules.access.routes import router as identity_router
@@ -113,6 +114,9 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        # 新数据层的连接在这里建立：迁移尚未完成的模块仍走 core.db，
+        # 两者指向同一个 SQLite 文件，互不干扰。
+        _app.state.database = Database(settings.effective_database_url)
         sessions_scheduler.start()
         extend_hours_service.start()
         status_line_service.start()
@@ -122,6 +126,7 @@ def create_app() -> FastAPI:
         await status_line_service.stop()
         extend_hours_service.stop()
         sessions_scheduler.stop()
+        _app.state.database.dispose()
 
     app = FastAPI(title="NTU Shower", version=APP_VERSION, lifespan=lifespan)
     install_error_handlers(app)

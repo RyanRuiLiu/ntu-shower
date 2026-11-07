@@ -7,6 +7,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     db_path: str = "data/ntu-shower.db"
+    #: 显式的数据库连接串（环境变量 DATABASE_URL）。留空时由 db_path 推导。
+    #: 迁移工具与数据转换脚本用同一份来源，避免「迁移打的库和应用连的库」分叉。
+    database_url: str = ""
     max_ota_bytes: int = 50 * 1024 * 1024  # OTA 上传/存储的单文件上限
     ota_dir: str = "ota_releases"  # APK 发布文件目录（相对 server 工作目录）
     voice_dir: str = "data/voice"  # 固定音频素材目录（assets/，随 data/ 保留）
@@ -41,6 +44,11 @@ class Settings(BaseSettings):
 
     # ── 命令确认等待 ──
     config_ack_timeout_s: float = 15.0  # 等待设备 config.ack 的时限
+
+    @property
+    def effective_database_url(self) -> str:
+        """应用与迁移共用的连接串：显式值优先，否则由 db_path 推导。"""
+        return self.database_url or f"sqlite:///{self.db_path}"
 
 
 settings = Settings()
