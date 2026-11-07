@@ -16,10 +16,11 @@ DEVICE_ID = "dev-debug-1"
 
 def _put_identity(device_id: str, identity: str, capabilities: list[str], scope: list[str]) -> dict[str, str]:
     """登记一个身份并返回其请求头。"""
-    from app.modules.access import repository
+    from tests.identity import register as register_identity
+
     from app.modules.access.identity import IdentityKind
 
-    repository.put_identity(identity, IdentityKind.WEB, capabilities, "测试", device_scope=scope)
+    register_identity(identity, IdentityKind.WEB, capabilities, "测试", device_scope=scope)
     return {"X-Identity": identity}
 
 

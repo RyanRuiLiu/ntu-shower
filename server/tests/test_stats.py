@@ -8,10 +8,10 @@ from datetime import timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from tests.identity import register as register_identity
 
 from app.core.clock import now_rfc3339, rfc3339_ago, shift_rfc3339, to_local
 from app.core.db import write
-from app.modules.access import repository as access_repository
 from app.modules.access.identity import IdentityKind
 from app.modules.devices import repository as devices_repository
 from app.modules.devices.schemas import LINK_OFFLINE, LINK_ONLINE
@@ -122,7 +122,7 @@ def _event(door_no: int, state: DoorState, seconds_ago: int, cert_no: str = "", 
 @pytest.fixture
 def stats_headers(fresh_db: str) -> dict[str, str]:
     """持 `stats` 位的调用方，外加一台已注册的设备。"""
-    access_repository.put_identity(STATS_IDENTITY, IdentityKind.OPENID, ["stats"], "统计探针", device_scope=[])
+    register_identity(STATS_IDENTITY, IdentityKind.OPENID, ["stats"], "统计探针", device_scope=[])
     write(
         "INSERT INTO device (device_id, name, trusted) VALUES (?,?,?)",
         (DEVICE, "测试浴室", 1),

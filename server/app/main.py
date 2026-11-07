@@ -40,7 +40,6 @@ from .core.errors import install_error_handlers
 from .core.logging import configure_logging, log_event
 from .core.version import APP_VERSION
 from .db.session import Database
-from .modules.access import repository as access_repository
 from .modules.access.routes import admin_router as identities_admin_router
 from .modules.access.routes import router as identity_router
 from .modules.audit import repository as command_audit_repository
@@ -93,7 +92,6 @@ def init_schema() -> None:
     db.init_db()
     devices_repository.init_tables()
     doors_repository.init_tables()
-    access_repository.init_tables()
     ota_repository.init_tables()
     config_store.init_tables()
     audit.init_tables()
