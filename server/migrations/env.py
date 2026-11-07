@@ -15,6 +15,7 @@ from logging.config import fileConfig
 
 from alembic import context
 
+from app.db.base import UtcDateTime
 from app.db.engine import create_db_engine
 from app.models import Base
 
@@ -24,6 +25,18 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+
+
+def render_item(type_: str, obj: object, autogen_context: object) -> str | bool:
+    """自定义类型在迁移里的渲染方式。
+
+    Alembic 默认把 `UtcDateTime` 写成 `app.db.base.UtcDateTime()`，却不加对应的 import，
+    生成的迁移一执行就 NameError。这里显式补上 import 并给出渲染文本。
+    """
+    if type_ == "type" and isinstance(obj, UtcDateTime):
+        autogen_context.imports.add("from app.db.base import UtcDateTime")  # type: ignore[attr-defined]
+        return "UtcDateTime()"
+    return False
 
 
 def database_url() -> str:
@@ -45,6 +58,7 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
         render_as_batch=True,
         compare_type=True,
+        render_item=render_item,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -59,6 +73,7 @@ def run_migrations_online() -> None:
                 target_metadata=target_metadata,
                 render_as_batch=True,
                 compare_type=True,
+                render_item=render_item,
             )
             with context.begin_transaction():
                 context.run_migrations()

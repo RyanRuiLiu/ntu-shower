@@ -35,7 +35,9 @@ class UsageSession(Base):
     cert_no: Mapped[str] = mapped_column(String(32), default="", index=True)
     assigned_at: Mapped[datetime] = mapped_column(UtcDateTime)
     assigned_source: Mapped[AssignedSource] = mapped_column(enum_column(AssignedSource, "assigned_source"))
-    observed_span: Mapped[ObservedSpan] = mapped_column(enum_column(ObservedSpan, "observed_span"))
+    observed_span: Mapped[ObservedSpan] = mapped_column(
+        enum_column(ObservedSpan, "observed_span"), default=ObservedSpan.CONTINUOUS
+    )
     #: 设备自己累计的出水秒数，与用段汇总出的 flow_s 是两套口径
     device_flow_s: Mapped[int] = mapped_column(Integer, default=0)
     segments_complete: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -69,7 +71,8 @@ class UsageSegment(Base):
     #: 设备原始字段，未解释
     opened_raw: Mapped[str] = mapped_column(String(32), default="")
     closed_raw: Mapped[str] = mapped_column(String(32), default="")
-    source: Mapped[SegmentSource] = mapped_column(enum_column(SegmentSource, "segment_source"))
+    #: 段长的来源；未关阀时为空，关阀那一刻才定稿
+    source: Mapped[SegmentSource | None] = mapped_column(enum_column(SegmentSource, "segment_source"), default=None)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
 
 

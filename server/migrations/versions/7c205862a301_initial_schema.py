@@ -1,18 +1,18 @@
 """initial schema
 
-Revision ID: 692bf29a4fdd
+Revision ID: 7c205862a301
 Revises: 
-Create Date: 2026-11-07 22:42:54.190703
+Create Date: 2026-11-07 23:41:08.161484
 
 """
 from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-
+from app.db.base import UtcDateTime
 
 # revision identifiers, used by Alembic.
-revision: str = '692bf29a4fdd'
+revision: str = '7c205862a301'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -28,8 +28,8 @@ def upgrade() -> None:
     sa.Column('capabilities', sa.JSON(), nullable=False),
     sa.Column('device_scope', sa.JSON(), nullable=False),
     sa.Column('label', sa.String(length=64), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('created_at', UtcDateTime(), nullable=False),
+    sa.Column('updated_at', UtcDateTime(), nullable=False),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_access_identities')),
     sa.UniqueConstraint('identity', name=op.f('uq_access_identities_identity'))
     )
@@ -37,7 +37,7 @@ def upgrade() -> None:
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('revision', sa.Integer(), nullable=False),
     sa.Column('config', sa.JSON(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', UtcDateTime(), nullable=False),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_app_settings'))
     )
     op.create_table('app_users',
@@ -47,9 +47,9 @@ def upgrade() -> None:
     sa.Column('capabilities', sa.JSON(), nullable=False),
     sa.Column('device_scope', sa.JSON(), nullable=False),
     sa.Column('disabled', sa.Boolean(), nullable=False),
-    sa.Column('last_login_at', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('last_login_at', UtcDateTime(), nullable=True),
+    sa.Column('created_at', UtcDateTime(), nullable=False),
+    sa.Column('updated_at', UtcDateTime(), nullable=False),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_app_users')),
     sa.UniqueConstraint('username', name=op.f('uq_app_users_username'))
     )
@@ -62,13 +62,13 @@ def upgrade() -> None:
     sa.Column('version_code', sa.Integer(), nullable=False),
     sa.Column('os_version', sa.String(length=32), nullable=False),
     sa.Column('capabilities', sa.JSON(), nullable=False),
-    sa.Column('last_seen_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('last_seen_at', UtcDateTime(), nullable=True),
     sa.Column('last_ip', sa.String(length=45), nullable=True),
-    sa.Column('booted_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('booted_at', UtcDateTime(), nullable=True),
     sa.Column('clock_skew_s', sa.Double(), nullable=False),
     sa.Column('sort_order', sa.Integer(), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('created_at', UtcDateTime(), nullable=False),
+    sa.Column('updated_at', UtcDateTime(), nullable=False),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_devices')),
     sa.UniqueConstraint('device_id', name=op.f('uq_devices_device_id'))
     )
@@ -83,8 +83,8 @@ def upgrade() -> None:
     sa.Column('mandatory', sa.Boolean(), nullable=False),
     sa.Column('force', sa.Boolean(), nullable=False),
     sa.Column('target', sa.String(length=32), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('created_at', UtcDateTime(), nullable=False),
+    sa.Column('updated_at', UtcDateTime(), nullable=False),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_ota_releases')),
     sa.UniqueConstraint('version', name=op.f('uq_ota_releases_version'))
     )
@@ -95,7 +95,7 @@ def upgrade() -> None:
     sa.Column('digit', sa.Integer(), nullable=True),
     sa.Column('duration_ms', sa.Integer(), nullable=False),
     sa.Column('size_bytes', sa.Integer(), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('created_at', UtcDateTime(), nullable=False),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_voice_assets')),
     sa.UniqueConstraint('asset_id', name=op.f('uq_voice_assets_asset_id'))
     )
@@ -112,14 +112,14 @@ def upgrade() -> None:
     sa.Column('segments', sa.JSON(), nullable=False),
     sa.Column('volume', sa.Integer(), nullable=False),
     sa.Column('enabled', sa.Boolean(), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('created_at', UtcDateTime(), nullable=False),
+    sa.Column('updated_at', UtcDateTime(), nullable=False),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_voice_rules'))
     )
     op.create_table('api_calls',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('kind', sa.String(length=32), nullable=False),
-    sa.Column('requested_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('requested_at', UtcDateTime(), nullable=False),
     sa.Column('request_id', sa.String(length=64), nullable=False),
     sa.Column('trace_id', sa.String(length=64), nullable=False),
     sa.Column('actor_kind', sa.Enum('device', 'anonymous', 'identity', name='actor_kind', native_enum=False, create_constraint=True, length=32), nullable=False),
@@ -136,7 +136,7 @@ def upgrade() -> None:
     sa.Column('problem_type', sa.String(length=64), nullable=True),
     sa.Column('detail', sa.Text(), nullable=True),
     sa.Column('response_body', sa.Text(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('created_at', UtcDateTime(), nullable=False),
     sa.ForeignKeyConstraint(['device_id'], ['devices.id'], name=op.f('fk_api_calls_device_id_devices'), ondelete='SET NULL'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_api_calls'))
     )
@@ -148,10 +148,10 @@ def upgrade() -> None:
     op.create_table('clock_shifts',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('device_id', sa.Integer(), nullable=False),
-    sa.Column('shifted_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('restarted_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('shifted_at', UtcDateTime(), nullable=False),
+    sa.Column('restarted_at', UtcDateTime(), nullable=True),
     sa.Column('assignments', sa.JSON(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', UtcDateTime(), nullable=False),
     sa.ForeignKeyConstraint(['device_id'], ['devices.id'], name=op.f('fk_clock_shifts_device_id_devices'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_clock_shifts')),
     sa.UniqueConstraint('device_id', name=op.f('uq_clock_shifts_device_id'))
@@ -162,8 +162,8 @@ def upgrade() -> None:
     sa.Column('device_id', sa.Integer(), nullable=False),
     sa.Column('action', sa.String(length=64), nullable=False),
     sa.Column('params', sa.JSON(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('finished_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('created_at', UtcDateTime(), nullable=False),
+    sa.Column('finished_at', UtcDateTime(), nullable=True),
     sa.Column('status', sa.Enum('ok', 'failed', 'timeout', 'rejected', name='command_status', native_enum=False, create_constraint=True, length=32), nullable=True),
     sa.Column('reason_code', sa.String(length=64), nullable=True),
     sa.Column('terminal_message', sa.Text(), nullable=True),
@@ -182,7 +182,7 @@ def upgrade() -> None:
     sa.Column('device_id', sa.Integer(), nullable=False),
     sa.Column('revision', sa.Integer(), nullable=False),
     sa.Column('config', sa.JSON(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', UtcDateTime(), nullable=False),
     sa.ForeignKeyConstraint(['device_id'], ['devices.id'], name=op.f('fk_device_configs_device_id_devices'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_device_configs')),
     sa.UniqueConstraint('device_id', name=op.f('uq_device_configs_device_id'))
@@ -192,9 +192,9 @@ def upgrade() -> None:
     sa.Column('device_id', sa.Integer(), nullable=False),
     sa.Column('token_hash', sa.String(length=64), nullable=False),
     sa.Column('label', sa.String(length=64), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('expires_at', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('revoked_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('created_at', UtcDateTime(), nullable=False),
+    sa.Column('expires_at', UtcDateTime(), nullable=True),
+    sa.Column('revoked_at', UtcDateTime(), nullable=True),
     sa.ForeignKeyConstraint(['device_id'], ['devices.id'], name=op.f('fk_device_credentials_device_id_devices'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_device_credentials')),
     sa.UniqueConstraint('token_hash', name=op.f('uq_device_credentials_token_hash'))
@@ -205,10 +205,10 @@ def upgrade() -> None:
     op.create_table('device_link_events',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('device_id', sa.Integer(), nullable=False),
-    sa.Column('occurred_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('occurred_at', UtcDateTime(), nullable=False),
     sa.Column('event', sa.Enum('online', 'offline', name='link_event', native_enum=False, create_constraint=True, length=32), nullable=False),
     sa.Column('reason', sa.String(length=128), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('created_at', UtcDateTime(), nullable=False),
     sa.ForeignKeyConstraint(['device_id'], ['devices.id'], name=op.f('fk_device_link_events_device_id_devices'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_device_link_events'))
     )
@@ -221,8 +221,8 @@ def upgrade() -> None:
     sa.Column('device_id', sa.Integer(), nullable=False),
     sa.Column('kind', sa.Enum('device', 'ota', name='device_log_kind', native_enum=False, create_constraint=True, length=32), nullable=False),
     sa.Column('content', sa.Text(), nullable=False),
-    sa.Column('uploaded_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('uploaded_at', UtcDateTime(), nullable=False),
+    sa.Column('created_at', UtcDateTime(), nullable=False),
     sa.ForeignKeyConstraint(['device_id'], ['devices.id'], name=op.f('fk_device_logs_device_id_devices'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_device_logs'))
     )
@@ -235,11 +235,11 @@ def upgrade() -> None:
     sa.Column('snapshot_id', sa.String(length=64), nullable=False),
     sa.Column('seq', sa.Integer(), nullable=True),
     sa.Column('source', sa.Enum('import', 'startup', 'db_watch', name='snapshot_source', native_enum=False, create_constraint=True, length=32), nullable=False),
-    sa.Column('captured_at', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('received_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('captured_at', UtcDateTime(), nullable=True),
+    sa.Column('received_at', UtcDateTime(), nullable=False),
     sa.Column('doors', sa.JSON(), nullable=False),
     sa.Column('device_clock', sa.String(length=64), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('created_at', UtcDateTime(), nullable=False),
     sa.ForeignKeyConstraint(['device_id'], ['devices.id'], name=op.f('fk_door_snapshots_device_id_devices'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_door_snapshots')),
     sa.UniqueConstraint('device_id', 'snapshot_id', name='uq_door_snapshots_device_id_snapshot_id')
@@ -257,8 +257,8 @@ def upgrade() -> None:
     sa.Column('card_no', sa.Integer(), nullable=False),
     sa.Column('cert_no', sa.String(length=32), nullable=False),
     sa.Column('bath_time_s', sa.Integer(), nullable=False),
-    sa.Column('occurred_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('occurred_at', UtcDateTime(), nullable=False),
+    sa.Column('created_at', UtcDateTime(), nullable=False),
     sa.ForeignKeyConstraint(['device_id'], ['devices.id'], name=op.f('fk_door_state_events_device_id_devices'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_door_state_events'))
     )
@@ -274,13 +274,13 @@ def upgrade() -> None:
     sa.Column('card_no', sa.Integer(), nullable=False),
     sa.Column('cert_no', sa.String(length=32), nullable=False),
     sa.Column('acc_no', sa.String(length=32), nullable=False),
-    sa.Column('open_time', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('in_time', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('close_time', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('open_time', UtcDateTime(), nullable=True),
+    sa.Column('in_time', UtcDateTime(), nullable=True),
+    sa.Column('close_time', UtcDateTime(), nullable=True),
     sa.Column('bath_time_s', sa.Integer(), nullable=False),
     sa.Column('status_raw', sa.Integer(), nullable=False),
-    sa.Column('reported_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('reported_at', UtcDateTime(), nullable=False),
+    sa.Column('updated_at', UtcDateTime(), nullable=False),
     sa.ForeignKeyConstraint(['device_id'], ['devices.id'], name=op.f('fk_door_states_device_id_devices'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_door_states')),
     sa.UniqueConstraint('device_id', 'door_no', name='uq_door_states_device_id_door_no')
@@ -291,7 +291,7 @@ def upgrade() -> None:
     op.create_table('ota_release_installs',
     sa.Column('release_id', sa.Integer(), nullable=False),
     sa.Column('device_id', sa.Integer(), nullable=False),
-    sa.Column('applied_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('applied_at', UtcDateTime(), nullable=False),
     sa.ForeignKeyConstraint(['device_id'], ['devices.id'], name=op.f('fk_ota_release_installs_device_id_devices'), ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['release_id'], ['ota_releases.id'], name=op.f('fk_ota_release_installs_release_id_ota_releases'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('release_id', 'device_id', name=op.f('pk_ota_release_installs'))
@@ -302,16 +302,16 @@ def upgrade() -> None:
     sa.Column('door_no', sa.Integer(), nullable=False),
     sa.Column('card_no', sa.Integer(), nullable=False),
     sa.Column('cert_no', sa.String(length=32), nullable=False),
-    sa.Column('assigned_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('assigned_at', UtcDateTime(), nullable=False),
     sa.Column('assigned_source', sa.Enum('observed', 'inferred', name='assigned_source', native_enum=False, create_constraint=True, length=32), nullable=False),
     sa.Column('observed_span', sa.Enum('continuous', 'gap', name='observed_span', native_enum=False, create_constraint=True, length=32), nullable=False),
     sa.Column('device_flow_s', sa.Integer(), nullable=False),
     sa.Column('segments_complete', sa.Boolean(), nullable=False),
-    sa.Column('ended_at', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('last_seen_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('ended_at', UtcDateTime(), nullable=True),
+    sa.Column('last_seen_at', UtcDateTime(), nullable=False),
     sa.Column('flow_s', sa.Integer(), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('created_at', UtcDateTime(), nullable=False),
+    sa.Column('updated_at', UtcDateTime(), nullable=False),
     sa.ForeignKeyConstraint(['device_id'], ['devices.id'], name=op.f('fk_usage_sessions_device_id_devices'), ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_usage_sessions'))
     )
@@ -332,14 +332,14 @@ def upgrade() -> None:
     sa.Column('segments', sa.JSON(), nullable=False),
     sa.Column('segment_count', sa.Integer(), nullable=False),
     sa.Column('duration_ms', sa.Integer(), nullable=False),
-    sa.Column('occurred_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('dispatched_at', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('done_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('occurred_at', UtcDateTime(), nullable=False),
+    sa.Column('dispatched_at', UtcDateTime(), nullable=True),
+    sa.Column('done_at', UtcDateTime(), nullable=True),
     sa.Column('downloaded', sa.Boolean(), nullable=False),
     sa.Column('status', sa.String(length=32), nullable=False),
     sa.Column('detail', sa.Text(), nullable=False),
     sa.Column('trace_id', sa.String(length=64), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('created_at', UtcDateTime(), nullable=False),
     sa.ForeignKeyConstraint(['device_id'], ['devices.id'], name=op.f('fk_voice_deliveries_device_id_devices'), ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['rule_id'], ['voice_rules.id'], name=op.f('fk_voice_deliveries_rule_id_voice_rules'), ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_voice_deliveries')),
@@ -361,7 +361,7 @@ def upgrade() -> None:
 
     op.create_table('background_task_runs',
     sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('occurred_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('occurred_at', UtcDateTime(), nullable=False),
     sa.Column('device_id', sa.Integer(), nullable=False),
     sa.Column('door_no', sa.Integer(), nullable=False),
     sa.Column('session_id', sa.Integer(), nullable=True),
@@ -371,7 +371,7 @@ def upgrade() -> None:
     sa.Column('outcome', sa.Enum('settled', 'assigned', 'settle-failed', 'assign-waiting', 'assign-failed', 'skipped', name='background_outcome', native_enum=False, create_constraint=True, length=32), nullable=False),
     sa.Column('reason', sa.String(length=128), nullable=True),
     sa.Column('threshold_s', sa.Integer(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('created_at', UtcDateTime(), nullable=False),
     sa.ForeignKeyConstraint(['device_id'], ['devices.id'], name=op.f('fk_background_task_runs_device_id_devices'), ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['session_id'], ['usage_sessions.id'], name=op.f('fk_background_task_runs_session_id_usage_sessions'), ondelete='SET NULL'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_background_task_runs'))
@@ -385,13 +385,13 @@ def upgrade() -> None:
     sa.Column('session_id', sa.Integer(), nullable=False),
     sa.Column('device_id', sa.Integer(), nullable=False),
     sa.Column('door_no', sa.Integer(), nullable=False),
-    sa.Column('opened_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('closed_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('opened_at', UtcDateTime(), nullable=False),
+    sa.Column('closed_at', UtcDateTime(), nullable=True),
     sa.Column('flow_s', sa.Integer(), nullable=False),
     sa.Column('opened_raw', sa.String(length=32), nullable=False),
     sa.Column('closed_raw', sa.String(length=32), nullable=False),
-    sa.Column('source', sa.Enum('measured', 'observed', 'capped', 'derived', name='segment_source', native_enum=False, create_constraint=True, length=32), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('source', sa.Enum('measured', 'observed', 'capped', 'derived', name='segment_source', native_enum=False, create_constraint=True, length=32), nullable=True),
+    sa.Column('created_at', UtcDateTime(), nullable=False),
     sa.ForeignKeyConstraint(['device_id'], ['devices.id'], name=op.f('fk_usage_segments_device_id_devices'), ondelete='RESTRICT'),
     sa.ForeignKeyConstraint(['session_id'], ['usage_sessions.id'], name=op.f('fk_usage_segments_session_id_usage_sessions'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_usage_segments'))
