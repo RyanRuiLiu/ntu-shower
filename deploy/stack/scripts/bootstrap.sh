@@ -17,7 +17,7 @@ die() { printf '[bootstrap] 失败：%s\n' "$*" >&2; exit 1; }
 [ "$(id -u)" -eq 0 ] || die "需要 root"
 
 # 1. Docker Engine + compose 插件。装完把当前用户加进 docker 组，
-#    但本次脚本仍以 root 执行，不依赖重新登录。
+#    但本次脚本仍以 root 执行，不依赖组成员资格立即生效。
 if ! command -v docker >/dev/null 2>&1; then
     log "安装 Docker Engine"
     apt-get update
