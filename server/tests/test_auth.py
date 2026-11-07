@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.auth import passwords, tokens
 from app.db.session import Database
 from app.models import Base
-from app.persistence import device_credentials, devices, users
+from app.persistence import device_credentials, devices, principals
 
 NOW = datetime(2026, 11, 7, 12, 0, 0, tzinfo=UTC)
 
@@ -46,22 +46,22 @@ def test_token_helpers() -> None:
 
 
 def test_user_lifecycle(session: Session) -> None:
-    created = users.create_user(session, "admin", "s3cret", ["admin"])
+    created = principals.create_account(session, "admin", "s3cret", ["admin"])
     assert created["capabilities"] == ["admin"]
     assert created["device_scope"] == ["*"]
     assert "password_hash" not in created
 
-    assert users.authenticate(session, "admin", "wrong") is None
-    ok = users.authenticate(session, "admin", "s3cret", now=NOW)
+    assert principals.authenticate(session, "admin", "wrong") is None
+    ok = principals.authenticate(session, "admin", "s3cret", now=NOW)
     assert ok is not None
-    assert ok["last_login_at"] == NOW
+    assert ok["last_seen_at"] == NOW
 
-    assert users.set_disabled(session, "admin", True) is True
-    assert users.authenticate(session, "admin", "s3cret") is None
-    assert users.set_password(session, "admin", "new-pass") is True
-    assert users.set_disabled(session, "admin", False) is True
-    assert users.authenticate(session, "admin", "new-pass") is not None
-    assert users.authenticate(session, "ghost", "x") is None
+    assert principals.set_disabled(session, "admin", True) is True
+    assert principals.authenticate(session, "admin", "s3cret") is None
+    assert principals.set_password(session, "admin", "new-pass") is True
+    assert principals.set_disabled(session, "admin", False) is True
+    assert principals.authenticate(session, "admin", "new-pass") is not None
+    assert principals.authenticate(session, "ghost", "x") is None
 
 
 def test_device_credential_lifecycle(session: Session) -> None:

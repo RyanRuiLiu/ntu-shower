@@ -13,7 +13,7 @@ import secrets
 from sqlalchemy.orm import Session
 
 from app.core.logging import log_event
-from app.persistence import access as access_store
+from app.persistence import principals as principals_store
 
 from .identity import IdentityKind
 from .schemas import IdentityRecord
@@ -44,7 +44,7 @@ def put_identity(
         raise ValueError(message)
     if not identity:
         identity = secrets.token_urlsafe(WEB_IDENTITY_BYTES)
-    record = access_store.put_identity(session, identity, kind, capabilities, label, device_scope)
+    record = principals_store.put(session, identity, kind, capabilities, label, device_scope)
     log_event(
         "INFO",
         "access.identity-put",
@@ -64,7 +64,7 @@ def update_identity(
     device_scope: list[str] | None = None,
 ) -> IdentityRecord:
     """编辑既有标识的能力位、作用域与备注；标识本身不变，下一次请求即生效。"""
-    record = access_store.put_identity(session, identity, kind, capabilities, label, device_scope)
+    record = principals_store.put(session, identity, kind, capabilities, label, device_scope)
     log_event(
         "INFO",
         "access.identity-put",
@@ -77,12 +77,12 @@ def update_identity(
 
 def resolve_identity(session: Session, identity: str) -> IdentityRecord | None:
     """解析请求携带的标识，返回其记录；未授权返回 None。"""
-    return access_store.find_identity(session, identity)
+    return principals_store.find(session, identity)
 
 
 def revoke_identity(session: Session, identity: str) -> bool:
     """撤销授权；该标识立即失去全部能力。"""
-    removed = access_store.delete_identity(session, identity)
+    removed = principals_store.delete(session, identity)
     if removed:
         log_event("INFO", "access.identity-revoked", "身份已吊销")
     return removed
@@ -90,4 +90,4 @@ def revoke_identity(session: Session, identity: str) -> bool:
 
 def list_identities(session: Session) -> list[IdentityRecord]:
     """名单。"""
-    return access_store.list_identities(session)
+    return principals_store.list_all(session)

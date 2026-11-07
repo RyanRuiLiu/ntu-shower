@@ -1,20 +1,21 @@
 """授权守卫（全库唯一的判定实现）。
 
-调用方在 `X-Identity` 头里带上自己的标识，服务端查身份库得能力位与设备作用域。
+调用方通过标准 `Authorization: Bearer` 凭据或签名会话 Cookie 表明身份，
+服务端查主体表得能力位与设备作用域。
 
 ## 守卫形态
 
-- `optional_identity`：带标识就解析（不在名单则 401），不带即匿名。公开端点据此
+- `optional_identity`：带凭据就解析（无效则 401），不带即匿名。公开端点据此
   按调用方裁剪视图（如 /devices 的 actions 字段）。
-- `require_identity`：要求携带在名单里的标识（操作端点与 require_admin 的基座）。
+- `require_identity`：要求一个可解析的身份（操作端点与 require_admin 的基座）。
 - `require_admin`：管理端点守卫（admin 能力位，作用域恒 *）。
 - `enforce`：能力位 × 设备作用域的一体化判定。操作端点先取调用方再在函数体内
   调它（目标设备随请求而定，函数体内调意图最直接）。
 - `require_capability`：只问能力位，专给**没有设备维度**的能力（`tasks`）。它用的仍是
   同一份能力位集合，所以那不是第二个判据，只是作用域这一维不参与。
 
-失败各有明确的问题类型：没带标识（unauthenticated，仅要求标识的端点）、标识
-不在名单（unknown-identity）、缺能力位或设备不在作用域（capability-denied）。
+失败各有明确的问题类型：没带凭据（unauthenticated，仅要求身份的端点）、凭据
+无效（unknown-identity）、缺能力位或设备不在作用域（capability-denied）。
 
 ## 设备作用域
 
@@ -25,26 +26,25 @@
 
 from typing import Any
 
-from fastapi import Depends, Header
+from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import current_user
+from app.auth.tokens import extract_bearer
 from app.core.problems import CAPABILITY_DENIED, UNAUTHENTICATED, UNKNOWN_IDENTITY, ApiProblemError
 from app.db.deps import get_db
+from app.persistence import principals as principals_store
 
 from . import service
 from .capabilities import DEVICE_SCOPED, Capability
 from .identity import IdentityKind
 from .schemas import IdentityRecord
 
-#: 调用方携带自身标识的请求头。
-IDENTITY_HEADER = "X-Identity"
-
 
 def _from_account(user: dict[str, Any]) -> IdentityRecord:
     """认证账号 → 身份记录。能力位与作用域的判定与名单身份完全同构。"""
-    last_login = user["last_login_at"]
-    created_at = last_login.isoformat() if last_login is not None else ""
+    last_seen = user["last_seen_at"]
+    created_at = last_seen.isoformat() if last_seen is not None else ""
     return {
         "identity": str(user["username"]),
         "kind": IdentityKind.WEB,
@@ -56,20 +56,24 @@ def _from_account(user: dict[str, Any]) -> IdentityRecord:
 
 
 def optional_identity(
-    x_identity: str | None = Header(default=None, alias=IDENTITY_HEADER),
+    request: Request,
     session: Session = Depends(get_db),
     account: dict[str, Any] | None = Depends(current_user),
 ) -> IdentityRecord | None:
-    """会话优先，其次名单标识；两者都没有即匿名。
+    """会话 Cookie 优先，其次 Bearer 凭据；两者都没有即匿名。
 
-    会话 Cookie 是管理台的新入口；`X-Identity` 仍服务小程序转发的 openid 调用方。
-    两者最终都产出同一个 `IdentityRecord`，守卫逻辑不分叉。
+    Bearer 凭据只比对摘要，明文不落库、不进日志。两条通道最终都产出同一个
+    `IdentityRecord`，守卫逻辑不分叉。
     """
     if account is not None:
         return _from_account(account)
-    if not x_identity:
+    token = extract_bearer(request.headers.get("authorization"))
+    if token is None:
         return None
-    caller = service.resolve_identity(session, x_identity)
+    name = principals_store.resolve_token(session, token)
+    if name is None:
+        raise ApiProblemError(UNKNOWN_IDENTITY)
+    caller = service.resolve_identity(session, name)
     if caller is None:
         raise ApiProblemError(UNKNOWN_IDENTITY)
     return caller

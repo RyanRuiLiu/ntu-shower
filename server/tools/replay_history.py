@@ -83,7 +83,7 @@ import json
 import sqlite3
 import sys
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -116,7 +116,7 @@ def _to_rfc3339(epoch_s: object) -> str | None:
 
     if not isinstance(epoch_s, int) or epoch_s <= 0:
         return None
-    return format_rfc3339(datetime.fromtimestamp(epoch_s, timezone.utc))
+    return format_rfc3339(datetime.fromtimestamp(epoch_s, UTC))
 
 
 def _adapt(raw: dict[str, Any]) -> dict[str, Any]:

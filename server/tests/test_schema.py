@@ -20,10 +20,8 @@ from app.models import Base
 from app.models.enums import CommandStatus
 
 EXPECTED_TABLES: set[str] = {
-    "access_identities",
     "api_calls",
     "app_settings",
-    "app_users",
     "background_task_runs",
     "clock_shifts",
     "command_audits",
@@ -35,6 +33,7 @@ EXPECTED_TABLES: set[str] = {
     "door_snapshots",
     "door_state_events",
     "door_states",
+    "principals",
     "ota_release_installs",
     "ota_releases",
     "usage_segments",

@@ -51,6 +51,21 @@ class IdentityRecord(TypedDict):
     created_at: str
 
 
+class IdentityIssued(TypedDict):
+    """登记/编辑的响应：记录 + 一次性返回的 Bearer 凭据明文。
+
+    凭据明文只在这一次响应里出现，库里只留摘要；再次编辑会轮换，旧凭据立即失效。
+    """
+
+    identity: str
+    kind: IdentityKind
+    capabilities: list[str]
+    device_scope: list[str]
+    label: str
+    created_at: str
+    token: str
+
+
 class CapabilityOption(TypedDict):
     """一个能力位的对外描述：稳定 key + 人读名称（登记表派生，表单的唯一来源）。"""
 

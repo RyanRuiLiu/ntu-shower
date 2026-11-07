@@ -19,10 +19,12 @@
 - 时间是 RFC 3339 字符串 → `UtcDateTime` 的存储形式（UTC、无时区后缀）。
 - JSON 列在新库仍是 TEXT，原样搬运。
 - 枚举列取值不变，只校验取值合法。
+- 认证材料（`password_hash` / `token_hash`）不从旧库搬运：旧库没有这些凭据，
+  切换后由管理员为主体重新签发，凭据明文不落库。
 
 ## 分阶段
 
-当前实现「身份组」：`devices`、`access_identities`。其余表按 `PLANNED` 登记，
+当前实现「身份组」：`devices`、`principals`。其余表按 `PLANNED` 登记，
 未实现时脚本明确拒绝执行，不会产出半份数据。
 """
 
@@ -31,7 +33,7 @@ from __future__ import annotations
 import argparse
 import sqlite3
 import sys
-from datetime import UTC, datetime
+from datetime import UTC
 from pathlib import Path
 
 from app.core.clock import parse_rfc3339
@@ -42,7 +44,7 @@ from app.models import Base
 #: 已实现的转换：(旧表, 新表)。
 DONE: tuple[tuple[str, str], ...] = (
     ("device", "devices"),
-    ("access_identity", "access_identities"),
+    ("access_identity", "principals"),
     ("clock_shift", "clock_shifts"),
     ("device_config", "device_configs"),
     ("device_link_event", "device_link_events"),
@@ -65,8 +67,7 @@ DONE: tuple[tuple[str, str], ...] = (
 )
 
 #: 尚未实现的表。存在即拒绝执行——半份数据比没有数据更危险。
-PLANNED: tuple[str, ...] = (
-)
+PLANNED: tuple[str, ...] = ()
 
 
 def to_storage_time(text: str | None) -> str | None:
@@ -120,9 +121,9 @@ def copy_identities(source: sqlite3.Connection, target: sqlite3.Connection) -> N
     now = utcnow().replace(tzinfo=None).isoformat(sep=" ")
     for row in rows:
         target.execute(
-            "INSERT INTO access_identities"
-            " (identity, kind, capabilities, device_scope, label, created_at, updated_at)"
-            " VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO principals"
+            " (name, kind, capabilities, device_scope, label, created_at, updated_at, disabled)"
+            " VALUES (?,?,?,?,?,?,?,0)",
             (
                 row[0],
                 row[1],
@@ -145,43 +146,29 @@ def copy_simple(
     这些表没有跨表引用，只有设备外键与时间列，统一用一张映射表处理。
     """
     now = utcnow().replace(tzinfo=None).isoformat(sep=" ")
-    for row in source.execute(
-        "SELECT device_id, occurred_at, event, reason FROM device_link_event"
-    ).fetchall():
+    for row in source.execute("SELECT device_id, occurred_at, event, reason FROM device_link_event").fetchall():
         target.execute(
-            "INSERT INTO device_link_events (device_id, occurred_at, event, reason, created_at)"
-            " VALUES (?,?,?,?,?)",
+            "INSERT INTO device_link_events (device_id, occurred_at, event, reason, created_at) VALUES (?,?,?,?,?)",
             (devices[str(row[0])], to_storage_time(row[1]), row[2], row[3] or "", now),
         )
-    for row in source.execute(
-        "SELECT device_id, kind, content, uploaded_at FROM device_log"
-    ).fetchall():
+    for row in source.execute("SELECT device_id, kind, content, uploaded_at FROM device_log").fetchall():
         target.execute(
-            "INSERT INTO device_logs (device_id, kind, content, uploaded_at, created_at)"
-            " VALUES (?,?,?,?,?)",
+            "INSERT INTO device_logs (device_id, kind, content, uploaded_at, created_at) VALUES (?,?,?,?,?)",
             (devices[str(row[0])], row[1], row[2], to_storage_time(row[3]) or now, now),
         )
-    for row in source.execute(
-        "SELECT device_id, shifted_at, assignments FROM clock_shift"
-    ).fetchall():
+    for row in source.execute("SELECT device_id, shifted_at, assignments FROM clock_shift").fetchall():
         target.execute(
-            "INSERT INTO clock_shifts (device_id, shifted_at, assignments, updated_at)"
-            " VALUES (?,?,?,?)",
+            "INSERT INTO clock_shifts (device_id, shifted_at, assignments, updated_at) VALUES (?,?,?,?)",
             (devices[str(row[0])], to_storage_time(row[1]) or now, row[2] or "[]", now),
         )
-    for row in source.execute(
-        "SELECT device_id, revision, config FROM device_config"
-    ).fetchall():
+    for row in source.execute("SELECT device_id, revision, config FROM device_config").fetchall():
         target.execute(
-            "INSERT INTO device_configs (device_id, revision, config, updated_at)"
-            " VALUES (?,?,?,?)",
+            "INSERT INTO device_configs (device_id, revision, config, updated_at) VALUES (?,?,?,?)",
             (devices[str(row[0])], int(row[1]), row[2] or "{}", now),
         )
 
 
-def copy_singletons(
-    source: sqlite3.Connection, target: sqlite3.Connection
-) -> dict[str, int]:
+def copy_singletons(source: sqlite3.Connection, target: sqlite3.Connection) -> dict[str, int]:
     """整表单条的配置、无外键的发布与素材表。"""
     now = utcnow().replace(tzinfo=None).isoformat(sep=" ")
     row = source.execute("SELECT revision, config FROM global_config WHERE id = 1").fetchone()
@@ -198,8 +185,14 @@ def copy_singletons(
             "INSERT INTO ota_releases (version, version_code, sha256, mandatory, force, target,"
             " created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
             (
-                row[0], int(row[1]), row[2], 1 if row[3] else 0, 1 if row[4] else 0,
-                row[5] or "all", to_storage_time(row[6]) or now, now,
+                row[0],
+                int(row[1]),
+                row[2],
+                1 if row[3] else 0,
+                1 if row[4] else 0,
+                row[5] or "all",
+                to_storage_time(row[6]) or now,
+                now,
             ),
         )
         releases[str(row[0])] = int(target.execute("SELECT last_insert_rowid()").fetchone()[0])
@@ -214,22 +207,25 @@ def copy_singletons(
     return releases
 
 
-def copy_door_events(
-    source: sqlite3.Connection, target: sqlite3.Connection, devices: dict[str, int]
-) -> None:
+def copy_door_events(source: sqlite3.Connection, target: sqlite3.Connection, devices: dict[str, int]) -> None:
     """原始帧与状态流水：两张 19 万行级的大表，逐批写。"""
     now = utcnow().replace(tzinfo=None).isoformat(sep=" ")
     for row in source.execute(
-        "SELECT device_id, snapshot_id, seq, source, captured_at, received_at, doors,"
-        " device_clock FROM door_snapshot"
+        "SELECT device_id, snapshot_id, seq, source, captured_at, received_at, doors, device_clock FROM door_snapshot"
     ):
         target.execute(
             "INSERT INTO door_snapshots (device_id, snapshot_id, seq, source, captured_at,"
             " received_at, doors, device_clock, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
             (
-                devices[str(row[0])], row[1], row[2], row[3],
-                to_storage_time(row[4]), to_storage_time(row[5]) or now,
-                row[6], row[7], now,
+                devices[str(row[0])],
+                row[1],
+                row[2],
+                row[3],
+                to_storage_time(row[4]),
+                to_storage_time(row[5]) or now,
+                row[6],
+                row[7],
+                now,
             ),
         )
     for row in source.execute(
@@ -240,15 +236,20 @@ def copy_door_events(
             "INSERT INTO door_state_events (device_id, door_no, from_state, to_state, card_no,"
             " cert_no, bath_time_s, occurred_at, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
             (
-                devices[str(row[1])], int(row[2]), row[3], row[4], int(row[5] or 0),
-                row[6] or "", int(row[7] or 0), to_storage_time(row[0]) or now, now,
+                devices[str(row[1])],
+                int(row[2]),
+                row[3],
+                row[4],
+                int(row[5] or 0),
+                row[6] or "",
+                int(row[7] or 0),
+                to_storage_time(row[0]) or now,
+                now,
             ),
         )
 
 
-def copy_audit_and_live(
-    source: sqlite3.Connection, target: sqlite3.Connection, devices: dict[str, int]
-) -> None:
+def copy_audit_and_live(source: sqlite3.Connection, target: sqlite3.Connection, devices: dict[str, int]) -> None:
     """审计两张与门现态：都只依赖设备外键。"""
     now = utcnow().replace(tzinfo=None).isoformat(sep=" ")
     for row in source.execute(
@@ -262,11 +263,25 @@ def copy_audit_and_live(
             " device_id, problem_type, detail, response_body, created_at)"
             " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
-                row[0], to_storage_time(row[1]) or now, row[2] or "", row[3] or "", row[4],
-                row[5] or "", row[6], row[7], row[8], row[9], row[10], row[11],
-                int(row[12]), int(row[13]),
+                row[0],
+                to_storage_time(row[1]) or now,
+                row[2] or "",
+                row[3] or "",
+                row[4],
+                row[5] or "",
+                row[6],
+                row[7],
+                row[8],
+                row[9],
+                row[10],
+                row[11],
+                int(row[12]),
+                int(row[13]),
                 devices.get(str(row[14])) if row[14] else None,
-                row[15], row[16], row[17], now,
+                row[15],
+                row[16],
+                row[17],
+                now,
             ),
         )
     for row in source.execute(
@@ -278,8 +293,17 @@ def copy_audit_and_live(
             " finished_at, status, reason_code, terminal_message, trace_id, result)"
             " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (
-                row[0], devices[str(row[1])], row[2], row[3], to_storage_time(row[4]) or now,
-                to_storage_time(row[5]), row[6], row[7], row[8], row[9] or "", row[10],
+                row[0],
+                devices[str(row[1])],
+                row[2],
+                row[3],
+                to_storage_time(row[4]) or now,
+                to_storage_time(row[5]),
+                row[6],
+                row[7],
+                row[8],
+                row[9] or "",
+                row[10],
             ),
         )
     for row in source.execute(
@@ -291,8 +315,17 @@ def copy_audit_and_live(
             " cert_no, feature, action, outcome, reason, threshold_s, created_at)"
             " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (
-                to_storage_time(row[0]) or now, devices[str(row[1])], int(row[2]), row[3],
-                row[4] or "", row[5], row[6], row[7], row[8], row[9], now,
+                to_storage_time(row[0]) or now,
+                devices[str(row[1])],
+                int(row[2]),
+                row[3],
+                row[4] or "",
+                row[5],
+                row[6],
+                row[7],
+                row[8],
+                row[9],
+                now,
             ),
         )
     for row in source.execute(
@@ -304,10 +337,19 @@ def copy_audit_and_live(
             " open_time, in_time, close_time, bath_time_s, status_raw, reported_at, updated_at)"
             " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
-                devices[str(row[0])], int(row[1]), row[2], int(row[3] or 0), row[4] or "",
-                row[5] or "", to_storage_time(row[6]), to_storage_time(row[7]),
-                to_storage_time(row[8]), int(row[9] or 0), int(row[10] or 0),
-                to_storage_time(row[11]) or now, now,
+                devices[str(row[0])],
+                int(row[1]),
+                row[2],
+                int(row[3] or 0),
+                row[4] or "",
+                row[5] or "",
+                to_storage_time(row[6]),
+                to_storage_time(row[7]),
+                to_storage_time(row[8]),
+                int(row[9] or 0),
+                int(row[10] or 0),
+                to_storage_time(row[11]) or now,
+                now,
             ),
         )
 
@@ -329,10 +371,20 @@ def copy_usage_and_voice(
             " last_seen_at, flow_s, created_at, updated_at)"
             " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
-                devices[str(row[1])], int(row[2]), int(row[3] or 0), row[4] or "",
-                to_storage_time(row[5]) or now, row[6], row[7], int(row[8] or 0),
-                1 if row[9] else 0, to_storage_time(row[10]),
-                to_storage_time(row[11]) or now, int(row[12] or 0), now, now,
+                devices[str(row[1])],
+                int(row[2]),
+                int(row[3] or 0),
+                row[4] or "",
+                to_storage_time(row[5]) or now,
+                row[6],
+                row[7],
+                int(row[8] or 0),
+                1 if row[9] else 0,
+                to_storage_time(row[10]),
+                to_storage_time(row[11]) or now,
+                int(row[12] or 0),
+                now,
+                now,
             ),
         )
         sessions[int(row[0])] = int(target.execute("SELECT last_insert_rowid()").fetchone()[0])
@@ -345,16 +397,21 @@ def copy_usage_and_voice(
             "INSERT INTO voice_rules (devices, certs, events, time_windows, exempt, segments,"
             " volume, enabled, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
-                row[1], row[2], row[3], row[4] or "[]", row[5] or "[]", row[6],
-                int(row[7]), 1 if row[8] else 0,
-                to_storage_time(row[9]) or now, to_storage_time(row[10]) or now,
+                row[1],
+                row[2],
+                row[3],
+                row[4] or "[]",
+                row[5] or "[]",
+                row[6],
+                int(row[7]),
+                1 if row[8] else 0,
+                to_storage_time(row[9]) or now,
+                to_storage_time(row[10]) or now,
             ),
         )
         rules[int(row[0])] = int(target.execute("SELECT last_insert_rowid()").fetchone()[0])
     for row in source.execute("SELECT unit, asset_id FROM voice_unit"):
-        target.execute(
-            "INSERT INTO voice_units (unit, asset_id) VALUES (?,?)", (row[0], row[1])
-        )
+        target.execute("INSERT INTO voice_units (unit, asset_id) VALUES (?,?)", (row[0], row[1]))
     return sessions, rules
 
 
@@ -365,7 +422,7 @@ def copy_children(
     sessions: dict[int, int],
     releases: dict[str, int],
     rules: dict[int, int],
-) -> None:
+) -> dict[str, int]:
     """子表：外键必须能在字典里解析到，解析不到就中止——静默丢行会让统计缺一段。"""
     now = utcnow().replace(tzinfo=None).isoformat(sep=" ")
     skipped = {"release": 0, "session": 0, "rule": 0}
@@ -381,9 +438,16 @@ def copy_children(
             "INSERT INTO usage_segments (session_id, device_id, door_no, opened_at, closed_at,"
             " flow_s, opened_raw, closed_raw, source, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
-                session_id, devices[str(row[1])], int(row[2]),
-                to_storage_time(row[3]) or now, to_storage_time(row[4]), int(row[5] or 0),
-                row[6] or "", row[7] or "", row[8], now,
+                session_id,
+                devices[str(row[1])],
+                int(row[2]),
+                to_storage_time(row[3]) or now,
+                to_storage_time(row[4]),
+                int(row[5] or 0),
+                row[6] or "",
+                row[7] or "",
+                row[8],
+                now,
             ),
         )
     for row in source.execute("SELECT version, device_id, applied_at FROM ota_release_install"):
@@ -391,7 +455,7 @@ def copy_children(
         if release_id is None:
             # 发布已按保留策略删除，安装记录成了孤儿。APK 本身已不存在，
             # 这些行无法补全，跳过并计数——不静默吞掉，最后统一报出。
-            skipped['release'] += 1
+            skipped["release"] += 1
             continue
         target.execute(
             "INSERT INTO ota_release_installs (release_id, device_id, applied_at) VALUES (?,?,?)",
@@ -412,26 +476,49 @@ def copy_children(
             " downloaded, status, detail, trace_id, created_at)"
             " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
-                row[0], rule_id, devices[str(row[2])], int(row[3]), row[4], row[5], row[6],
-                int(row[7]), int(row[8]), to_storage_time(row[9]) or now,
-                to_storage_time(row[10]), to_storage_time(row[11]),
-                1 if row[12] else 0, row[13], row[14] or "", row[15] or "",
+                row[0],
+                rule_id,
+                devices[str(row[2])],
+                int(row[3]),
+                row[4],
+                row[5],
+                row[6],
+                int(row[7]),
+                int(row[8]),
+                to_storage_time(row[9]) or now,
+                to_storage_time(row[10]),
+                to_storage_time(row[11]),
+                1 if row[12] else 0,
+                row[13],
+                row[14] or "",
+                row[15] or "",
                 to_storage_time(row[16]) or now,
             ),
         )
     if any(skipped.values()):
         print(f"跳过孤儿行：{skipped}", file=sys.stderr)
+    return skipped
 
 
-def verify(source: sqlite3.Connection, target: sqlite3.Connection) -> list[str]:
+#: 子表里会被跳过的孤儿行计数，验证时从期望值里扣掉，避免把已知的跳过数误报成错误。
+SKIPPED_BY_TABLE: dict[str, str] = {
+    "ota_release_install": "release",
+    "voice_delivery": "rule",
+}
+
+
+def verify(source: sqlite3.Connection, target: sqlite3.Connection, skipped: dict[str, int] | None = None) -> list[str]:
     problems: list[str] = []
     for old, new in DONE:
         expected = int(source.execute(f"SELECT COUNT(*) FROM {old}").fetchone()[0])
+        key = SKIPPED_BY_TABLE.get(old)
+        if skipped and key:
+            expected -= skipped.get(key, 0)
         actual = int(target.execute(f"SELECT COUNT(*) FROM {new}").fetchone()[0])
         status = "ok" if expected == actual else "MISMATCH"
         problems.append(f"{old:20s} {expected:8d} → {new:22s} {actual:8d}  {status}")
         if expected != actual:
-            problems.append(f"  !! {new} 行数不一致")
+            problems.append(f"  !! {new} 行数不一致（期望 {expected}，实际 {actual}）")
     return problems
 
 
@@ -458,9 +545,11 @@ def main() -> int:
                 print(line)
             return 0
 
-        missing = [name for name in PLANNED if source.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
-        ).fetchone()]
+        missing = [
+            name
+            for name in PLANNED
+            if source.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
+        ]
         if missing:
             print("以下表尚未实现转换，脚本拒绝执行：", file=sys.stderr)
             for name in missing:
@@ -475,10 +564,10 @@ def main() -> int:
         copy_door_events(source, target, devices)
         copy_audit_and_live(source, target, devices)
         sessions, rules = copy_usage_and_voice(source, target, devices)
-        copy_children(source, target, devices, sessions, releases, rules)
+        skipped = copy_children(source, target, devices, sessions, releases, rules)
         target.commit()
 
-        for line in verify(source, target):
+        for line in verify(source, target, skipped):
             print(line)
         return 0
     finally:

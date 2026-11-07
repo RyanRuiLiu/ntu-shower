@@ -8,7 +8,7 @@
 
 ## 守卫
 
-整个域要求 admin 能力位（X-Identity 头，统一身份制见 access.dependencies）。
+整个域要求 admin 能力位（标准 Bearer 凭据或会话，见 access.dependencies）。
 
 ## 写入校验
 
@@ -21,12 +21,13 @@ from sqlalchemy.orm import Session
 
 from app.core.problems import UNKNOWN_CAPABILITY, VALIDATION_FAILED, ApiProblemError
 from app.db.deps import get_db
+from app.persistence import principals as principals_store
 
 from . import service
 from .capabilities import ALL_CAPABILITIES, Capability, cap_label
 from .dependencies import require_admin, require_identity
 from .identity import IdentityKind
-from .schemas import IdentityCatalog, IdentityRecord, IdentityRequest
+from .schemas import IdentityCatalog, IdentityIssued, IdentityRecord, IdentityRequest
 
 #: 身份域里"我自己"那一面。要排在那条带 require_admin 的 router 之前注册（见 app/main.py）。
 router = APIRouter(prefix="/api/v1/identities", tags=["identities"])
@@ -58,7 +59,7 @@ def list_identities(session: Session = Depends(get_db)) -> IdentityCatalog:
 
 
 @admin_router.post("")
-def put_identity(req: IdentityRequest, session: Session = Depends(get_db)) -> IdentityRecord:
+def put_identity(req: IdentityRequest, session: Session = Depends(get_db)) -> IdentityIssued:
     """登记一个标识。
 
     - `kind=openid`：登记一个小程序用户（`openid` 必填，重复登记即整体更新）
@@ -75,16 +76,20 @@ def put_identity(req: IdentityRequest, session: Session = Depends(get_db)) -> Id
         raise ApiProblemError(VALIDATION_FAILED, "该标识已存在，编辑请用 PUT")
     _reject_unknown_devices(session, req.device_scope)
     desired = req.openid if req.kind is IdentityKind.OPENID else (req.identity or "")
-    return service.put_identity(session, req.kind, req.capabilities, req.label, desired, req.device_scope)
+    return _issued(
+        session, service.put_identity(session, req.kind, req.capabilities, req.label, desired, req.device_scope)
+    )
 
 
 @admin_router.put("/{identity}")
-def update_identity(identity: str, req: IdentityRequest, session: Session = Depends(get_db)) -> IdentityRecord:
+def update_identity(identity: str, req: IdentityRequest, session: Session = Depends(get_db)) -> IdentityIssued:
     """编辑一个既有标识：能力位、设备作用域与备注。标识本身不变，下一次请求即生效。"""
     _reject_unknown_capabilities(req.capabilities)
     # 标识由路径给出：编辑不改身份本身，body 里的 openid 字段忽略
     _reject_unknown_devices(session, req.device_scope)
-    return service.update_identity(session, identity, req.kind, req.capabilities, req.label, req.device_scope)
+    return _issued(
+        session, service.update_identity(session, identity, req.kind, req.capabilities, req.label, req.device_scope)
+    )
 
 
 @admin_router.delete("/{identity}", status_code=204)
@@ -97,6 +102,13 @@ def delete_identity(identity: str, session: Session = Depends(get_db)) -> Respon
     """
     service.revoke_identity(session, identity)
     return Response(status_code=204)
+
+
+def _issued(session: Session, record: IdentityRecord) -> IdentityIssued:
+    """主体登记后签发凭据；返回时带上明文，之后不再可读取。"""
+    token = principals_store.issue_token(session, record["identity"])
+    assert token is not None
+    return {**record, "token": token}
 
 
 def _reject_unknown_devices(_session: Session, device_scope: list[str]) -> None:

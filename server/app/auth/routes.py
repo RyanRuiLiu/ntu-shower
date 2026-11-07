@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.problems import UNAUTHENTICATED, ApiProblemError
 from app.db.deps import get_db
-from app.persistence import users as users_store
+from app.persistence import principals as principals_store
 
 from . import sessions
 from .dependencies import current_user
@@ -34,7 +34,7 @@ def login(body: LoginRequest, response: Response, session: Session = Depends(get
 
     账号不存在与口令错误返回同一个问题类型，避免接口变成账号枚举器。
     """
-    user = users_store.authenticate(session, body.username, body.password)
+    user = principals_store.authenticate(session, body.username, body.password)
     if user is None:
         raise ApiProblemError(UNAUTHENTICATED, "账号或口令不正确")
     token = sessions.issue(body.username)

@@ -59,38 +59,36 @@ class DeviceCredential(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
 
 
-class AccessIdentity(Base):
-    """可授予能力位的身份：小程序用户（openid）与管理台签发标识。"""
+class Principal(Base):
+    """主体：管理台账号、小程序 openid、服务间调用凭据共用一张表。
 
-    __tablename__ = "access_identities"
+    旧库里 `access_identity` 与新建的 `app_users` 字段几乎完全相同，是两份真相：
+    同一个「能被授予能力位的主体」被拆成两处，认证与授权各读一半。这里合并。
+
+    认证材料都是**可选且只存哈希**：
+    - `password_hash`：管理台账号走口令认证（Argon2id）
+    - `token_hash`：非浏览器调用方走 `Authorization: Bearer`，只比对摘要
+    - 小程序 openid 由 status-panel 转发，主体在这里只作授权名单
+    """
+
+    __tablename__ = "principals"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    identity: Mapped[str] = mapped_column(String(64), unique=True)
+    #: 业务唯一键：管理台是用户名，小程序调用方是 openid
+    name: Mapped[str] = mapped_column(String(64), unique=True)
     kind: Mapped[IdentityKind] = mapped_column(enum_column(IdentityKind, "identity_kind"))
     capabilities: Mapped[list[str]] = mapped_column(JSON, default=list)
     #: 设备作用域。`["*"]` 表示全部设备；其余为设备字符串标识的白名单。
-    #: 用 JSON 而不是关联表：它由 API 整体读写，不参与 SQL 连接查询。
     device_scope: Mapped[list[str]] = mapped_column(JSON, default=list)
     label: Mapped[str] = mapped_column(String(64), default="")
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow, onupdate=utcnow)
-
-
-class AppUser(Base):
-    """管理台账号，替代原来「在浏览器里粘贴身份串」的做法。"""
-
-    __tablename__ = "app_users"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    username: Mapped[str] = mapped_column(String(64), unique=True)
-    #: Argon2id 编码串（含算法、参数、盐），由 argon2-cffi 生成
-    password_hash: Mapped[str] = mapped_column(String(255))
-    capabilities: Mapped[list[str]] = mapped_column(JSON, default=list)
-    device_scope: Mapped[list[str]] = mapped_column(JSON, default=list)
+    #: Argon2id 编码串（含算法、参数与盐）；没有口令的主体为空
+    password_hash: Mapped[str | None] = mapped_column(String(255), default=None)
+    #: SHA-256(API token)；没有签发凭据的主体为空
+    token_hash: Mapped[str | None] = mapped_column(String(64), unique=True, default=None)
     disabled: Mapped[bool] = mapped_column(Boolean, default=False)
-    last_login_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
+    last_seen_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow, onupdate=utcnow)
 
 
-__all__: list[str] = ["AccessIdentity", "AppUser", "Device", "DeviceCredential"]
+__all__: list[str] = ["Device", "DeviceCredential", "Principal"]

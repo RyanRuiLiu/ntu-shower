@@ -4,13 +4,13 @@
 
 对外 HTTP 面统一挂 `/api/v1` 前缀（路径版本化，对外契约的破坏性变更升 v2）；
 URL 只表达资源，不表达权限——谁能调用由能力位守卫决定（统一身份制，
-X-Identity 头）：
+标准 Bearer 凭据）：
 
 - /api/v1/devices、/api/v1/doors     设备域：精简清单公开；runtime 档案与远程
                                       操作 admin；分配/结算/拍照按 session/photo 能力位
 - /api/v1/config                     配置域（admin）
 - /api/v1/identities                 身份域：名单与签发/编辑/撤销 admin；`/identities/me`
-                                      是自己的记录（凭 X-Identity）
+                                      是自己的记录（凭 Bearer 凭据）
 - /api/v1/tasks                      后台任务登记：按 tasks 能力位增删某个学号的登记
 - /api/v1/stats                      浴室统计：按 stats 能力位读一台设备的聚合、某一天的
                                      状态序列（客户端本地重放）、个人的跨设备统计

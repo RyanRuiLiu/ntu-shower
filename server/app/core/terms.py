@@ -136,7 +136,7 @@ DEPRECATED: dict[str, str] = {
     "快照": "帧（指一次上报时）／备份（指数据库或配置的存档时，见 RUNBOOK）",
     "终端": "设备（指那台机器时）；指 shell 时保留「终端」",
     "代理": "NTU Shower（指我们的程序时）；指 nginx 时保留「代理」",
-    "登录": "分配（指浴室 App 提交凭证那一刻）／身份（指我们的 X-Identity）",
+    "登录": "分配（指浴室 App 提交凭证那一刻）／身份（指认证后的主体）",
     # 2026-10-05 校时统一为一个服务端功能（没有"只在校正开机时跑"的形态）之后，
     # 旧的分身称呼全部退场。见 config/spec.py 的 `time_sync_*` 与 extend_hours 的
     # `_maybe_correct_clock`。

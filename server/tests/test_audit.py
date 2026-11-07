@@ -61,8 +61,10 @@ def test_identity_call_records_raw_actor(client: TestClient, admin_headers: dict
     assert row["method"] == "GET"
     assert row["path"] == "/api/v1/ota/releases"
     assert row["status_code"] == 200
-    assert row["actor_kind"] == "identity"
-    assert row["actor"] == "admin-identity-0001"
+    assert row["actor_kind"] == "token"
+    # 只记凭据摘要前 12 位：足够对账，不足以冒用；明文身份与凭据都不进审计
+    assert len(row["actor"]) == 12
+    assert row["actor"] != "admin-identity-0001"
     assert row["duration_ms"] >= 0
 
 
@@ -163,9 +165,9 @@ def test_calls_filters_by_actor_kind_and_device(client: TestClient, admin_header
     assert by_device
     assert all(row["device_id"] == "dev-filter-1" for row in by_device)
 
-    by_actor = _calls(client, admin_headers, actor_kind="identity", limit=1)
+    by_actor = _calls(client, admin_headers, actor_kind="token", limit=1)
     assert by_actor
-    assert all(row["actor_kind"] == "identity" for row in by_actor)
+    assert all(row["actor_kind"] == "token" for row in by_actor)
 
 
 def test_commands_lists_command_audit_rows(client: TestClient, admin_headers: dict[str, str]) -> None:

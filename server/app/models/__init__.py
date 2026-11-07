@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from ..db.base import Base
 from .doors import DoorSnapshot, DoorState, DoorStateEvent
-from .identity import AccessIdentity, AppUser, Device, DeviceCredential
+from .identity import Device, DeviceCredential, Principal
 from .ops import ApiCall, BackgroundTaskRun, CommandAudit, DeviceLinkEvent, DeviceLog
 from .ota import OtaRelease, OtaReleaseInstall
 from .settings import AppSettings, ClockShift, DeviceConfig
@@ -17,10 +17,8 @@ from .usage import UsageSegment, UsageSession
 from .voice import VoiceAsset, VoiceDelivery, VoiceRule, VoiceUnit
 
 __all__: list[str] = [
-    "AccessIdentity",
     "ApiCall",
     "AppSettings",
-    "AppUser",
     "BackgroundTaskRun",
     "Base",
     "ClockShift",
@@ -35,6 +33,7 @@ __all__: list[str] = [
     "DoorStateEvent",
     "OtaRelease",
     "OtaReleaseInstall",
+    "Principal",
     "UsageSegment",
     "UsageSession",
     "VoiceAsset",

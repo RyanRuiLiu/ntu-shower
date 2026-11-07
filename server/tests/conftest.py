@@ -22,6 +22,19 @@ TRUSTED_DEVICE_ID = "dev-test-0001"
 
 
 @pytest.fixture(autouse=True)
+def _disable_device_token_in_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    """测试环境统一关闭设备接入凭据校验。
+
+    生产默认强制校验（见 config.require_device_token），但网关用例关注的是帧协议与
+    推导，逐条签发设备凭据只会把无关噪声塞进每个用例。显式关闭属于测试夹具职责，
+    不是生产侧的旁路开关；凭据校验本身由 tests/test_auth_endpoints.py 单独验证。
+    """
+    from app.core import config as config_module
+
+    monkeypatch.setattr(config_module.settings, "require_device_token", False)
+
+
+@pytest.fixture(autouse=True)
 def _reset_process_singletons() -> Iterator[None]:
     """清空进程级单例：跨用例累积产生伪影。
 
@@ -147,12 +160,12 @@ def admin_headers(fresh_db: str) -> dict[str, str]:
     """管理台调用方：admin 之外还持 session/photo——管理台要代操作用户动作。"""
     from app.db.session import Database
     from app.modules.access.identity import IdentityKind
-    from app.persistence import access as access_store
+    from app.persistence import principals as principals_store
 
     database = Database(f"sqlite:///{Path(fresh_db).as_posix()}")
     try:
         with database.new_session() as session:
-            access_store.put_identity(
+            principals_store.put(
                 session,
                 ADMIN_IDENTITY,
                 IdentityKind.WEB,
@@ -160,9 +173,11 @@ def admin_headers(fresh_db: str) -> dict[str, str]:
                 "测试管理员",
                 ["*"],
             )
+            token = principals_store.issue_token(session, ADMIN_IDENTITY)
     finally:
         database.dispose()
-    return {"X-Identity": ADMIN_IDENTITY}
+    assert token is not None
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture
@@ -175,17 +190,19 @@ def ops_headers(fresh_db: str) -> dict[str, str]:
     from app.db.session import Database
     from app.modules.access.identity import IdentityKind
     from app.modules.devices import repository as devices_repository
-    from app.persistence import access as access_store
+    from app.persistence import principals as principals_store
 
     devices_repository.register(TRUSTED_DEVICE_ID, "0.4.13", 57, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
     devices_repository.set_trusted(TRUSTED_DEVICE_ID, True)
     database = Database(f"sqlite:///{Path(fresh_db).as_posix()}")
     try:
         with database.new_session() as session:
-            access_store.put_identity(session, OPS_IDENTITY, IdentityKind.WEB, ["session", "photo"], "测试用", ["*"])
+            principals_store.put(session, OPS_IDENTITY, IdentityKind.WEB, ["session", "photo"], "测试用", ["*"])
+            token = principals_store.issue_token(session, OPS_IDENTITY)
     finally:
         database.dispose()
-    return {"X-Identity": OPS_IDENTITY}
+    assert token is not None
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture

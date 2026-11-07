@@ -52,9 +52,9 @@ class Settings(BaseSettings):
     # 后果只是重启后会话失效，不会把默认密钥带进线上。
     session_secret: str = ""
     session_ttl_seconds: int = 12 * 60 * 60
-    # 设备接入令牌校验开关。旧设备固件不带令牌，切换期由服务端按批次开启；
-    # 新固件全量上线后置 true，是发布开关而非长期双轨。
-    require_device_token: bool = False
+    # 设备接入令牌校验默认强制开启。只在测试夹具里显式关闭——生产不留
+    # 「不带凭据也能连」的旁路，这是安全默认值而不是长期双轨。
+    require_device_token: bool = True
 
     @property
     def effective_database_url(self) -> str:

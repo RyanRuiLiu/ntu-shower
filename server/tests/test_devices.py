@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from tests import device_link, frames
+from tests.identity import bearer
 
 from app.core import actions, db
 from app.core.clock import now_rfc3339
@@ -16,12 +17,13 @@ DEVICE_ID = "dev-debug-1"
 
 def _put_identity(device_id: str, identity: str, capabilities: list[str], scope: list[str]) -> dict[str, str]:
     """登记一个身份并返回其请求头。"""
+    from tests.identity import bearer
     from tests.identity import register as register_identity
 
     from app.modules.access.identity import IdentityKind
 
-    register_identity(identity, IdentityKind.WEB, capabilities, "测试", device_scope=scope)
-    return {"X-Identity": identity}
+    token = register_identity(identity, IdentityKind.WEB, capabilities, "测试", device_scope=scope)
+    return bearer(token)
 
 
 def test_device_list_is_public_and_anonymous_actions_are_empty(client: TestClient, fresh_db: str) -> None:
@@ -61,7 +63,7 @@ def test_device_list_actions_empty_outside_scope(client: TestClient, fresh_db: s
 
 def test_device_list_unknown_identity_is_rejected(client: TestClient) -> None:
     """公开端点带了不在名单的标识同样 401：视图按调用方裁剪，先要认识调用方。"""
-    r = client.get("/api/v1/devices", headers={"X-Identity": "no-such-identity"})
+    r = client.get("/api/v1/devices", headers=bearer("not-a-valid-token"))
 
     assert r.status_code == 401
     assert r.json()["type"].endswith("/problems/unknown-identity")

@@ -32,10 +32,11 @@ def tasks_headers(fresh_db: str) -> dict[str, str]:
     **设备作用域是空的**：这个位没有设备维度，作用域填什么都不该影响判定。填空比填
     `["*"]` 更能证明这一点——填 `*` 的话，判据出错也看不出来。
     """
+    from tests.identity import bearer
     from tests.identity import register as register_identity
 
-    register_identity(TASKS_IDENTITY, IdentityKind.OPENID, ["tasks"], "测试登记", device_scope=[])
-    return {"X-Identity": TASKS_IDENTITY}
+    token = register_identity(TASKS_IDENTITY, IdentityKind.OPENID, ["tasks"], "测试登记", device_scope=[])
+    return bearer(token)
 
 
 # ── 登记表本身的唯一出处 ──

@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from app.db.session import Database
 from app.models import Base
 from app.modules.access.identity import IdentityKind
-from app.persistence import access
+from app.persistence import principals as access
 
 
 @pytest.fixture
@@ -30,7 +30,7 @@ def session(tmp_path: Path) -> Iterator[Session]:
 
 
 def test_put_creates_with_defaults(session: Session) -> None:
-    record = access.put_identity(session, "web-001", IdentityKind.WEB, ["admin"])
+    record = access.put(session, "web-001", IdentityKind.WEB, ["admin"])
     assert record["identity"] == "web-001"
     assert record["kind"] is IdentityKind.WEB
     assert record["capabilities"] == ["admin"]
@@ -40,8 +40,8 @@ def test_put_creates_with_defaults(session: Session) -> None:
 
 
 def test_put_updates_without_touching_kind_or_created_at(session: Session) -> None:
-    first = access.put_identity(session, "web-002", IdentityKind.WEB, ["session"], label="a")
-    second = access.put_identity(
+    first = access.put(session, "web-002", IdentityKind.WEB, ["session"], label="a")
+    second = access.put(
         session,
         "web-002",
         IdentityKind.OPENID,
@@ -57,18 +57,18 @@ def test_put_updates_without_touching_kind_or_created_at(session: Session) -> No
 
 
 def test_find_missing_returns_none(session: Session) -> None:
-    assert access.find_identity(session, "nobody") is None
+    assert access.find(session, "nobody") is None
 
 
 def test_list_orders_newest_first(session: Session) -> None:
-    access.put_identity(session, "first", IdentityKind.WEB, ["session"])
-    access.put_identity(session, "second", IdentityKind.WEB, ["session"])
-    identities = [record["identity"] for record in access.list_identities(session)]
+    access.put(session, "first", IdentityKind.WEB, ["session"])
+    access.put(session, "second", IdentityKind.WEB, ["session"])
+    identities = [record["identity"] for record in access.list_all(session)]
     assert identities == ["second", "first"]
 
 
 def test_delete_reports_whether_row_existed(session: Session) -> None:
-    access.put_identity(session, "temp", IdentityKind.WEB, ["session"])
-    assert access.delete_identity(session, "temp") is True
-    assert access.delete_identity(session, "temp") is False
-    assert access.find_identity(session, "temp") is None
+    access.put(session, "temp", IdentityKind.WEB, ["session"])
+    assert access.delete(session, "temp") is True
+    assert access.delete(session, "temp") is False
+    assert access.find(session, "temp") is None

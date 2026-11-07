@@ -12,7 +12,7 @@ from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
 from app.db.deps import get_db
-from app.persistence import users as users_store
+from app.persistence import principals as principals_store
 
 from . import sessions
 
@@ -22,7 +22,7 @@ def current_user(request: Request, session: Session = Depends(get_db)) -> dict[s
     username = sessions.verify(request.cookies.get(sessions.COOKIE_NAME))
     if username is None:
         return None
-    user = users_store.find_user(session, username)
+    user = principals_store.find_account(session, username)
     if user is None or user["disabled"]:
         return None
     return user

@@ -8,6 +8,7 @@ from datetime import timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from tests.identity import bearer
 from tests.identity import register as register_identity
 
 from app.core.clock import now_rfc3339, rfc3339_ago, shift_rfc3339, to_local
@@ -122,12 +123,12 @@ def _event(door_no: int, state: DoorState, seconds_ago: int, cert_no: str = "", 
 @pytest.fixture
 def stats_headers(fresh_db: str) -> dict[str, str]:
     """持 `stats` 位的调用方，外加一台已注册的设备。"""
-    register_identity(STATS_IDENTITY, IdentityKind.OPENID, ["stats"], "统计探针", device_scope=[])
+    token = register_identity(STATS_IDENTITY, IdentityKind.OPENID, ["stats"], "统计探针", device_scope=[])
     write(
         "INSERT INTO device (device_id, name, trusted) VALUES (?,?,?)",
         (DEVICE, "测试浴室", 1),
     )
-    return {"X-Identity": STATS_IDENTITY}
+    return bearer(token)
 
 
 @pytest.fixture

@@ -1,7 +1,7 @@
-"""统一身份制：X-Identity 守卫、能力位矩阵、设备作用域与名单维护。
+"""统一身份制：Bearer 凭据守卫、能力位矩阵、设备作用域与名单维护。
 
-守卫唯一实现是 access.dependencies：未带标识 401（unauthenticated）、标识不在
-名单 401（unknown-identity）、缺能力位或设备不在作用域 403（capability-denied）。
+守卫唯一实现是 access.dependencies：未带凭据 401（unauthenticated）、凭据无效
+401（unknown-identity）、缺能力位或设备不在作用域 403（capability-denied）。
 """
 
 from collections.abc import Iterator
@@ -12,13 +12,14 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 from tests import device_link
+from tests.identity import bearer
 
 from app.core.problems import CAPABILITY_DENIED, ApiProblemError
 from app.modules.access.capabilities import ALL_CAPABILITIES, DEVICE_SCOPED, Capability, user_actions
 from app.modules.access.dependencies import require_capability
 from app.modules.access.identity import IdentityKind
 from app.modules.access.schemas import IdentityRecord
-from app.persistence import access as access_store
+from app.persistence import principals as principals_store
 
 
 @contextmanager
@@ -41,19 +42,22 @@ def _register(
     capabilities: list[str],
     label: str = "",
     device_scope: list[str] | None = None,
-) -> None:
+) -> str:
     with _store() as session:
-        access_store.put_identity(session, identity, kind, capabilities, label, device_scope)
+        principals_store.put(session, identity, kind, capabilities, label, device_scope)
+        token = principals_store.issue_token(session, identity)
+    assert token is not None
+    return token
 
 
 def _find(identity: str) -> IdentityRecord | None:
     with _store() as session:
-        return access_store.find_identity(session, identity)
+        return principals_store.find(session, identity)
 
 
 def _count() -> int:
     with _store() as session:
-        return len(access_store.list_identities(session))
+        return len(principals_store.list_all(session))
 
 
 def _identity(capabilities: list[str], device_scope: list[str] | None = None) -> IdentityRecord:
@@ -106,7 +110,7 @@ def test_admin_surface_without_identity_is_unauthenticated(client: TestClient) -
 
 
 def test_unknown_identity_is_unauthorized(client: TestClient) -> None:
-    r = client.get("/api/v1/identities", headers={"X-Identity": "not-in-any-list"})
+    r = client.get("/api/v1/identities", headers=bearer("not-a-valid-token"))
 
     assert r.status_code == 401
     assert r.json()["type"].endswith("/problems/unknown-identity")
@@ -157,12 +161,12 @@ def test_assign_requires_session_capability(client: TestClient, fresh_db: str) -
     """只有 photo 能力位的身份对分配被拒（capability-denied，先于设备存在性检查）。"""
     from app.modules.access.identity import IdentityKind
 
-    _register("photo-only-0001", IdentityKind.WEB, ["photo"], "只拍照", device_scope=["*"])
+    token = _register("photo-only-0001", IdentityKind.WEB, ["photo"], "只拍照", device_scope=["*"])
 
     r = client.post(
         "/api/v1/devices/dev-any-0001/assign",
         json={"door_no": 1, "cert_no": "C", "password": "P"},
-        headers={"X-Identity": "photo-only-0001"},
+        headers=bearer(token),
     )
 
     assert r.status_code == 403
@@ -173,9 +177,9 @@ def test_photo_requires_photo_capability(client: TestClient, fresh_db: str) -> N
     """只有 session 能力位的身份对拍照被拒。"""
     from app.modules.access.identity import IdentityKind
 
-    _register("session-only-001", IdentityKind.WEB, ["session"], "只分配", device_scope=["*"])
+    token = _register("session-only-001", IdentityKind.WEB, ["session"], "只分配", device_scope=["*"])
 
-    r = client.post("/api/v1/devices/dev-any-0001/photo", headers={"X-Identity": "session-only-001"})
+    r = client.post("/api/v1/devices/dev-any-0001/photo", headers=bearer(token))
 
     assert r.status_code == 403
     assert r.json()["type"].endswith("/problems/capability-denied")
@@ -193,12 +197,12 @@ def test_wildcard_scope_passes_guard_for_any_device(
     monkeypatch.setattr(manager, "_connections", {"dev-any-0001": object()})
     from app.modules.access.identity import IdentityKind
 
-    _register("wildcard-000001", IdentityKind.WEB, ["session"], "通配", device_scope=["*"])
+    token = _register("wildcard-000001", IdentityKind.WEB, ["session"], "通配", device_scope=["*"])
 
     r = client.post(
         "/api/v1/devices/dev-any-0001/assign",
         json={"door_no": 1, "cert_no": "C", "password": "P"},
-        headers={"X-Identity": "wildcard-000001"},
+        headers=bearer(token),
     )
 
     assert r.status_code == 404
@@ -209,12 +213,12 @@ def test_list_scope_blocks_device_outside_list(client: TestClient, fresh_db: str
     """作用域限定具体设备后，对列表外设备的操作被拒。"""
     from app.modules.access.identity import IdentityKind
 
-    _register("scoped-0000001", IdentityKind.WEB, ["session"], "限定设备", device_scope=["dev-allow-0001"])
+    token = _register("scoped-0000001", IdentityKind.WEB, ["session"], "限定设备", device_scope=["dev-allow-0001"])
 
     r = client.post(
         "/api/v1/devices/dev-other-002/assign",
         json={"door_no": 1, "cert_no": "C", "password": "P"},
-        headers={"X-Identity": "scoped-0000001"},
+        headers=bearer(token),
     )
 
     assert r.status_code == 403
@@ -268,8 +272,9 @@ def test_put_identity_edit_takes_effect_immediately(
         },
     )
     identity = created.json()["identity"]
+    token = created.json()["token"]
     payload = {"door_no": 1, "cert_no": "C", "password": "P"}
-    before = client.post("/api/v1/devices/dev-edit-0001/assign", json=payload, headers={"X-Identity": identity})
+    before = client.post("/api/v1/devices/dev-edit-0001/assign", json=payload, headers=bearer(token))
     assert before.status_code == 404  # 穿过身份与作用域守卫，到达喷头预检
 
     updated = client.put(
@@ -281,8 +286,11 @@ def test_put_identity_edit_takes_effect_immediately(
     # 编辑沿用原标识：不得生成新标识另起一行
     assert updated.json()["identity"] == identity
     assert _count() == 2  # 管理员身份 + 该用户
+    # 编辑会轮换凭据：旧明文立即失效，新明文带着新能力位生效
+    assert client.get("/api/v1/devices", headers=bearer(token)).status_code == 401
+    rotated = updated.json()["token"]
 
-    after = client.post("/api/v1/devices/dev-edit-0001/assign", json=payload, headers={"X-Identity": identity})
+    after = client.post("/api/v1/devices/dev-edit-0001/assign", json=payload, headers=bearer(rotated))
     assert after.status_code == 403
     assert after.json()["type"].endswith("/problems/capability-denied")
 
@@ -293,11 +301,12 @@ def test_delete_identity_revokes_immediately(client: TestClient, admin_headers: 
         "/api/v1/identities", headers=admin_headers, json={"kind": "web", "capabilities": ["session"], "label": "临时"}
     )
     identity = created.json()["identity"]
-    assert client.get("/api/v1/devices", headers={"X-Identity": identity}).status_code == 200
+    token = created.json()["token"]
+    assert client.get("/api/v1/devices", headers=bearer(token)).status_code == 200
 
     assert client.delete(f"/api/v1/identities/{identity}", headers=admin_headers).status_code == 204
     assert client.delete(f"/api/v1/identities/{identity}", headers=admin_headers).status_code == 204  # 幂等
-    assert client.get("/api/v1/devices", headers={"X-Identity": identity}).status_code == 401
+    assert client.get("/api/v1/devices", headers=bearer(token)).status_code == 401
 
 
 def test_unknown_capability_name_is_rejected(client: TestClient, admin_headers: dict[str, str]) -> None:
@@ -350,12 +359,13 @@ def test_web_identity_is_issued_once_and_usable(client: TestClient, admin_header
 
     assert r.status_code == 200
     identity = r.json()["identity"]
+    token = r.json()["token"]
     assert identity
     found = _find(identity)
     assert found is not None
     assert found["kind"] == "web"
     assert found["label"] == "给张三的网页入口"
-    assert client.get("/api/v1/devices", headers={"X-Identity": identity}).status_code == 200
+    assert client.get("/api/v1/devices", headers=bearer(token)).status_code == 200
 
 
 def test_list_shows_both_kinds(client: TestClient, admin_headers: dict[str, str]) -> None:

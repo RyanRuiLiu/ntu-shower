@@ -16,7 +16,7 @@ from tests import frames
 from app.auth import sessions
 from app.core.config import settings
 from app.db.session import Database
-from app.persistence import device_credentials, devices, users
+from app.persistence import device_credentials, devices, principals
 
 USER = "admin-web"
 PASSWORD = "correct-horse-battery-staple"
@@ -27,7 +27,7 @@ def account(fresh_db: str) -> None:
     database = Database(settings.effective_database_url)
     try:
         with database.new_session() as session:
-            users.create_user(session, USER, PASSWORD, ["admin", "session"], ["*"])
+            principals.create_account(session, USER, PASSWORD, ["admin", "session"], ["*"])
     finally:
         database.dispose()
 
@@ -69,7 +69,7 @@ def test_expired_token_is_rejected(client: TestClient, account: None) -> None:
 
 
 def test_session_cookie_grants_admin_capability(client: TestClient, account: None) -> None:
-    """会话身份走的是同一条守卫：能进管理端点，不需要再带 X-Identity。"""
+    """会话身份走的是同一条守卫：能进管理端点，不需要另带 Bearer 凭据。"""
     assert client.get("/api/v1/identities").status_code == 401
     client.post("/api/v1/auth/login", json={"username": USER, "password": PASSWORD})
     resp = client.get("/api/v1/identities")
@@ -82,7 +82,7 @@ def test_disabled_account_cannot_keep_a_session(client: TestClient, account: Non
     database = Database(settings.effective_database_url)
     try:
         with database.new_session() as session:
-            assert users.set_disabled(session, USER, True) is True
+            assert principals.set_disabled(session, USER, True) is True
     finally:
         database.dispose()
     assert client.get("/api/v1/auth/me").status_code == 401
