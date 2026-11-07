@@ -56,16 +56,16 @@ DONE: tuple[tuple[str, str], ...] = (
     ("command_audit", "command_audits"),
     ("background_task_run", "background_task_runs"),
     ("door_live", "door_states"),
+    ("usage_session", "usage_sessions"),
+    ("voice_rule", "voice_rules"),
+    ("voice_unit", "voice_units"),
 )
 
 #: 尚未实现的表。存在即拒绝执行——半份数据比没有数据更危险。
 PLANNED: tuple[str, ...] = (
     "ota_release_install",
     "usage_segment",
-    "usage_session",
     "voice_delivery",
-    "voice_rule",
-    "voice_unit",
 )
 
 
@@ -309,6 +309,47 @@ def copy_audit_and_live(
         )
 
 
+def copy_usage_and_voice(
+    source: sqlite3.Connection, target: sqlite3.Connection, devices: dict[str, int]
+) -> None:
+    """会话、播报规则与语音单元：仅会话依赖设备外键。"""
+    now = utcnow().replace(tzinfo=None).isoformat(sep=" ")
+    for row in source.execute(
+        "SELECT device_id, door_no, card_no, cert_no, assigned_at, assigned_source,"
+        " observed_span, device_flow_s, segments_complete, ended_at, last_seen_at, flow_s"
+        " FROM usage_session"
+    ):
+        target.execute(
+            "INSERT INTO usage_sessions (device_id, door_no, card_no, cert_no, assigned_at,"
+            " assigned_source, observed_span, device_flow_s, segments_complete, ended_at,"
+            " last_seen_at, flow_s, created_at, updated_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                devices[str(row[0])], int(row[1]), int(row[2] or 0), row[3] or "",
+                to_storage_time(row[4]) or now, row[5], row[6], int(row[7] or 0),
+                1 if row[8] else 0, to_storage_time(row[9]),
+                to_storage_time(row[10]) or now, int(row[11] or 0), now, now,
+            ),
+        )
+    for row in source.execute(
+        "SELECT devices, certs, events, time_windows, exempt, segments, volume, enabled,"
+        " created_at, updated_at FROM voice_rule"
+    ):
+        target.execute(
+            "INSERT INTO voice_rules (devices, certs, events, time_windows, exempt, segments,"
+            " volume, enabled, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (
+                row[0], row[1], row[2], row[3] or "[]", row[4] or "[]", row[5],
+                int(row[6]), 1 if row[7] else 0,
+                to_storage_time(row[8]) or now, to_storage_time(row[9]) or now,
+            ),
+        )
+    for row in source.execute("SELECT unit, asset_id FROM voice_unit"):
+        target.execute(
+            "INSERT INTO voice_units (unit, asset_id) VALUES (?,?)", (row[0], row[1])
+        )
+
+
 def verify(source: sqlite3.Connection, target: sqlite3.Connection) -> list[str]:
     problems: list[str] = []
     for old, new in DONE:
@@ -360,6 +401,7 @@ def main() -> int:
         copy_singletons(source, target)
         copy_door_events(source, target, devices)
         copy_audit_and_live(source, target, devices)
+        copy_usage_and_voice(source, target, devices)
         target.commit()
 
         for line in verify(source, target):
