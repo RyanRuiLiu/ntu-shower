@@ -60,7 +60,9 @@ jobs:
       - run: ruff format --check app tests
       - run: ruff check app tests
       - run: mypy app --strict
-      - run: pytest -q --cov=app --cov-report=term-missing
+      # 本机默认 6 进程并行（见 pyproject addopts）；CI runner 核数少，显式串行
+      # 保持原有可复现语义，-n 0 覆盖 addopts 里的 -n 6。
+      - run: pytest -q -n 0 --cov=app --cov-report=term-missing
 
   android:
     runs-on: ubuntu-latest

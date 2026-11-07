@@ -14,7 +14,7 @@
 | 持久化 | 8 个域（`server/app/persistence/`） | 各域测试 |
 | 认证 | `principals` 单主体表、Bearer 凭据、会话 Cookie、设备令牌 | `test_auth_endpoints.py` |
 | access 域 | 已完整切到新层（依赖注入） | 全套测试 |
-| 转换工具 | `server/tools/convert_v1_to_v2.py` 21 张表 | 生产副本 48 万行逐表 ok |
+| 转换工具 | `server/tools/convert_v1_to_v2.py` 21 张表 + `--token-output` 给现有设备补凭据 | 生产副本 48 万行逐表 ok，6 台设备各一枚摘要 |
 | 编排 | `deploy/stack/`（compose/Caddyfile/三个脚本） | `docker compose config` + `caddy fmt` |
 | 调度 | `server/app/core/background.py` 统一三个间隔任务 | 测试 |
 
@@ -35,9 +35,11 @@
 
 `doors + stats + tasks + config + ota + audit`。config/ota/audit 读取方少，相对独立。
 
-### 设备令牌签发与下发
+### 设备令牌下发
 
-旧数据没有设备令牌，切换后 6 台设备连不上。需要：管理台签发端点 + 设备写入途径（如首次连接用 ANDROID_ID 换取，或管理员配置）。
+转换工具的 `--token-output` 已在切换时给每台现有设备签发凭据，明文写进 600 权限文件、
+库中只留摘要。剩下的是把这枚明文写进设备（管理员配置或首次连接引导）。`app/persistence/device_credentials.py`
+另有 `list_for_device` / `revoke_all` 供管理面轮换凭据用，端点尚未接入。
 
 ### 待定夺的事项
 
@@ -49,9 +51,9 @@
 1. 发新版 APK（带设备令牌能力）
 2. 无人使用时停旧服务
 3. `deploy/stack/scripts/backup.sh` 备份
-4. `PYTHONPATH=. python tools/convert_v1_to_v2.py --source 旧库 --target 新库`
-5. 起新服务（migrate 服务跑 `alembic upgrade head`）
-6. 给 6 台设备签发并下发令牌
+4. `PYTHONPATH=. python tools/convert_v1_to_v2.py --source 旧库 --target 新库 --token-output /root/device-tokens.txt`
+5. 把 `device-tokens.txt` 里的明文逐台写进设备，用完删除该文件
+6. 起新服务（migrate 服务跑 `alembic upgrade head`）
 
 ## 工作流约定
 

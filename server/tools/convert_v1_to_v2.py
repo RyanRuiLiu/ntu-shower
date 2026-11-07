@@ -31,6 +31,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import secrets
 import sqlite3
 import sys
 from datetime import UTC
@@ -500,6 +502,29 @@ def copy_children(
     return skipped
 
 
+def issue_device_tokens(target: sqlite3.Connection, devices: dict[str, int], output: Path) -> list[tuple[str, str]]:
+    """给每台现有设备签发一枚接入凭据，返回 (设备标识, 明文) 清单。
+
+    旧库没有凭据这回事，新服务默认强制校验；切换时不补这一步，设备全部连不上。
+    库里只写 SHA-256 摘要，明文只写进调用方指定的文件（权限 600），不进日志、
+    不进数据库、不进标准输出。
+    """
+    now = utcnow().replace(tzinfo=None).isoformat(sep=" ")
+    issued: list[tuple[str, str]] = []
+    for device_id, device_pk in devices.items():
+        token = secrets.token_urlsafe(32)
+        digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        target.execute(
+            "INSERT INTO device_credentials (device_id, token_hash, label, created_at) VALUES (?,?,?,?)",
+            (device_pk, digest, "停机切换补发", now),
+        )
+        issued.append((device_id, token))
+    lines = [f"{device_id}\t{token}" for device_id, token in issued]
+    output.write_text(chr(10).join(lines) + chr(10), encoding="utf-8")
+    output.chmod(0o600)
+    return issued
+
+
 #: 子表里会被跳过的孤儿行计数，验证时从期望值里扣掉，避免把已知的跳过数误报成错误。
 SKIPPED_BY_TABLE: dict[str, str] = {
     "ota_release_install": "release",
@@ -527,6 +552,12 @@ def main() -> int:
     parser.add_argument("--source", required=True)
     parser.add_argument("--target", required=True)
     parser.add_argument("--verify", action="store_true")
+    parser.add_argument(
+        "--token-output",
+        type=Path,
+        default=None,
+        help="切换时给每台现有设备签发接入凭据，明文写进这个文件（权限 600）",
+    )
     args = parser.parse_args()
 
     if Path(args.target).exists():
@@ -565,6 +596,9 @@ def main() -> int:
         copy_audit_and_live(source, target, devices)
         sessions, rules = copy_usage_and_voice(source, target, devices)
         skipped = copy_children(source, target, devices, sessions, releases, rules)
+        if args.token_output is not None:
+            issued = issue_device_tokens(target, devices, args.token_output)
+            print(f"已为 {len(issued)} 台设备签发接入凭据：{args.token_output}", file=sys.stderr)
         target.commit()
 
         for line in verify(source, target, skipped):

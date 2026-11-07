@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from ..auth.tokens import generate_token, hash_token
@@ -41,6 +41,49 @@ def issue(
     )
     session.commit()
     return token
+
+
+def list_for_device(session: Session, device_id: str) -> list[dict[str, object]]:
+    """列出某设备的凭据元数据；明文不存库，所以这里没有 token 字段。"""
+    device_pk = _device_pk(session, device_id)
+    if device_pk is None:
+        return []
+    rows = session.scalars(
+        select(DeviceCredential)
+        .where(DeviceCredential.device_id == device_pk, DeviceCredential.revoked_at.is_(None))
+        .order_by(DeviceCredential.id)
+    ).all()
+    return [
+        {
+            "id": int(row.id),
+            "label": row.label,
+            "created_at": row.created_at,
+            "expires_at": row.expires_at,
+        }
+        for row in rows
+    ]
+
+
+def revoke_all(session: Session, device_id: str, now: datetime | None = None) -> int:
+    """吊销该设备全部有效凭据，返回吊销条数。轮换前先调用它。"""
+    device_pk = _device_pk(session, device_id)
+    if device_pk is None:
+        return 0
+    stamp = now or utcnow()
+    active_ids = session.scalars(
+        select(DeviceCredential.id).where(
+            DeviceCredential.device_id == device_pk,
+            DeviceCredential.revoked_at.is_(None),
+        )
+    ).all()
+    if active_ids:
+        session.execute(
+            update(DeviceCredential)
+            .where(DeviceCredential.id.in_(active_ids))
+            .values(revoked_at=stamp)
+        )
+        session.commit()
+    return len(active_ids)
 
 
 def revoke(session: Session, token: str, now: datetime | None = None) -> bool:
@@ -77,4 +120,4 @@ def authenticate_device(session: Session, token: str, now: datetime | None = Non
     return str(business_id)
 
 
-__all__: list[str] = ["authenticate_device", "issue", "revoke"]
+__all__: list[str] = ["authenticate_device", "issue", "list_for_device", "revoke", "revoke_all"]
