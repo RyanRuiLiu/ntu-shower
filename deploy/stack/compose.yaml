@@ -1,0 +1,104 @@
+# 单机全容器编排：Caddy 为唯一公网入口，业务服务全部不对外发布端口。
+#
+# 这里存放的是「编排仓库」的内容，因该仓库尚未命名而暂存于此；命名后整体搬走，
+# 业务仓库里不保留第二份。
+#
+# 换机流程：装 Docker → clone 编排仓库 → 放 .env → 恢复 /srv → docker compose up -d
+
+services:
+  caddy:
+    image: ${CADDY_IMAGE:?CADDY_IMAGE must be set}
+    # host 网络：要够到 rootless 容器监听在宿主回环的 8100，
+    # 以及 php-fpm 的 unix socket。它自己占 80/443。
+    network_mode: host
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - /srv/www:/srv/www:ro
+      - /run/php:/run/php
+      - caddy_data:/data
+      - caddy_config:/config
+    # /data 里有 ACME 账户与证书：换机必须随备份一起搬，否则会重新申请通配符证书
+    healthcheck:
+      test: ["CMD", "caddy", "version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: local
+
+  # 迁移作为独立的一次性服务：失败时业务容器根本不会启动，日志也分开。
+  migrate:
+    image: ${NTU_SHOWER_IMAGE:?NTU_SHOWER_IMAGE must be set}
+    restart: "no"
+    env_file: .env
+    environment:
+      DATABASE_URL: sqlite:////var/lib/ntu-shower/ntu-shower.db
+    volumes:
+      - /srv/ntu-shower:/var/lib/ntu-shower
+    user: "997:997"
+    command: ["alembic", "upgrade", "head"]
+
+  ntu-shower:
+    image: ${NTU_SHOWER_IMAGE:?NTU_SHOWER_IMAGE must be set}
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    env_file: .env
+    environment:
+      DB_PATH: /var/lib/ntu-shower/ntu-shower.db
+      OTA_DIR: /var/lib/ntu-shower/ota_releases
+      VOICE_DIR: /var/lib/ntu-shower/voice
+    volumes:
+      - /srv/ntu-shower:/var/lib/ntu-shower
+    user: "997:997"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      # 仅回环：由 Caddy 代理对外；ADB 桥经 SSH 隧道落在宿主回环
+      - "127.0.0.1:8110:8110"
+      - "127.0.0.1:15655-15664:15655-15664"
+    healthcheck:
+      test:
+        ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8110/healthz', timeout=2)"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    # local 驱动默认轮转；json-file 不设上限会吃满磁盘
+    logging:
+      driver: local
+
+  status-panel:
+    image: ${STATUS_PANEL_IMAGE:?STATUS_PANEL_IMAGE must be set}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      STATUS_PANEL_DATA_DIR: /var/lib/status-panel
+      STATUS_PANEL_LOG_DIR: /var/log/status-panel
+    volumes:
+      - /srv/status-panel/data:/var/lib/status-panel
+      - /srv/status-panel/logs:/var/log/status-panel
+    user: "997:997"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "127.0.0.1:8120:8120"
+    logging:
+      driver: local
+
+volumes:
+  caddy_data:
+  caddy_config:
