@@ -47,6 +47,9 @@ DONE: tuple[tuple[str, str], ...] = (
     ("device_config", "device_configs"),
     ("device_link_event", "device_link_events"),
     ("device_log", "device_logs"),
+    ("global_config", "app_settings"),
+    ("ota_release", "ota_releases"),
+    ("voice_asset", "voice_assets"),
 )
 
 #: 尚未实现的表。存在即拒绝执行——半份数据比没有数据更危险。
@@ -57,12 +60,9 @@ PLANNED: tuple[str, ...] = (
     "door_live",
     "door_snapshot",
     "door_state_event",
-    "global_config",
-    "ota_release",
     "ota_release_install",
     "usage_segment",
     "usage_session",
-    "voice_asset",
     "voice_delivery",
     "voice_rule",
     "voice_unit",
@@ -179,6 +179,38 @@ def copy_simple(
         )
 
 
+def copy_singletons(
+    source: sqlite3.Connection, target: sqlite3.Connection
+) -> None:
+    """整表单条的配置、无外键的发布与素材表。"""
+    now = utcnow().replace(tzinfo=None).isoformat(sep=" ")
+    row = source.execute("SELECT revision, config FROM global_config WHERE id = 1").fetchone()
+    if row is not None:
+        target.execute(
+            "INSERT INTO app_settings (id, revision, config, updated_at) VALUES (1,?,?,?)",
+            (int(row[0]), row[1] or "{}", now),
+        )
+    for row in source.execute(
+        "SELECT version, version_code, sha256, mandatory, force, target, created_at FROM ota_release"
+    ).fetchall():
+        target.execute(
+            "INSERT INTO ota_releases (version, version_code, sha256, mandatory, force, target,"
+            " created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+            (
+                row[0], int(row[1]), row[2], 1 if row[3] else 0, 1 if row[4] else 0,
+                row[5] or "all", to_storage_time(row[6]) or now, now,
+            ),
+        )
+    for row in source.execute(
+        "SELECT asset_id, name, digit, duration_ms, size_bytes, created_at FROM voice_asset"
+    ).fetchall():
+        target.execute(
+            "INSERT INTO voice_assets (asset_id, name, digit, duration_ms, size_bytes, created_at)"
+            " VALUES (?,?,?,?,?,?)",
+            (row[0], row[1], row[2], int(row[3]), int(row[4]), to_storage_time(row[5]) or now),
+        )
+
+
 def verify(source: sqlite3.Connection, target: sqlite3.Connection) -> list[str]:
     problems: list[str] = []
     for old, new in DONE:
@@ -227,6 +259,7 @@ def main() -> int:
         devices = copy_devices(source, target)
         copy_identities(source, target)
         copy_simple(source, target, devices)
+        copy_singletons(source, target)
         target.commit()
 
         for line in verify(source, target):
