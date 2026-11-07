@@ -42,21 +42,4 @@ class Database:
         self.engine.dispose()
 
 
-def session_scope() -> Iterator[Session]:
-    """非请求路径（后台任务、仓储层的迁移期封装）的短生命周期会话。
-
-    请求路径用 `Database.session()` 依赖注入；后台任务没有请求上下文，用这一个
-    入口按当前配置开短会话。迁移期仓储层还保留旧签名（无 session 参数），
-    内部也走这里，全部调用点迁到显式注入后删除。
-    """
-    from app.core.config import settings
-
-    database = Database(settings.effective_database_url)
-    try:
-        with database.new_session() as session:
-            yield session
-    finally:
-        database.dispose()
-
-
-__all__: list[str] = ["Database", "session_scope"]
+__all__: list[str] = ["Database"]

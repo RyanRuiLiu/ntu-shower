@@ -39,99 +39,23 @@ CLOSE_GOING_AWAY = 1001
 
 @router.websocket("/gateway/device")
 async def device_gateway(ws: WebSocket) -> None:
-    # 设备接入令牌：旧固件不带 Authorization，切换期由服务端按批次开启。
-    # 开启后令牌必须有效，且 hello 自报的 device_id 必须与令牌绑定的一致——
-    # 否则一枚合法令牌就能冒充任意一台设备。
-    token_device_id: str | None = None
-    if settings.require_device_token:
-        token = extract_bearer(ws.headers.get("authorization"))
-        if token is not None:
-            with ws.app.state.database.new_session() as auth_session:
-                token_device_id = device_credentials.authenticate_device(auth_session, token)
-        if token_device_id is None:
-            log_event("WARNING", "gateway.device-token-rejected", "设备令牌无效，连接被拒")
-            await ws.close(code=1008)
-            return
+    """一条设备连接的一生：验凭据 → 握手 → 帧循环 → 收尾。"""
+    allowed, token_device_id = await _verify_device_token(ws)
+    if not allowed:
+        return
     await ws.accept()
-    device_id: str | None = None
     ip = ""
     ping_task: asyncio.Task[None] | None = None
     #: 每次收到设备 pong 由 `_handle_frame` 置位；`_server_ping_loop` 用它判断链路是否还活着。
     pong_seen = asyncio.Event()
-    trusted = False
     #: 服务端自己发起断开的原因（pong 超时）；设备/网络侧断开服务端无从得知，留空。
     offline_reason: list[str] = []
+    device_id: str | None = None
     try:
-        hello = protocol.parse(await ws.receive_text())
-        if hello is None or hello.get("type") != "link.hello":
-            log_event("WARNING", "gateway.hello-required", "首帧必须是 link.hello，连接被拒")
-            await ws.send_text(protocol.error(reason_codes.HELLO_REQUIRED.code, "首帧必须是 link.hello"))
-            await ws.close()
+        hello_state = await _accept_hello(ws, token_device_id)
+        if hello_state is None:
             return
-
-        hello_payload = payload_of(hello)
-        device_id = text_of(hello_payload, "device_id")
-        if token_device_id is not None and device_id != token_device_id:
-            log_event("WARNING", "gateway.device-token-mismatch", "hello 设备与令牌绑定设备不一致")
-            await ws.send_text(protocol.error(reason_codes.HELLO_REQUIRED.code, "设备与凭据不匹配"))
-            await ws.close(code=1008)
-            return
-        version_code = as_int(hello_payload.get("version_code"))
-        row = await run_in_threadpool(devices_service.get_device, device_id)
-        trusted = bool(row and row["trusted"])
-        # 经 nginx 代理而来：真实设备 IP 在 X-Real-IP 头里
-        ip = ws.headers.get("x-real-ip") or (ws.client.host if ws.client else "")
-        # 开机时刻由服务端反推（此刻减设备上报的运行秒数）：运行时长是单调量，
-        # 不受设备墙上时钟偏差影响
-        booted_at = rfc3339_ago(as_int(hello_payload.get("uptime_s")))
-        await run_in_threadpool(
-            devices_service.register_device,
-            device_id,
-            text_of(hello_payload, "app_version"),
-            version_code,
-            text_of(hello_payload, "os_version"),
-            list_of(hello_payload, "capabilities"),
-            ip,
-            booted_at,
-        )
-        # 安装确认：设备以某 version_code 上线，即证明所有 ≤ 该版本的发布已装在它身上。
-        # 必须早于 latest_for，否则本次 hello 仍会推送刚装过的版本，force 发布会形成
-        # 「下发→下载→安装→重启→再下发」的无限重装循环。
-        await run_in_threadpool(ota_repository.mark_installed_upto, device_id, version_code)
-        # 设备随 hello 带回的上一次断开原因（0.4.35+）：记进 online 事件的 reason——
-        # 「设备为什么掉线」自此有结构化答案，不再只靠现场读日志
-        last_offline_reason = text_of(hello_payload, "last_offline_reason")
-        manager.register(device_id, ws)
-        # 载入上次记下的钟偏差。从上线到首次 pong 之间有一小段窗口，不载入的话那段时间
-        # 读到的是 0（等于不平移）——而"我们刚接手、那边还被占着"恰恰最常落在窗口里。
-        await run_in_threadpool(devices_service.load_clock_skew, device_id)
-        await run_in_threadpool(devices_service.record_link_event, device_id, LINK_ONLINE, last_offline_reason)
-        await run_in_threadpool(audit.record_gateway, device_id, "connect", ip)
-        log_event(
-            "INFO",
-            "gateway.device-connected",
-            "设备接入",
-            device_id=device_id,
-            trusted=trusted,
-            version=text_of(hello_payload, "app_version"),
-            os=text_of(hello_payload, "os_version"),
-            capabilities=len(list_of(hello_payload, "capabilities")),
-            ip=ip,
-        )
-        await ws.send_text(
-            protocol.envelope(
-                "link.hello_ack",
-                {
-                    "trusted": trusted,
-                    "server_time": now_rfc3339(),
-                    # 只给设备端消费的键（`effective` 再按 scope 过滤）：服务端自己的键
-                    # 不占设备的解析路径，两条下发的路（这里与 config.update）给的键集要一致。
-                    "config": await run_in_threadpool(config_store.device_effective, device_id),
-                    "upgrade": await run_in_threadpool(ota_repository.latest_for, device_id, version_code),
-                },
-                reply_to=text_of(hello, "id"),
-            )
-        )
+        device_id, trusted, ip = hello_state
 
         # 立刻主动探测一轮，不等 ping_interval_s：设备刚连上时手上还没有时间锚点，而
         # 它采集的每一帧都要带采集时刻——越早把服务端时刻交给它，最初那几帧时刻越准。
@@ -151,7 +75,7 @@ async def device_gateway(ws: WebSocket) -> None:
         # 设备离线是常态（移动网络/重启），不作为异常处理
         pass
     except Exception as exc:
-        # 其他异常必须留痕：静默会让"设备莫名掉线"无从追查
+        # 其他异常必须留痕：静默会让设备莫名掉线无从追查
         log_event(
             "WARNING",
             "gateway.session-failed",
@@ -164,9 +88,8 @@ async def device_gateway(ws: WebSocket) -> None:
         if ping_task is not None:
             ping_task.cancel()
         if device_id:
-            # 只有"我这条连接确实是当前那条"才算一次真离线。重连是新连接顶替旧连接，
-            # 被顶替的那条随后走这里收尾——那一刻设备仍在线，不该记 offline。实测这台
-            # 设备一天重连两百次上下，假 offline 会占掉绝大多数。
+            # 只有我这条连接确实是当前那条才算一次真离线。重连是新连接顶替旧连接，
+            # 被顶替的那条随后走这里收尾——那一刻设备仍在线，不该记 offline。
             if manager.unregister(device_id, ws):
                 reason = offline_reason[0] if offline_reason else ""
                 await run_in_threadpool(devices_service.record_link_event, device_id, LINK_OFFLINE, reason)
@@ -174,6 +97,101 @@ async def device_gateway(ws: WebSocket) -> None:
             await run_in_threadpool(audit.record_gateway, device_id, "disconnect", ip)
             log_event("INFO", "gateway.device-disconnected", "设备断开", device_id=device_id)
             devices_service.publish_device_update(device_id)
+
+
+async def _verify_device_token(ws: WebSocket) -> tuple[bool, str | None]:
+    """握手前的设备凭据校验：返回 (放行, 令牌绑定的设备)。
+
+    未开启校验时返回 (True, None)；开启后凭据必须有效，无效则回 1008 并拒绝。
+    令牌绑定的设备标识交给握手阶段与 hello 自报比对——否则一枚合法令牌
+    就能冒充任意一台设备。
+    """
+    if not settings.require_device_token:
+        return True, None
+    token = extract_bearer(ws.headers.get("authorization"))
+    token_device_id: str | None = None
+    if token is not None:
+        with ws.app.state.database.new_session() as auth_session:
+            token_device_id = device_credentials.authenticate_device(auth_session, token)
+    if token_device_id is None:
+        log_event("WARNING", "gateway.device-token-rejected", "设备令牌无效，连接被拒")
+        await ws.close(code=1008)
+        return False, None
+    return True, token_device_id
+
+
+async def _accept_hello(ws: WebSocket, token_device_id: str | None) -> tuple[str, bool, str] | None:
+    """首帧必须是 link.hello：注册档案、回 hello_ack；失败已完成回错并返回 None。"""
+    hello = protocol.parse(await ws.receive_text())
+    if hello is None or hello.get("type") != "link.hello":
+        log_event("WARNING", "gateway.hello-required", "首帧必须是 link.hello，连接被拒")
+        await ws.send_text(protocol.error(reason_codes.HELLO_REQUIRED.code, "首帧必须是 link.hello"))
+        await ws.close()
+        return None
+
+    hello_payload = payload_of(hello)
+    device_id = text_of(hello_payload, "device_id")
+    if token_device_id is not None and device_id != token_device_id:
+        log_event("WARNING", "gateway.device-token-mismatch", "hello 设备与令牌绑定设备不一致")
+        await ws.send_text(protocol.error(reason_codes.HELLO_REQUIRED.code, "设备与凭据不匹配"))
+        await ws.close(code=1008)
+        return None
+    version_code = as_int(hello_payload.get("version_code"))
+    row = await run_in_threadpool(devices_service.get_device, device_id)
+    trusted = bool(row and row["trusted"])
+    # 经 Caddy 代理而来：真实设备 IP 在 X-Real-IP 头里
+    ip = ws.headers.get("x-real-ip") or (ws.client.host if ws.client else "")
+    # 开机时刻由服务端反推（此刻减设备上报的运行秒数）：运行时长是单调量，
+    # 不受设备墙上时钟偏差影响
+    booted_at = rfc3339_ago(as_int(hello_payload.get("uptime_s")))
+    await run_in_threadpool(
+        devices_service.register_device,
+        device_id,
+        text_of(hello_payload, "app_version"),
+        version_code,
+        text_of(hello_payload, "os_version"),
+        list_of(hello_payload, "capabilities"),
+        ip,
+        booted_at,
+    )
+    # 安装确认：设备以某 version_code 上线，即证明所有 ≤ 该版本的发布已装在它身上。
+    # 必须早于 latest_for，否则本次 hello 仍会推送刚装过的版本，force 发布会形成
+    # 下发→下载→安装→重启→再下发的无限重装循环。
+    await run_in_threadpool(ota_repository.mark_installed_upto, device_id, version_code)
+    # 设备随 hello 带回的上一次断开原因（0.4.35+）：记进 online 事件的 reason
+    last_offline_reason = text_of(hello_payload, "last_offline_reason")
+    manager.register(device_id, ws)
+    # 载入上次记下的钟偏差。从上线到首次 pong 之间有一小段窗口，不载入的话那段时间
+    # 读到的是 0（等于不平移）——而刚接手、那边还被占着恰恰最常落在窗口里。
+    await run_in_threadpool(devices_service.load_clock_skew, device_id)
+    await run_in_threadpool(devices_service.record_link_event, device_id, LINK_ONLINE, last_offline_reason)
+    await run_in_threadpool(audit.record_gateway, device_id, "connect", ip)
+    log_event(
+        "INFO",
+        "gateway.device-connected",
+        "设备接入",
+        device_id=device_id,
+        trusted=trusted,
+        version=text_of(hello_payload, "app_version"),
+        os=text_of(hello_payload, "os_version"),
+        capabilities=len(list_of(hello_payload, "capabilities")),
+        ip=ip,
+    )
+    await ws.send_text(
+        protocol.envelope(
+            "link.hello_ack",
+            {
+                "trusted": trusted,
+                "server_time": now_rfc3339(),
+                # 只给设备端消费的键（effective 再按 scope 过滤）：服务端自己的键
+                # 不占设备的解析路径，两条下发的路（这里与 config.update）给的键集要一致。
+                "config": await run_in_threadpool(config_store.device_effective, device_id),
+                "upgrade": await run_in_threadpool(ota_repository.latest_for, device_id, version_code),
+            },
+            reply_to=text_of(hello, "id"),
+        )
+    )
+    return device_id, trusted, ip
 
 
 async def _handle_frame(
