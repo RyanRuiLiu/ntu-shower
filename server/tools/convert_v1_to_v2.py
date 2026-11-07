@@ -52,14 +52,14 @@ DONE: tuple[tuple[str, str], ...] = (
     ("voice_asset", "voice_assets"),
     ("door_snapshot", "door_snapshots"),
     ("door_state_event", "door_state_events"),
+    ("api_call", "api_calls"),
+    ("command_audit", "command_audits"),
+    ("background_task_run", "background_task_runs"),
+    ("door_live", "door_states"),
 )
 
 #: 尚未实现的表。存在即拒绝执行——半份数据比没有数据更危险。
 PLANNED: tuple[str, ...] = (
-    "api_call",
-    "background_task_run",
-    "command_audit",
-    "door_live",
     "ota_release_install",
     "usage_segment",
     "usage_session",
@@ -243,6 +243,72 @@ def copy_door_events(
         )
 
 
+def copy_audit_and_live(
+    source: sqlite3.Connection, target: sqlite3.Connection, devices: dict[str, int]
+) -> None:
+    """审计两张与门现态：都只依赖设备外键。"""
+    now = utcnow().replace(tzinfo=None).isoformat(sep=" ")
+    for row in source.execute(
+        "SELECT kind, requested_at, request_id, trace_id, actor_kind, actor, client_ip,"
+        " user_agent, method, path, query, request_body, status_code, duration_ms, device_id,"
+        " problem_type, detail, response_body FROM api_call"
+    ):
+        target.execute(
+            "INSERT INTO api_calls (kind, requested_at, request_id, trace_id, actor_kind, actor,"
+            " client_ip, user_agent, method, path, query, request_body, status_code, duration_ms,"
+            " device_id, problem_type, detail, response_body, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                row[0], to_storage_time(row[1]) or now, row[2] or "", row[3] or "", row[4],
+                row[5] or "", row[6], row[7], row[8], row[9], row[10], row[11],
+                int(row[12]), int(row[13]),
+                devices.get(str(row[14])) if row[14] else None,
+                row[15], row[16], row[17], now,
+            ),
+        )
+    for row in source.execute(
+        "SELECT command_id, device_id, action, params, created_at, finished_at, status,"
+        " reason_code, terminal_message, trace_id, data FROM command_audit"
+    ):
+        target.execute(
+            "INSERT INTO command_audits (command_id, device_id, action, params, created_at,"
+            " finished_at, status, reason_code, terminal_message, trace_id, result)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                row[0], devices[str(row[1])], row[2], row[3], to_storage_time(row[4]) or now,
+                to_storage_time(row[5]), row[6], row[7], row[8], row[9] or "", row[10],
+            ),
+        )
+    for row in source.execute(
+        "SELECT occurred_at, device_id, door_no, session_id, cert_no, feature, action,"
+        " outcome, reason, threshold_s FROM background_task_run"
+    ):
+        target.execute(
+            "INSERT INTO background_task_runs (occurred_at, device_id, door_no, session_id,"
+            " cert_no, feature, action, outcome, reason, threshold_s, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                to_storage_time(row[0]) or now, devices[str(row[1])], int(row[2]), row[3],
+                row[4] or "", row[5], row[6], row[7], row[8], row[9], now,
+            ),
+        )
+    for row in source.execute(
+        "SELECT device_id, door_no, state, card_no, cert_no, acc_no, open_time, in_time,"
+        " close_time, bath_time_s, status_raw, reported_at FROM door_live"
+    ):
+        target.execute(
+            "INSERT INTO door_states (device_id, door_no, state, card_no, cert_no, acc_no,"
+            " open_time, in_time, close_time, bath_time_s, status_raw, reported_at, updated_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                devices[str(row[0])], int(row[1]), row[2], int(row[3] or 0), row[4] or "",
+                row[5] or "", to_storage_time(row[6]), to_storage_time(row[7]),
+                to_storage_time(row[8]), int(row[9] or 0), int(row[10] or 0),
+                to_storage_time(row[11]) or now, now,
+            ),
+        )
+
+
 def verify(source: sqlite3.Connection, target: sqlite3.Connection) -> list[str]:
     problems: list[str] = []
     for old, new in DONE:
@@ -293,6 +359,7 @@ def main() -> int:
         copy_simple(source, target, devices)
         copy_singletons(source, target)
         copy_door_events(source, target, devices)
+        copy_audit_and_live(source, target, devices)
         target.commit()
 
         for line in verify(source, target):
