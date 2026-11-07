@@ -13,11 +13,14 @@ import contextlib
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.concurrency import run_in_threadpool
 
+from ...auth.tokens import extract_bearer
 from ...core import audit, protocol, reason_codes
 from ...core.clock import now_rfc3339, rfc3339_ago
+from ...core.config import settings
 from ...core.connections import manager
 from ...core.logging import log_event
 from ...core.protocol import JsonObject, as_int, list_of, payload_of, text_of
+from ...persistence import device_credentials
 from ..config import store as config_store
 from ..devices import service as devices_service
 from ..devices.schemas import LINK_OFFLINE, LINK_ONLINE
@@ -36,6 +39,19 @@ CLOSE_GOING_AWAY = 1001
 
 @router.websocket("/gateway/device")
 async def device_gateway(ws: WebSocket) -> None:
+    # 设备接入令牌：旧固件不带 Authorization，切换期由服务端按批次开启。
+    # 开启后令牌必须有效，且 hello 自报的 device_id 必须与令牌绑定的一致——
+    # 否则一枚合法令牌就能冒充任意一台设备。
+    token_device_id: str | None = None
+    if settings.require_device_token:
+        token = extract_bearer(ws.headers.get("authorization"))
+        if token is not None:
+            with ws.app.state.database.new_session() as auth_session:
+                token_device_id = device_credentials.authenticate_device(auth_session, token)
+        if token_device_id is None:
+            log_event("WARNING", "gateway.device-token-rejected", "设备令牌无效，连接被拒")
+            await ws.close(code=1008)
+            return
     await ws.accept()
     device_id: str | None = None
     ip = ""
@@ -55,6 +71,11 @@ async def device_gateway(ws: WebSocket) -> None:
 
         hello_payload = payload_of(hello)
         device_id = text_of(hello_payload, "device_id")
+        if token_device_id is not None and device_id != token_device_id:
+            log_event("WARNING", "gateway.device-token-mismatch", "hello 设备与令牌绑定设备不一致")
+            await ws.send_text(protocol.error(reason_codes.HELLO_REQUIRED.code, "设备与凭据不匹配"))
+            await ws.close(code=1008)
+            return
         version_code = as_int(hello_payload.get("version_code"))
         row = await run_in_threadpool(devices_service.get_device, device_id)
         trusted = bool(row and row["trusted"])

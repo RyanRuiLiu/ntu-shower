@@ -33,6 +33,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
 from typing_extensions import TypedDict
 
+from .auth.routes import router as auth_router
 from .core import audit, db
 from .core.clock import now_rfc3339
 from .core.config import settings
@@ -152,6 +153,7 @@ def create_app() -> FastAPI:
     app.include_router(voice_router)
     app.include_router(water_router)
     app.include_router(voice_admin_router)
+    app.include_router(auth_router)
 
     @app.get("/healthz", tags=["meta"])
     def health() -> HealthStatus:

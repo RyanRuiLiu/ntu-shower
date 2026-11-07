@@ -47,6 +47,15 @@ class Settings(BaseSettings):
     # ── 命令确认等待 ──
     config_ack_timeout_s: float = 15.0  # 等待设备 config.ack 的时限
 
+    # ── 管理台会话 ──
+    # 会话签名密钥。生产必须由环境变量注入；留空时进程内随机生成，
+    # 后果只是重启后会话失效，不会把默认密钥带进线上。
+    session_secret: str = ""
+    session_ttl_seconds: int = 12 * 60 * 60
+    # 设备接入令牌校验开关。旧设备固件不带令牌，切换期由服务端按批次开启；
+    # 新固件全量上线后置 true，是发布开关而非长期双轨。
+    require_device_token: bool = False
+
     @property
     def effective_database_url(self) -> str:
         """应用与迁移共用的连接串：显式值优先，否则由 db_path 推导。

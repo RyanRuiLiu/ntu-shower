@@ -23,25 +23,50 @@
 判定集中在 [device_allowed] 一处，除 [enforce] 与 [require_capability] 外任何代码不自行判定。
 """
 
+from typing import Any
+
 from fastapi import Depends, Header
 from sqlalchemy.orm import Session
 
+from app.auth.dependencies import current_user
 from app.core.problems import CAPABILITY_DENIED, UNAUTHENTICATED, UNKNOWN_IDENTITY, ApiProblemError
 from app.db.deps import get_db
 
 from . import service
 from .capabilities import DEVICE_SCOPED, Capability
+from .identity import IdentityKind
 from .schemas import IdentityRecord
 
 #: 调用方携带自身标识的请求头。
 IDENTITY_HEADER = "X-Identity"
 
 
+def _from_account(user: dict[str, Any]) -> IdentityRecord:
+    """认证账号 → 身份记录。能力位与作用域的判定与名单身份完全同构。"""
+    last_login = user["last_login_at"]
+    created_at = last_login.isoformat() if last_login is not None else ""
+    return {
+        "identity": str(user["username"]),
+        "kind": IdentityKind.WEB,
+        "capabilities": list(user["capabilities"]),
+        "device_scope": list(user["device_scope"]),
+        "label": "",
+        "created_at": created_at,
+    }
+
+
 def optional_identity(
     x_identity: str | None = Header(default=None, alias=IDENTITY_HEADER),
     session: Session = Depends(get_db),
+    account: dict[str, Any] | None = Depends(current_user),
 ) -> IdentityRecord | None:
-    """带标识就解析（不在名单则 401），不带就是匿名。用于按调用方裁剪视图的端点。"""
+    """会话优先，其次名单标识；两者都没有即匿名。
+
+    会话 Cookie 是管理台的新入口；`X-Identity` 仍服务小程序转发的 openid 调用方。
+    两者最终都产出同一个 `IdentityRecord`，守卫逻辑不分叉。
+    """
+    if account is not None:
+        return _from_account(account)
     if not x_identity:
         return None
     caller = service.resolve_identity(session, x_identity)
@@ -50,12 +75,8 @@ def optional_identity(
     return caller
 
 
-def require_identity(
-    x_identity: str | None = Header(default=None, alias=IDENTITY_HEADER),
-    session: Session = Depends(get_db),
-) -> IdentityRecord:
-    """要求携带一个在名单里的标识，不要求具体能力。操作端点与 require_admin 的基座。"""
-    caller = optional_identity(x_identity, session)
+def require_identity(caller: IdentityRecord | None = Depends(optional_identity)) -> IdentityRecord:
+    """要求一个可解析的身份，不要求具体能力。操作端点与 require_admin 的基座。"""
     if caller is None:
         raise ApiProblemError(UNAUTHENTICATED)
     return caller
