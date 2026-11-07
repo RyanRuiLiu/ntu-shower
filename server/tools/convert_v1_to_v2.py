@@ -50,6 +50,8 @@ DONE: tuple[tuple[str, str], ...] = (
     ("global_config", "app_settings"),
     ("ota_release", "ota_releases"),
     ("voice_asset", "voice_assets"),
+    ("door_snapshot", "door_snapshots"),
+    ("door_state_event", "door_state_events"),
 )
 
 #: 尚未实现的表。存在即拒绝执行——半份数据比没有数据更危险。
@@ -58,8 +60,6 @@ PLANNED: tuple[str, ...] = (
     "background_task_run",
     "command_audit",
     "door_live",
-    "door_snapshot",
-    "door_state_event",
     "ota_release_install",
     "usage_segment",
     "usage_session",
@@ -211,6 +211,38 @@ def copy_singletons(
         )
 
 
+def copy_door_events(
+    source: sqlite3.Connection, target: sqlite3.Connection, devices: dict[str, int]
+) -> None:
+    """原始帧与状态流水：两张 19 万行级的大表，逐批写。"""
+    now = utcnow().replace(tzinfo=None).isoformat(sep=" ")
+    for row in source.execute(
+        "SELECT device_id, snapshot_id, seq, source, captured_at, received_at, doors,"
+        " device_clock FROM door_snapshot"
+    ):
+        target.execute(
+            "INSERT INTO door_snapshots (device_id, snapshot_id, seq, source, captured_at,"
+            " received_at, doors, device_clock, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                devices[str(row[0])], row[1], row[2], row[3],
+                to_storage_time(row[4]), to_storage_time(row[5]) or now,
+                row[6], row[7], now,
+            ),
+        )
+    for row in source.execute(
+        "SELECT occurred_at, device_id, door_no, from_state, to_state, card_no, cert_no,"
+        " bath_time_s FROM door_state_event"
+    ):
+        target.execute(
+            "INSERT INTO door_state_events (device_id, door_no, from_state, to_state, card_no,"
+            " cert_no, bath_time_s, occurred_at, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                devices[str(row[1])], int(row[2]), row[3], row[4], int(row[5] or 0),
+                row[6] or "", int(row[7] or 0), to_storage_time(row[0]) or now, now,
+            ),
+        )
+
+
 def verify(source: sqlite3.Connection, target: sqlite3.Connection) -> list[str]:
     problems: list[str] = []
     for old, new in DONE:
@@ -260,6 +292,7 @@ def main() -> int:
         copy_identities(source, target)
         copy_simple(source, target, devices)
         copy_singletons(source, target)
+        copy_door_events(source, target, devices)
         target.commit()
 
         for line in verify(source, target):
