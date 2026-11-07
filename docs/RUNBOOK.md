@@ -6,7 +6,7 @@
 
 | 项 | 值 |
 |---|---|
-| 入口 | `https://ntu-shower.iseekdream.com`（nginx 443 → 127.0.0.1:8110） |
+| 入口 | `https://ntu-shower.iseekdream.com`（Caddy 443 → 127.0.0.1:8110） |
 | 服务器 | `root@iseekdream.com`（SSH 密钥 `~/.ssh/iseekdream-ubuntu.pem`） |
 | 运行形态 | Docker Compose（2026-11-06 起）：镜像自 ACR 拉取，`docker compose -f /opt/ntu-shower/compose.yaml up -d` |
 | 编排文件 | `/opt/ntu-shower/compose.yaml`（由仓库根 `compose.yaml` 同步；数据路径在 compose 的 `environment` 钉死） |
@@ -91,7 +91,7 @@ ssh iseekdream.com 'cd /opt/ntu-shower && NTU_SHOWER_TAG=<上一个tag> docker c
   的旧预检教训由镜像同一性天然解决（历史教训：3.10 时代 `typing.TypedDict` 被
   pydantic 拒绝，本地全绿线上即崩——那正是当年的 `deploy.sh` 预检存在的理由）。
 - 打包与依赖安装不再存在：依赖变更走 requirements.txt → CI 镜像 → pull。
-- 配置（nginx / compose / backup）的唯一事实来源是仓库 `deploy/` 与根 `compose.yaml`，
+- 配置（Caddy / compose / backup）的唯一事实来源是仓库 `deploy/stack/`，
   **不要在服务器上直接改**；改法与同步命令见 `deploy/README.md`。
 - 数据库备份在宿主机 timer 上执行、读 `/var/lib/ntu-shower`，与容器无关（加密取舍见 ADR-0018）。
 

@@ -127,7 +127,7 @@
 | `kind` | `http`（普通 HTTP 请求）／`gateway`（设备 WS 连接的建立与断开） |
 | `requested_at` | 服务端轴 |
 | `request_id` / `trace_id` | 请求标识 / 链路标识（有合法 `traceparent` 就沿用它的 trace-id，否则生成） |
-| `actor_kind` | `identity`（带了 `X-Identity`）／`anonymous`／`device`（网关） |
+| `actor_kind` | `token`（Bearer 凭据，actor 记摘要前 12 位）／`session`／`anonymous`／`device`（网关） |
 | `actor` | 身份原文，**不脱敏**；匿名时为空串 |
 | `client_ip` / `user_agent` | 来源 IP（经 nginx 反向代理而来，真实地址在 `X-Real-IP`）／UA |
 | `method` / `path` / `query` | 请求行 |
@@ -393,7 +393,7 @@ gap = 上一帧到本帧的秒数（没有上一帧时 -1）
 
 | 字段 | 是什么 |
 |---|---|
-| `identity` | 主键，就是 `X-Identity` 头的值 |
+| `identity` | 主体名，即 `principals.name` |
 | `kind` | `openid`（微信小程序用户，标识即其 openid）／`web`（网页用户，我方签发的不透明串） |
 | `capabilities` | 能力位（能做什么），与 `kind`（这个标识从哪来）分开 |
 | `device_scope` | **设备作用域**：`["*"]`（全部设备）或设备 id 列表，限定该身份的能力能作用于哪些设备。登记是全量写入，不传按 `["*"]` 落库 |
@@ -442,7 +442,7 @@ gap = 上一帧到本帧的秒数（没有上一帧时 -1）
 
 ### 通用约定
 
-- 基址 `https://ntu-shower.iseekdream.com`；管理面接口要 `X-Identity` 头。
+- 基址 `https://ntu-shower.iseekdream.com`；管理面接口要 Bearer 凭据或管理台会话。
 - 失败响应是 RFC 9457 的问题对象，类型登记在 `app/core/problems.py`。
 - 时间一律 RFC 3339 UTC；任何响应都不携带设备轴原话。
 
