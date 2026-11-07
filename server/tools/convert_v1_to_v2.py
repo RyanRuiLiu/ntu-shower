@@ -59,13 +59,13 @@ DONE: tuple[tuple[str, str], ...] = (
     ("usage_session", "usage_sessions"),
     ("voice_rule", "voice_rules"),
     ("voice_unit", "voice_units"),
+    ("usage_segment", "usage_segments"),
+    ("ota_release_install", "ota_release_installs"),
+    ("voice_delivery", "voice_deliveries"),
 )
 
 #: 尚未实现的表。存在即拒绝执行——半份数据比没有数据更危险。
 PLANNED: tuple[str, ...] = (
-    "ota_release_install",
-    "usage_segment",
-    "voice_delivery",
 )
 
 
@@ -181,7 +181,7 @@ def copy_simple(
 
 def copy_singletons(
     source: sqlite3.Connection, target: sqlite3.Connection
-) -> None:
+) -> dict[str, int]:
     """整表单条的配置、无外键的发布与素材表。"""
     now = utcnow().replace(tzinfo=None).isoformat(sep=" ")
     row = source.execute("SELECT revision, config FROM global_config WHERE id = 1").fetchone()
@@ -190,6 +190,7 @@ def copy_singletons(
             "INSERT INTO app_settings (id, revision, config, updated_at) VALUES (1,?,?,?)",
             (int(row[0]), row[1] or "{}", now),
         )
+    releases: dict[str, int] = {}
     for row in source.execute(
         "SELECT version, version_code, sha256, mandatory, force, target, created_at FROM ota_release"
     ).fetchall():
@@ -201,6 +202,7 @@ def copy_singletons(
                 row[5] or "all", to_storage_time(row[6]) or now, now,
             ),
         )
+        releases[str(row[0])] = int(target.execute("SELECT last_insert_rowid()").fetchone()[0])
     for row in source.execute(
         "SELECT asset_id, name, digit, duration_ms, size_bytes, created_at FROM voice_asset"
     ).fetchall():
@@ -209,6 +211,7 @@ def copy_singletons(
             " VALUES (?,?,?,?,?,?)",
             (row[0], row[1], row[2], int(row[3]), int(row[4]), to_storage_time(row[5]) or now),
         )
+    return releases
 
 
 def copy_door_events(
@@ -311,11 +314,12 @@ def copy_audit_and_live(
 
 def copy_usage_and_voice(
     source: sqlite3.Connection, target: sqlite3.Connection, devices: dict[str, int]
-) -> None:
+) -> tuple[dict[int, int], dict[int, int]]:
     """会话、播报规则与语音单元：仅会话依赖设备外键。"""
     now = utcnow().replace(tzinfo=None).isoformat(sep=" ")
+    sessions: dict[int, int] = {}
     for row in source.execute(
-        "SELECT device_id, door_no, card_no, cert_no, assigned_at, assigned_source,"
+        "SELECT id, device_id, door_no, card_no, cert_no, assigned_at, assigned_source,"
         " observed_span, device_flow_s, segments_complete, ended_at, last_seen_at, flow_s"
         " FROM usage_session"
     ):
@@ -325,29 +329,98 @@ def copy_usage_and_voice(
             " last_seen_at, flow_s, created_at, updated_at)"
             " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
-                devices[str(row[0])], int(row[1]), int(row[2] or 0), row[3] or "",
-                to_storage_time(row[4]) or now, row[5], row[6], int(row[7] or 0),
-                1 if row[8] else 0, to_storage_time(row[9]),
-                to_storage_time(row[10]) or now, int(row[11] or 0), now, now,
+                devices[str(row[1])], int(row[2]), int(row[3] or 0), row[4] or "",
+                to_storage_time(row[5]) or now, row[6], row[7], int(row[8] or 0),
+                1 if row[9] else 0, to_storage_time(row[10]),
+                to_storage_time(row[11]) or now, int(row[12] or 0), now, now,
             ),
         )
+        sessions[int(row[0])] = int(target.execute("SELECT last_insert_rowid()").fetchone()[0])
+    rules: dict[int, int] = {}
     for row in source.execute(
-        "SELECT devices, certs, events, time_windows, exempt, segments, volume, enabled,"
+        "SELECT id, devices, certs, events, time_windows, exempt, segments, volume, enabled,"
         " created_at, updated_at FROM voice_rule"
     ):
         target.execute(
             "INSERT INTO voice_rules (devices, certs, events, time_windows, exempt, segments,"
             " volume, enabled, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
-                row[0], row[1], row[2], row[3] or "[]", row[4] or "[]", row[5],
-                int(row[6]), 1 if row[7] else 0,
-                to_storage_time(row[8]) or now, to_storage_time(row[9]) or now,
+                row[1], row[2], row[3], row[4] or "[]", row[5] or "[]", row[6],
+                int(row[7]), 1 if row[8] else 0,
+                to_storage_time(row[9]) or now, to_storage_time(row[10]) or now,
             ),
         )
+        rules[int(row[0])] = int(target.execute("SELECT last_insert_rowid()").fetchone()[0])
     for row in source.execute("SELECT unit, asset_id FROM voice_unit"):
         target.execute(
             "INSERT INTO voice_units (unit, asset_id) VALUES (?,?)", (row[0], row[1])
         )
+    return sessions, rules
+
+
+def copy_children(
+    source: sqlite3.Connection,
+    target: sqlite3.Connection,
+    devices: dict[str, int],
+    sessions: dict[int, int],
+    releases: dict[str, int],
+    rules: dict[int, int],
+) -> None:
+    """子表：外键必须能在字典里解析到，解析不到就中止——静默丢行会让统计缺一段。"""
+    now = utcnow().replace(tzinfo=None).isoformat(sep=" ")
+    skipped = {"release": 0, "session": 0, "rule": 0}
+    for row in source.execute(
+        "SELECT session_id, device_id, door_no, opened_at, closed_at, flow_s, opened_raw,"
+        " closed_raw, source FROM usage_segment"
+    ):
+        session_id = sessions.get(int(row[0]))
+        if session_id is None:
+            skipped["session"] += 1
+            continue
+        target.execute(
+            "INSERT INTO usage_segments (session_id, device_id, door_no, opened_at, closed_at,"
+            " flow_s, opened_raw, closed_raw, source, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (
+                session_id, devices[str(row[1])], int(row[2]),
+                to_storage_time(row[3]) or now, to_storage_time(row[4]), int(row[5] or 0),
+                row[6] or "", row[7] or "", row[8], now,
+            ),
+        )
+    for row in source.execute("SELECT version, device_id, applied_at FROM ota_release_install"):
+        release_id = releases.get(str(row[0]))
+        if release_id is None:
+            # 发布已按保留策略删除，安装记录成了孤儿。APK 本身已不存在，
+            # 这些行无法补全，跳过并计数——不静默吞掉，最后统一报出。
+            skipped['release'] += 1
+            continue
+        target.execute(
+            "INSERT INTO ota_release_installs (release_id, device_id, applied_at) VALUES (?,?,?)",
+            (release_id, devices[str(row[1])], to_storage_time(row[2]) or now),
+        )
+    for row in source.execute(
+        "SELECT event_key, rule_id, device_id, door_no, cert_no, event, segments,"
+        " segment_count, duration_ms, occurred_at, dispatched_at, done_at, downloaded, status,"
+        " detail, trace_id, created_at FROM voice_delivery"
+    ):
+        rule_id = rules.get(int(row[1]))
+        if rule_id is None:
+            skipped["rule"] += 1
+            continue
+        target.execute(
+            "INSERT INTO voice_deliveries (event_key, rule_id, device_id, door_no, cert_no,"
+            " event, segments, segment_count, duration_ms, occurred_at, dispatched_at, done_at,"
+            " downloaded, status, detail, trace_id, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                row[0], rule_id, devices[str(row[2])], int(row[3]), row[4], row[5], row[6],
+                int(row[7]), int(row[8]), to_storage_time(row[9]) or now,
+                to_storage_time(row[10]), to_storage_time(row[11]),
+                1 if row[12] else 0, row[13], row[14] or "", row[15] or "",
+                to_storage_time(row[16]) or now,
+            ),
+        )
+    if any(skipped.values()):
+        print(f"跳过孤儿行：{skipped}", file=sys.stderr)
 
 
 def verify(source: sqlite3.Connection, target: sqlite3.Connection) -> list[str]:
@@ -398,10 +471,11 @@ def main() -> int:
         devices = copy_devices(source, target)
         copy_identities(source, target)
         copy_simple(source, target, devices)
-        copy_singletons(source, target)
+        releases = copy_singletons(source, target)
         copy_door_events(source, target, devices)
         copy_audit_and_live(source, target, devices)
-        copy_usage_and_voice(source, target, devices)
+        sessions, rules = copy_usage_and_voice(source, target, devices)
+        copy_children(source, target, devices, sessions, releases, rules)
         target.commit()
 
         for line in verify(source, target):
