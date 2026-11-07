@@ -25,7 +25,6 @@
 """
 
 import asyncio
-import contextlib
 from dataclasses import dataclass
 from typing import Any
 
@@ -46,8 +45,6 @@ KEEPALIVE_S = 30.0
 
 #: 汇总持续失败时，日志最多这么久记一条——库忙时每秒一条会把真正的问题淹掉。
 FAILURE_LOG_INTERVAL_S = 60.0
-
-_task: asyncio.Task[None] | None = None
 
 
 @dataclass(frozen=True)
@@ -93,41 +90,41 @@ def _snapshot() -> _Snapshot:
     return _Snapshot({"floors": floors}, tuple(recipients))
 
 
-async def _run() -> None:
-    """常驻循环：每秒汇总一次，变了就推，否则按 [KEEPALIVE_S] 保活。
+class _Pusher:
+    """一轮推送的全部状态；`tick()` 是「汇总 → 按需推送」的一轮。
 
-    `last_payload` 是上一轮实际发出的载荷；`last_sent` 按设备记最后一次成功发出的
-    时刻。设备掉线后从收件人里消失，它的记录随即清掉——重连时不会因为「上一轮刚发过」
-    而空等一个保活周期。重连比一个周期更快时，`last_connection` 记的身份代数会变，
-    同样触发立即发送。
+    生命周期由 core/background 管理，本模块只暴露 `PUSH_INTERVAL_S` 与一个
+    协程入口，不再持有自己的循环与取消逻辑。
     """
-    last_payload: dict[str, Any] | None = None
-    last_sent: dict[str, float] = {}
-    last_connection: dict[str, int] = {}
-    last_failure_log = 0.0
-    loop = asyncio.get_running_loop()
-    while True:
+
+    def __init__(self) -> None:
+        self.last_payload: dict[str, Any] | None = None
+        self.last_sent: dict[str, float] = {}
+        self.last_connection: dict[str, int] = {}
+        self.last_failure_log = 0.0
+
+    async def tick(self) -> None:
+        loop = asyncio.get_running_loop()
         try:
             snapshot = await run_in_threadpool(_snapshot)
-        except Exception as exc:  # noqa: BLE001 —— 后台循环不能因为一轮读库失败就退出
+        except Exception as exc:  # noqa: BLE001 —— 一轮读库失败退给统一循环，下一轮重试
             now = loop.time()
-            if now - last_failure_log >= FAILURE_LOG_INTERVAL_S:
-                last_failure_log = now
+            if now - self.last_failure_log >= FAILURE_LOG_INTERVAL_S:
+                self.last_failure_log = now
                 log_event("ERROR", "status_line.snapshot-failed", "楼层状态汇总失败，下一轮重试", error=str(exc))
-            await asyncio.sleep(PUSH_INTERVAL_S)
-            continue
+            return
 
         now = loop.time()
-        changed = snapshot.payload != last_payload
+        changed = snapshot.payload != self.last_payload
         current = {recipient.device_id for recipient in snapshot.recipients}
-        for device_id in set(last_sent) | set(last_connection):
+        for device_id in set(self.last_sent) | set(self.last_connection):
             if device_id not in current:
-                last_sent.pop(device_id, None)
-                last_connection.pop(device_id, None)
+                self.last_sent.pop(device_id, None)
+                self.last_connection.pop(device_id, None)
         for recipient in snapshot.recipients:
             device_id = recipient.device_id
-            fresh_connection = last_connection.get(device_id) == recipient.generation
-            if not changed and fresh_connection and now - last_sent.get(device_id, 0.0) < KEEPALIVE_S:
+            fresh_connection = self.last_connection.get(device_id) == recipient.generation
+            if not changed and fresh_connection and now - self.last_sent.get(device_id, 0.0) < KEEPALIVE_S:
                 continue
             try:
                 sent = await manager.send_to(device_id, protocol.envelope("status_line.update", snapshot.payload))
@@ -141,27 +138,14 @@ async def _run() -> None:
                 )
                 sent = False
             if sent:
-                last_sent[device_id] = now
-                last_connection[device_id] = recipient.generation
-        last_payload = snapshot.payload
-        await asyncio.sleep(PUSH_INTERVAL_S)
+                self.last_sent[device_id] = now
+                self.last_connection[device_id] = recipient.generation
+        self.last_payload = snapshot.payload
 
 
-def start() -> None:
-    global _task
-    if _task is None:
-        _task = asyncio.create_task(_run())
-        log_event("INFO", "status_line.started", "楼层状态推送已启动")
+pusher = _Pusher()
 
 
-async def stop() -> None:
-    """取消常驻任务并等它收尾；只在应用 lifespan 退出时调用。"""
-    global _task
-    task = _task
-    _task = None
-    if task is None:
-        return
-    task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await task
-    log_event("INFO", "status_line.stopped", "楼层状态推送已停止")
+async def tick() -> None:
+    """统一循环的一轮入口。"""
+    await pusher.tick()

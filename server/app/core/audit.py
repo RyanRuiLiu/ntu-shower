@@ -10,7 +10,6 @@ JSON 请求体与响应体原文入库，全有或全无、不截断、不脱敏
 保留，过期行由清理任务删除；业务数据永久保留。
 """
 
-import asyncio
 import contextlib
 import json
 import re
@@ -30,7 +29,7 @@ from typing_extensions import TypedDict
 from . import db
 from .clock import now_rfc3339
 from .config import settings
-from .logging import exc_info_text, log_event, request_id_var, trace_id_var
+from .logging import log_event, request_id_var, trace_id_var
 
 
 class ApiCallRecord(TypedDict):
@@ -70,9 +69,7 @@ _AUDITED_PREFIXES = ("/api/v1", "/ota/manifest")
 
 _TRACEPARENT = re.compile(r"^[0-9a-f]{2}-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$", re.IGNORECASE)
 
-_PRUNE_INTERVAL_S = 6 * 3600.0
-
-_prune_task: asyncio.Task[None] | None = None
+PRUNE_INTERVAL_S = 6 * 3600.0
 
 
 def init_tables() -> None:
@@ -282,41 +279,17 @@ def prune(retention_days: int) -> int:
     return removed
 
 
-async def _prune_loop() -> None:
-    while True:
-        try:
-            removed = prune(settings.audit_retention_days)
-            if removed:
-                log_event(
-                    "INFO",
-                    "audit.pruned",
-                    "审计过期行已清理",
-                    rows=removed,
-                    retention_days=settings.audit_retention_days,
-                )
-        except asyncio.CancelledError:
-            raise
-        except Exception:  # noqa: BLE001 清理失败不能带垮服务，下一轮重试
-            log_event(
-                "ERROR",
-                "audit.prune-failed",
-                "审计清理失败，等下一轮重试",
-                error=exc_info_text(),
-            )
-        await asyncio.sleep(_PRUNE_INTERVAL_S)
-
-
-def start_prune() -> None:
-    global _prune_task
-    if _prune_task is None or _prune_task.done():
-        _prune_task = asyncio.create_task(_prune_loop())
-
-
-def stop_prune() -> None:
-    global _prune_task
-    if _prune_task is not None:
-        _prune_task.cancel()
-        _prune_task = None
+async def prune_once() -> None:
+    """清理一轮；生命周期（启动、取消、间隔）由 core/background 统一管理。"""
+    removed = prune(settings.audit_retention_days)
+    if removed:
+        log_event(
+            "INFO",
+            "audit.pruned",
+            "审计过期行已清理",
+            rows=removed,
+            retention_days=settings.audit_retention_days,
+        )
 
 
 def _device_of(path: str, query: str) -> str:

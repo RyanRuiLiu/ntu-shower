@@ -436,17 +436,25 @@ def test_reassign_waits_for_a_leftover_session_from_before_the_shift(
 # ── 生命周期 ──────────────────────────────────────────────────────────────
 
 
-def test_start_and_stop_are_idempotent(fresh_db: str) -> None:
-    """与其余后台任务同一种形态：重复 start 不叠加，stop 之后可以再 start。"""
+def test_background_start_and_stop_are_idempotent(fresh_db: str) -> None:
+    """后台任务生命周期已统一到 core/background：重复 start 不叠加，stop 后可再 start。"""
 
     async def body() -> None:
-        extend_hours.start()
-        first = extend_hours._task
-        extend_hours.start()
-        assert extend_hours._task is first
+        from app.core.background import Background
 
-        extend_hours.stop()
-        assert extend_hours._task is None
+        bg = Background()
+
+        async def noop() -> None:
+            return None
+
+        bg.interval("noop", 60.0, noop)
+        bg.start()
+        first = bg._tasks["noop"]
+        bg.start()
+        assert bg._tasks["noop"] is first
+
+        await bg.stop()
+        assert not bg._tasks
 
     asyncio.run(body())
 

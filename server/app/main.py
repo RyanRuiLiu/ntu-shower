@@ -35,6 +35,7 @@ from typing_extensions import TypedDict
 
 from .auth.routes import router as auth_router
 from .core import audit, db
+from .core.background import Background
 from .core.clock import now_rfc3339
 from .core.config import settings
 from .core.errors import install_error_handlers
@@ -116,15 +117,16 @@ def create_app() -> FastAPI:
         # 新数据层的连接在这里建立：迁移尚未完成的模块仍走 core.db，
         # 两者指向同一个 SQLite 文件，互不干扰。
         _app.state.database = Database(settings.effective_database_url)
+        # 间隔任务统一装配：各模块只提供「一轮做什么」，生命周期集中在这一个对象上。
+        background.interval("extend-hours", extend_hours_service.TICK_INTERVAL_S, extend_hours_service.tick_once)
+        background.interval("status-line", status_line_service.PUSH_INTERVAL_S, status_line_service.tick)
+        background.interval("audit-prune", audit.PRUNE_INTERVAL_S, audit.prune_once)
+        background.start()
+        # 事件驱动型任务保持自己的模型：按设备惰性起 worker，不占统一循环。
         sessions_scheduler.start()
-        extend_hours_service.start()
-        status_line_service.start()
-        audit.start_prune()
         yield
-        audit.stop_prune()
-        await status_line_service.stop()
-        extend_hours_service.stop()
         sessions_scheduler.stop()
+        await background.stop()
         _app.state.database.dispose()
 
     app = FastAPI(title="NTU Shower", version=APP_VERSION, lifespan=lifespan)
@@ -179,5 +181,7 @@ def create_app() -> FastAPI:
 
     return app
 
+
+background = Background()
 
 app = create_app()

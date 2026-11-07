@@ -74,7 +74,7 @@ from sqlite3 import Row
 
 from app.core import actions, device_clock, outcomes
 from app.core.clock import now_rfc3339, parse_rfc3339, shift_rfc3339, to_local, wall_clock_text
-from app.core.logging import exc_info_text, log_event
+from app.core.logging import log_event
 from app.core.problems import ApiProblemError
 from app.core.protocol import as_int
 from app.modules.config import store as config_store
@@ -109,7 +109,6 @@ ROLL_REARM_INTERVAL_S = 120.0
 #: 续写间隔（120 秒）与命令延迟（p50 0.6 秒），10 分钟即"连续丢 5 次续写才到点"。
 ROLL_WINDOW_MIN = 10
 
-_task: asyncio.Task[None] | None = None
 
 #: 设备 → 最近一次成功滚动续写的时刻（单调钟）与断电目标（表盘 HH:MM）。前者做
 #: 限频（武装未满间隔不重复下发），后者给看板显示"MCU 里此刻武装的截止"；进程
@@ -706,32 +705,4 @@ def _today_at(local_now: str, at: str) -> str:
     return f"{local_now[:10]}T{at}:00.000Z"
 
 
-# ── 生命周期 ──────────────────────────────────────────────────────────────
-
-
-async def _tick_loop() -> None:
-    while True:
-        try:
-            await tick_once()
-        except asyncio.CancelledError:
-            raise
-        except Exception:  # noqa: BLE001 一轮失败不能带垮服务，下一轮重试
-            log_event(
-                "ERROR", "extend-hours.tick-failed", "延长服务时间的定时任务失败，等下一轮重试", error=exc_info_text()
-            )
-        await asyncio.sleep(TICK_INTERVAL_S)
-
-
-def start() -> None:
-    global _task
-    if _task is None or _task.done():
-        _task = asyncio.create_task(_tick_loop())
-        log_event("INFO", "extend-hours.started", "延长服务时间已启动")
-
-
-def stop() -> None:
-    global _task
-    if _task is not None:
-        _task.cancel()
-        _task = None
-        log_event("INFO", "extend-hours.stopped", "延长服务时间已停止")
+# 一轮的逻辑见 [tick_once]；启动、取消、间隔由 core/background 统一管理。
