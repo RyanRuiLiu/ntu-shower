@@ -41,6 +41,10 @@ android {
         versionCode = 116
         versionName = "0.6.5"
         buildConfigField("String", "SERVER_DOMAIN", "\"${providers.gradleProperty("serverDomain").get()}\"")
+        // 设备自注册的 claim 令牌（fleet provisioning by claim）：全队共享一枚，构建期
+        // 注入、不入库。缺省空串 = 注册通道关闭（与服务端 fail closed 对齐）。泄露时
+        // 换一枚重新构建即可，库内已签发的设备凭据不受影响。
+        buildConfigField("String", "DEVICE_ENROLL_TOKEN", "\"${providers.gradleProperty("deviceEnrollToken").getOrElse("")}\"")
         buildConfigField("String", "APP_VERSION", "\"$versionName\"")
         buildConfigField("int", "VERSION_CODE", "$versionCode")
     }

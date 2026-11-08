@@ -9,6 +9,7 @@ import com.ryanliu.ntushower.core.clock.Clock
 import com.ryanliu.ntushower.core.clock.ServerClock
 import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.RuntimeConfig
+import com.ryanliu.ntushower.core.identity.DeviceCredential
 import com.ryanliu.ntushower.core.identity.DeviceIdentity
 import com.ryanliu.ntushower.core.net.HttpClientFactory
 import com.ryanliu.ntushower.core.net.ReconnectBackoff
@@ -32,6 +33,13 @@ import org.json.JSONObject
  *
  * [connected] 与 [authenticated] 是两件事：前者是链路连上，后者是服务端已认下这台设备。
  *
+ * ## 接入凭据与自注册
+ *
+ * 握手必须带设备自己的接入凭据（`Authorization: Bearer`）。本地没有凭据、或服务端以
+ * [CLOSE_BAD_CREDENTIAL] 拒绝（凭据被吊销/除档）时，先经 [EnrollClient] 用 APK 内置的
+ * claim 令牌注册一枚新凭据再连接——重装 APK、清数据都能自助恢复，不需要逐台预置。
+ * 注册只回答「这是我们的程序」，信任位照旧由服务端档案回答。
+ *
  * ## 一条连接，几类消息：字段该走哪一条
  *
  * 判定依据是**那个字段多久变一次**，以及接收方**需要它多新**——而不是塞进碰巧已有的那一条。
@@ -53,7 +61,7 @@ import org.json.JSONObject
  * `uptime_s` 反推出的开机时刻同属"设备健康"这一组。真要加的时候，间隔也做成配置项，
  * 默认值与范围登记在服务端的 `modules/config/spec.py`。
  */
-class GatewayClient(context: Context, private val callback: Callback) {
+class GatewayClient(private val context: Context, private val callback: Callback) {
 
     interface Callback {
         fun onConnected(trusted: Boolean, config: JSONObject, upgrade: JSONObject?, serverTime: String)
@@ -92,6 +100,25 @@ class GatewayClient(context: Context, private val callback: Callback) {
     private var reconnectAttempt = 0
     private var reconnectScheduled = false
 
+    /** 注册去重：注册已在途时不再叠加，避免每帧失败都开一个注册请求。 */
+    private var enrollScheduled = false
+
+    private val enrollClient = EnrollClient(context, object : EnrollClient.Callback {
+        override fun onEnrolled() {
+            enrollScheduled = false
+            Log.i(TAG, "credential enrolled, retrying connect")
+            connect()
+        }
+
+        override fun onEnrollFailed(reason: String) {
+            enrollScheduled = false
+            lastOfflineReason = "enroll:$reason"
+            lastOfflineAt = ServerClock.nowRfc3339() ?: Clock.wallClockRfc3339()
+            handler.post { callback.onDisconnected("enroll failed: $reason") }
+            scheduleReconnect()
+        }
+    })
+
     /**
      * 显式停用标志：[disconnect] 之后不再自动重连，直到下一次 [connect]。
      *
@@ -129,10 +156,26 @@ class GatewayClient(context: Context, private val callback: Callback) {
     fun connect() {
         stopped = false
         if (connected) return
+        val credential = DeviceCredential.read(context)
+        if (credential == null) {
+            Log.i(TAG, "no gateway credential, enrolling first")
+            ensureEnrolled()
+            return
+        }
         val url = "wss://${BuildConfig.SERVER_DOMAIN}/gateway/device"
         Log.i(TAG, "connecting $url (device_id=$deviceId)")
-        val request = Request.Builder().url(url).build()
+        val request = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer $credential")
+            .build()
         webSocket = client.newWebSocket(request, listener)
+    }
+
+    /** 注册去重入口：已在途就不叠加；context 由构造时的同一线程链路持有。 */
+    private fun ensureEnrolled() {
+        if (enrollScheduled) return
+        enrollScheduled = true
+        enrollClient.enroll(context)
     }
 
     fun disconnect() {
@@ -248,6 +291,15 @@ class GatewayClient(context: Context, private val callback: Callback) {
             authenticated = false
             lastOfflineReason = "closed:$code"
             lastOfflineAt = ServerClock.nowRfc3339() ?: Clock.wallClockRfc3339()
+            if (code == CLOSE_BAD_CREDENTIAL) {
+                // 凭据被吊销或除档：本地这份已经无效，清掉走重新注册——
+                // 服务端轮换语义的对侧动作。与普通断开共用一条收尾路径。
+                DeviceCredential.clear(context)
+                Log.w(TAG, "credential rejected (1008), re-enrolling")
+                handler.post { callback.onDisconnected("credential rejected") }
+                scheduleReconnect()
+                return
+            }
             handler.post { callback.onDisconnected("closed: $reason") }
             scheduleReconnect()
         }
@@ -321,6 +373,9 @@ class GatewayClient(context: Context, private val callback: Callback) {
 
         /** 标准 WebSocket 关闭码：端点主动离开。握手超时属于这一类。 */
         private const val CLOSE_GOING_AWAY = 1001
+
+        /** 服务端设备凭据校验失败的关闭码（见 gateway/routes 的 _verify_device_token）。 */
+        private const val CLOSE_BAD_CREDENTIAL = 1008
 
         /**
          * 等 `link.hello_ack` 的上限。
