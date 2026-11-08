@@ -25,7 +25,7 @@ from app.core.clock import now_rfc3339, parse_rfc3339, rfc3339_ago, shift_rfc333
 from app.core.db import get_conn
 from app.core.problems import ApiProblemError, Problem
 from app.core.protocol import JsonObject
-from app.modules.audit import repository as audit_repository
+from app.db.session import session_scope
 from app.modules.doors import service as doors_service
 from app.modules.doors.schemas import DoorState
 from app.modules.sessions import scheduler
@@ -37,6 +37,7 @@ from app.modules.sessions.decision import (
     Candidate,
 )
 from app.modules.sessions.schemas import AssignRequest, CommandOutcome, SettleRequest
+from app.persistence import audit as audit_repository
 
 SCHEDULER_PATH = Path(scheduler.__file__)
 
@@ -302,12 +303,14 @@ def test_settle_lands_in_the_audit_table_with_its_own_fields(monkeypatch: pytest
 
     asyncio.run(body())
 
-    rows = audit_repository.list_background_task_runs()
+    with session_scope() as session:
+        rows = audit_repository.list_background_task_runs(session)
     assert [row["outcome"] for row in rows] == ["settled"]
     row = rows[0]
     assert row["feature"] == FEATURE_RENEW_WAIT
     assert row["action"] == "session.settle"
-    assert row["session_id"] == WAITING.session_id
+    # doors 域未切（第二批）：旧表会话 id 引用新表无对应行，过渡期审计行置 None
+    assert row["session_id"] is None
     assert row["cert_no"] == WAITING.cert_no
     assert row["threshold_s"] == THRESHOLDS[FEATURE_RENEW_WAIT]
     assert row["reason"] is None  # 成了就有没理由要说
@@ -327,7 +330,8 @@ def test_a_rejected_settle_is_recorded_with_its_reason(monkeypatch: pytest.Monke
 
     asyncio.run(body())
 
-    rows = audit_repository.list_background_task_runs()
+    with session_scope() as session:
+        rows = audit_repository.list_background_task_runs(session)
     assert [row["outcome"] for row in rows] == ["not-applicable"]
     assert rows[0]["feature"] == FEATURE_AUTO_SETTLE
     assert rows[0]["action"] == "session.settle"

@@ -107,7 +107,9 @@ class BackgroundTaskRun(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     occurred_at: Mapped[datetime] = mapped_column(UtcDateTime, index=True)
-    device_id: Mapped[int] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"))
+    device_id: Mapped[int | None] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"), default=None)
+    #: 调用目标的文本业务键留底：审计的事实性不依赖设备是否在册
+    device_key: Mapped[str] = mapped_column(String(64), default="")
     door_no: Mapped[int] = mapped_column(Integer)
     session_id: Mapped[int | None] = mapped_column(ForeignKey("usage_sessions.id", ondelete="SET NULL"), default=None)
     cert_no: Mapped[str] = mapped_column(String(32), default="")

@@ -25,12 +25,14 @@ from app.core import actions, outcomes, protocol, reason_codes
 from app.core.connections import manager
 from app.core.logging import log_event
 from app.core.problems import DEVICE_OFFLINE, ApiProblemError
+from app.db.base import utcnow
 from app.db.deps import get_db
+from app.models.enums import CommandStatus
 from app.modules.access.dependencies import require_admin
-from app.modules.audit import repository as command_audit
 from app.modules.bridge.schemas import BridgeClosed, BridgeOpened, BridgeStatus
 from app.modules.config import store as config_store
 from app.modules.devices.dependencies import require_trusted_online_device
+from app.persistence import audit as command_audit
 
 from .manager import (
     BRIDGE_BUFFER_SIZE,
@@ -162,8 +164,11 @@ async def device_bridge(ws: WebSocket) -> None:
         if bridge.device_ws is ws:
             await bridge.recycle(reason)
             audit_id = _bridge_audit_id()
-            command_audit.insert_command(audit_id, device_id, SESSION_END_ACTION)
-            command_audit.finish(audit_id, outcomes.OK.value, "", reason)
+            from app.db.session import session_scope
+
+            with session_scope() as session:
+                command_audit.insert_command(session, audit_id, device_id, SESSION_END_ACTION, utcnow())
+                command_audit.finish(session, audit_id, CommandStatus(outcomes.OK.value), "", reason, utcnow())
 
 
 async def _pump_tcp_to_ws(bridge: AdbBridge, reader: asyncio.StreamReader) -> None:
@@ -237,7 +242,7 @@ async def adb_open(device_id: str, session: Session = Depends(get_db)) -> Bridge
         loop = asyncio.get_running_loop()
         generation, port, nonce = registry.open_session(device_id, loop.time())
         audit_id = _bridge_audit_id()
-        command_audit.insert_command(audit_id, device_id, actions.BRIDGE_OPEN)
+        command_audit.insert_command(session, audit_id, device_id, actions.BRIDGE_OPEN, utcnow())
         sent = await manager.send_to(
             device_id,
             protocol.envelope(actions.BRIDGE_OPEN, {"device_id": device_id, "nonce": nonce}),
@@ -245,10 +250,12 @@ async def adb_open(device_id: str, session: Session = Depends(get_db)) -> Bridge
         if not sent:
             registry.pending.pop(device_id, None)
             command_audit.finish(
+                session,
                 audit_id,
-                outcomes.TIMEOUT.value,
+                CommandStatus(outcomes.TIMEOUT.value),
                 reason_codes.DEVICE_OFFLINE.code,
                 reason_codes.DEVICE_OFFLINE.message,
+                utcnow(),
             )
             raise ApiProblemError(DEVICE_OFFLINE, f"设备 {device_id} 没有活跃连接")
 
@@ -257,9 +264,18 @@ async def adb_open(device_id: str, session: Session = Depends(get_db)) -> Bridge
             bridge = await AdbBridge.open(device_id, generation, port, _serve_client)
         except ApiProblemError as exc:
             registry.pending.pop(device_id, None)
-            command_audit.finish(audit_id, outcomes.FAILED.value, reason_codes.PORT_BIND_FAILED.code, str(exc))
+            command_audit.finish(
+                session,
+                audit_id,
+                CommandStatus(outcomes.FAILED.value),
+                reason_codes.PORT_BIND_FAILED.code,
+                str(exc),
+                utcnow(),
+            )
             raise
-        command_audit.finish(audit_id, outcomes.OK.value, "", f"port {port} gen {generation}")
+        command_audit.finish(
+            session, audit_id, CommandStatus(outcomes.OK.value), "", f"port {port} gen {generation}", utcnow()
+        )
         log_event(
             "INFO",
             "bridge.opened",
@@ -273,17 +289,17 @@ async def adb_open(device_id: str, session: Session = Depends(get_db)) -> Bridge
 
 
 @admin_router.post("/devices/{device_id}/bridge/close")
-async def adb_close(device_id: str) -> BridgeClosed:
+async def adb_close(device_id: str, session: Session = Depends(get_db)) -> BridgeClosed:
     """关闭桥：回收监听与流，并让设备停掉 adbd。与开桥共用同一把锁，理由见 adb_open。"""
     async with registry.op_lock:
         bridge = registry.get(device_id)
         audit_id = _bridge_audit_id()
-        command_audit.insert_command(audit_id, device_id, actions.BRIDGE_CLOSE)
+        command_audit.insert_command(session, audit_id, device_id, actions.BRIDGE_CLOSE, utcnow())
         if bridge is None:
-            command_audit.finish(audit_id, outcomes.OK.value, "", "already closed")
+            command_audit.finish(session, audit_id, CommandStatus(outcomes.OK.value), "", "already closed", utcnow())
             return {"device_id": device_id, "closed": False}
         await bridge.recycle("requested")
-        command_audit.finish(audit_id, outcomes.OK.value, "", "")
+        command_audit.finish(session, audit_id, CommandStatus(outcomes.OK.value), "", "", utcnow())
         # 通知设备停 adbd 的返回值不看：本地已收干净，设备没收到也只是它的 adbd
         # 多开一会儿，下次开桥会重新下发；为一个不影响本地状态的通知改关桥成败
         # 只会让"关没关掉"变成两个问题。

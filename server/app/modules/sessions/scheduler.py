@@ -59,8 +59,9 @@ from app.core.clock import now_rfc3339, shift_rfc3339
 from app.core.logging import log_event
 from app.core.problems import ApiProblemError
 from app.core.protocol import as_int
+from app.db.base import utcnow
 from app.db.session import session_scope
-from app.modules.audit import repository as audit_repository
+from app.models.enums import BackgroundOutcome
 from app.modules.config import store as config_store
 from app.modules.doors import service as doors_service
 from app.modules.doors.schemas import DoorState
@@ -258,17 +259,25 @@ def _record(
         feature=subject.feature,
         **extra,
     )
-    audit_repository.insert_background_task_run(
-        device_id=subject.device_id,
-        door_no=subject.door_no,
-        cert_no=subject.cert_no,
-        feature=subject.feature,
-        outcome=outcome,
-        action=subject.action,
-        session_id=subject.session_id,
-        reason=reason,
-        threshold_s=subject.threshold_s,
-    )
+    from app.db.session import session_scope
+    from app.persistence import audit as audit_store
+
+    with session_scope() as session:
+        audit_store.insert_background_task_run(
+            session,
+            occurred_at=utcnow(),
+            device_id=subject.device_id,
+            door_no=subject.door_no,
+            cert_no=subject.cert_no,
+            feature=subject.feature,
+            outcome=BackgroundOutcome(outcome),
+            action=subject.action,
+            # doors 域未切（第二批）：会话 id 还是旧表的，引用新表无对应行；
+            # doors 切换后恢复传 subject.session_id
+            session_id=None,
+            reason=reason,
+            threshold_s=subject.threshold_s,
+        )
 
 
 def _worker(device_id: str) -> _DeviceWorker:

@@ -14,7 +14,8 @@ from sqlalchemy.orm import Session
 from tests import apk, frames
 
 from app.core import audit
-from app.modules.audit import repository as command_audit
+from app.db.base import utcnow
+from app.persistence import audit as command_audit
 
 
 def _calls(client: TestClient, admin_headers: dict[str, str], **params: object) -> list[dict[str, object]]:
@@ -174,7 +175,8 @@ def test_calls_filters_by_actor_kind_and_device(client: TestClient, admin_header
 
 def test_commands_lists_command_audit_rows(client: TestClient, admin_headers: dict[str, str]) -> None:
     """GET /audit/commands 裸数组：命令流水，可按设备过滤。"""
-    command_audit.insert_command("cmd-audit-1", "dev-audit-cmd", "session.assign")
+    with _svc() as session:
+        command_audit.insert_command(session, "cmd-audit-1", "dev-audit-cmd", "session.assign", utcnow())
 
     rows = client.get("/api/v1/audit/commands", headers=admin_headers, params={"device_id": "dev-audit-cmd"}).json()
     assert isinstance(rows, list)

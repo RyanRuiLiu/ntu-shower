@@ -68,14 +68,23 @@ class SnapshotSource(StrEnum):
 
 
 class BackgroundOutcome(StrEnum):
-    """后台任务的执行结果。"""
+    """后台任务的执行结果。
+
+    取值与 scheduler 的日志事件名后缀同一套（`background-task.<它>`）：
+    日志与审计表两边不分叉。
+    """
 
     SETTLED = "settled"
     ASSIGNED = "assigned"
     SETTLE_FAILED = "settle-failed"
     ASSIGN_WAITING = "assign-waiting"
     ASSIGN_FAILED = "assign-failed"
+    ASSIGN_EXPIRED = "assign-expired"
     SKIPPED = "skipped"
+    FAILED = "failed"
+    REJECTED = "rejected"
+    NO_PASSWORD = "no-password"
+    NOT_APPLICABLE = "not-applicable"
 
 
 class CommandStatus(StrEnum):

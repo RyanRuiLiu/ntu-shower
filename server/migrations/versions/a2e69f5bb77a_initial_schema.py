@@ -1,8 +1,8 @@
 """initial schema
 
-Revision ID: f53659800f89
+Revision ID: a2e69f5bb77a
 Revises: 
-Create Date: 2026-11-08 14:56:22.831946
+Create Date: 2026-11-08 15:00:25.498155
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from app.db.base import UtcDateTime
 
 # revision identifiers, used by Alembic.
-revision: str = 'f53659800f89'
+revision: str = 'a2e69f5bb77a'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -356,7 +356,8 @@ def upgrade() -> None:
     op.create_table('background_task_runs',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('occurred_at', UtcDateTime(), nullable=False),
-    sa.Column('device_id', sa.Integer(), nullable=False),
+    sa.Column('device_id', sa.Integer(), nullable=True),
+    sa.Column('device_key', sa.String(length=64), nullable=False),
     sa.Column('door_no', sa.Integer(), nullable=False),
     sa.Column('session_id', sa.Integer(), nullable=True),
     sa.Column('cert_no', sa.String(length=32), nullable=False),

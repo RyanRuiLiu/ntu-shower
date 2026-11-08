@@ -126,13 +126,11 @@ def insert_background_task_run(
     reason: str = "",
     threshold_s: int | None = None,
 ) -> None:
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return
     session.add(
         BackgroundTaskRunRow(
             occurred_at=occurred_at,
-            device_id=device_pk,
+            device_id=_device_pk(session, device_id),
+            device_key=device_id,
             door_no=door_no,
             session_id=session_id,
             cert_no=cert_no,
@@ -149,21 +147,16 @@ def insert_background_task_run(
 def list_background_task_runs(
     session: Session, device_id: str | None = None, limit: int = 50
 ) -> list[BackgroundTaskRun]:
-    statement = (
-        select(BackgroundTaskRunRow, Device.device_id)
-        .outerjoin(Device, BackgroundTaskRunRow.device_id == Device.id)
-        .order_by(BackgroundTaskRunRow.id.desc())
-        .limit(limit)
-    )
+    statement = select(BackgroundTaskRunRow).order_by(BackgroundTaskRunRow.id.desc()).limit(limit)
     if device_id:
-        statement = statement.where(Device.device_id == device_id)
+        statement = statement.where(BackgroundTaskRunRow.device_key == device_id)
     records: list[BackgroundTaskRun] = []
-    for row, business_id in session.execute(statement).all():
+    for row in session.scalars(statement).all():
         records.append(
             {
                 "id": int(row.id),
                 "occurred_at": format_rfc3339(row.occurred_at),
-                "device_id": business_id or "",
+                "device_id": row.device_key,
                 "door_no": int(row.door_no),
                 "session_id": row.session_id,
                 "cert_no": row.cert_no,
