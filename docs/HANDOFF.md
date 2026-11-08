@@ -1,6 +1,6 @@
 # 交接：v2 数据层重写分支
 
-> 写给接下这个分支的人。状态截至 2026-11-07 夜，HEAD `ae02c12`，`1055 passed` 全绿。
+> 写给接下这个分支的人。状态截至 2026-11-08，HEAD 之后见 `git log`，`1066 passed` 全绿、覆盖率 96%。
 
 ## 这条分支在做什么
 
@@ -14,26 +14,28 @@
 | 持久化 | 8 个域（`server/app/persistence/`） | 各域测试 |
 | 认证 | `principals` 单主体表、Bearer 凭据、会话 Cookie、设备令牌 | `test_auth_endpoints.py` |
 | access 域 | 已完整切到新层（依赖注入） | 全套测试 |
+| **devices 域 + 全部调用方** | 服务层显式 session 注入；12 个域的调用点（gateway/voice/sessions/extend_hours/status_line/access/stats/freelist/water/bridge/config）全批切完；WS 走 `_call` 短会话、后台任务由 Background 每轮 `session_scope()` 注入 | `1066 passed` / `mypy --strict` |
 | 转换工具 | `server/tools/convert_v1_to_v2.py` 21 张表 + `--token-output` 给现有设备补凭据 | 生产副本 48 万行逐表 ok，6 台设备各一枚摘要 |
 | 编排 | `deploy/stack/`（compose/Caddyfile/三个脚本） | `docker compose config` + `caddy fmt` |
 | 调度 | `server/app/core/background.py` 统一三个间隔任务 | 测试 |
 
 ## 剩余工作（按顺序）
 
-### 五域同批切换（唯一阻塞）
+### ~~五域同批切换~~（已完成，`724fa21`）
 
-`devices + gateway + voice + sessions + extend_hours` 必须一次切完——已实测：devices 服务加 session 参数后，调用链横跨这五个域，切一个编译就过不了。
+实际穿透面比预想大：`device_action` 与 `require_trusted_online_device` 把 freelist/water/bridge/config 也挂了进来——**12 个域一批**。经验：
+- 会话三入口：路由 `Depends(get_db)`、WS `ws.app.state.database` 短会话（`gateway/routes.py` 的 `_call`）、后台任务 `core/background` 每轮 `session_scope()`、asyncio 任务入口自取 `session_scope()`
+- 测试里 stub（fake_send/device_action/reject 等）全部要加 session 首参——量大但机械
+- `as_record` 对非数组 capabilities 按未声明态处理（守卫链上不能因畸形数据崩）
+- 旧 `modules/devices/repository.py` 只剩 `init_tables()`（第二批删）
 
-方法（已探明）：
-- `devices/service.py` 每个查库函数加 `session: Session` 首参，调 `app.persistence.devices`
-- 路由用 `Depends(get_db)`；网关 WS 用 `ws.app.state.database.new_session()` 短会话（本轮已写好 `_call` helper 后因未完成而撤销，可从 git reflog 找回或重写）
-- 后台任务由 `core/background` 的循环每轮开短会话注入
-- 时间/枚举在 service 层转换（RFC 3339 ↔ datetime、str ↔ LinkEvent/DeviceLogKind）
-- 删 `modules/devices/repository.py`、`init_schema()` 里对应 `init_tables()`、测试里旧 `device*` 表裸 SQL 改新表
+### 其余域切换（下一步）
 
-### 其余域切换
-
-`doors + stats + tasks + config + ota + audit`。config/ota/audit 读取方少，相对独立。
+`doors + stats存储 + config + ota + audit中间件 + voice存储 + extend_hours存储`。
+- **doors 是大头**（service.py 977 行状态机，内部大量旧 Row 细节），`persistence/doors.py` 的函数已备好
+- stats 的**读路径**已在第一批改用 `persistence.devices`（会话注入），自身的 door_live/usage_* 读旧表
+- audit 的**中间件写入**还走旧表（`core/audit.py`），prune 已切新表并有测试；`test_audit.py` 的 prune 用例用 ORM 直造数据验证
+- 注意新表名：`api_calls`/`command_audits`/`device_logs`/`device_link_events`（复数），旧表是单数
 
 ### 设备令牌下发
 
