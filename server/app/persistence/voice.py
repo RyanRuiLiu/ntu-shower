@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from ..core.clock import format_rfc3339
 from ..core.logging import log_event
 from ..models.identity import Device
+from ..models.voice import VoiceAsset, VoiceDelivery, VoiceRule, VoiceUnit
 
 
 def _device_pk(session: Session, device_id: str) -> int | None:
@@ -27,9 +28,6 @@ def _dumps(value: list[Any] | None) -> str | None:
     if value is None:
         return None
     return json.dumps(value, ensure_ascii=False)
-
-
-from ..models.voice import VoiceAsset, VoiceDelivery, VoiceRule, VoiceUnit
 
 
 def _asset_view(row: VoiceAsset) -> dict[str, Any]:

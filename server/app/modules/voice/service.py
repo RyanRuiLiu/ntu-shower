@@ -986,7 +986,6 @@ async def _dispatch_event(session: Session, event: DoorEvent, max_age: int) -> N
         utcnow(),
     ):
         return
-    dispatched_at = now_rfc3339()
     outcome = await sessions_service.send_command_and_wait(
         session,
         event.device_id,
