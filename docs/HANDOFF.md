@@ -33,7 +33,7 @@
 
 已切：access、devices、ota、**audit 全部**（HTTP 中间件写 api_calls、命令审计 command_audits、后台任务 background_task_runs、bridge 的审计调用；scheduler 的 insert_background_task_run 也切了）。审计三表都留**设备文本键**列（`device_key`）：审计的事实性不依赖设备是否在册（未在册设备的行不能丢）。
 
-剩余（按建议顺序）：
+剩余（按此顺序执行）：
 1. **voice 存储**：service 50 处 `repository.` 直调，`persistence/voice.py` 函数已备好（含 claim/finish_delivery）；第一批已把 create/update/list/push/schedule 链加了 session
 2. **config store**：5 个存储函数切 `persistence/config.py`，但 `effective()/device_effective()` 调用方遍布全域——又是一次小规模穿透（gateway ping loop/scheduler/extend_hours 等，大多已在 `_call`/session_scope 框架内）
 3. **extend_hours 存储**（clock_shift 表）与其 service 内 `repository.get/record/clear/list_shifted`
