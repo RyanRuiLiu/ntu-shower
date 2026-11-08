@@ -19,21 +19,34 @@ admin 端点统一挂 require_admin；下发命令的端点额外要求设备已
 （require_trusted_online_device）——把命令发给离线设备只会白等超时。
 """
 
-from fastapi import APIRouter, Depends, Query
+import hmac
+
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
+from app.auth.tokens import extract_bearer, hash_token
 from app.core import actions
 from app.core.clock import now_rfc3339
+from app.core.config import settings
 from app.core.connections import manager
 from app.core.outcomes import OK as OUTCOME_OK
-from app.core.problems import DEVICE_LOG_READ_FAILED, DEVICE_NOT_FOUND, VALIDATION_FAILED, ApiProblemError
+from app.core.problems import (
+    DEVICE_LOG_READ_FAILED,
+    DEVICE_NOT_FOUND,
+    INVALID_DEVICE_CLAIM,
+    VALIDATION_FAILED,
+    ApiProblemError,
+)
 from app.core.protocol import as_int
+from app.db.base import utcnow
 from app.db.deps import get_db
 from app.modules.access.capabilities import user_actions
 from app.modules.access.dependencies import optional_identity, require_admin
 from app.modules.access.schemas import IdentityRecord
 from app.modules.config import store as config_store
 from app.modules.sessions.schemas import CommandOutcome
+from app.persistence import device_credentials
+from app.persistence import devices as devices_store
 
 from . import schemas, service
 from .dependencies import DEVICE_ACTION_TIMEOUT_S, device_action
@@ -52,6 +65,47 @@ from .schemas import (
 )
 
 router = APIRouter(prefix="/api/v1", tags=["devices"])
+
+
+@router.post("/devices/enroll", response_model=schemas.DeviceEnrollResult)
+def enroll_device(
+    req: schemas.DeviceEnrollRequest, request: Request, session: Session = Depends(get_db)
+) -> schemas.DeviceEnrollResult:
+    """设备自注册：APK 构建期内置一枚全队共享的 claim 令牌，设备首次连接凭它换
+    每台自己的接入凭据（AWS IoT fleet provisioning by claim 同型）。
+
+    - 通道开关在服务端配置（`DEVICE_ENROLL_TOKEN`）：留空即 fail closed，一律 401；
+    - 注册只回答「这是我们的程序」，**不等于信任**——信任位照旧由管理员在档案上
+      点（ADR-0007 模型不动），未信任设备照旧收 `trusted=false`、业务帧被墙；
+    - 每次注册先吊销该设备旧凭据再签发新的：重装 APK、凭据丢失都能自助恢复，
+      轮换语义与 `--token-output` 签发的一致；
+    - 已在册设备（含转换搬来的 6 台）档案字段照常刷新、trusted 位不动。
+
+    凭据明文只出现在本次响应；比对用哈希后常量时间比较，不暴露时序。
+    """
+    claim = extract_bearer(request.headers.get("authorization"))
+    configured = settings.device_enroll_token
+    if not configured or claim is None or not hmac.compare_digest(hash_token(claim), hash_token(configured)):
+        raise ApiProblemError(INVALID_DEVICE_CLAIM, "注册令牌缺失或无效")
+
+    devices_store.register(
+        session,
+        device_id=req.device_id,
+        app_version=req.app_version,
+        version_code=req.version_code,
+        os_version=req.os_version,
+        capabilities=req.capabilities,
+        ip=request.client.host if request.client else "",
+        booted_at=utcnow(),
+        seen_at=utcnow(),
+    )
+    device_credentials.revoke_all(session, req.device_id)
+    token = device_credentials.issue(session, req.device_id, label="自注册")
+    if token is None:  # register 刚确保了行存在，到这里为 None 只可能是并发除档
+        raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {req.device_id} 刚被除档")
+    return schemas.DeviceEnrollResult(device_id=req.device_id, token=token)
+
+
 admin_router = APIRouter(prefix="/api/v1/devices", dependencies=[Depends(require_admin)], tags=["devices-admin"])
 
 #: 可查看/上送的三份设备日志。

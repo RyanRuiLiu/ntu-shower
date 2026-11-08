@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     # 设备接入令牌校验默认强制开启。只在测试夹具里显式关闭——生产不留
     # 「不带凭据也能连」的旁路，这是安全默认值而不是长期双轨。
     require_device_token: bool = True
+    # 设备自注册的 claim 令牌（AWS IoT fleet provisioning by claim 同型）：APK 构建期
+    # 内置一枚全队共享的注册令牌，设备首次连接凭它换每台自己的接入凭据；信任位照旧
+    # 由管理员在档案上点——注册只回答「这是我们的程序」，不等于信任。留空即注册
+    # 通道关闭（fail closed）。泄露时轮换：换一枚重新构建 APK，库里凭据不受影响。
+    device_enroll_token: str = ""
 
     @property
     def effective_database_url(self) -> str:

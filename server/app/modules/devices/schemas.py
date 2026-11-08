@@ -196,3 +196,25 @@ class DeviceUiTextRequest(BaseModel):
     channel: Literal["clipboard", "keys"] = Field(
         description="注入通路：clipboard 粘贴（支持中文）；keys 按键注入（仅 ASCII）。必填，调用方必须显式选择",
     )
+
+
+class DeviceEnrollRequest(BaseModel):
+    """设备自注册请求：设备首次连接凭 claim 令牌换自己的接入凭据。
+
+    设备自报档案元数据（版本、能力）——新设备的档案行在这里建立，之后每次
+    上线由 `link.hello` 刷新。`device_id` 是设备自报的 ANDROID_ID：伪造需要
+    物理接触目标设备（决策 ADR-0007 的既有边界，注册不改变它）。
+    """
+
+    device_id: str = Field(min_length=1, max_length=64, description="设备标识（ANDROID_ID）")
+    app_version: str = Field(max_length=32, default="")
+    version_code: int = Field(ge=0, le=2_000_000_000, default=0)
+    os_version: str = Field(max_length=32, default="")
+    capabilities: list[str] = Field(max_length=64, default=[])
+
+
+class DeviceEnrollResult(BaseModel):
+    """注册结果：接入凭据明文只出现在这一响应里，服务端只留摘要。"""
+
+    device_id: str
+    token: str
