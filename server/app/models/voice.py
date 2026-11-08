@@ -42,7 +42,7 @@ class VoiceRule(Base):
     events: Mapped[list[str]] = mapped_column(JSON)
     time_windows: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     exempt: Mapped[list[str]] = mapped_column(JSON, default=list)
-    segments: Mapped[list[str]] = mapped_column(JSON)
+    segments: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
     volume: Mapped[int] = mapped_column(Integer)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
@@ -72,11 +72,16 @@ class VoiceDelivery(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     event_key: Mapped[str] = mapped_column(String(128), unique=True)
     rule_id: Mapped[int] = mapped_column(ForeignKey("voice_rules.id", ondelete="RESTRICT"))
-    device_id: Mapped[int] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"), index=True)
+    device_id: Mapped[int | None] = mapped_column(
+        ForeignKey("devices.id", ondelete="CASCADE"), default=None, index=True
+    )
+    #: 调用目标的文本业务键留底：投递记录的事实性不依赖设备是否在册
+    device_key: Mapped[str] = mapped_column(String(64), default="")
     door_no: Mapped[int] = mapped_column(Integer)
     cert_no: Mapped[str] = mapped_column(String(32))
     event: Mapped[str] = mapped_column(String(32))
-    segments: Mapped[list[str]] = mapped_column(JSON)
+    #: 投递摘要文本（_plan_summary 的产物），审计页直接展示；不是播放清单
+    segments: Mapped[str] = mapped_column(Text, default="")
     segment_count: Mapped[int] = mapped_column(Integer)
     duration_ms: Mapped[int] = mapped_column(Integer)
     occurred_at: Mapped[datetime] = mapped_column(UtcDateTime)

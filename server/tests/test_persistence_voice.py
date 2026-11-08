@@ -40,7 +40,7 @@ def _device(session: Session, device_id: str = "dev-a") -> None:
 
 
 def test_asset_and_unit_lifecycle(session: Session) -> None:
-    voice.insert_asset(session, "a1", "数字一", 1, 800, 4000, NOW)
+    voice.insert_asset(session, "a1", "数字一", 1, 800, 4000)
     assert [item["asset_id"] for item in voice.list_assets(session)] == ["a1"]
     assert voice.get_asset_by_digit(session, 1)["name"] == "数字一"  # type: ignore[index]
     assert voice.get_asset_by_name(session, "数字一")["asset_id"] == "a1"  # type: ignore[index]
@@ -65,7 +65,7 @@ def test_rule_lifecycle(session: Session) -> None:
         events=["assigned"],
         time_windows=[],
         exempt=[],
-        segments=["a1"],
+        segments=[{"kind": "asset", "asset_id": "a1"}],
         volume=8,
         enabled=True,
         created_at=NOW,
@@ -107,7 +107,7 @@ def test_delivery_is_idempotent(session: Session) -> None:
         events=["assigned"],
         time_windows=[],
         exempt=[],
-        segments=["a1"],
+        segments=[{"kind": "asset", "asset_id": "a1"}],
         volume=8,
         enabled=True,
         created_at=NOW,
@@ -120,7 +120,7 @@ def test_delivery_is_idempotent(session: Session) -> None:
         door_no=3,
         cert_no="c1",
         event="assigned",
-        segments=["a1"],
+        segments="音频",
         segment_count=1,
         duration_ms=800,
         occurred_at=NOW,
@@ -135,7 +135,7 @@ def test_delivery_is_idempotent(session: Session) -> None:
         door_no=3,
         cert_no="c1",
         event="assigned",
-        segments=["a1"],
+        segments="音频",
         segment_count=1,
         duration_ms=800,
         occurred_at=NOW,
@@ -176,7 +176,8 @@ def test_missing_entities_return_not_found(session: Session) -> None:
     voice.finish_delivery(session, "nope", NOW, "ok", "", NOW, False)
 
 
-def test_claim_for_missing_device_is_rejected(session: Session) -> None:
+def test_claim_for_missing_device_keeps_its_key(session: Session) -> None:
+    """设备不在册时投递行仍落（审计事实性不依赖主数据），以文本键可查。"""
     rule_id = voice.insert_rule(
         session,
         devices=["*"],
@@ -198,12 +199,13 @@ def test_claim_for_missing_device_is_rejected(session: Session) -> None:
             door_no=1,
             cert_no="c",
             event="assigned",
-            segments=[],
+            segments="",
             segment_count=0,
             duration_ms=0,
             occurred_at=NOW,
             trace_id="",
             created_at=NOW,
         )
-        is False
+        is True
     )
+    assert voice.list_deliveries(session, 10)[0]["device_id"] == "missing"

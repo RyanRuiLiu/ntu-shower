@@ -5,7 +5,6 @@ MP3 字节；`audio.py` 自身的外部命令边界另有单元测试（test_voi
 """
 
 import asyncio
-import json
 from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -18,11 +17,35 @@ from tests import device_link, frames
 
 from app.core.clock import now_rfc3339
 from app.core.problems import INVALID_VOICE_RULE, ApiProblemError
+from app.db.base import utcnow
 from app.modules.devices import service as devices_service
 from app.modules.doors.events import DoorEvent, DoorEventKind
+
+
+def _match(device_id: str, cert_no: str, event: str, local: datetime) -> list[dict[str, Any]]:
+    with _svc_session() as session:
+        return repository.matching_rules(session, device_id, cert_no, event, local)
+
+
+def _repo_call(name: str, *args: object, **kwargs: object) -> object:
+    """持久化直调：短会话。"""
+    fn = getattr(repository, name)
+    with _svc_session() as session:
+        return fn(session, *args, **kwargs)
+
+
+def _svc_session() -> "AbstractContextManager[Session]":
+    """持久化直调的短会话。"""
+    from app.db.session import session_scope
+
+    with session_scope() as session:
+        yield session
+
+
 from app.modules.sessions import service as sessions_service
 from app.modules.sessions.schemas import CommandOutcome
-from app.modules.voice import audio, repository, schemas, service
+from app.modules.voice import audio, schemas, service
+from app.persistence import voice as repository
 
 DEVICE_ID = "dev-voice"
 OTHER_DEVICE_ID = "dev-voice-other"
@@ -493,10 +516,8 @@ def test_scope_priority_prefers_narrower_rules(
         certs=["C1"],
     )
     narrow_device = _create(client, admin_headers, asset_id, certs=["C1"])
-    assert int(repository.matching_rules(DEVICE_ID, "C1", "assigned", MATCH_LOCAL)[0]["id"]) == narrow_device["id"]
-    assert (
-        int(repository.matching_rules(OTHER_DEVICE_ID, "C1", "assigned", MATCH_LOCAL)[0]["id"]) == broad_devices["id"]
-    )
+    assert int(_match(DEVICE_ID, "C1", "assigned", MATCH_LOCAL)[0]["id"]) == narrow_device["id"]
+    assert int(_match(OTHER_DEVICE_ID, "C1", "assigned", MATCH_LOCAL)[0]["id"]) == broad_devices["id"]
 
     # 学号维度：同一设备下，学号集合更小者优先
     broad_certs = _create(
@@ -507,8 +528,8 @@ def test_scope_priority_prefers_narrower_rules(
         events=["resumed"],
     )
     narrow_cert = _create(client, admin_headers, asset_id, certs=["C1"], events=["resumed"])
-    assert int(repository.matching_rules(DEVICE_ID, "C1", "resumed", MATCH_LOCAL)[0]["id"]) == narrow_cert["id"]
-    assert int(repository.matching_rules(DEVICE_ID, "C2", "resumed", MATCH_LOCAL)[0]["id"]) == broad_certs["id"]
+    assert int(_match(DEVICE_ID, "C1", "resumed", MATCH_LOCAL)[0]["id"]) == narrow_cert["id"]
+    assert int(_match(DEVICE_ID, "C2", "resumed", MATCH_LOCAL)[0]["id"]) == broad_certs["id"]
 
     # 优先级完全相同且目标相交：没有确定胜者，保存时拒绝
     _create(client, admin_headers, asset_id, certs=["C1", "C2"], events=["shower_started"])
@@ -530,10 +551,8 @@ def test_scope_priority_prefers_narrower_rules(
         events=["released_unused"],
     )
     specific = _create(client, admin_headers, asset_id, certs=["C1"], events=["released_unused"])
-    assert int(repository.matching_rules(DEVICE_ID, "C1", "released_unused", MATCH_LOCAL)[0]["id"]) == specific["id"]
-    assert (
-        int(repository.matching_rules(OTHER_DEVICE_ID, "C1", "released_unused", MATCH_LOCAL)[0]["id"]) == wildcard["id"]
-    )
+    assert int(_match(DEVICE_ID, "C1", "released_unused", MATCH_LOCAL)[0]["id"]) == specific["id"]
+    assert int(_match(OTHER_DEVICE_ID, "C1", "released_unused", MATCH_LOCAL)[0]["id"]) == wildcard["id"]
 
 
 def test_time_window_filters_and_priority(
@@ -553,17 +572,21 @@ def test_time_window_filters_and_priority(
         events=["assigned"],
         time_windows=[{"days": [1, 2, 3, 4, 5, 6, 7], "start": "22:00", "end": "06:00"}],
     )
-    assert night["time_windows"] == [{"days": [1, 2, 3, 4, 5, 6, 7], "start": "22:00", "end": "06:00"}]
+    with _svc_session() as session:
+        night_row = repository.get_rule(session, int(night["id"]))
+    assert night_row is not None and list(night_row["time_windows"]) == [
+        {"days": [1, 2, 3, 4, 5, 6, 7], "start": "22:00", "end": "06:00"}
+    ]
     assert night["time_summary"] == "每天 22:00–次日 06:00"
 
     noon = datetime(2026, 1, 5, 12, 0)
     late = datetime(2026, 1, 5, 23, 0)
     dawn = datetime(2026, 1, 6, 5, 59)
     boundary = datetime(2026, 1, 6, 6, 0)
-    assert int(repository.matching_rules(DEVICE_ID, "C1", "assigned", noon)[0]["id"]) == general["id"]
-    assert int(repository.matching_rules(DEVICE_ID, "C1", "assigned", late)[0]["id"]) == night["id"]
-    assert int(repository.matching_rules(DEVICE_ID, "C1", "assigned", dawn)[0]["id"]) == night["id"]
-    assert int(repository.matching_rules(DEVICE_ID, "C1", "assigned", boundary)[0]["id"]) == general["id"]
+    assert int(_match(DEVICE_ID, "C1", "assigned", noon)[0]["id"]) == general["id"]
+    assert int(_match(DEVICE_ID, "C1", "assigned", late)[0]["id"]) == night["id"]
+    assert int(_match(DEVICE_ID, "C1", "assigned", dawn)[0]["id"]) == night["id"]
+    assert int(_match(DEVICE_ID, "C1", "assigned", boundary)[0]["id"]) == general["id"]
 
     # 原有优先级不变：设备更具体的全天规则仍压过全局夜间规则
     specific = _create(client, admin_headers, asset_id, certs=["C1"], events=["paused"])
@@ -576,8 +599,8 @@ def test_time_window_filters_and_priority(
         events=["paused"],
         time_windows=[{"days": [1, 2, 3, 4, 5, 6, 7], "start": "22:00", "end": "06:00"}],
     )
-    assert int(repository.matching_rules(DEVICE_ID, "C1", "paused", late)[0]["id"]) == specific["id"]
-    assert int(repository.matching_rules(OTHER_DEVICE_ID, "C1", "paused", late)[0]["id"]) == global_night["id"]
+    assert int(_match(DEVICE_ID, "C1", "paused", late)[0]["id"]) == specific["id"]
+    assert int(_match(OTHER_DEVICE_ID, "C1", "paused", late)[0]["id"]) == global_night["id"]
 
 
 def test_time_window_cross_midnight_and_duplicate_overlap(
@@ -600,10 +623,10 @@ def test_time_window_cross_midnight_and_duplicate_overlap(
     saturday_dawn = datetime(2026, 1, 10, 1, 0)
     saturday_end = datetime(2026, 1, 10, 2, 0)
     friday_early = datetime(2026, 1, 9, 21, 0)
-    assert repository.matching_rules(DEVICE_ID, "C1", "paused", friday_late)
-    assert repository.matching_rules(DEVICE_ID, "C1", "paused", saturday_dawn)
-    assert not repository.matching_rules(DEVICE_ID, "C1", "paused", saturday_end)
-    assert not repository.matching_rules(DEVICE_ID, "C1", "paused", friday_early)
+    assert _match(DEVICE_ID, "C1", "paused", friday_late)
+    assert _match(DEVICE_ID, "C1", "paused", saturday_dawn)
+    assert not _match(DEVICE_ID, "C1", "paused", saturday_end)
+    assert not _match(DEVICE_ID, "C1", "paused", friday_early)
 
     # 同为 1 小时、同一目标、时段重叠：没有确定胜者，保存时拒绝
     _create(
@@ -659,8 +682,8 @@ def test_time_window_cross_midnight_and_duplicate_overlap(
     )
     monday_late = datetime(2026, 1, 5, 22, 30)
     monday_later = datetime(2026, 1, 5, 23, 30)
-    assert int(repository.matching_rules(DEVICE_ID, "C3", "shower_started", monday_late)[0]["id"]) == narrow["id"]
-    assert int(repository.matching_rules(DEVICE_ID, "C3", "shower_started", monday_later)[0]["id"]) == broad["id"]
+    assert int(_match(DEVICE_ID, "C3", "shower_started", monday_late)[0]["id"]) == narrow["id"]
+    assert int(_match(DEVICE_ID, "C3", "shower_started", monday_later)[0]["id"]) == broad["id"]
 
 
 def test_time_window_validation(
@@ -732,30 +755,10 @@ def test_ambiguous_rules_are_not_picked_by_id(
             errors.append((key, ids[0], ids[1]))
 
     monkeypatch.setattr(repository, "log_event", capture)
-    now = now_rfc3339()
-    first = repository.insert_rule(
-        json.dumps([DEVICE_ID]),
-        json.dumps(["C1", "C2"]),
-        json.dumps(["assigned"]),
-        "[]",
-        "[]",
-        "[]",
-        3,
-        True,
-        now,
-    )
-    second = repository.insert_rule(
-        json.dumps([DEVICE_ID]),
-        json.dumps(["C1", "C3"]),
-        json.dumps(["assigned"]),
-        "[]",
-        "[]",
-        "[]",
-        3,
-        True,
-        now,
-    )
-    assert repository.matching_rules(DEVICE_ID, "C1", "assigned", MATCH_LOCAL) == []
+    with _svc_session() as session:
+        first = repository.insert_rule(session, [DEVICE_ID], ["C1", "C2"], ["assigned"], [], [], [], 3, True, utcnow())
+        second = repository.insert_rule(session, [DEVICE_ID], ["C1", "C3"], ["assigned"], [], [], [], 3, True, utcnow())
+    assert _match(DEVICE_ID, "C1", "assigned", MATCH_LOCAL) == []
     assert errors == [("voice.rule-ambiguous", first, second)]
 
 
@@ -775,18 +778,27 @@ def test_rule_with_corrupted_time_windows_is_skipped(
             invalid.append(int(kwargs["rule_id"]))  # type: ignore[arg-type]
 
     monkeypatch.setattr(repository, "log_event", capture)
-    repository.insert_rule(
-        json.dumps([DEVICE_ID]),
-        json.dumps(["C1"]),
-        json.dumps(["assigned"]),
-        '{"days": [1], "start": "not-a-time"}',  # 形状像时段、值非法：解析必然失败
-        "[]",
-        "[]",
-        3,
-        True,
-        now_rfc3339(),
-    )
-    assert repository.matching_rules(DEVICE_ID, "C1", "assigned", MATCH_LOCAL) == []
+    with _svc_session() as session:
+        rule_id = repository.insert_rule(
+            session,
+            [DEVICE_ID],
+            ["C1"],
+            ["assigned"],
+            [],
+            [],
+            [],
+            3,
+            True,
+            utcnow(),
+        )
+        # 时段列被外部改坏（形状像时段、值非法）：直接改列，模拟外部工具写坏
+        from sqlalchemy import text as _text
+
+        session.execute(
+            _text("UPDATE voice_rules SET time_windows = :w WHERE id = :id"),
+            {"w": '{"days": [1], "start": "not-a-time"}', "id": rule_id},
+        )
+    assert _match(DEVICE_ID, "C1", "assigned", MATCH_LOCAL) == []
     assert len(invalid) == 1
 
 
@@ -1192,7 +1204,8 @@ def test_handle_events_resolution_failure_does_not_deliver(
         assets["请到"],
         segments=[{"kind": "digits", "source": "door_no"}],
     )
-    repository.delete_asset(assets["五"])
+    with _svc_session() as session:
+        repository.delete_asset(session, assets["五"])
     audio.asset_path(assets["五"]).unlink()
     calls: list[tuple[str, dict[str, object]]] = []
     monkeypatch.setattr(sessions_service, "send_command_and_wait", _collector(calls))
@@ -1251,20 +1264,22 @@ def test_dispatch_event_handles_malformed_rule(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     rule = _create(client, admin_headers, assets["请到"])
-    row = repository.get_rule(rule["id"])
+    row = _repo_call("get_rule", rule["id"])
     assert row is not None
-    repository.update_rule(
-        rule["id"],
-        str(row["devices"]),
-        str(row["certs"]),
-        str(row["events"]),
-        str(row["time_windows"]),
-        str(row["exempt"]),
-        json.dumps([{"kind": "asset", "asset_id": "f" * 64}]),
-        int(row["volume"]),
-        bool(row["enabled"]),
-        now_rfc3339(),
-    )
+    with _svc_session() as session:
+        repository.update_rule(
+            session,
+            rule["id"],
+            list(row["devices"]),
+            list(row["certs"]),
+            list(row["events"]),
+            list(row["time_windows"]),
+            list(row["exempt"]),
+            [{"kind": "asset", "asset_id": "f" * 64}],
+            int(row["volume"]),
+            bool(row["enabled"]),
+            utcnow(),
+        )
     calls: list[tuple[str, dict[str, object]]] = []
     monkeypatch.setattr(sessions_service, "send_command_and_wait", _collector(calls))
     asyncio.run(service.handle_events((_event(now_rfc3339()),)))
@@ -1276,7 +1291,7 @@ def test_dispatch_event_handles_malformed_rule(
 
 
 def test_asset_rows_empty_and_plan_helpers(fresh_db: str) -> None:
-    assert repository.asset_rows_by_ids([]) == {}
+    assert _repo_call("asset_rows_by_ids", []) == {}
     assert service._play_timeout_s(0) == 120.0
     assert service._play_timeout_s(10_000) == 130.0
     assert service._play_timeout_s(200_000) == 320.0
@@ -1285,7 +1300,8 @@ def test_asset_rows_empty_and_plan_helpers(fresh_db: str) -> None:
         service.ClipPlan("a" * 64, "a" * 64, 1, 1),
         service.PausePlan(250),
     ]
-    assert service._plan_summary(plan) == "音频 · 停顿 0.25 秒"
+    with _svc_session() as session:
+        assert service._plan_summary(session, plan) == "音频 · 停顿 0.25 秒"
     assert service._plan_duration_ms(plan) == 251
     assert service._plan_json(plan) == [
         {"kind": "clip", "clip_id": "a" * 64, "sha256": "a" * 64, "size_bytes": 1, "duration_ms": 1},
@@ -1307,8 +1323,8 @@ def test_asset_insert_and_readback_failures_leave_no_file(
         return 500
 
     monkeypatch.setattr(audio, "normalize_to_mp3", normalize)
-    with pytest.raises(service.InvalidVoiceAssetError, match="0–9"):
-        service.create_asset("数字越界", b"x", 10, None)
+    with _svc_session() as session, pytest.raises(service.InvalidVoiceAssetError, match="0–9"):
+        service.create_asset(session, "数字越界", b"x", 10, None)
 
     original_insert = repository.insert_asset
 
@@ -1317,32 +1333,33 @@ def test_asset_insert_and_readback_failures_leave_no_file(
         raise RuntimeError(message)
 
     monkeypatch.setattr(repository, "insert_asset", fail_insert)
-    with pytest.raises(RuntimeError, match="db"):
-        service.create_asset("写库失败", b"fail", None, None)
+    with _svc_session() as session, pytest.raises(RuntimeError, match="db"):
+        service.create_asset(session, "写库失败", b"fail", None, None)
     assert list(audio.assets_dir().glob("*.mp3")) == []
 
     monkeypatch.setattr(repository, "insert_asset", original_insert)
     original_get = repository.get_asset
-    monkeypatch.setattr(repository, "get_asset", lambda _asset_id: None)
-    with pytest.raises(service.InvalidVoiceAssetError, match="读不到"):
-        service.create_asset("读回失败", b"missing", None, None)
+    monkeypatch.setattr(repository, "get_asset", lambda _session, _asset_id: None)
+    with _svc_session() as session, pytest.raises(service.InvalidVoiceAssetError, match="读不到"):
+        service.create_asset(session, "读回失败", b"missing", None, None)
     assert list(audio.assets_dir().glob("*.mp3")) == []
-    assert repository.list_assets() == []
+    assert _repo_call("list_assets") == []
 
     monkeypatch.setattr(repository, "get_asset", original_get)
-    created = service.create_asset("正常", b"ok", None, None)
-    monkeypatch.setattr(repository, "get_asset", lambda _asset_id: None)
-    with pytest.raises(ApiProblemError) as error:
-        service.rename_asset(created.asset_id, "改名")
-    assert error.value.problem.code == "voice-asset-not-found"
+    with _svc_session() as session:
+        created = service.create_asset(session, "正常", b"ok", None, None)
+        monkeypatch.setattr(repository, "get_asset", lambda _session, _asset_id: None)
+        with pytest.raises(ApiProblemError) as error:
+            service.rename_asset(session, created.asset_id, "改名")
+        assert error.value.problem.code == "voice-asset-not-found"
 
 
 def test_segment_and_target_normalization_guards(fresh_db: str) -> None:
     for value in ("not-a-dict", {"kind": "bogus"}):
         with pytest.raises(service.InvalidVoiceRuleError):
             service._segment_from_dict(value)
-    with pytest.raises(service.InvalidVoiceRuleError, match="至少需要一个分段"):
-        service._validate_segments([])
+    with _svc_session() as session, pytest.raises(service.InvalidVoiceRuleError, match="至少需要一个分段"):
+        service._validate_segments(session, [])
 
     assert (
         service._segment_summary([schemas.DigitsSegment(kind="digits", source="cert_no", length=4)], {})
@@ -1377,7 +1394,7 @@ def test_rule_repository_races(
     original_get = repository.get_rule
 
     monkeypatch.setattr(repository, "insert_rule", lambda *_args, **_kwargs: 4242)
-    monkeypatch.setattr(repository, "get_rule", lambda _rule_id: None)
+    monkeypatch.setattr(repository, "get_rule", lambda _session, _rule_id: None)
     request = schemas.VoiceRuleCreate(
         devices=[DEVICE_ID],
         certs=["C9"],
@@ -1389,8 +1406,8 @@ def test_rule_repository_races(
     assert error.value.problem.code == "voice-rule-not-found"
 
     monkeypatch.setattr(repository, "get_rule", original_get)
-    monkeypatch.setattr(repository, "update_rule", lambda *_args, **_kwargs: 0)
-    with pytest.raises(ApiProblemError):
+    monkeypatch.setattr(repository, "update_rule", lambda *_args, **_kwargs: False)
+    with _svc_session() as session, pytest.raises(ApiProblemError):
         service.update_rule(
             session,
             rule_id,
@@ -1402,11 +1419,12 @@ def test_rule_repository_races(
             ),
         )
 
-    real_row = original_get(rule_id)
+    with _svc_session() as session:
+        real_row = original_get(session, rule_id)
     assert real_row is not None
     rows = iter([real_row, None])
-    monkeypatch.setattr(repository, "get_rule", lambda _rule_id: next(rows))
-    monkeypatch.setattr(repository, "update_rule", lambda *_args, **_kwargs: 1)
+    monkeypatch.setattr(repository, "get_rule", lambda _session, _rule_id: next(rows))
+    monkeypatch.setattr(repository, "update_rule", lambda *_args, **_kwargs: True)
     with pytest.raises(ApiProblemError):
         service.update_rule(
             session,
@@ -1419,10 +1437,10 @@ def test_rule_repository_races(
             ),
         )
 
-    monkeypatch.setattr(repository, "get_rule", lambda _rule_id: None)
-    monkeypatch.setattr(repository, "set_enabled", lambda *_args, **_kwargs: 1)
-    with pytest.raises(ApiProblemError):
-        service.set_enabled(rule_id, True)
+    monkeypatch.setattr(repository, "get_rule", lambda _session, _rule_id: None)
+    monkeypatch.setattr(repository, "set_enabled", lambda *_args, **_kwargs: True)
+    with _svc_session() as session, pytest.raises(ApiProblemError):
+        service.set_enabled(session, rule_id, True)
 
 
 def test_schedule_and_preview_edge_cases(
@@ -1450,7 +1468,8 @@ def test_schedule_and_preview_edge_cases(
                 updated_at=now_rfc3339(),
             ),
         )
-    assert service._preview([service.ClipPlan("f" * 64, "f" * 64, 1, 1)]).segments == []
+    with _svc_session() as session:
+        assert service._preview(session, [service.ClipPlan("f" * 64, "f" * 64, 1, 1)]).segments == []
 
 
 def test_task_done_ignores_cancelled(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1474,20 +1493,22 @@ def test_push_rejects_malformed_rule(
     assets: dict[str, str],
 ) -> None:
     rule = _create(client, admin_headers, assets["请到"])
-    row = repository.get_rule(rule["id"])
+    row = _repo_call("get_rule", rule["id"])
     assert row is not None
-    repository.update_rule(
-        rule["id"],
-        str(row["devices"]),
-        str(row["certs"]),
-        str(row["events"]),
-        str(row["time_windows"]),
-        str(row["exempt"]),
-        json.dumps([{"kind": "asset", "asset_id": "f" * 64}]),
-        int(row["volume"]),
-        bool(row["enabled"]),
-        now_rfc3339(),
-    )
+    with _svc_session() as session:
+        repository.update_rule(
+            session,
+            rule["id"],
+            list(row["devices"]),
+            list(row["certs"]),
+            list(row["events"]),
+            list(row["time_windows"]),
+            list(row["exempt"]),
+            [{"kind": "asset", "asset_id": "f" * 64}],
+            int(row["volume"]),
+            bool(row["enabled"]),
+            utcnow(),
+        )
     with pytest.raises(ApiProblemError) as error, _svc_session() as session:
         asyncio.run(service.push_to_device(session, rule["id"], DEVICE_ID))
     assert error.value.problem is INVALID_VOICE_RULE
@@ -1553,7 +1574,7 @@ def test_dispatch_uses_server_local_time(fresh_db: str, monkeypatch: pytest.Monk
     captured: dict[str, object] = {}
     monkeypatch.setattr(service, "now_rfc3339", lambda: "2026-01-05T14:00:00.000Z")
 
-    def capture(_device_id: str, _cert_no: str, _event: str, local: object) -> list[object]:
+    def capture(_session: Session, _device_id: str, _cert_no: str, _event: str, local: object) -> list[object]:
         captured["local"] = local
         return []
 

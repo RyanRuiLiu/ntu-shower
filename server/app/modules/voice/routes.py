@@ -28,18 +28,18 @@ _ASSET_ID = re.compile(r"[0-9a-f]{64}")
 
 
 @admin_router.get("/voice/spec")
-def get_spec() -> schemas.VoiceSpecView:
-    return service.spec()
+def get_spec(session: Session = Depends(get_db)) -> schemas.VoiceSpecView:
+    return service.spec(session)
 
 
 @admin_router.get("/voice/status")
-def get_status() -> schemas.VoiceStatusView:
-    return service.status()
+def get_status(session: Session = Depends(get_db)) -> schemas.VoiceStatusView:
+    return service.status(session)
 
 
 @admin_router.get("/voice/assets")
-def list_assets() -> list[schemas.VoiceAssetView]:
-    return service.list_assets()
+def list_assets(session: Session = Depends(get_db)) -> list[schemas.VoiceAssetView]:
+    return service.list_assets(session)
 
 
 @admin_router.post("/voice/assets")
@@ -48,6 +48,7 @@ async def create_asset(
     file: Annotated[UploadFile, File()],
     digit: Annotated[str, Form()] = "",
     unit: Annotated[str, Form()] = "",
+    session: Session = Depends(get_db),
 ) -> schemas.VoiceAssetView:
     """上传固定音频；可选 0–9 标记为数字素材，或十/百/千/万标记为单位素材。"""
     if digit.strip():
@@ -59,29 +60,31 @@ async def create_asset(
     unit_value = unit.strip() or None
     data = await file.read()
     try:
-        return await run_in_threadpool(service.create_asset, name, data, digit_value, unit_value)
+        return await run_in_threadpool(service.create_asset, session, name, data, digit_value, unit_value)
     except service.InvalidVoiceAssetError as exc:
         raise ApiProblemError(INVALID_VOICE_ASSET, str(exc)) from exc
 
 
 @admin_router.patch("/voice/assets/{asset_id}")
-async def rename_asset(asset_id: str, req: schemas.VoiceAssetRename) -> schemas.VoiceAssetView:
+async def rename_asset(
+    asset_id: str, req: schemas.VoiceAssetRename, session: Session = Depends(get_db)
+) -> schemas.VoiceAssetView:
     try:
-        return await run_in_threadpool(service.rename_asset, asset_id, req.name)
+        return await run_in_threadpool(service.rename_asset, session, asset_id, req.name)
     except service.InvalidVoiceAssetError as exc:
         raise ApiProblemError(INVALID_VOICE_ASSET, str(exc)) from exc
 
 
 @admin_router.delete("/voice/assets/{asset_id}", status_code=204)
-def delete_asset(asset_id: str) -> None:
-    service.delete_asset(asset_id)
+def delete_asset(asset_id: str, session: Session = Depends(get_db)) -> None:
+    service.delete_asset(session, asset_id)
 
 
 @router.get("/voice/assets/{asset_id}.mp3")
-def download_asset(asset_id: str) -> FileResponse:
+def download_asset(asset_id: str, session: Session = Depends(get_db)) -> FileResponse:
     if _ASSET_ID.fullmatch(asset_id) is None:
         raise ApiProblemError(VOICE_ASSET_NOT_FOUND, asset_id)
-    path = service.asset_file(asset_id)
+    path = service.asset_file(session, asset_id)
     return FileResponse(
         path,
         media_type="audio/mpeg",
@@ -120,20 +123,20 @@ async def update_rule(
 async def patch_rule(
     rule_id: int, req: schemas.VoiceRuleEnabledPatch, session: Session = Depends(get_db)
 ) -> schemas.VoiceRuleView:
-    view = await run_in_threadpool(service.set_enabled, rule_id, req.enabled)
+    view = await run_in_threadpool(service.set_enabled, session, rule_id, req.enabled)
     service.schedule_rule_prepare(session, view)
     return view
 
 
 @admin_router.delete("/voice/rules/{rule_id}", status_code=204)
-def delete_rule(rule_id: int) -> None:
-    service.delete_rule(rule_id)
+def delete_rule(rule_id: int, session: Session = Depends(get_db)) -> None:
+    service.delete_rule(session, rule_id)
 
 
 @admin_router.post("/voice/preview")
-async def preview(req: schemas.VoicePreviewRequest) -> schemas.VoicePreviewView:
+async def preview(req: schemas.VoicePreviewRequest, session: Session = Depends(get_db)) -> schemas.VoicePreviewView:
     try:
-        return await run_in_threadpool(service.preview, req)
+        return await run_in_threadpool(service.preview, session, req)
     except service.InvalidVoiceRuleError as exc:
         raise ApiProblemError(INVALID_VOICE_RULE, str(exc)) from exc
 
@@ -146,5 +149,7 @@ async def push_rule(
 
 
 @admin_router.get("/voice/deliveries")
-def list_deliveries(limit: int = Query(default=50, ge=1, le=200)) -> list[schemas.VoiceDeliveryView]:
-    return service.list_deliveries(limit)
+def list_deliveries(
+    limit: int = Query(default=50, ge=1, le=200), session: Session = Depends(get_db)
+) -> list[schemas.VoiceDeliveryView]:
+    return service.list_deliveries(session, limit)

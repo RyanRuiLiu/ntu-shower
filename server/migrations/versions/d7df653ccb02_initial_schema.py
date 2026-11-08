@@ -1,8 +1,8 @@
 """initial schema
 
-Revision ID: a2e69f5bb77a
+Revision ID: d7df653ccb02
 Revises: 
-Create Date: 2026-11-08 15:00:25.498155
+Create Date: 2026-11-08 15:42:24.814026
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from app.db.base import UtcDateTime
 
 # revision identifiers, used by Alembic.
-revision: str = 'a2e69f5bb77a'
+revision: str = 'd7df653ccb02'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -319,11 +319,12 @@ def upgrade() -> None:
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('event_key', sa.String(length=128), nullable=False),
     sa.Column('rule_id', sa.Integer(), nullable=False),
-    sa.Column('device_id', sa.Integer(), nullable=False),
+    sa.Column('device_id', sa.Integer(), nullable=True),
+    sa.Column('device_key', sa.String(length=64), nullable=False),
     sa.Column('door_no', sa.Integer(), nullable=False),
     sa.Column('cert_no', sa.String(length=32), nullable=False),
     sa.Column('event', sa.String(length=32), nullable=False),
-    sa.Column('segments', sa.JSON(), nullable=False),
+    sa.Column('segments', sa.Text(), nullable=False),
     sa.Column('segment_count', sa.Integer(), nullable=False),
     sa.Column('duration_ms', sa.Integer(), nullable=False),
     sa.Column('occurred_at', UtcDateTime(), nullable=False),
@@ -363,7 +364,7 @@ def upgrade() -> None:
     sa.Column('cert_no', sa.String(length=32), nullable=False),
     sa.Column('feature', sa.String(length=32), nullable=False),
     sa.Column('action', sa.String(length=32), nullable=True),
-    sa.Column('outcome', sa.Enum('settled', 'assigned', 'settle-failed', 'assign-waiting', 'assign-failed', 'skipped', name='background_outcome', native_enum=False, create_constraint=True, length=32), nullable=False),
+    sa.Column('outcome', sa.Enum('settled', 'assigned', 'settle-failed', 'assign-waiting', 'assign-failed', 'assign-expired', 'skipped', 'failed', 'rejected', 'no-password', 'not-applicable', name='background_outcome', native_enum=False, create_constraint=True, length=32), nullable=False),
     sa.Column('reason', sa.String(length=128), nullable=True),
     sa.Column('threshold_s', sa.Integer(), nullable=True),
     sa.Column('created_at', UtcDateTime(), nullable=False),

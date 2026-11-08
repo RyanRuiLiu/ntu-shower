@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any
 
@@ -13,7 +14,21 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.clock import format_rfc3339
+from ..core.logging import log_event
 from ..models.identity import Device
+
+
+def _device_pk(session: Session, device_id: str) -> int | None:
+    return session.scalars(select(Device.id).where(Device.device_id == device_id)).one_or_none()
+
+
+def _dumps(value: list[Any] | None) -> str | None:
+    """JSON 列 → 字符串（API 契约里 segments 是 JSON 文本）。"""
+    if value is None:
+        return None
+    return json.dumps(value, ensure_ascii=False)
+
+
 from ..models.voice import VoiceAsset, VoiceDelivery, VoiceRule, VoiceUnit
 
 
@@ -49,11 +64,11 @@ def _delivery_view(row: VoiceDelivery) -> dict[str, Any]:
         "id": int(row.id),
         "event_key": row.event_key,
         "rule_id": int(row.rule_id),
-        "device_id": row.device_id,
+        "device_id": row.device_key,
         "cert_no": row.cert_no,
         "event": row.event,
         "door_no": int(row.door_no),
-        "segments": list(row.segments),
+        "segments": row.segments,
         "segment_count": int(row.segment_count),
         "duration_ms": int(row.duration_ms),
         "occurred_at": format_rfc3339(row.occurred_at),
@@ -95,7 +110,6 @@ def insert_asset(
     digit: int | None,
     duration_ms: int,
     size_bytes: int,
-    created_at: datetime,
 ) -> None:
     session.add(
         VoiceAsset(
@@ -104,7 +118,6 @@ def insert_asset(
             digit=digit,
             duration_ms=duration_ms,
             size_bytes=size_bytes,
-            created_at=created_at,
         )
     )
     session.commit()
@@ -138,9 +151,12 @@ def asset_rows_by_ids(session: Session, asset_ids: list[str]) -> dict[str, dict[
 # ── 单元映射 ──
 
 
-def unit_rows(session: Session) -> dict[str, dict[str, str]]:
-    rows = session.scalars(select(VoiceUnit)).all()
-    return {row.unit: {"unit": row.unit, "asset_id": row.asset_id} for row in rows}
+def unit_rows(session: Session) -> dict[str, dict[str, Any]]:
+    """单位 → 素材完整档案（联表；调用方按素材形状消费，与数字素材同构）。"""
+    rows = session.execute(
+        select(VoiceUnit, VoiceAsset).join(VoiceAsset, VoiceUnit.asset_id == VoiceAsset.asset_id)
+    ).all()
+    return {unit.unit: _asset_view(asset) for unit, asset in rows}
 
 
 def get_unit_by_asset(session: Session, asset_id: str) -> dict[str, str] | None:
@@ -170,7 +186,7 @@ def insert_rule(
     events: list[str],
     time_windows: list[dict[str, Any]],
     exempt: list[str],
-    segments: list[str],
+    segments: list[dict[str, Any]],
     volume: int,
     enabled: bool,
     created_at: datetime,
@@ -200,7 +216,7 @@ def update_rule(
     events: list[str],
     time_windows: list[dict[str, Any]],
     exempt: list[str],
-    segments: list[str],
+    segments: list[dict[str, Any]],
     volume: int,
     enabled: bool,
     updated_at: datetime,
@@ -266,7 +282,7 @@ def claim_delivery(
     door_no: int,
     cert_no: str,
     event: str,
-    segments: list[str],
+    segments: str,
     segment_count: int,
     duration_ms: int,
     occurred_at: datetime,
@@ -277,14 +293,12 @@ def claim_delivery(
     existing = session.scalars(select(VoiceDelivery.id).where(VoiceDelivery.event_key == event_key)).one_or_none()
     if existing is not None:
         return False
-    device_pk = session.scalar(select(Device.id).where(Device.device_id == device_id))
-    if device_pk is None:
-        return False
     session.add(
         VoiceDelivery(
             event_key=event_key,
             rule_id=rule_id,
-            device_id=device_pk,
+            device_id=_device_pk(session, device_id),
+            device_key=device_id,
             door_no=door_no,
             cert_no=cert_no,
             event=event,
@@ -350,3 +364,72 @@ __all__: list[str] = [
     "unit_rows",
     "update_rule",
 ]
+
+
+def matching_rules(
+    session: Session,
+    device_id: str,
+    cert_no: str,
+    event: str,
+    local: datetime,
+) -> list[dict[str, Any]]:
+    """一次事件命中的启用规则，按优先级排序；完全同优先级时拒绝替用户挑一条。
+
+    优先级比较与坏行处置见 modules.voice.service.rule_priority 与 time_rules——
+    本函数只负责查询、命中判定与排序。
+    """
+    from ..modules.voice import time_windows as time_rules
+    from ..modules.voice.priority import rule_priority
+
+    hits: list[tuple[tuple[int, int, int, int, int, int], dict[str, Any]]] = []
+    for row in session.scalars(select(VoiceRule).where(VoiceRule.enabled.is_(True))).all():
+        view = _rule_view(row)
+        if event not in view["events"]:
+            continue
+        devices = view["devices"]
+        certs = view["certs"]
+        if not ("*" in devices or device_id in devices):
+            continue
+        if "*" in certs:
+            if cert_no in view["exempt"]:
+                continue
+        elif cert_no not in certs:
+            continue
+        try:
+            windows = time_rules.parse_json(row.time_windows)
+        except (TypeError, ValueError) as exc:
+            # TypeError 与 ValueError 都来自解析：前者是列内容不是数组（库被外部改坏），
+            # 后者是时段值非法。两者同属"这条规则的时段不可用"，一并跳过并留痕。
+            log_event(
+                "ERROR",
+                "voice.rule-time-invalid",
+                "规则时段格式非法，跳过",
+                rule_id=int(row.id),
+                error=str(exc),
+            )
+            continue
+        if not time_rules.match(windows, local):
+            log_event(
+                "DEBUG",
+                "voice.rule-time-filtered",
+                "规则不在生效时段内",
+                device_id=device_id,
+                event=event,
+                rule_id=int(row.id),
+                local_time=local.isoformat(timespec="minutes"),
+            )
+            continue
+        hits.append((rule_priority(devices, certs, windows), view))
+    hits.sort(key=lambda item: item[0], reverse=True)
+    if len(hits) >= 2 and hits[0][0] == hits[1][0]:
+        log_event(
+            "ERROR",
+            "voice.rule-ambiguous",
+            "同优先级规则同时命中，拒绝随机选择",
+            device_id=device_id,
+            event=event,
+            local_time=local.isoformat(timespec="minutes"),
+            rule_ids=[int(hits[0][1]["id"]), int(hits[1][1]["id"])],
+        )
+        return []
+    return [row for _priority, row in hits]
