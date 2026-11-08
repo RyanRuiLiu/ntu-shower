@@ -70,7 +70,7 @@ MCU 的断电截止是**钟面时刻**——钟被拨动，截止就在真实时
 import asyncio
 import time
 from dataclasses import dataclass
-from sqlite3 import Row
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -79,6 +79,7 @@ from app.core.clock import now_rfc3339, parse_rfc3339, shift_rfc3339, to_local, 
 from app.core.logging import log_event
 from app.core.problems import ApiProblemError
 from app.core.protocol import as_int
+from app.db.base import utcnow
 from app.db.session import session_scope
 from app.modules.config import store as config_store
 from app.modules.config.schemas import ConfigValues
@@ -88,8 +89,7 @@ from app.modules.sessions import routes as sessions_routes
 from app.modules.sessions import service as sessions_service
 from app.modules.sessions.decision import roster
 from app.modules.sessions.schemas import AssignRequest
-
-from . import repository
+from app.persistence import extend_hours as repository
 
 
 #: 拨钟拨走的时长按 `extend_shift_minutes` 现算（秒）：落点必须跨过午夜，才能一次
@@ -186,16 +186,15 @@ def _present(device_id: str, students: dict[str, str]) -> list[tuple[int, str]]:
     ]
 
 
-def _as_shift(row: Row) -> Shift:
-    assignments = tuple(
-        (as_int(item.get("door_no")), str(item.get("cert_no", "")))
-        for item in repository.parse_assignments(row)
-        if isinstance(item, dict)
-    )
+def _as_shift(row: dict[str, Any]) -> Shift:
     return Shift(
         device_id=str(row["device_id"]),
         shifted_at=str(row["shifted_at"]),
-        assignments=assignments,
+        assignments=tuple(
+            (as_int(item.get("door_no")), str(item.get("cert_no", "")))
+            for item in row["assignments"]
+            if isinstance(item, dict)
+        ),
     )
 
 
@@ -216,7 +215,7 @@ def current_shifts(session: Session) -> list[dict[str, object]]:
     尚未放回的人：浴室端收回谁，谁就是走了，不再重新预约。
     """
     rows: list[dict[str, object]] = []
-    for row in repository.list_shifted():
+    for row in repository.list_shifted(session):
         shift = _as_shift(row)
         config = config_store.effective(session, shift.device_id)
         zone = as_int(config["extend_hours_zone_offset_minutes"])
@@ -368,7 +367,7 @@ async def _maybe_correct_clock(session: Session, device_id: str, config: ConfigV
     """
     if not config["time_sync_enabled"]:
         return
-    if repository.get(device_id) is not None:
+    if repository.get(session, device_id) is not None:
         return  # 延长中：偏差是故意的
     if not device_clock.has(device_id):
         return  # 还没有偏差记录（首次 pong 之前），无从判
@@ -414,7 +413,7 @@ async def _maybe_shift(session: Session, device_id: str) -> None:
     config = config_store.effective(session, device_id)
     if not config["extend_hours_enabled"]:
         return
-    if repository.get(device_id) is not None:
+    if repository.get(session, device_id) is not None:
         return  # 已经在延长中
     students = roster(config, "extend_hours_students")
     if not students:
@@ -450,17 +449,17 @@ async def _maybe_shift(session: Session, device_id: str) -> None:
             landing=landing,
         )
         return
-    repository.record(device_id, now_rfc3339(), assignments)
+    repository.record(session, device_id, utcnow(), assignments)
     if not await _roll_power(session, device_id, config, pre_shift=True):
-        repository.clear(device_id)
+        repository.clear(session, device_id)
         log_event("WARNING", "extend-hours.shift-failed", "保护性重布没成功，下一轮再试", device_id=device_id)
         return
     if not await _set_clock(session, device_id, shift_s, zone):
-        repository.clear(device_id)
+        repository.clear(session, device_id)
         log_event("WARNING", "extend-hours.shift-failed", "拨钟没成功，下一轮再试", device_id=device_id)
         return
     # shifted_at 以**拨成功那一刻**为准：恢复条件（被跳过的断电时刻已过）从它起算。
-    repository.record(device_id, now_rfc3339(), assignments)
+    repository.record(session, device_id, utcnow(), assignments)
     log_event("INFO", "extend-hours.shifted", "已延长服务时间", device_id=device_id, students=len(present))
 
 
@@ -478,15 +477,15 @@ def on_frame(device_id: str) -> None:
     还有一种：**已经有一轮在跑**——帧与定时任务都会推这一步，两边同时动手会给同一个人
     下发两条命令。
     """
-    row = repository.get(device_id)
-    if row is None:
-        return
-    shift = _as_shift(row)
-    if not shift.assignments:
-        return
-    if _reassign_tasks:
-        return
     with session_scope() as session:
+        row = repository.get(session, device_id)
+        if row is None:
+            return
+        shift = _as_shift(row)
+        if not shift.assignments:
+            return
+        if _reassign_tasks:
+            return
         students = roster(config_store.effective(session, device_id), "extend_hours_students")
     if not students:
         return
@@ -604,19 +603,9 @@ async def tick_once(session: Session) -> None:
         await _maybe_shift(session, record["device_id"])
         config = config_store.effective(session, record["device_id"])
         await _maybe_correct_clock(session, record["device_id"], config)
-    for row in repository.list_shifted():
+    for row in repository.list_shifted(session):
         shift = _as_shift(row)
-        # 不在册的设备（已从设备表除名）：它不会再上电，残行只会让每轮 tick 白发一条
-        # 命令、记一条 WARNING，永无尽头。清掉，日志留一句，这一环到此为止。
-        if devices_service.get_device(session, shift.device_id) is None:
-            repository.clear(shift.device_id)
-            log_event(
-                "WARNING",
-                "extend-hours.device-gone",
-                "设备已不在册，延长记录清除",
-                device_id=shift.device_id,
-            )
-            continue
+        # 行跟着设备走（外键 CASCADE）：设备除档时这一行随之消失，不会有残行。
         await _advance(session, shift, config_store.effective(session, shift.device_id))
 
 
@@ -674,7 +663,7 @@ async def _restore(session: Session, shift: Shift, config: ConfigValues) -> bool
         str(config["power_on_at"]),
     )
     if rearmed:
-        repository.clear(shift.device_id)
+        repository.clear(session, shift.device_id)
         _forget_failures(shift.device_id)
         log_event("INFO", "extend-hours.restored", "设备钟已调回，节奏已恢复", device_id=shift.device_id)
     else:

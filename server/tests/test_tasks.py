@@ -440,9 +440,26 @@ def test_status_reports_tasks_extending_and_scheduled(
 
 def test_status_includes_the_extending_device(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:
     """延长中的设备是"哪台设备钟是拨快着的"唯一可见面：表里有行，看板就报。"""
-    from app.modules.extend_hours import repository as extend_repository
+    from datetime import UTC, datetime
 
-    extend_repository.record("dev-status-ext", "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": CERT_NO}])
+    from app.db.session import session_scope
+    from app.persistence import devices as devices_store
+    from app.persistence import extend_hours as extend_repository
+
+    shifted_at = datetime(2026, 10, 5, 15, 49, 30, tzinfo=UTC)
+    with session_scope() as session:
+        devices_store.register(
+            session,
+            device_id="dev-status-ext",
+            app_version="0.4.13",
+            version_code=57,
+            os_version="4.4.4",
+            capabilities=[],
+            ip="127.0.0.1",
+            booted_at=shifted_at,
+            seen_at=shifted_at,
+        )
+        extend_repository.record(session, "dev-status-ext", shifted_at, [{"door_no": 3, "cert_no": CERT_NO}])
 
     data = client.get("/api/v1/background-tasks/status", headers=admin_headers).json()
 
