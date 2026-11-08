@@ -1,3 +1,6 @@
+from app.core.db import get_conn
+
+
 def init_tables() -> None:
     get_conn().executescript(
         """
