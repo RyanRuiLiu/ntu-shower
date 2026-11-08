@@ -201,7 +201,6 @@ def test_data_heavy_paths_are_excluded_from_response_storage() -> None:
     assert audit._DATA_HEAVY_PATH.search("/ota/manifest") is None
 
 
-
 def test_prune_removes_only_expired_rows(client: TestClient, admin_headers: dict[str, str]) -> None:
     """保留期之内必须留，之外的可删（NIST SP 800-92）；清理幂等。"""
     assert client.get("/api/v1/ota/releases", headers=admin_headers).status_code == 200
@@ -252,6 +251,7 @@ def test_store_body_replaces_oversize_payload() -> None:
 
     assert audit.store_body("compact") == "compact"
     assert audit.store_body(body).startswith("[JSON 体")
+
 
 @contextmanager
 def _svc() -> "AbstractContextManager[Session]":

@@ -8,10 +8,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from app.core.protocol import JsonObject
 
 from ..core.clock import format_rfc3339
 from ..db.base import utcnow
@@ -38,7 +38,6 @@ def insert_release(
     mandatory: bool,
     force: bool,
     target: str,
-    created_at: datetime,
 ) -> None:
     row = session.scalars(select(OtaRelease).where(OtaRelease.version == version)).one_or_none()
     if row is None:
@@ -50,7 +49,6 @@ def insert_release(
                 mandatory=mandatory,
                 force=force,
                 target=target,
-                created_at=created_at,
             )
         )
     else:
@@ -59,11 +57,10 @@ def insert_release(
         row.mandatory = mandatory
         row.force = force
         row.target = target
-        row.created_at = created_at
     session.commit()
 
 
-def latest_for(session: Session, device_id: str, current_version_code: int) -> dict[str, object] | None:
+def latest_for(session: Session, device_id: str, current_version_code: int) -> JsonObject | None:
     """该设备适用的最新发布；没有则 None。"""
     releases = session.scalars(
         select(OtaRelease).order_by(OtaRelease.version_code.desc(), OtaRelease.created_at.desc())

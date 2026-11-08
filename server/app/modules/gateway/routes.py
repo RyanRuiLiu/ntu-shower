@@ -25,12 +25,12 @@ from ...core.logging import log_event
 from ...core.protocol import JsonObject, as_int, list_of, payload_of, text_of
 from ...db.session import Database
 from ...persistence import device_credentials
+from ...persistence import ota as ota_store
 from ..config import store as config_store
 from ..devices import service as devices_service
 from ..devices.schemas import LINK_OFFLINE, LINK_ONLINE
 from ..doors import service as doors_service
 from ..extend_hours import service as extend_hours_service
-from ..ota import repository as ota_repository
 from ..sessions import scheduler as sessions_scheduler
 from ..sessions import service as sessions_service
 from ..voice import service as voice_service
@@ -180,7 +180,7 @@ async def _accept_hello(ws: WebSocket, token_device_id: str | None) -> tuple[str
     # 安装确认：设备以某 version_code 上线，即证明所有 ≤ 该版本的发布已装在它身上。
     # 必须早于 latest_for，否则本次 hello 仍会推送刚装过的版本，force 发布会形成
     # 下发→下载→安装→重启→再下发的无限重装循环。
-    await run_in_threadpool(ota_repository.mark_installed_upto, device_id, version_code)
+    await _call(ws, ota_store.mark_installed_upto, device_id, version_code)
     # 设备随 hello 带回的上一次断开原因（0.4.35+）：记进 online 事件的 reason
     last_offline_reason = text_of(hello_payload, "last_offline_reason")
     manager.register(device_id, ws)
@@ -209,7 +209,7 @@ async def _accept_hello(ws: WebSocket, token_device_id: str | None) -> tuple[str
                 # 只给设备端消费的键（effective 再按 scope 过滤）：服务端自己的键
                 # 不占设备的解析路径，两条下发的路（这里与 config.update）给的键集要一致。
                 "config": await run_in_threadpool(config_store.device_effective, device_id),
-                "upgrade": await run_in_threadpool(ota_repository.latest_for, device_id, version_code),
+                "upgrade": await _call(ws, ota_store.latest_for, device_id, version_code),
             },
             reply_to=text_of(hello, "id"),
         )

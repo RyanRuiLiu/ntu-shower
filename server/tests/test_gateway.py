@@ -19,7 +19,6 @@ from app.core import db, events
 from app.core.clock import now_rfc3339, rfc3339_ago
 from app.modules.devices.schemas import LINK_OFFLINE, LINK_ONLINE
 from app.modules.doors import service as doors_service
-from app.modules.ota import repository as ota_repository
 
 
 def test_first_frame_must_be_hello(client: TestClient, fresh_db: str) -> None:
@@ -278,7 +277,7 @@ def test_force_release_not_repushed_after_install_confirmation(
         ack = frames.recv_until(ws, "link.hello_ack")
         assert ack["payload"]["upgrade"] is None
 
-    assert ota_repository.is_installed(device_id, "0.3.1") is True
+    assert _ota_call("is_installed", device_id, "0.3.1") is True
 
 
 def test_heartbeat_refreshes_last_seen(client: TestClient, fresh_db: str) -> None:
@@ -670,6 +669,15 @@ def _svc_session() -> "AbstractContextManager[Session]":
 
     with session_scope() as session:
         yield session
+
+
+def _ota_call(name: str, *args: object) -> object:
+    """OTA 持久化直调：短会话。"""
+    from app.persistence import ota as ota_store
+
+    fn = getattr(ota_store, name)
+    with _svc_session() as session:
+        return fn(session, *args)
 
 
 def _skew(device_id: str) -> float:
