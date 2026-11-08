@@ -35,14 +35,14 @@ from . import service
 router = APIRouter(prefix="/api/v1", tags=["sessions"])
 
 
-def _require_assignable_door(device_id: str, door_no: int) -> None:
+def _require_assignable_door(session: Session, device_id: str, door_no: int) -> None:
     """分配前的喷头现态预检。
 
     两种失败分开报：喷头从未上报过是 404（编号不存在），状态不可分配是 409。
     判据在 doors 域——那扇门此刻能不能分配是它的事，这里只负责转成 HTTP 错误；
     喷头编号不硬编码，存在哪些喷头是设备上报的事实。
     """
-    found = doors_service.can_assign(device_id, door_no)
+    found = doors_service.can_assign(session, device_id, door_no)
     if found is None:
         raise ApiProblemError(DOOR_NOT_FOUND, f"喷头 {door_no} 从未被上报")
     assignable, raw_state = found
@@ -50,9 +50,9 @@ def _require_assignable_door(device_id: str, door_no: int) -> None:
         raise ApiProblemError(DOOR_NOT_FREE, f"喷头 {door_no} 当前状态：{raw_state}")
 
 
-def _reject_duplicate_session(device_id: str, cert_no: str) -> None:
+def _reject_duplicate_session(session: Session, device_id: str, cert_no: str) -> None:
     """同一学号已有活跃会话则拒绝。"""
-    door_no = doors_service.open_session_door(device_id, cert_no)
+    door_no = doors_service.open_session_door(session, device_id, cert_no)
     if door_no is not None:
         raise ApiProblemError(DUPLICATE_SESSION, f"该学号已在喷头 {door_no} 有进行中的会话")
 
@@ -71,8 +71,8 @@ def _reject_overload(result: CommandOutcome) -> CommandOutcome:
 async def perform_assign(session: Session, device_id: str, req: AssignRequest) -> CommandOutcome:
     """分配喷头的领域逻辑，所有调用方共用。"""
     require_trusted_online_device(device_id, session)
-    _require_assignable_door(device_id, req.door_no)
-    _reject_duplicate_session(device_id, req.cert_no)
+    _require_assignable_door(session, device_id, req.door_no)
+    _reject_duplicate_session(session, device_id, req.cert_no)
     result = await service.send_command_and_wait(
         session,
         device_id,
@@ -86,7 +86,7 @@ async def perform_assign(session: Session, device_id: str, req: AssignRequest) -
 async def perform_settle(session: Session, device_id: str, req: SettleRequest) -> CommandOutcome:
     """结算的领域逻辑。"""
     require_trusted_online_device(device_id, session)
-    if not doors_service.is_occupied(device_id, req.cert_no):
+    if not doors_service.is_occupied(session, device_id, req.cert_no):
         raise ApiProblemError(NO_OCCUPIED_DOOR, "该学号没有正在使用的喷头")
     result = await service.send_command_and_wait(
         session,

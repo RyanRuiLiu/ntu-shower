@@ -13,13 +13,13 @@ from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from tests import device_link
+from tests import device_link, door_link
 
 from app.core import device_clock, outcomes
 from app.core.clock import now_rfc3339, seconds_between
 from app.core.db import get_conn, write
+from app.db.session import session_scope
 from app.modules.doors import repository as doors_repository
-from app.modules.doors import service as doors_service
 from app.modules.doors.schemas import DoorState
 from app.modules.sessions import scheduler
 from app.modules.sessions import service as sessions_service
@@ -200,6 +200,12 @@ REAL_SEGMENTS: tuple[tuple[object, ...], ...] = (
         "2026-10-03T17:37:16.000Z",
     ),
 )
+
+
+def _read_snapshots(device_id: str) -> list:
+    """直读 _snapshots 的短会话包装。"""
+    with session_scope() as session:
+        return scheduler._snapshots(session, device_id)
 
 
 def _seed() -> None:
@@ -396,7 +402,7 @@ def test_snapshots_walks_real_rows_and_the_live_view(real_rows: None) -> None:
             0,
         ),
     )
-    doors_service.process_snapshot(
+    door_link.feed(
         "dev-1",
         _frame(
             captured_at="2026-10-03T21:57:03.244Z",
@@ -407,7 +413,7 @@ def test_snapshots_walks_real_rows_and_the_live_view(real_rows: None) -> None:
         ),
     )
 
-    found = scheduler._snapshots("dev-1")
+    found = _read_snapshots("dev-1")
 
     assert len(found) == 1
     assert found[0].state is DoorState.WAITING  # 分配了、还没开阀
@@ -432,7 +438,7 @@ def test_a_real_shape_ends_in_a_settle(
 
     monkeypatch.setattr(scheduler.config_store, "effective", lambda _session, _device_id: CONFIG)
     monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
-    doors_service.process_snapshot(
+    door_link.feed(
         "dev-1",
         _frame(
             captured_at="2026-10-03T21:57:03.244Z",

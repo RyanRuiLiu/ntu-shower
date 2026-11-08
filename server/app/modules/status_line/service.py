@@ -76,7 +76,7 @@ def _snapshot(session: Session) -> _Snapshot:
         online = bool(record["online"]) and bool(record["trusted"])
         # 只要现态，不要 `list_doors` 那一路带出的上次使用：状态行数的是 door_live，
         # 每台设备每秒少一次联表查询。
-        live = doors_service.live_doors(device_id)
+        live = doors_service.live_doors(session, device_id)
         free = sum(1 for door in live.values() if door.state == DoorState.FREE.value) if online and live else None
         floors.append(
             {

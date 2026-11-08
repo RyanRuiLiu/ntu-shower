@@ -281,7 +281,7 @@ async def _handle_frame(
         # `finally` 记 offline、推 device.update（网页上看到设备闪断），其他门正在推进的
         # 会话也被打断。
         try:
-            result = await run_in_threadpool(doors_service.process_snapshot, device_id, payload)
+            result = await _call(ws, doors_service.process_snapshot, device_id, payload)
         except Exception as exc:  # noqa: BLE001 —— 原始帧没落下去：不回执，设备保留重发
             log_event(
                 "ERROR",

@@ -1,8 +1,8 @@
 """initial schema
 
-Revision ID: 3fa78e15d5e2
+Revision ID: 005d56b1c684
 Revises: 
-Create Date: 2026-11-08 21:16:46.366715
+Create Date: 2026-11-08 22:44:51.131426
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from app.db.base import UtcDateTime
 
 # revision identifiers, used by Alembic.
-revision: str = '3fa78e15d5e2'
+revision: str = '005d56b1c684'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -230,7 +230,7 @@ def upgrade() -> None:
     sa.Column('device_id', sa.Integer(), nullable=False),
     sa.Column('snapshot_id', sa.String(length=64), nullable=False),
     sa.Column('seq', sa.Integer(), nullable=True),
-    sa.Column('source', sa.Enum('import', 'startup', 'db_watch', name='snapshot_source', native_enum=False, create_constraint=True, length=32), nullable=False),
+    sa.Column('source', sa.String(length=16), nullable=False),
     sa.Column('captured_at', UtcDateTime(), nullable=True),
     sa.Column('received_at', UtcDateTime(), nullable=False),
     sa.Column('doors', sa.JSON(), nullable=False),

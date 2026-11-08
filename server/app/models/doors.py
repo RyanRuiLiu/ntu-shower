@@ -15,7 +15,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db.base import Base, UtcDateTime, enum_column, utcnow
 from ..modules.doors.schemas import DoorState as DoorStateEnum
-from .enums import SnapshotSource
 
 
 class DoorState(Base):
@@ -89,7 +88,9 @@ class DoorSnapshot(Base):
     #: 设备为这一帧生成的标识，用于幂等去重
     snapshot_id: Mapped[str] = mapped_column(String(64))
     seq: Mapped[int | None] = mapped_column(Integer, default=None)
-    source: Mapped[SnapshotSource] = mapped_column(enum_column(SnapshotSource, "snapshot_source"))
+    #: 帧来源原话。原始层不解释：协议外的取值也照记（回执语义要求原话落库），
+    #: 词汇表（models/enums.SnapshotSource）只在派生层做判定时使用。
+    source: Mapped[str] = mapped_column(String(16), default="")
     captured_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
     received_at: Mapped[datetime] = mapped_column(UtcDateTime, index=True)
     #: 帧内全部门的状态原文，不解释

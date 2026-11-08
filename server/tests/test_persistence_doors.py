@@ -74,7 +74,8 @@ def test_snapshot_is_idempotent(session: Session) -> None:
         session, "dev-a", "s1", 1, SnapshotSource.DB_WATCH, T0, "12:00", T0, [{"door_no": 1}]
     )
     assert first is True
-    assert second is False
+    # 重复投递按「已落库」回真：设备在收到 ack 前重发同一条，回执语义不变
+    assert second is True
 
 
 def test_session_and_segment_lifecycle(session: Session) -> None:

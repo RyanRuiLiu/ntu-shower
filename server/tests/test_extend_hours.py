@@ -12,14 +12,13 @@ SKEW_FAST_S 取 -900 模拟"偏差已被测量"的状态：`_local_now` 给出�
 import asyncio
 
 import pytest
-from tests import device_link
+from tests import device_link, door_link
 
 from app.core import actions, device_clock
 from app.core.clock import parse_rfc3339, shift_rfc3339
 from app.core.problems import DOOR_NOT_FREE, ApiProblemError
 from app.db.session import session_scope
 from app.modules.config import store as config_store
-from app.modules.doors import service as doors_service
 from app.modules.extend_hours import service as extend_hours
 from app.modules.sessions.decision import roster
 from app.modules.sessions.schemas import AssignRequest
@@ -84,7 +83,7 @@ def _prepare(
 
 def _with_session(open_time: str, cert_no: str = "2026000001", door_no: int = 3) -> None:
     """造一场未结束的会话：分配了、还没开阀。"""
-    doors_service.process_snapshot(
+    door_link.feed(
         DEVICE,
         _frame(
             captured_at=open_time, card_no=0, cert_no=cert_no, acc_no="7000000001", open_time=open_time, door_no=door_no
@@ -94,7 +93,7 @@ def _with_session(open_time: str, cert_no: str = "2026000001", door_no: int = 3)
 
 def _clear_door(captured_at: str, door_no: int = 3) -> None:
     """浴室端清场：门变空的那一帧（挂着的会话随之关闭）。"""
-    doors_service.process_snapshot(DEVICE, _frame(captured_at=captured_at, card_no=0, cert_no="", door_no=door_no))
+    door_link.feed(DEVICE, _frame(captured_at=captured_at, card_no=0, cert_no="", door_no=door_no))
 
 
 def _record_shift(device_id: str, shifted_at: str, assignments: list[dict[str, object]]) -> None:

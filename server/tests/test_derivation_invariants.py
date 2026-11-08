@@ -12,7 +12,8 @@ from __future__ import annotations
 import itertools
 from typing import Any
 
-from app.core import db
+from tests import door_link
+
 from app.modules.doors import service
 
 
@@ -72,34 +73,31 @@ SEQUENCE = [
 
 def _run(device_id: str) -> None:
     for frame, _ in SEQUENCE:
-        service.process_snapshot(device_id, frame)
+        door_link.feed(device_id, frame)
 
 
 def test_invariants_over_a_frame_sequence(fresh_db: str) -> None:
     """七条不变式，逐条验。"""
     device_id = "dev-invariants"
     _run(device_id)
-    conn = db.get_conn()
-
-    sessions = conn.execute("SELECT * FROM usage_session WHERE device_id = ? ORDER BY id", (device_id,)).fetchall()
+    sessions = door_link.list_sessions(device_id)
     assert sessions, "这一串帧应当产出会话"
 
     # 1 · assigned_at ≤ ended_at
     for row in sessions:
-        if row["ended_at"] is not None:
+        if row["ended_at"]:
             assert row["assigned_at"] <= row["ended_at"], f"起点晚于终点：{dict(row)}"
 
     # 2 · 每一段都落在它所属会话的 [assigned_at, ended_at] 内
-    segments = conn.execute(
-        "SELECT g.opened_at, s.assigned_at, s.ended_at, s.door_no FROM usage_segment g"
-        " JOIN usage_session s ON s.id = g.session_id"
-        " WHERE s.device_id = ? ORDER BY g.id",
-        (device_id,),
-    ).fetchall()
+    segments = [
+        {**seg, "assigned_at": row["assigned_at"], "ended_at": row["ended_at"]}
+        for row in sessions
+        for seg in door_link.list_segments_of(row["id"])
+    ]
     assert segments, "这一串帧应当产出段"
     for seg in segments:
         assert seg["assigned_at"] <= seg["opened_at"], f"开阀早于分配：{dict(seg)}"
-        if seg["ended_at"] is not None:
+        if seg["ended_at"]:
             assert seg["opened_at"] <= seg["ended_at"], f"开阀晚于出门：{dict(seg)}"
 
     # 4 · flow_s ∈ [0, 一天]
@@ -117,10 +115,7 @@ def test_invariants_over_a_frame_sequence(fresh_db: str) -> None:
             assert prev_end <= next_start, f"门{door_no} 的会话区间重叠：{spans}"
 
     # 6 · 事件链闭合：同门有序，前一条 to_state == 后一条 from_state
-    events = conn.execute(
-        "SELECT door_no, from_state, to_state FROM door_state_event WHERE device_id = ? ORDER BY id",
-        (device_id,),
-    ).fetchall()
+    events = door_link.list_events(device_id)
     previous: dict[int, str] = {}
     for event in events:
         door_no = event["door_no"]
@@ -149,10 +144,10 @@ def test_cross_gap_does_not_join_two_baths(fresh_db: str) -> None:
     t0 = "2026-09-30T13:00:00.000Z"
     far = "2026-09-30T14:00:00.000Z"  # 与 t0 相隔 3600 秒 > SESSION_MAX_S
 
-    service.process_snapshot(device_id, _frame([_occupied(2, "丙", in_time=t0)], t0))
-    service.process_snapshot(device_id, _frame([_occupied(2, "丙", in_time=t0)], far))
+    door_link.feed(device_id, _frame([_occupied(2, "丙", in_time=t0)], t0))
+    door_link.feed(device_id, _frame([_occupied(2, "丙", in_time=t0)], far))
 
-    rows = db.get_conn().execute("SELECT * FROM usage_session WHERE device_id = ? ORDER BY id", (device_id,)).fetchall()
+    rows = door_link.list_sessions(device_id)
     # 盲区 3600 秒远超一次占用的物理上限，中间必然发生过我们没看见的释放，所以是**两次会话**：
     # 前一场在我们最后看见它的时刻收尾，本帧另起一场。并成一场的话它永远不结束、起点还
     # 落在几小时前，而"跨盲区那一段"本来就没有任何证据。
@@ -169,15 +164,7 @@ def test_occupant_change_splits_the_account(fresh_db: str) -> None:
     device_id = "dev-inv-swap"
     _run(device_id)
 
-    rows = (
-        db.get_conn()
-        .execute(
-            "SELECT cert_no, assigned_at, ended_at, flow_s FROM usage_session"
-            " WHERE device_id = ? AND door_no = 1 ORDER BY id",
-            (device_id,),
-        )
-        .fetchall()
-    )
+    rows = [row for row in door_link.list_sessions(device_id) if row["door_no"] == 1]
     assert [row["cert_no"] for row in rows] == ["甲", "乙"], "门1 应当是两个人的两笔账"
     assert rows[0]["ended_at"] == rows[1]["assigned_at"], "旧账的终点就是新账的起点"
     assert rows[0]["flow_s"] > 0, "甲那一段确实出过水"
@@ -192,11 +179,7 @@ def test_flow_s_counts_only_observed_segments(fresh_db: str) -> None:
     device_id = "dev-inv-flow"
     _run(device_id)
 
-    rows = (
-        db.get_conn()
-        .execute("SELECT door_no, cert_no, flow_s FROM usage_session WHERE device_id = ? ORDER BY id", (device_id,))
-        .fetchall()
-    )
+    rows = door_link.list_sessions(device_id)
     by_cert = {row["cert_no"]: row["flow_s"] for row in rows}
     assert by_cert["甲"] == 110, "甲那次：第一段 50 秒（12:00:20→12:01:10）+ 第二段 60 秒（12:02:00→12:03:00）"
     assert by_cert["乙"] == 30, "乙那一次：从分配到释放"

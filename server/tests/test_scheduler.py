@@ -18,15 +18,21 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from tests import device_link
+from tests import device_link, door_link
 
 from app.core import device_clock, outcomes, problems
 from app.core.clock import now_rfc3339, parse_rfc3339, rfc3339_ago, shift_rfc3339
-from app.core.db import get_conn
 from app.core.problems import ApiProblemError, Problem
 from app.core.protocol import JsonObject
 from app.db.session import session_scope
-from app.modules.doors import service as doors_service
+
+
+def _read_snapshots(device_id: str) -> list:
+    """直读 _snapshots 的短会话包装：测试直调辅助。"""
+    with session_scope() as session:
+        return scheduler._snapshots(session, device_id)
+
+
 from app.modules.doors.schemas import DoorState
 from app.modules.sessions import scheduler
 from app.modules.sessions import service as sessions_service
@@ -96,6 +102,43 @@ def _clean_scheduler() -> Iterator[None]:
     scheduler._running = False
 
 
+def _seed_session(candidate: Candidate) -> None:
+    """给桩出来的候选会话落真实行：审计行的 session_id 是真外键（usage_sessions）。
+
+    id 显式给、与候选一致；登记设备满足外键；其余列给不参与判定的合法值。
+    未声明库（该用例不落库）直接跳过——审计也不会发生，无需种子。
+    """
+    from datetime import datetime
+
+    from sqlalchemy import text
+    from sqlalchemy.exc import OperationalError
+
+    from app.models.usage import UsageSession
+    from app.persistence import doors as doors_store
+
+    with session_scope() as session:
+        try:
+            session.execute(text("SELECT 1 FROM devices LIMIT 1"))
+        except OperationalError:
+            return
+    device_link.register_trusted_device(candidate.device_id)
+    with session_scope() as session:
+        assigned = datetime.fromisoformat(candidate.assigned_at.replace("Z", "+00:00"))
+        if session.get(UsageSession, candidate.session_id) is None:
+            session.add(
+                UsageSession(
+                    id=candidate.session_id,
+                    device_id=doors_store._device_pk(session, candidate.device_id),
+                    door_no=candidate.door_no,
+                    cert_no=candidate.cert_no,
+                    assigned_at=assigned,
+                    assigned_source="observed",
+                    last_seen_at=assigned,
+                )
+            )
+            session.commit()
+
+
 def _prepare(
     monkeypatch: pytest.MonkeyPatch,
     candidates: list[Candidate],
@@ -109,7 +152,12 @@ def _prepare(
     验一层。
     """
     monkeypatch.setattr(scheduler.config_store, "effective", lambda _session, _device_id: CONFIG)
-    monkeypatch.setattr(scheduler, "_snapshots", lambda _device_id: candidates)
+    monkeypatch.setattr(scheduler, "_snapshots", lambda _session, _device_id: candidates)
+    # WAITING 无条件落种子：它只是桩（_snapshots 只认 candidates），但手动 _fire 它的
+    # 用例（如"会话已没了"）的审计行同样要过真外键——FK 完整与判定桩是两件事。
+    _seed_session(WAITING)
+    for candidate in candidates:
+        _seed_session(candidate)
     calls = sent if sent is not None else []
 
     async def fake_settle(_session: object, device_id: str, req: SettleRequest) -> CommandOutcome:
@@ -218,11 +266,12 @@ def test_closed_sessions_are_forgotten_without_touching_other_devices(monkeypatc
     而会话 id 是全库自增的，所以**只清本设备的**——否则 B 设备的帧会把 A 设备的记录一起
     清掉，那一场就会被重复动手。
     """
-    monkeypatch.setattr(scheduler.doors_service, "open_sessions", lambda _device_id: [])
+    monkeypatch.setattr(scheduler.doors_service, "open_sessions", lambda _session, _device_id: [])
     scheduler._attempted.add(("dev-1", 7, FEATURE_RENEW_WAIT))
     scheduler._attempted.add(("dev-2", 8, FEATURE_RENEW_WAIT))
 
-    scheduler._forget_closed_sessions("dev-1")
+    with session_scope() as session:
+        scheduler._forget_closed_sessions(session, "dev-1")
 
     assert ("dev-1", 7, FEATURE_RENEW_WAIT) not in scheduler._attempted
     assert ("dev-2", 8, FEATURE_RENEW_WAIT) in scheduler._attempted
@@ -310,8 +359,7 @@ def test_settle_lands_in_the_audit_table_with_its_own_fields(monkeypatch: pytest
     row = rows[0]
     assert row["feature"] == FEATURE_RENEW_WAIT
     assert row["action"] == "session.settle"
-    # doors 域未切（第二批）：旧表会话 id 引用新表无对应行，过渡期审计行置 None
-    assert row["session_id"] is None
+    assert row["session_id"] == WAITING.session_id
     assert row["cert_no"] == WAITING.cert_no
     assert row["threshold_s"] == THRESHOLDS[FEATURE_RENEW_WAIT]
     assert row["reason"] is None  # 成了就有没理由要说
@@ -423,6 +471,7 @@ def test_domain_rejections_are_split_into_normal_and_noteworthy(
     分错的两个方向都坏：把正常当失败会刷满告警，把失败当正常就没人知道这次的维护没做成。
     所以这条**验日志级别**，而不是重述那两个集合——后者会因为错误的原因通过。
     """
+    _seed_session(WAITING)  # 审计行的 session_id 是真外键
 
     def problem(code: str) -> ApiProblemError:
         return ApiProblemError(Problem(code, 409, "x"), "细节")
@@ -459,6 +508,7 @@ def test_assign_is_sent_exactly_once(monkeypatch: pytest.MonkeyPatch, fresh_db: 
 def _arm(monkeypatch: pytest.MonkeyPatch, **overrides: object) -> None:
     scheduler.start()
     _prepare(monkeypatch, [])
+    _seed_session(WAITING)
     fields: dict[str, object] = {
         "device_id": "dev-1",
         "door_no": 3,
@@ -677,9 +727,9 @@ def _frame(captured_at: str = "2026-10-05T11:00:00.000Z", **door: object) -> Jso
 
 def test_snapshots_reads_only_the_derived_layer(fresh_db: str) -> None:
     """取数只走 `usage_session` + `door_live`，原始帧一概不读。"""
-    doors_service.process_snapshot("dev-1", _frame(card_no=1001, open_time="2026-10-05T11:00:00.000Z"))
+    door_link.feed("dev-1", _frame(card_no=1001, open_time="2026-10-05T11:00:00.000Z"))
 
-    found = scheduler._snapshots("dev-1")
+    found = _read_snapshots("dev-1")
 
     assert len(found) == 1
     assert found[0].state is DoorState.WAITING
@@ -692,41 +742,41 @@ def test_snapshots_reads_only_the_derived_layer(fresh_db: str) -> None:
 
 def test_snapshots_skips_a_session_without_a_live_row(fresh_db: str) -> None:
     """会话还在、门的现态却没了：不判，等下一帧。"""
-    doors_service.process_snapshot("dev-1", _frame(card_no=1001, open_time="2026-10-05T11:00:00.000Z"))
-    get_conn().execute("DELETE FROM door_live WHERE device_id = ?", ("dev-1",))
+    door_link.feed("dev-1", _frame(card_no=1001, open_time="2026-10-05T11:00:00.000Z"))
+    door_link.clear_live("dev-1")
 
-    assert scheduler._snapshots("dev-1") == []
+    assert _read_snapshots("dev-1") == []
 
 
 def test_run_started_at_is_the_first_session_of_the_run(fresh_db: str) -> None:
     """这一串的起点是学生自己那一次分配——续出来的每一场都不该把它往后挪。"""
-    doors_service.process_snapshot(
+    door_link.feed(
         "dev-1", _frame(captured_at="2026-10-05T11:00:00.000Z", card_no=1001, open_time="2026-10-05T11:00:00.000Z")
     )
-    assert scheduler._snapshots("dev-1")[0].run_started_at == "2026-10-05T11:00:00.000Z"
+    assert _read_snapshots("dev-1")[0].run_started_at == "2026-10-05T11:00:00.000Z"
 
     # 我们自己续出来的那一场：门空了、紧接着又被分配回同一个喷头
-    doors_service.process_snapshot("dev-1", _frame(captured_at="2026-10-05T11:05:00.000Z"))
-    doors_service.process_snapshot(
+    door_link.feed("dev-1", _frame(captured_at="2026-10-05T11:05:00.000Z"))
+    door_link.feed(
         "dev-1", _frame(captured_at="2026-10-05T11:05:04.000Z", card_no=1001, open_time="2026-10-05T11:05:04.000Z")
     )
 
     # 换了一场，起点仍是第一场——时长上限从第一场算起，挪了它这个上限就永远到不了
-    assert scheduler._snapshots("dev-1")[0].run_started_at == "2026-10-05T11:00:00.000Z"
+    assert _read_snapshots("dev-1")[0].run_started_at == "2026-10-05T11:00:00.000Z"
 
 
 def test_run_started_at_moves_after_a_real_break(fresh_db: str) -> None:
     """喷头空着超过 300 秒，说明那个人的占用真的结束了——计时从头开始。"""
-    doors_service.process_snapshot(
+    door_link.feed(
         "dev-1", _frame(captured_at="2026-10-05T11:00:00.000Z", card_no=1001, open_time="2026-10-05T11:00:00.000Z")
     )
-    doors_service.process_snapshot("dev-1", _frame(captured_at="2026-10-05T11:05:00.000Z"))
+    door_link.feed("dev-1", _frame(captured_at="2026-10-05T11:05:00.000Z"))
     # 中间空了一小时才被重新分配
-    doors_service.process_snapshot(
+    door_link.feed(
         "dev-1", _frame(captured_at="2026-10-05T12:05:00.000Z", card_no=1001, open_time="2026-10-05T12:05:00.000Z")
     )
 
-    assert scheduler._snapshots("dev-1")[0].run_started_at == "2026-10-05T12:05:00.000Z"
+    assert _read_snapshots("dev-1")[0].run_started_at == "2026-10-05T12:05:00.000Z"
 
 
 # ── 接缝：一帧进来，到命令出、再到补上分配 ────────────────────────────────
@@ -774,10 +824,10 @@ def test_a_frame_ends_in_a_settle_then_an_assign(
     monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
 
     # 一小时前分配、一直没开阀：预约续期的 270 秒早已过点
-    doors_service.process_snapshot("dev-1", _frame(captured_at=_ago(3600), card_no=1001, open_time=_ago(3600)))
+    door_link.feed("dev-1", _frame(captured_at=_ago(3600), card_no=1001, open_time=_ago(3600)))
 
     async def body() -> None:
-        session_id = scheduler._snapshots("dev-1")[0].session_id
+        session_id = _read_snapshots("dev-1")[0].session_id
         scheduler.start()
         scheduler.on_frame("dev-1")  # 网关的挂钩点
         await _let_the_loop_run()
@@ -789,7 +839,7 @@ def test_a_frame_ends_in_a_settle_then_an_assign(
         assert ("dev-1", session_id, FEATURE_RENEW_WAIT) in scheduler._attempted
 
         # 门被释放的那一帧：会话收尾，待分配接上
-        doors_service.process_snapshot("dev-1", _frame(captured_at=_ago(3000)))
+        door_link.feed("dev-1", _frame(captured_at=_ago(3000)))
         scheduler.on_frame("dev-1")
         await _let_the_loop_run()
 
@@ -813,7 +863,7 @@ def test_the_same_session_is_settled_only_once(
 
     monkeypatch.setattr(scheduler.config_store, "effective", lambda _session, _device_id: CONFIG)
     monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
-    doors_service.process_snapshot("dev-1", _frame(captured_at=_ago(3600), card_no=1001, open_time=_ago(3600)))
+    door_link.feed("dev-1", _frame(captured_at=_ago(3600), card_no=1001, open_time=_ago(3600)))
 
     async def body() -> None:
         scheduler.start()
@@ -843,7 +893,7 @@ def test_auto_settle_only_settles_and_never_reassigns(
 
     monkeypatch.setattr(scheduler.config_store, "effective", lambda _session, _device_id: CONFIG)
     monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
-    doors_service.process_snapshot(
+    door_link.feed(
         "dev-1", _frame(captured_at=_ago(120), card_no=1001, open_time=_ago(300), close_time=_ago(120), bath_time_s=120)
     )
 
@@ -875,9 +925,7 @@ def test_a_student_outside_the_roster_is_never_touched(
 
     monkeypatch.setattr(scheduler.config_store, "effective", lambda _session, _device_id: CONFIG)
     monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
-    doors_service.process_snapshot(
-        "dev-1", _frame(captured_at=_ago(3600), card_no=1001, cert_no="2026000006", open_time=_ago(3600))
-    )
+    door_link.feed("dev-1", _frame(captured_at=_ago(3600), card_no=1001, cert_no="2026000006", open_time=_ago(3600)))
 
     async def body() -> None:
         scheduler.start()

@@ -159,7 +159,7 @@ def test_unparsable_snapshot_is_acknowledged_and_recorded(
         ack = frames.recv_until(ws, "door.snapshot_ack")
         assert ack["payload"]["snapshot_id"] == "bad-1"
 
-    rows = db.get_conn().execute("SELECT doors FROM door_snapshot WHERE snapshot_id = ?", ("bad-1",)).fetchall()
+    rows = db.get_conn().execute("SELECT doors FROM door_snapshots WHERE snapshot_id = ?", ("bad-1",)).fetchall()
     assert [row["doors"] for row in rows] == ["[]"]
 
 

@@ -173,16 +173,16 @@ def _local_now(device_id: str, zone_offset_minutes: int) -> str | None:
     return shift_rfc3339(device_now, zone_offset_minutes * 60)
 
 
-def _present(device_id: str, students: dict[str, str]) -> list[tuple[int, str]]:
+def _present(session: Session, device_id: str, students: dict[str, str]) -> list[tuple[int, str]]:
     """这台设备上此刻还占着喷头的名单里的人：(喷头号, 学号)。
 
     用**未结束的会话**当"占用"，而不是读喷头现态：占着的正是会话，而"重新分配"要的
     也是会话的主人。两者在正常路径上一致，而会话是更贴切的那个。
     """
     return [
-        (session.door_no, session.cert_no)
-        for session in doors_service.open_sessions(device_id)
-        if session.cert_no in students
+        (item.door_no, item.cert_no)
+        for item in doors_service.open_sessions(session, device_id)
+        if item.cert_no in students
     ]
 
 
@@ -222,7 +222,7 @@ def current_shifts(session: Session) -> list[dict[str, object]]:
         shift_local = to_local(shift.shifted_at, zone)
         now_local = to_local(now_rfc3339(), zone)
         past_midnight = shift_local is not None and now_local is not None and now_local.date() > shift_local.date()
-        idle = not doors_service.open_sessions(shift.device_id)
+        idle = not doors_service.open_sessions(session, shift.device_id)
         pending = [
             {"door_no": door_no, "cert_no": cert_no}
             for door_no, cert_no in shift.assignments
@@ -371,7 +371,7 @@ async def _maybe_correct_clock(session: Session, device_id: str, config: ConfigV
         return  # 延长中：偏差是故意的
     if not device_clock.has(device_id):
         return  # 还没有偏差记录（首次 pong 之前），无从判
-    if doors_service.open_sessions(device_id):
+    if doors_service.open_sessions(session, device_id):
         return  # 有人占用：校钟的跳变会清掉会话，等人走再校
     skew = device_clock.get(device_id)  # 服务端 − 设备（秒）
     threshold = as_int(config["time_sync_threshold_s"])
@@ -422,7 +422,7 @@ async def _maybe_shift(session: Session, device_id: str) -> None:
         _local_now(device_id, as_int(config["extend_hours_zone_offset_minutes"])), str(config["extend_hours_at"])
     ):
         return
-    present = _present(device_id, students)
+    present = _present(session, device_id, students)
     if not present:
         return  # 没人在用，不必拨
 
@@ -527,7 +527,7 @@ async def _reassign(session: Session, shift: Shift, students: dict[str, str]) ->
     """
     device_id = shift.device_id
     # 按学号索引现占：判"已成立"要看会话的**建立时刻**，而 `open_session_door` 只给门号。
-    occupying = {session.cert_no: session for session in doors_service.open_sessions(device_id)}
+    occupying = {item.cert_no: item for item in doors_service.open_sessions(session, device_id)}
     for door_no, cert_no in shift.assignments:
         password = students.get(cert_no)
         if password is None:
@@ -623,11 +623,11 @@ async def _advance(session: Session, shift: Shift, config: ConfigValues) -> None
     students = roster(config, "extend_hours_students")
     if students:
         await _reassign(session, shift, students)
-    if _restore_due(shift, config):
+    if _restore_due(session, shift, config):
         await _restore(session, shift, config)
 
 
-def _restore_due(shift: Shift, config: ConfigValues) -> bool:
+def _restore_due(session: Session, shift: Shift, config: ConfigValues) -> bool:
     """可不可以拨回了：被跳过的断电时刻已过，且设备上无未结束会话。
 
     两个条件缺一不可——时刻没到，延长还在服务窗口里；有会话在（预约未开阀的、
@@ -640,7 +640,7 @@ def _restore_due(shift: Shift, config: ConfigValues) -> bool:
         return False
     if now_local.date() <= shift_local.date():
         return False  # 午夜未过：敌对窗口的尾巴还在
-    return not doors_service.open_sessions(shift.device_id)
+    return not doors_service.open_sessions(session, shift.device_id)
 
 
 async def _restore(session: Session, shift: Shift, config: ConfigValues) -> bool:

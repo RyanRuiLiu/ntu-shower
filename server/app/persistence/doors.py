@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from ..core.clock import format_rfc3339, seconds_between
 from ..models.doors import DoorSnapshot, DoorState, DoorStateEvent
-from ..models.enums import ObservedSpan, SegmentSource, SnapshotSource
+from ..models.enums import ObservedSpan, SegmentSource
 from ..models.identity import Device
 from ..models.usage import UsageSegment, UsageSession
 from ..modules.doors.schemas import OCCUPIED_STATES, DoorView
@@ -166,13 +166,18 @@ def insert_snapshot(
     device_id: str,
     snapshot_id: str,
     seq: int | None,
-    source: SnapshotSource,
+    source: str,
     captured_at: datetime | None,
     device_clock: str | None,
     received_at: datetime,
     doors: list[dict[str, Any]],
 ) -> bool:
-    """落一帧原始数据。同一 `snapshot_id` 重复投递只留第一份，返回是否真的写入。"""
+    """落一帧原始数据。返回「此刻是否已在库中」。
+
+    同一 `snapshot_id` 重复投递只留第一份，但重复**算已落库**（True）：设备在收到 ack
+    前会重发同一条，重发与首投对回执是同一件事，照常让设备清发件箱。False 只留给
+    「帧没有落下去」一种情形——设备不在册（外键落不了行），调用方据此扣下回执。
+    """
     device_pk = _device_pk(session, device_id)
     if device_pk is None:
         return False
@@ -180,7 +185,7 @@ def insert_snapshot(
         select(DoorSnapshot.id).where(DoorSnapshot.device_id == device_pk, DoorSnapshot.snapshot_id == snapshot_id)
     ).one_or_none()
     if exists is not None:
-        return False
+        return True
     session.add(
         DoorSnapshot(
             device_id=device_pk,
@@ -520,6 +525,62 @@ def latest_usage_by_door(session: Session) -> dict[tuple[str, int], dict[str, An
     }
 
 
+def list_sessions(session: Session, device_id: str) -> list[dict[str, Any]]:
+    """这台设备的全部占用会话，按 id 升序（读模型与统计/核对共用）。"""
+    device_pk = _device_pk(session, device_id)
+    if device_pk is None:
+        return []
+    rows = session.scalars(
+        select(UsageSession).where(UsageSession.device_id == device_pk).order_by(UsageSession.id)
+    ).all()
+    return [_session_view(row, device_id) for row in rows]
+
+
+def list_events(session: Session, device_id: str, door_no: int | None = None) -> list[dict[str, Any]]:
+    """这台设备（可再按门过滤）的状态迁移流水，按 id 升序。"""
+    device_pk = _device_pk(session, device_id)
+    if device_pk is None:
+        return []
+    statement = select(DoorStateEvent).where(DoorStateEvent.device_id == device_pk)
+    if door_no is not None:
+        statement = statement.where(DoorStateEvent.door_no == door_no)
+    rows = session.scalars(statement.order_by(DoorStateEvent.id)).all()
+    return [
+        {
+            "door_no": int(row.door_no),
+            "from_state": str(row.from_state),
+            "to_state": str(row.to_state),
+            "card_no": int(row.card_no),
+            "cert_no": str(row.cert_no),
+            "bath_time_s": int(row.bath_time_s),
+            "occurred_at": _ts(row.occurred_at),
+        }
+        for row in rows
+    ]
+
+
+def list_snapshots(session: Session, device_id: str) -> list[dict[str, Any]]:
+    """这台设备的原始帧：设备说的原话按帧 id 留底，doors 是落库时的原样载荷。"""
+    device_pk = _device_pk(session, device_id)
+    if device_pk is None:
+        return []
+    rows = session.scalars(
+        select(DoorSnapshot).where(DoorSnapshot.device_id == device_pk).order_by(DoorSnapshot.id)
+    ).all()
+    return [
+        {
+            "snapshot_id": str(row.snapshot_id),
+            "seq": int(row.seq) if row.seq is not None else None,
+            "source": str(row.source),
+            "captured_at": _ts(row.captured_at),
+            "received_at": _ts(row.received_at),
+            "device_clock": str(row.device_clock or ""),
+            "doors": row.doors,
+        }
+        for row in rows
+    ]
+
+
 def list_doors(session: Session, device_id: str | None = None) -> list[DoorView]:
     """喷头现态列表，带上次完整使用的时刻、时长与凭证。"""
     statement = select(DoorState, Device.device_id).join(Device, Device.id == DoorState.device_id)
@@ -568,7 +629,10 @@ __all__: list[str] = [
     "latest_segment_opened_at",
     "latest_usage_by_door",
     "list_doors",
+    "list_events",
     "list_open_sessions_of",
+    "list_sessions",
+    "list_snapshots",
     "open_segment",
     "open_session",
     "run_started_at",

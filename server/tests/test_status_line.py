@@ -5,11 +5,10 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from tests import device_link, frames
+from tests import device_link, door_link, frames
 
 from app.core.connections import manager
 from app.modules.devices import service as devices_service
-from app.modules.doors import service as doors_service
 from app.modules.status_line import service as status_line_service
 
 
@@ -38,7 +37,7 @@ def _door(door_no: int, **overrides: object) -> dict[str, Any]:
 
 
 def _report(device_id: str, doors: list[dict[str, Any]]) -> None:
-    doors_service.process_snapshot(device_id, {"snapshot_id": str(uuid.uuid4()), "source": "db_watch", "doors": doors})
+    door_link.feed(device_id, {"snapshot_id": str(uuid.uuid4()), "source": "db_watch", "doors": doors})
 
 
 def _register(device_id: str, name: str, *, trusted: bool = True) -> None:
