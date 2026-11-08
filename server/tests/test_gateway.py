@@ -282,7 +282,6 @@ def test_force_release_not_repushed_after_install_confirmation(
 
 def test_heartbeat_refreshes_last_seen(client: TestClient, fresh_db: str) -> None:
     """心跳刷新 last_seen_at；先改成显然过期的值再验证推进。"""
-    from app.core.db import get_conn
     from app.modules.devices import service as devices_service
 
     device_id = "dev-heartbeat"
@@ -290,9 +289,12 @@ def test_heartbeat_refreshes_last_seen(client: TestClient, fresh_db: str) -> Non
         ws.send_text(frames.hello_frame(device_id))
         frames.recv_until(ws, "link.hello_ack")
 
-        conn = get_conn()
-        conn.execute("UPDATE device SET last_seen_at = ? WHERE device_id = ?", ("2020-01-01T00:00:00.000Z", device_id))
-        conn.commit()
+        from datetime import UTC, datetime
+
+        from app.persistence import devices as devices_store
+
+        with _svc_session() as session:
+            devices_store.touch_seen(session, device_id, datetime(2020, 1, 1, tzinfo=UTC))
 
         ws.send_text(frames.frame("link.ping", {"sender_time": "2026-09-30T12:00:01.000Z"}))
         frames.recv_until(ws, "link.pong")

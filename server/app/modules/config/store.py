@@ -14,7 +14,6 @@ from typing import NoReturn
 
 from sqlalchemy.orm import Session
 
-from app.core.db import get_conn, write
 from app.persistence import config as config_store_persistence
 
 from .schemas import ConfigSpecView, ConfigValues
@@ -48,27 +47,6 @@ class InvalidConfigError(ValueError):
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
         self.reason = reason
-
-
-def init_tables() -> None:
-    get_conn().executescript(
-        """
-        CREATE TABLE IF NOT EXISTS global_config (
-            id       INTEGER PRIMARY KEY CHECK (id = 1),
-            revision INTEGER NOT NULL,
-            config   TEXT    NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS device_config (
-            device_id TEXT    PRIMARY KEY,
-            revision  INTEGER NOT NULL,
-            config    TEXT    NOT NULL
-        );
-        """
-    )
-    # config 存的是与默认值的差异，空对象即全部沿用默认，无需预置
-    row = get_conn().execute("SELECT revision FROM global_config WHERE id = 1").fetchone()
-    if row is None:
-        write("INSERT INTO global_config (id, revision, config) VALUES (1, 1, '{}')")
 
 
 def _reject(reason: str) -> NoReturn:

@@ -30,7 +30,6 @@ from typing_extensions import TypedDict
 
 from app.db.base import utcnow
 
-from . import db
 from .config import settings
 from .logging import log_event, request_id_var, trace_id_var
 
@@ -73,38 +72,6 @@ _AUDITED_PREFIXES = ("/api/v1", "/ota/manifest")
 _TRACEPARENT = re.compile(r"^[0-9a-f]{2}-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$", re.IGNORECASE)
 
 PRUNE_INTERVAL_S = 6 * 3600.0
-
-
-def init_tables() -> None:
-    db.get_conn().executescript(
-        """
-        CREATE TABLE IF NOT EXISTS api_call (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            kind          TEXT    NOT NULL,
-            requested_at  TEXT    NOT NULL,
-            request_id    TEXT    NOT NULL,
-            trace_id      TEXT    NOT NULL,
-            actor_kind    TEXT    NOT NULL,
-            actor         TEXT    NOT NULL,
-            client_ip     TEXT,
-            user_agent    TEXT,
-            method        TEXT    NOT NULL,
-            path          TEXT    NOT NULL,
-            query         TEXT,
-            request_body  TEXT,
-            status_code   INTEGER NOT NULL,
-            duration_ms   INTEGER NOT NULL,
-            device_id     TEXT,
-            problem_type  TEXT,
-            detail        TEXT,
-            response_body TEXT
-        );
-        CREATE INDEX IF NOT EXISTS idx_api_call_requested
-            ON api_call(requested_at);
-        CREATE INDEX IF NOT EXISTS idx_api_call_device
-            ON api_call(device_id, requested_at);
-        """
-    )
 
 
 def resolve_trace_id(traceparent: str | None) -> str:

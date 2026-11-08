@@ -101,17 +101,8 @@ def _schema_template(tmp_path_factory: pytest.TempPathFactory) -> str:
     每用例执行一遍 init_schema 要 15 毫秒以上，而结果完全相同；复制一个已
     checkpoint 的空库文件是亚毫秒级操作，隔离性不变（每个用例仍是独立文件）。
     """
-    from app.main import init_schema
-
     base = tmp_path_factory.mktemp("schema-template")
     path = str(base / "template.db")
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(config_module.settings, "db_path", path)
-        mp.setattr(config_module.settings, "ota_dir", str(base / "ota_releases"))
-        init_schema()
-    # 过渡期：新数据层的表与旧表并存于同一个测试库。
-    # 已迁移的模块跑新表，未迁移的仍跑旧表，两侧互不干扰；生产上不会这样并存，
-    # 这里只是让切换可以逐域进行、每一步都有完整测试覆盖。
     from app.db.engine import create_db_engine
     from app.models import Base
 

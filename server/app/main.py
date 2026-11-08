@@ -44,22 +44,16 @@ from .db.base import utcnow
 from .db.session import Database
 from .modules.access.routes import admin_router as identities_admin_router
 from .modules.access.routes import router as identity_router
-from .modules.audit import repository as command_audit_repository
 from .modules.audit.routes import admin_router as audit_admin_router
 from .modules.bridge.routes import admin_router as bridge_admin_router
 from .modules.bridge.routes import router as bridge_router
-from .modules.config import store as config_store
 from .modules.config.routes import admin_router as config_admin_router
-from .modules.devices import repository as devices_repository
 from .modules.devices.routes import admin_router as devices_admin_router
 from .modules.devices.routes import router as devices_router
-from .modules.doors import repository as doors_repository
 from .modules.doors.routes import router as doors_router
-from .modules.extend_hours import repository as extend_hours_repository
 from .modules.extend_hours import service as extend_hours_service
 from .modules.freelist.routes import router as freelist_router
 from .modules.gateway.routes import router as gateway_router
-from .modules.ota import repository as ota_repository
 from .modules.ota.routes import device_router as ota_device_router
 from .modules.ota.routes import router as ota_router
 from .modules.sessions import scheduler as sessions_scheduler
@@ -68,7 +62,6 @@ from .modules.stats.routes import router as stats_router
 from .modules.status_line import service as status_line_service
 from .modules.tasks.routes import admin_router as tasks_admin_router
 from .modules.tasks.routes import router as tasks_router
-from .modules.voice import repository as voice_repository
 from .modules.voice.routes import admin_router as voice_admin_router
 from .modules.voice.routes import router as voice_router
 from .modules.water.routes import router as water_router
@@ -84,23 +77,6 @@ class HealthStatus(TypedDict):
     status: str
     name: str
     version: str
-
-
-def init_schema() -> None:
-    """建全部表。
-
-    各领域仓储持有自己的表结构，这里是唯一的装配点：应用启动与测试夹具都调它。
-    全部用 CREATE TABLE IF NOT EXISTS，重复调用没有副作用。
-    """
-    db.init_db()
-    devices_repository.init_tables()
-    doors_repository.init_tables()
-    ota_repository.init_tables()
-    config_store.init_tables()
-    audit.init_tables()
-    command_audit_repository.init_tables()
-    extend_hours_repository.init_tables()
-    voice_repository.init_tables()
 
 
 def _abort_pending_commands() -> None:
@@ -120,7 +96,7 @@ def _abort_pending_commands() -> None:
 def create_app() -> FastAPI:
     # 先装配日志：此后的初始化失败才有痕迹可查
     configure_logging(settings.log_level)
-    init_schema()
+    db.init_db()  # 触发连接创建并校验库可写；表结构归 Alembic（compose 的 migrate 先于应用启动）
     Path(settings.ota_dir).mkdir(parents=True, exist_ok=True)
     Path(settings.voice_dir).mkdir(parents=True, exist_ok=True)
 
