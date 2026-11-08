@@ -32,9 +32,7 @@ def test_bridge_requires_trusted_online_admin(
     """开桥仅管理面可触发，且设备必须存在、已信任、在线。"""
     assert client.post("/api/v1/devices/dev-nobody/bridge/open", headers=admin_headers).status_code == 404
 
-    from app.modules.devices import repository as devices_repository
-
-    devices_repository.register(DEVICE_ID, "0.4.13", 57, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
+    device_link.register_device_raw(DEVICE_ID)
     assert client.post(f"/api/v1/devices/{DEVICE_ID}/bridge/open", headers=admin_headers).status_code == 403
 
     assert client.post(f"/api/v1/devices/{DEVICE_ID}/bridge/open").status_code == 401

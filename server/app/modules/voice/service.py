@@ -20,6 +20,8 @@ from pathlib import Path
 from sqlite3 import Row
 from typing import NoReturn
 
+from sqlalchemy.orm import Session
+
 from app.core import actions
 from app.core.clock import now_rfc3339, parse_rfc3339, to_local
 from app.core.logging import log_event, trace_id_var
@@ -419,11 +421,11 @@ def _exempt_json(cert_nos: list[str], exemptions: list[str]) -> str:
     return json.dumps(exemptions, ensure_ascii=False)
 
 
-def _require_known_devices(device_ids: list[str]) -> None:
+def _require_known_devices(session: Session, device_ids: list[str]) -> None:
     for device_id in device_ids:
         if device_id == schemas.WILDCARD:
             continue
-        if devices_service.get_device(device_id) is None:
+        if devices_service.get_device(session, device_id) is None:
             raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {device_id} 不在档案里")
 
 
@@ -475,6 +477,7 @@ def _duplicate_rule(
 
 
 def _normalize_rule(
+    session: Session,
     devices: list[str],
     certs: list[str],
     events: list[DoorEventKind],
@@ -485,7 +488,7 @@ def _normalize_rule(
 ) -> tuple[list[str], list[str], list[DoorEventKind], str, list[schemas.Segment], str]:
     normalized_devices = _normalized_targets(devices, "设备")
     normalized_certs = _normalized_targets(certs, "学号")
-    _require_known_devices(normalized_devices)
+    _require_known_devices(session, normalized_devices)
     normalized_events = list(dict.fromkeys(events))
     if not normalized_events:
         _reject("至少选择一个事件")
@@ -497,9 +500,9 @@ def _normalize_rule(
     return normalized_devices, normalized_certs, normalized_events, windows_json, segments, exempt
 
 
-def create_rule(req: schemas.VoiceRuleCreate) -> schemas.VoiceRuleView:
+def create_rule(session: Session, req: schemas.VoiceRuleCreate) -> schemas.VoiceRuleView:
     devices, certs, events, windows_json, segments, exempt = _normalize_rule(
-        req.devices, req.certs, req.events, req.time_windows, req.segments, req.exempt_cert_nos, None
+        session, req.devices, req.certs, req.events, req.time_windows, req.segments, req.exempt_cert_nos, None
     )
     rule_id = repository.insert_rule(
         json.dumps(devices, ensure_ascii=False),
@@ -518,11 +521,11 @@ def create_rule(req: schemas.VoiceRuleCreate) -> schemas.VoiceRuleView:
     return _rule_view(row)
 
 
-def update_rule(rule_id: int, req: schemas.VoiceRuleUpdate) -> schemas.VoiceRuleView:
+def update_rule(session: Session, rule_id: int, req: schemas.VoiceRuleUpdate) -> schemas.VoiceRuleView:
     if repository.get_rule(rule_id) is None:
         raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
     devices, certs, events, windows_json, segments, exempt = _normalize_rule(
-        req.devices, req.certs, req.events, req.time_windows, req.segments, req.exempt_cert_nos, rule_id
+        session, req.devices, req.certs, req.events, req.time_windows, req.segments, req.exempt_cert_nos, rule_id
     )
     if (
         repository.update_rule(
@@ -560,9 +563,11 @@ def delete_rule(rule_id: int) -> None:
         raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
 
 
-def _rule_order(view: schemas.VoiceRuleView) -> tuple[bool, str, bool, int, int]:
+def _rule_order(session: Session, view: schemas.VoiceRuleView) -> tuple[bool, str, bool, int, int]:
     cert_label = "~" if "*" in view.certs else (view.certs[0] if view.certs else "~")
-    device_order = {str(record["device_id"]): index for index, record in enumerate(devices_service.list_devices())}
+    device_order = {
+        str(record["device_id"]): index for index, record in enumerate(devices_service.list_devices(session))
+    }
     return (
         "*" in view.certs,
         cert_label,
@@ -572,8 +577,8 @@ def _rule_order(view: schemas.VoiceRuleView) -> tuple[bool, str, bool, int, int]
     )
 
 
-def list_rules() -> list[schemas.VoiceRuleView]:
-    return sorted((_rule_view(row) for row in repository.list_rules()), key=_rule_order)
+def list_rules(session: Session) -> list[schemas.VoiceRuleView]:
+    return sorted((_rule_view(row) for row in repository.list_rules()), key=lambda view: _rule_order(session, view))
 
 
 # ── 解析与播放清单 ──
@@ -701,11 +706,11 @@ def _sample_event(row: Row) -> DoorEventKind:
     return DoorEventKind(str(events[0]))
 
 
-async def push_to_device(rule_id: int, device_id: str) -> schemas.VoicePushView:
+async def push_to_device(session: Session, rule_id: int, device_id: str) -> schemas.VoicePushView:
     row = repository.get_rule(rule_id)
     if row is None:
         raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
-    if devices_service.get_device(device_id) is None:
+    if devices_service.get_device(session, device_id) is None:
         raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {device_id} 不在档案里")
     segments = [_segment_from_dict(value) for value in json.loads(str(row["segments"]))]
     try:
@@ -734,6 +739,7 @@ async def push_to_device(rule_id: int, device_id: str) -> schemas.VoicePushView:
         now,
     )
     outcome = await sessions_service.send_command_and_wait(
+        session,
         device_id,
         actions.VOICE_PLAY,
         _play_params(plan, int(row["volume"])),
@@ -785,7 +791,7 @@ def _spawn_prepare(device_id: str, clips: list[dict[str, object]]) -> None:
     if not clips:
         return
     try:
-        task = asyncio.get_running_loop().create_task(_prepare(device_id, {"clips": clips}, VOICE_PREPARE_TIMEOUT_S))
+        task = asyncio.get_running_loop().create_task(_prepare_task(device_id, {"clips": clips}))
     except Exception as exc:  # noqa: BLE001 — 调度失败只记日志
         log_event("ERROR", "voice.schedule-failed", "语音预下载调度失败", device_id=device_id, error=str(exc))
         return
@@ -793,9 +799,18 @@ def _spawn_prepare(device_id: str, clips: list[dict[str, object]]) -> None:
     task.add_done_callback(_task_done)
 
 
-async def _prepare(device_id: str, params: dict[str, object], timeout_s: float) -> None:
+async def _prepare_task(device_id: str, params: dict[str, object]) -> None:
+    """asyncio 任务入口：自己开短会话。"""
+    from app.db.session import session_scope
+
+    with session_scope() as session:
+        await _prepare(session, device_id, params, VOICE_PREPARE_TIMEOUT_S)
+
+
+async def _prepare(session: Session, device_id: str, params: dict[str, object], timeout_s: float) -> None:
     try:
         outcome = await sessions_service.send_command_and_wait(
+            session,
             device_id,
             actions.VOICE_PREPARE,
             params,
@@ -821,7 +836,7 @@ async def _prepare(device_id: str, params: dict[str, object], timeout_s: float) 
     )
 
 
-def schedule_rule_prepare(view: schemas.VoiceRuleView) -> None:
+def schedule_rule_prepare(session: Session, view: schemas.VoiceRuleView) -> None:
     if not view.enabled:
         return
     row = repository.get_rule(view.id)
@@ -830,7 +845,7 @@ def schedule_rule_prepare(view: schemas.VoiceRuleView) -> None:
     clips = _clips_for_rule(row)
     devices = view.devices
     if schemas.WILDCARD in devices:
-        ids = [str(record["device_id"]) for record in devices_service.list_devices()]
+        ids = [str(record["device_id"]) for record in devices_service.list_devices(session)]
     else:
         ids = list(devices)
     for device_id in ids:
@@ -865,22 +880,25 @@ def _task_done(task: asyncio.Task[None]) -> None:
 async def handle_events(events: tuple[DoorEvent, ...]) -> None:
     value = config_store.global_effective()["voice_event_max_age_s"]
     max_age = value if isinstance(value, int) else 0
-    for event in events:
-        try:
-            await _dispatch_event(event, max_age)
-        except Exception as exc:  # noqa: BLE001 — 单事件失败不拖垮同一帧其它事件
-            log_event(
-                "ERROR",
-                "voice.delivery-error",
-                "语音事件处理失败",
-                device_id=event.device_id,
-                door_no=event.door_no,
-                event=event.kind.value,
-                error=str(exc),
-            )
+    from app.db.session import session_scope
+
+    with session_scope() as session:
+        for event in events:
+            try:
+                await _dispatch_event(session, event, max_age)
+            except Exception as exc:  # noqa: BLE001 — 单事件失败不拖垮同一帧其它事件
+                log_event(
+                    "ERROR",
+                    "voice.delivery-error",
+                    "语音事件处理失败",
+                    device_id=event.device_id,
+                    door_no=event.door_no,
+                    event=event.kind.value,
+                    error=str(exc),
+                )
 
 
-async def _dispatch_event(event: DoorEvent, max_age: int) -> None:
+async def _dispatch_event(session: Session, event: DoorEvent, max_age: int) -> None:
     if max_age > 0 and _elapsed_s(event.occurred_at) > max_age:
         log_event(
             "INFO",
@@ -945,6 +963,7 @@ async def _dispatch_event(event: DoorEvent, max_age: int) -> None:
         return
     dispatched_at = now_rfc3339()
     outcome = await sessions_service.send_command_and_wait(
+        session,
         event.device_id,
         actions.VOICE_PLAY,
         _play_params(plan, int(rule["volume"])),

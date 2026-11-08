@@ -8,10 +8,17 @@ from fastapi.testclient import TestClient
 from tests import device_link, frames
 
 from app.core.connections import manager
-from app.modules.devices import repository as devices_repository
 from app.modules.devices import service as devices_service
 from app.modules.doors import service as doors_service
 from app.modules.status_line import service as status_line_service
+
+
+def _snap() -> object:
+    """读一轮楼层现态汇总（后台循环的会话边界在这里显式打开）。"""
+    from app.db.session import session_scope
+
+    with session_scope() as session:
+        return status_line_service._snapshot(session)
 
 
 def _door(door_no: int, **overrides: object) -> dict[str, Any]:
@@ -35,9 +42,23 @@ def _report(device_id: str, doors: list[dict[str, Any]]) -> None:
 
 
 def _register(device_id: str, name: str, *, trusted: bool = True) -> None:
-    devices_repository.register(device_id, "0.5.0", 1, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
-    devices_repository.set_name(device_id, name)
-    devices_repository.set_trusted(device_id, trusted)
+    from app.db.base import utcnow
+    from app.persistence import devices as devices_store
+
+    with device_link.db() as session:
+        devices_store.register(
+            session,
+            device_id=device_id,
+            app_version="0.5.0",
+            version_code=1,
+            os_version="4.4.4",
+            capabilities=[],
+            ip="127.0.0.1",
+            booted_at=utcnow(),
+            seen_at=utcnow(),
+        )
+        devices_store.set_name(session, device_id, name)
+        devices_store.set_trusted(session, device_id, trusted)
 
 
 def test_free_count_only_counts_free_and_follows_device_order(
@@ -47,7 +68,10 @@ def test_free_count_only_counts_free_and_follows_device_order(
     """`free` 只数空闲；已选中、等待开阀、报修都不算；顺序沿用设备清单。"""
     _register("dev-2f", "2F")
     _register("dev-1f", "1F")
-    devices_service.set_order(["dev-1f", "dev-2f"])
+    from app.db.session import session_scope as _scope
+
+    with _scope() as _session:
+        devices_service.set_order(_session, ["dev-1f", "dev-2f"])
     _report(
         "dev-1f",
         [
@@ -64,7 +88,7 @@ def test_free_count_only_counts_free_and_follows_device_order(
         {"dev-1f": device_link.FakeGatewayWS(), "dev-2f": device_link.FakeGatewayWS()},
     )
 
-    snapshot = status_line_service._snapshot()
+    snapshot = _snap()
 
     assert [floor["name"] for floor in snapshot.payload["floors"]] == ["1F", "2F"]
     assert [floor["free"] for floor in snapshot.payload["floors"]] == [1, 2]
@@ -94,7 +118,7 @@ def test_unavailable_devices_report_no_free_count(fresh_db: str, monkeypatch: py
         },
     )
 
-    snapshot = status_line_service._snapshot()
+    snapshot = _snap()
 
     by_name = {floor["name"]: floor for floor in snapshot.payload["floors"]}
     assert by_name["4F"]["online"] is False
@@ -110,10 +134,10 @@ def test_unavailable_devices_report_no_free_count(fresh_db: str, monkeypatch: py
 
 def test_unnamed_device_uses_its_id_as_the_label(fresh_db: str) -> None:
     """没设名称的设备不能从状态行里消失：与网页端同一约定，未命名时显示设备 id。"""
-    devices_repository.register("dev-unnamed", "0.5.0", 1, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
+    device_link.register_device_raw("dev-unnamed")
     _report("dev-unnamed", [_door(1)])
 
-    snapshot = status_line_service._snapshot()
+    snapshot = _snap()
 
     assert snapshot.payload["floors"][0]["name"] == "dev-unnamed"
 

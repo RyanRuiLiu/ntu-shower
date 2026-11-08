@@ -5,17 +5,18 @@ import contextlib
 import io
 import json
 import time
+from contextlib import AbstractContextManager, contextmanager
 from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 from starlette.testclient import WebSocketTestSession
 from starlette.websockets import WebSocketDisconnect
 from tests import apk, device_link, frames
 
 from app.core import db, events
 from app.core.clock import now_rfc3339, rfc3339_ago
-from app.modules.devices import repository as devices_repository
 from app.modules.devices.schemas import LINK_OFFLINE, LINK_ONLINE
 from app.modules.doors import service as doors_service
 from app.modules.ota import repository as ota_repository
@@ -71,13 +72,13 @@ def test_device_pong_updates_clock_skew(client: TestClient, admin_headers: dict[
     with device_link.trusted_online(client, device_id, admin_headers) as ws:
         ws.send_text(frames.frame("link.pong", {"device_time": now_rfc3339()}))
         _settle(ws)
-        skew_now = devices_repository.get_clock_skew(device_id)
+        skew_now = _skew(device_id)
         assert abs(skew_now) < 5, "设备报的就是此刻，两边差不出几秒"
 
         # 相隔两分钟：超过跳变阈值，直接采信新值而不做 EMA
         ws.send_text(frames.frame("link.pong", {"device_time": rfc3339_ago(120)}))
         _settle(ws)
-        skew_past = devices_repository.get_clock_skew(device_id)
+        skew_past = _skew(device_id)
         assert skew_past > 100, "设备报的是两分钟前，偏差随之变大"
         assert skew_past > skew_now, "落库的确实是新算出来的那个"
 
@@ -101,13 +102,13 @@ def test_device_pong_without_device_time_keeps_the_previous_skew(
     with device_link.trusted_online(client, device_id, admin_headers) as ws:
         ws.send_text(frames.frame("link.pong", {"device_time": now_rfc3339()}))
         _settle(ws)
-        settled = devices_repository.get_clock_skew(device_id)
+        settled = _skew(device_id)
 
         ws.send_text(frames.frame("link.pong", {}))
         ws.send_text(frames.frame("link.pong", {"device_time": "not-a-time"}))
         _settle(ws)
 
-    assert devices_repository.get_clock_skew(device_id) == settled
+    assert _skew(device_id) == settled
 
 
 def test_unknown_command_id_replies_error(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:
@@ -297,7 +298,8 @@ def test_heartbeat_refreshes_last_seen(client: TestClient, fresh_db: str) -> Non
         ws.send_text(frames.frame("link.ping", {"sender_time": "2026-09-30T12:00:01.000Z"}))
         frames.recv_until(ws, "link.pong")
 
-        record = devices_service.get_device(device_id)
+        with _svc_session() as session:
+            record = devices_service.get_device(session, device_id)
         assert record is not None
         assert record["last_seen_at"] > "2020-01-01T00:00:00.000Z"
 
@@ -308,7 +310,8 @@ def _next_published_update() -> dict[str, Any]:
 
     async def flow() -> dict[str, Any]:
         sid, queue = events.subscribe()
-        devices_service.publish_device_update("dev-update-1")
+        with _svc_session() as session:
+            devices_service.publish_device_update(session, "dev-update-1")
         await asyncio.sleep(0)
         raw = queue.get_nowait()
         events.unsubscribe(sid)
@@ -319,11 +322,22 @@ def _next_published_update() -> dict[str, Any]:
 
 def test_device_update_push_is_trimmed_summary(fresh_db: str) -> None:
     """device.update 推送是精简档案：IP、版本、时钟偏差等运维字段不进公开推送。"""
-    from app.modules.devices import repository as devices_repository
 
-    devices_repository.register(
-        "dev-update-1", "0.3.33", 40, "4.4.4", ["session.assign"], "10.0.0.9", "2026-06-01T08:00:00.000Z"
-    )
+    from app.db.base import utcnow
+    from app.persistence import devices as devices_store
+
+    with device_link.db() as session:
+        devices_store.register(
+            session,
+            device_id="dev-update-1",
+            app_version="0.3.33",
+            version_code=40,
+            os_version="4.4.4",
+            capabilities=["session.assign"],
+            ip="10.0.0.9",
+            booted_at=utcnow(),
+            seen_at=utcnow(),
+        )
 
     message = _next_published_update()
 
@@ -340,7 +354,8 @@ def test_device_update_with_missing_record_keeps_minimal_payload(fresh_db: str) 
         sid, queue = events.subscribe()
         from app.modules.devices import service as devices_service
 
-        devices_service.publish_device_update("dev-never-registered")
+        with _svc_session() as session:
+            devices_service.publish_device_update(session, "dev-never-registered")
         await asyncio.sleep(0)
         raw = queue.get_nowait()
         events.unsubscribe(sid)
@@ -357,21 +372,22 @@ def test_online_reflects_connection_not_storage(fresh_db: str) -> None:
     from fastapi import WebSocket
 
     from app.core.connections import manager
-    from app.modules.devices import repository, service
+    from app.modules.devices import service
 
     device_id = "dev-online-src"
-    repository.register(device_id, "0.3.35", 42, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
+    device_link.register_device_raw(device_id)
 
-    record = service.get_device(device_id)
-    assert record is not None
-    assert record["online"] is False
-    listed = next(item for item in service.list_devices() if item["device_id"] == device_id)
-    assert listed["online"] is False
+    with _svc_session() as session:
+        record = service.get_device(session, device_id)
+        assert record is not None
+        assert record["online"] is False
+        listed = next(item for item in service.list_devices(session) if item["device_id"] == device_id)
+        assert listed["online"] is False
 
-    manager.register(device_id, cast(WebSocket, object()))
-    assert service.get_device(device_id)["online"] is True
-    manager.unregister(device_id, cast(WebSocket, object()))  # 不是同一条连接，按设计不动
-    assert service.get_device(device_id)["online"] is True
+        manager.register(device_id, cast(WebSocket, object()))
+        assert service.get_device(session, device_id)["online"] is True
+        manager.unregister(device_id, cast(WebSocket, object()))  # 不是同一条连接，按设计不动
+        assert service.get_device(session, device_id)["online"] is True
 
 
 def test_unexpected_frame_error_is_logged(
@@ -419,8 +435,6 @@ def test_server_ping_loop_probes_and_enforces_pong(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """服务端按配置间隔主动 ping：回 pong 则链路保持，一个周期无 pong 则主动关链。"""
-    from starlette.websockets import WebSocketDisconnect
-
     # 间隔给 0.2 秒：两个完整周期亚秒级跑完，行为与真实间隔无关
     monkeypatch.setattr("app.modules.config.store.effective", lambda _device_id: {"ping_interval_s": 0.2})
     device_id = "dev-ping-loop"
@@ -459,7 +473,11 @@ def test_link_events_record_connect_and_disconnect(client: TestClient, fresh_db:
     while True:
         rows = (
             db.get_conn()
-            .execute("SELECT event FROM device_link_event WHERE device_id = ? ORDER BY id", (device_id,))
+            .execute(
+                "SELECT event FROM device_link_events"
+                " WHERE device_id = (SELECT id FROM devices WHERE device_id = ?) ORDER BY id",
+                (device_id,),
+            )
             .fetchall()
         )
         events = [row["event"] for row in rows]
@@ -490,7 +508,9 @@ def test_reconnect_does_not_record_a_false_offline(client: TestClient, fresh_db:
     events = [
         row["event"]
         for row in db.get_conn().execute(
-            "SELECT event FROM device_link_event WHERE device_id = ? ORDER BY id", (device_id,)
+            "SELECT event FROM device_link_events"
+            " WHERE device_id = (SELECT id FROM devices WHERE device_id = ?) ORDER BY id",
+            (device_id,),
         )
     ]
     assert events.count(LINK_ONLINE) == 2
@@ -632,8 +652,29 @@ def test_device_log_upload_keeps_only_recent_per_kind(
     assert body["content"] == "round-6"
     rows = (
         db.get_conn()
-        .execute("SELECT COUNT(*) AS n FROM device_log WHERE device_id = 'dev-log-trim' AND kind = 'device'")
+        .execute(
+            "SELECT COUNT(*) AS n FROM device_logs"
+            " WHERE device_id = (SELECT id FROM devices WHERE device_id = 'dev-log-trim')"
+            " AND kind = 'device'"
+        )
         .fetchone()
     )
     assert rows is not None
     assert rows["n"] == 5
+
+
+@contextmanager
+def _svc_session() -> "AbstractContextManager[Session]":
+    """直调 service 层的短会话。"""
+    from app.db.session import session_scope
+
+    with session_scope() as session:
+        yield session
+
+
+def _skew(device_id: str) -> float:
+    """读设备的持久化钟偏差。"""
+    from app.persistence import devices as devices_store
+
+    with _svc_session() as session:
+        return devices_store.get_clock_skew(session, device_id)

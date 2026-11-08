@@ -72,7 +72,7 @@ def _prepare(
     monkeypatch.setattr(extend_hours, "now_rfc3339", lambda: server_now)
     monkeypatch.setattr(config_store, "effective", lambda _device_id: CONFIG)
 
-    async def fake_send(_device_id: str, action: str, params: object, **_kw: object) -> object:
+    async def fake_send(_session: object, _device_id: str, action: str, params: object, **_kw: object) -> object:
         if sent is not None:
             sent.append((action, params))
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
@@ -174,7 +174,7 @@ def test_shift_rearms_power_with_precompensated_target_then_writes_the_clock(
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", sent)
     _with_session("2026-10-05T23:40:00.000Z")
 
-    asyncio.run(extend_hours.tick_once())
+    _tick()
 
     # 预补偿续写武装了"拨快后表盘再 +10 分钟"的截止，同轮推进的续写被限频跳过：
     # 武装未满 2 分钟，不必重复下发
@@ -194,7 +194,7 @@ def test_shift_is_skipped_when_disabled(fresh_db: str, monkeypatch: pytest.Monke
     monkeypatch.setitem(CONFIG, "extend_hours_enabled", False)
     _with_session("2026-10-05T23:40:00.000Z")
 
-    asyncio.run(extend_hours.tick_once())
+    _tick()
 
     assert sent == []
 
@@ -205,7 +205,7 @@ def test_shift_is_skipped_when_nobody_is_using_it(fresh_db: str, monkeypatch: py
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", sent)
     _with_session("2026-10-05T23:40:00.000Z", cert_no="9999999999")
 
-    asyncio.run(extend_hours.tick_once())
+    _tick()
 
     assert sent == []
     assert repository.get(DEVICE) is None
@@ -216,12 +216,12 @@ def test_failed_shift_leaves_no_row_so_the_next_tick_retries(fresh_db: str, monk
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z")
     _with_session("2026-10-05T23:40:00.000Z")
 
-    async def failing(_device_id: str, _action: str, _params: object, **_kw: object) -> object:
+    async def failing(_session: object, _device_id: str, _action: str, _params: object, **_kw: object) -> object:
         return {"status": "failed", "reason_code": "device.offline", "terminal_message": "", "data": None}
 
     monkeypatch.setattr(extend_hours.sessions_service, "send_command_and_wait", failing)
 
-    asyncio.run(extend_hours.tick_once())
+    _tick()
 
     assert repository.get(DEVICE) is None
 
@@ -231,7 +231,7 @@ def test_the_row_keeps_who_was_where(fresh_db: str, monkeypatch: pytest.MonkeyPa
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z")
     _with_session("2026-10-05T23:40:00.000Z", door_no=5)
 
-    asyncio.run(extend_hours.tick_once())
+    _tick()
 
     row = repository.get(DEVICE)
     assert row is not None
@@ -250,7 +250,7 @@ def test_shift_landing_guard_refuses_to_land_inside_the_hostile_window(
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
     _with_session("2026-10-05T23:40:00.000Z")
 
-    asyncio.run(extend_hours.tick_once())
+    _tick()
 
     assert "extend-hours.landing-unsafe" in events
     assert sent == []
@@ -270,7 +270,7 @@ def test_extension_rolls_the_deadline_every_tick(fresh_db: str, monkeypatch: pyt
         [{"door_no": 3, "cert_no": "2026000001"}],
     )
 
-    asyncio.run(extend_hours.tick_once())
+    _tick()
 
     # 滚动目标 = 表盘此刻（00:50，快 15 分钟）+ 十分钟 → 01:00
     assert sent == [(actions.POWER_SCHEDULE, {"off_at": "01:15", "on_at": "10:55"})]
@@ -291,7 +291,7 @@ def test_restore_waits_until_past_midnight(fresh_db: str, monkeypatch: pytest.Mo
         [{"door_no": 3, "cert_no": "2026000001"}],
     )
 
-    asyncio.run(extend_hours.tick_once())
+    _tick()
 
     assert sent == [(actions.POWER_SCHEDULE, {"off_at": "00:20", "on_at": "10:55"})]
     assert repository.get(DEVICE) is not None
@@ -309,7 +309,7 @@ def test_restore_happens_once_midnight_passed_and_nobody_is_occupying(
     _prepare(monkeypatch, "2026-10-06T00:45:00.000Z", sent, skew_s=SKEW_FAST_S)
     repository.record(DEVICE, "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2026000001"}])
 
-    asyncio.run(extend_hours.tick_once())
+    _tick()
 
     assert [action for action, _params in sent] == [actions.POWER_SCHEDULE, actions.CLOCK_SET, actions.POWER_SCHEDULE]
     # 滚动续写在前（表盘 00:45 + 偏差 15 分钟 + 窗口 10 分钟 = 01:10），
@@ -328,7 +328,7 @@ def test_restore_holds_while_someone_is_still_occupying(fresh_db: str, monkeypat
     repository.record(DEVICE, "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2026000001"}])
     _with_session("2026-10-06T00:40:00.000Z")
 
-    asyncio.run(extend_hours.tick_once())
+    _tick()
 
     assert [action for action, _params in sent] == [actions.POWER_SCHEDULE]
     assert repository.get(DEVICE) is not None
@@ -341,7 +341,7 @@ def test_on_frame_does_nothing_without_a_row(fresh_db: str, monkeypatch: pytest.
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z")
     assigned: list[object] = []
 
-    async def fake_assign(_device_id: str, req: AssignRequest) -> object:
+    async def fake_assign(_session: object, _device_id: str, req: AssignRequest) -> object:
         assigned.append(req)
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
 
@@ -357,7 +357,7 @@ def test_on_frame_assigns_back_who_is_missing(fresh_db: str, monkeypatch: pytest
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z")
     assigned: list[object] = []
 
-    async def fake_assign(_device_id: str, req: AssignRequest) -> object:
+    async def fake_assign(_session: object, _device_id: str, req: AssignRequest) -> object:
         assigned.append((req.door_no, req.cert_no, req.password))
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
 
@@ -389,13 +389,13 @@ def test_reassign_skips_someone_already_occupying(fresh_db: str, monkeypatch: py
     _with_session("2026-10-05T23:55:00.000Z")
     assigned: list[object] = []
 
-    async def fake_assign(_device_id: str, req: AssignRequest) -> object:
+    async def fake_assign(_session: object, _device_id: str, req: AssignRequest) -> object:
         assigned.append(req)
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
 
     monkeypatch.setattr(extend_hours.sessions_routes, "perform_assign", fake_assign)
 
-    asyncio.run(extend_hours._reassign(_shift("2026-10-05T23:50:00.000Z"), roster(CONFIG, "extend_hours_students")))
+    _reassign_with_db(_shift("2026-10-05T23:50:00.000Z"), roster(CONFIG, "extend_hours_students"))
 
     assert assigned == []
     assert (DEVICE, "2026000001") in extend_hours._reassigned
@@ -414,7 +414,7 @@ def test_reassign_waits_for_a_leftover_session_from_before_the_shift(
     _with_session("2026-10-05T23:40:00.000Z")  # 建立于拨钟之前：拨钟那一刻他还占着
     assigned: list[object] = []
 
-    async def fake_assign(_device_id: str, req: AssignRequest) -> object:
+    async def fake_assign(_session: object, _device_id: str, req: AssignRequest) -> object:
         assigned.append((req.door_no, req.cert_no))
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
 
@@ -422,13 +422,13 @@ def test_reassign_waits_for_a_leftover_session_from_before_the_shift(
     shift = _shift("2026-10-05T23:50:00.000Z")
 
     # 拨钟后第一次（门还占着）：不分配，且**不标记**——下一次还要再来
-    asyncio.run(extend_hours._reassign(shift, roster(CONFIG, "extend_hours_students")))
+    _reassign_with_db(shift, roster(CONFIG, "extend_hours_students"))
     assert assigned == []
     assert (DEVICE, "2026000001") not in extend_hours._reassigned
 
     # 浴室端清场之后：放回原喷头，并把这一次记成"已成立"
     _clear_door("2026-10-05T23:50:01.000Z")
-    asyncio.run(extend_hours._reassign(shift, roster(CONFIG, "extend_hours_students")))
+    _reassign_with_db(shift, roster(CONFIG, "extend_hours_students"))
     assert assigned == [(3, "2026000001")]
     assert (DEVICE, "2026000001") in extend_hours._reassigned
 
@@ -470,7 +470,7 @@ def test_every_shift_is_logged_for_the_operator(fresh_db: str, monkeypatch: pyte
     _with_session("2026-10-05T23:40:00.000Z")
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
 
-    asyncio.run(extend_hours.tick_once())
+    _tick()
 
     assert "extend-hours.shifted" in events
 
@@ -478,9 +478,11 @@ def test_every_shift_is_logged_for_the_operator(fresh_db: str, monkeypatch: pyte
 def test_registered_device_is_trusted(fresh_db: str) -> None:
     """建档入口与生产仓储一致：经夹具登记的设备在档案里就是受信任的。"""
     device_link.register_trusted_device(DEVICE)
+    from app.db.session import session_scope
     from app.modules.devices import service as devices_service
 
-    record = devices_service.get_device(DEVICE)
+    with session_scope() as session:
+        record = devices_service.get_device(session, DEVICE)
     assert record is not None
     assert record["trusted"]
 
@@ -504,14 +506,14 @@ def test_power_failure_after_shift_keeps_the_row_and_retries(fresh_db: str, monk
         [{"door_no": 3, "cert_no": "2026000001"}],
     )
 
-    async def half(_device_id: str, action: str, _params: object, **_kw: object) -> object:
+    async def half(_session: object, _device_id: str, action: str, _params: object, **_kw: object) -> object:
         if action == actions.POWER_SCHEDULE:
             return {"status": "failed", "reason_code": "device.offline", "terminal_message": "", "data": None}
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
 
     monkeypatch.setattr(extend_hours.sessions_service, "send_command_and_wait", half)
 
-    asyncio.run(extend_hours.tick_once())
+    _tick()
 
     assert "extend-hours.power-failed" in events
     row = repository.get(DEVICE)
@@ -530,14 +532,14 @@ def test_restore_rearm_failure_keeps_the_row_for_retry(fresh_db: str, monkeypatc
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
     repository.record(DEVICE, "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2026000001"}])
 
-    async def half(_device_id: str, action: str, params: object, **_kw: object) -> object:
+    async def half(_session: object, _device_id: str, action: str, params: object, **_kw: object) -> object:
         if action == actions.POWER_SCHEDULE and params.get("off_at") == "23:58":
             return {"status": "failed", "reason_code": "device.offline", "terminal_message": "", "data": None}
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
 
     monkeypatch.setattr(extend_hours.sessions_service, "send_command_and_wait", half)
 
-    asyncio.run(extend_hours.tick_once())
+    _tick()
 
     assert "extend-hours.restore-rearm-failed" in events
     row = repository.get(DEVICE)
@@ -551,7 +553,7 @@ def test_shift_is_skipped_without_a_skew_record(fresh_db: str, monkeypatch: pyte
     _with_session("2026-10-05T23:40:00.000Z")
     device_clock.clear()
 
-    asyncio.run(extend_hours.tick_once())
+    _tick()
 
     assert sent == []
     assert repository.get(DEVICE) is None
@@ -587,7 +589,7 @@ def test_reassign_reports_a_failed_command(fresh_db: str, monkeypatch: pytest.Mo
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
     repository.record(DEVICE, "2026-10-05T23:50:00.000Z", [{"door_no": 3, "cert_no": "2026000001"}])
 
-    async def failed(_device_id: str, _req: AssignRequest) -> dict[str, object]:
+    async def failed(_session: object, _device_id: str, _req: AssignRequest) -> dict[str, object]:
         return {"status": "timeout", "reason_code": "server.deadline-exceeded", "terminal_message": "", "data": None}
 
     monkeypatch.setattr(extend_hours.sessions_routes, "perform_assign", failed)
@@ -612,7 +614,7 @@ def test_a_refused_command_is_not_marked_as_a_failure(fresh_db: str, monkeypatch
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
     repository.record(DEVICE, "2026-10-05T23:50:00.000Z", [{"door_no": 3, "cert_no": "2026000001"}])
 
-    async def refusing(_device_id: str, _req: AssignRequest) -> object:
+    async def refusing(_session: object, _device_id: str, _req: AssignRequest) -> object:
         raise ApiProblemError(DOOR_NOT_FREE, "喷头 3 当前状态：bathing")
 
     monkeypatch.setattr(extend_hours.sessions_routes, "perform_assign", refusing)
@@ -633,7 +635,7 @@ def test_a_failed_command_is_not_tried_again(fresh_db: str, monkeypatch: pytest.
     repository.record(DEVICE, "2026-10-05T23:50:00.000Z", [{"door_no": 3, "cert_no": "2026000001"}])
     attempts: list[int] = []
 
-    async def failed(_device_id: str, _req: AssignRequest) -> object:
+    async def failed(_session: object, _device_id: str, _req: AssignRequest) -> object:
         attempts.append(1)
         return {"status": "timeout", "reason_code": "server.deadline-exceeded", "terminal_message": "", "data": None}
 
@@ -657,7 +659,7 @@ def test_the_failure_memory_is_cleared_when_the_extension_ends(fresh_db: str, mo
     extend_hours._reassign_failed.add((DEVICE, "2026000001"))
     extend_hours._reassigned.add((DEVICE, "2026000001"))
 
-    asyncio.run(extend_hours.tick_once())
+    _tick()
 
     assert repository.get(DEVICE) is None
     assert extend_hours._reassign_failed == set()
@@ -673,7 +675,7 @@ def test_runtime_correction_fires_when_skewed_outside_extension(fresh_db: str, m
     sent: list[tuple[str, object]] = []
     _prepare(monkeypatch, "2026-10-06T00:45:00.000Z", sent, skew_s=SKEW_FAST_S)
 
-    asyncio.run(extend_hours.tick_once())
+    _tick()
 
     # 校正目标是拨回之后的真实表盘时刻（表盘读数减去 15 分钟偏差）
     assert sent == [(actions.CLOCK_SET, {"datetime": "2026-10-06 00:45:00", "rearm": True})]
@@ -688,7 +690,7 @@ def test_runtime_correction_skipped_during_extension(fresh_db: str, monkeypatch:
     _prepare(monkeypatch, "2026-10-05T23:55:00.000Z", sent, skew_s=SKEW_FAST_S)
     repository.record(DEVICE, "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2026000001"}])
 
-    asyncio.run(extend_hours.tick_once())
+    _tick()
 
     assert actions.CLOCK_SET not in [action for action, _params in sent]
 
@@ -698,14 +700,14 @@ def test_runtime_correction_skipped_below_threshold(fresh_db: str, monkeypatch: 
     sent: list[tuple[str, object]] = []
     _prepare(monkeypatch, "2026-10-06T00:45:00.000Z", sent, skew_s=-30.0)
 
-    asyncio.run(extend_hours.tick_once())
+    _tick()
 
     assert sent == []
 
     sent.clear()
     _prepare(monkeypatch, "2026-10-06T00:45:00.000Z", sent, skew_s=-60.0)
 
-    asyncio.run(extend_hours.tick_once())
+    _tick()
 
     assert sent == [(actions.CLOCK_SET, {"datetime": "2026-10-06 00:45:00", "rearm": True})]
 
@@ -715,7 +717,7 @@ def test_runtime_correction_skipped_when_disabled(fresh_db: str, monkeypatch: py
     _prepare(monkeypatch, "2026-10-06T00:45:00.000Z", sent, skew_s=SKEW_FAST_S)
     monkeypatch.setitem(CONFIG, "time_sync_enabled", False)
 
-    asyncio.run(extend_hours.tick_once())
+    _tick()
 
     assert sent == []
 
@@ -729,7 +731,7 @@ def test_runtime_correction_skipped_while_someone_is_occupying(fresh_db: str, mo
     _prepare(monkeypatch, "2026-10-06T00:45:00.000Z", sent, skew_s=SKEW_FAST_S)
     _with_session("2026-10-06T00:40:00.000Z")
 
-    asyncio.run(extend_hours.tick_once())
+    _tick()
 
     assert sent == []
     assert repository.get(DEVICE) is None
@@ -744,12 +746,12 @@ def test_runtime_correction_failure_is_logged(fresh_db: str, monkeypatch: pytest
     _prepare(monkeypatch, "2026-10-06T00:45:00.000Z", skew_s=SKEW_FAST_S)
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
 
-    async def failing(_device_id: str, _action: str, _params: object, **_kw: object) -> object:
+    async def failing(_session: object, _device_id: str, _action: str, _params: object, **_kw: object) -> object:
         return {"status": "failed", "reason_code": "device.offline", "terminal_message": "", "data": None}
 
     monkeypatch.setattr(extend_hours.sessions_service, "send_command_and_wait", failing)
 
-    asyncio.run(extend_hours.tick_once())
+    _tick()
 
     assert "time-sync.correction-failed" in events
     assert "time-sync.corrected" not in events
@@ -774,7 +776,7 @@ def test_set_clock_warns_without_skew_record(fresh_db: str, monkeypatch: pytest.
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
     device_clock.clear()
 
-    ok = asyncio.run(extend_hours._set_clock(DEVICE, 3600, 480))
+    ok = _set_clock_with_db(3600, 480)
 
     assert not ok
     assert "extend-hours.no-skew" in events
@@ -786,12 +788,12 @@ def test_set_clock_warns_on_command_failure(fresh_db: str, monkeypatch: pytest.M
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", skew_s=SKEW_FAST_S)
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
 
-    async def failing(_device_id: str, _action: str, _params: object, **_kw: object) -> object:
+    async def failing(_session: object, _device_id: str, _action: str, _params: object, **_kw: object) -> object:
         return {"status": "failed", "reason_code": "device.offline", "terminal_message": "", "data": None}
 
     monkeypatch.setattr(extend_hours.sessions_service, "send_command_and_wait", failing)
 
-    ok = asyncio.run(extend_hours._set_clock(DEVICE, 3600, 480))
+    ok = _set_clock_with_db(3600, 480)
 
     assert not ok
     assert "extend-hours.clock-failed" in events
@@ -806,7 +808,7 @@ def test_roll_power_warns_without_skew_record(fresh_db: str, monkeypatch: pytest
     device_clock.clear()
     repository.record(DEVICE, "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2026000001"}])
 
-    asyncio.run(extend_hours.tick_once())
+    _tick()
 
     assert "extend-hours.no-skew" in events
     # 滚动重布失败但行保留（下一轮重试）
@@ -822,7 +824,7 @@ def test_maybe_shift_warns_without_skew_record(fresh_db: str, monkeypatch: pytes
     device_clock.clear()
     _with_session("2026-10-05T23:40:00.000Z")
 
-    asyncio.run(extend_hours.tick_once())
+    _tick()
 
     assert sent == []
 
@@ -858,7 +860,7 @@ def test_tick_advances_each_extending_device_with_its_own_config(
 
     sent: list[tuple[str, str, object]] = []
 
-    async def fake_send(device_id: str, action: str, params: object, **_kw: object) -> object:
+    async def fake_send(_session: object, device_id: str, action: str, params: object, **_kw: object) -> object:
         sent.append((device_id, action, params))
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
 
@@ -868,7 +870,7 @@ def test_tick_advances_each_extending_device_with_its_own_config(
     repository.record("dev-ext-a", server_now, [])
     repository.record("dev-ext-b", server_now, [])
 
-    asyncio.run(extend_hours.tick_once())
+    _tick()
 
     rolls = sorted((item for item in sent if item[1] == actions.POWER_SCHEDULE), key=lambda item: item[0])
     # 表盘 00:50 + 十分钟窗口；上电目标各取各的电源计划
@@ -888,7 +890,7 @@ def test_tick_clears_the_shift_row_of_a_delisted_device(fresh_db: str, monkeypat
     sent: list[tuple[str, object]] = []
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
 
-    async def fake_send(_device_id: str, _action: str, _params: object, **_kw: object) -> object:
+    async def fake_send(_session: object, _device_id: str, _action: str, _params: object, **_kw: object) -> object:
         sent.append((_device_id, _action))
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
 
@@ -896,7 +898,7 @@ def test_tick_clears_the_shift_row_of_a_delisted_device(fresh_db: str, monkeypat
     # 不经 _prepare：dev-gone 故意不注册进设备表
     repository.record("dev-gone", "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2026000001"}])
 
-    asyncio.run(extend_hours.tick_once())
+    _tick()
 
     assert repository.get("dev-gone") is None
     assert sent == []
@@ -913,7 +915,7 @@ def test_reassign_is_one_shot_per_extension(fresh_db: str, monkeypatch: pytest.M
     students = roster(CONFIG, "extend_hours_students")
     attempts: list[AssignRequest] = []
 
-    async def fake_assign(_device_id: str, req: AssignRequest) -> object:
+    async def fake_assign(_session: object, _device_id: str, req: AssignRequest) -> object:
         attempts.append(req)
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
 
@@ -921,17 +923,17 @@ def test_reassign_is_one_shot_per_extension(fresh_db: str, monkeypatch: pytest.M
     shift = _shift("2026-10-05T23:50:00.000Z")
 
     # 第一次：他不在占用态，放回
-    asyncio.run(extend_hours._reassign(shift, students))
+    _reassign_with_db(shift, students)
     assert len(attempts) == 1
 
     # 已经放回过，不再动
-    asyncio.run(extend_hours._reassign(shift, students))
+    _reassign_with_db(shift, students)
     assert len(attempts) == 1
 
     # 他拨钟之后自己重新开了会话，同样算"已成立"：之后哪怕会话结束（他走了），也不再重新预约
     extend_hours._reassigned.discard((DEVICE, "2026000001"))
     _with_session("2026-10-05T23:55:00.000Z")
-    asyncio.run(extend_hours._reassign(shift, students))
+    _reassign_with_db(shift, students)
     assert len(attempts) == 1
     assert (DEVICE, "2026000001") in extend_hours._reassigned
 
@@ -949,8 +951,39 @@ def test_rolling_rearm_is_throttled_within_the_interval(fresh_db: str, monkeypat
         [{"door_no": 3, "cert_no": "2026000001"}],
     )
 
-    asyncio.run(extend_hours.tick_once())
-    asyncio.run(extend_hours.tick_once())
+    _tick()
+    _tick()
 
     assert [action for action, _params in sent].count(actions.POWER_SCHEDULE) == 1
     assert repository.get(DEVICE) is not None
+
+
+def _tick() -> None:
+    """统一循环一轮：后台任务的会话边界在这里显式打开。"""
+    from app.db.session import session_scope
+
+    async def body() -> None:
+        with session_scope() as session:
+            await extend_hours.tick_once(session)
+
+    asyncio.run(body())
+
+
+def _reassign_with_db(shift: "extend_hours.Shift", students: dict[str, str]) -> None:
+    from app.db.session import session_scope
+
+    async def body() -> None:
+        with session_scope() as session:
+            await extend_hours._reassign(session, shift, students)
+
+    asyncio.run(body())
+
+
+def _set_clock_with_db(seconds: float, zone: int) -> bool:
+    from app.db.session import session_scope
+
+    async def body() -> bool:
+        with session_scope() as session:
+            return await extend_hours._set_clock(session, DEVICE, seconds, zone)
+
+    return asyncio.run(body())

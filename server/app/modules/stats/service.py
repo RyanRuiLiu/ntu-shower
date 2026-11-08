@@ -58,12 +58,14 @@ from datetime import UTC, datetime, timedelta, timezone
 from itertools import pairwise
 from sqlite3 import Row
 
-from app.core.clock import format_rfc3339, now_rfc3339, rfc3339_ago, seconds_between, to_local
+from sqlalchemy.orm import Session
+
+from app.core.clock import format_rfc3339, now_rfc3339, parse_rfc3339, rfc3339_ago, seconds_between, to_local
 from app.core.db import get_conn, read_one
-from app.modules.devices import repository as devices
 from app.modules.devices.schemas import LINK_OFFLINE
 from app.modules.doors.schemas import DoorState, state_label
 from app.modules.doors.service import SESSION_MAX_S
+from app.persistence import devices as devices_store
 
 from . import spec
 from .schemas import (
@@ -157,8 +159,8 @@ def _door_count(device_id: str) -> int:
     return int(row["n"]) if row is not None else 0
 
 
-def _device_name(device_id: str) -> str:
-    record = devices.get(device_id)
+def _device_name(session: Session, device_id: str) -> str:
+    record = devices_store.get(session, device_id)
     return str(record["name"]) if record is not None else ""
 
 
@@ -208,7 +210,15 @@ def _add_span(seconds: dict[tuple[int, int], float], start: datetime, end: datet
         cursor = edge
 
 
-def _offline_seconds(device_id: str, since: str, until: str, offset_minutes: int) -> dict[tuple[int, int], float]:
+def _until_dt(until: str) -> datetime:
+    """统计窗口右端点（RFC 3339 文本）转 aware datetime；解析失败按纪元处理。"""
+    parsed = parse_rfc3339(until)
+    return parsed if parsed is not None else datetime.min.replace(tzinfo=UTC)
+
+
+def _offline_seconds(
+    session: Session, device_id: str, since: str, until: str, offset_minutes: int
+) -> dict[tuple[int, int], float]:
     """窗口内设备离线的秒数，按 (星期, 小时) 格累计。
 
     状态从窗口之前最近的一条事件起步（`devices.link_events` 取 `until` 前全部事件）：
@@ -220,7 +230,7 @@ def _offline_seconds(device_id: str, since: str, until: str, offset_minutes: int
     if start is None or end is None:
         return seconds
     offline_at: datetime | None = None
-    for row in devices.link_events(device_id, before=until):
+    for row in devices_store.link_events(session, device_id, before=_until_dt(until)):
         moment = to_local(str(row["occurred_at"]), offset_minutes)
         if moment is None:
             continue
@@ -236,7 +246,9 @@ def _offline_seconds(device_id: str, since: str, until: str, offset_minutes: int
     return seconds
 
 
-def _cell_seconds(since: str, until: str, offset_minutes: int, device_id: str) -> dict[tuple[int, int], float]:
+def _cell_seconds(
+    session: Session, since: str, until: str, offset_minutes: int, device_id: str
+) -> dict[tuple[int, int], float]:
     """窗口内每个 (星期, 小时) 格**实际经过**的秒数——热力图的分母。
 
     墙钟累计再剔掉设备离线的那部分（口径 8）：离线期间没有帧，占用分子是空的，
@@ -252,7 +264,7 @@ def _cell_seconds(since: str, until: str, offset_minutes: int, device_id: str) -
     if start is None or end is None:
         return seconds
     _add_span(seconds, start, end)
-    for key, offline in _offline_seconds(device_id, since, until, offset_minutes).items():
+    for key, offline in _offline_seconds(session, device_id, since, until, offset_minutes).items():
         seconds[key] = max(0.0, seconds[key] - offline)
     return seconds
 
@@ -260,7 +272,9 @@ def _cell_seconds(since: str, until: str, offset_minutes: int, device_id: str) -
 # ── 分桶 ─────────────────────────────────────────────
 
 
-def _heat(rows: list[Row], since: str, until: str, offset_minutes: int, device_id: str) -> list[list[float]]:
+def _heat(
+    session: Session, rows: list[Row], since: str, until: str, offset_minutes: int, device_id: str
+) -> list[list[float]]:
     """`[星期][小时]` 的平均占用喷头数。
 
     按会话的占用区间与每个小时格求重叠秒数，再除以那一格在窗口内实际经过的秒数。
@@ -288,7 +302,7 @@ def _heat(rows: list[Row], since: str, until: str, offset_minutes: int, device_i
             end = min(end, limit)
         _add_span(seconds, start, end)
 
-    elapsed = _cell_seconds(since, until, offset_minutes, device_id)
+    elapsed = _cell_seconds(session, since, until, offset_minutes, device_id)
     return [
         [
             round(seconds[(weekday, column)] / elapsed[(weekday, column)], 2) if elapsed[(weekday, column)] else 0.0
@@ -700,7 +714,9 @@ def _peak_hours(heat: list[list[float]]) -> tuple[int, int]:
     return spec.HOUR_START + low, spec.HOUR_START + high
 
 
-def _compare_rows(current: CompareRow, since: str, until: str, settled: str, offset_minutes: int) -> list[CompareRow]:
+def _compare_rows(
+    session: Session, current: CompareRow, since: str, until: str, settled: str, offset_minutes: int
+) -> list[CompareRow]:
     """各设备的轻量汇总，供楼层对比。
 
     **顺序就是设备登记的展示顺序**（`devices.list_all`，与管理台、设备下拉同一来源）
@@ -715,7 +731,7 @@ def _compare_rows(current: CompareRow, since: str, until: str, settled: str, off
     与主视图的热力图同一口径，否则"高峰 20–22 时"会和页面上那张图对不上。
     """
     rows: list[CompareRow] = []
-    for record in devices.list_all():
+    for record in devices_store.list_all(session):
         device_id = str(record["device_id"])
         if device_id == current["device_id"]:
             rows.append(current)
@@ -723,7 +739,7 @@ def _compare_rows(current: CompareRow, since: str, until: str, settled: str, off
         sessions = _sessions(device_id, since, until)
         flowed = _flowed(sessions)
         usable = [row for row in sessions if _usable_for_occupancy(row)]
-        low, high = _peak_hours(_heat(usable, since, settled, offset_minutes, device_id))
+        low, high = _peak_hours(_heat(session, usable, since, settled, offset_minutes, device_id))
         # 只查一次喷头数：行里要用、等待算法也要用，两次 COUNT 是白走一趟库。
         door_count = _door_count(device_id)
         rows.append(
@@ -753,7 +769,7 @@ def state_options() -> list[LabeledOption]:
     return [LabeledOption(key=state.value, label=state_label(state)) for state in DoorState]
 
 
-def device_stats(device_id: str, days: int, tz_offset_minutes: int) -> StatsView:
+def device_stats(session: Session, device_id: str, days: int, tz_offset_minutes: int) -> StatsView:
     """一台设备一次装载。切设备与切窗口重拉，其余在客户端本地切。"""
     since, until = _window(days)
     rows = _sessions(device_id, since, until)
@@ -766,11 +782,11 @@ def device_stats(device_id: str, days: int, tz_offset_minutes: int) -> StatsView
     # 所在那一列按"零占用"参与平均——窗口越短偏得越狠（近 7 天时今天占分母的七分之一）。
     # 今天的数据由 TodaySummary 单独回答。
     settled = _day_start(until, tz_offset_minutes)
-    heat = _heat(usable, since, settled, tz_offset_minutes, device_id)
+    heat = _heat(session, usable, since, settled, tz_offset_minutes, device_id)
     low, high = _peak_hours(heat)
     return {
         "device_id": device_id,
-        "name": _device_name(device_id),
+        "name": _device_name(session, device_id),
         "door_count": door_count,
         "since": since,
         "until": until,
@@ -792,9 +808,10 @@ def device_stats(device_id: str, days: int, tz_offset_minutes: int) -> StatsView
         "doors": _door_rows(flowed),
         "leaderboards": _leaderboards(rows, tz_offset_minutes),
         "compare": _compare_rows(
+            session,
             CompareRow(
                 device_id=device_id,
-                name=_device_name(device_id),
+                name=_device_name(session, device_id),
                 door_count=door_count,
                 sessions_flowed=len(flowed),
                 flow_avg_s=_average([int(row["flow_s"]) for row in flowed]),

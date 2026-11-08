@@ -12,9 +12,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from fastapi.responses import FileResponse
+from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from app.core.problems import INVALID_VOICE_ASSET, INVALID_VOICE_RULE, VOICE_ASSET_NOT_FOUND, ApiProblemError
+from app.db.deps import get_db
 from app.modules.access.dependencies import require_admin
 
 from . import schemas, service
@@ -88,34 +90,38 @@ def download_asset(asset_id: str) -> FileResponse:
 
 
 @admin_router.get("/voice/rules")
-def list_rules() -> list[schemas.VoiceRuleView]:
-    return service.list_rules()
+def list_rules(session: Session = Depends(get_db)) -> list[schemas.VoiceRuleView]:
+    return service.list_rules(session)
 
 
 @admin_router.post("/voice/rules")
-async def create_rule(req: schemas.VoiceRuleCreate) -> schemas.VoiceRuleView:
+async def create_rule(req: schemas.VoiceRuleCreate, session: Session = Depends(get_db)) -> schemas.VoiceRuleView:
     try:
-        view = await run_in_threadpool(service.create_rule, req)
+        view = await run_in_threadpool(service.create_rule, session, req)
     except service.InvalidVoiceRuleError as exc:
         raise ApiProblemError(INVALID_VOICE_RULE, str(exc)) from exc
-    service.schedule_rule_prepare(view)
+    service.schedule_rule_prepare(session, view)
     return view
 
 
 @admin_router.put("/voice/rules/{rule_id}")
-async def update_rule(rule_id: int, req: schemas.VoiceRuleUpdate) -> schemas.VoiceRuleView:
+async def update_rule(
+    rule_id: int, req: schemas.VoiceRuleUpdate, session: Session = Depends(get_db)
+) -> schemas.VoiceRuleView:
     try:
-        view = await run_in_threadpool(service.update_rule, rule_id, req)
+        view = await run_in_threadpool(service.update_rule, session, rule_id, req)
     except service.InvalidVoiceRuleError as exc:
         raise ApiProblemError(INVALID_VOICE_RULE, str(exc)) from exc
-    service.schedule_rule_prepare(view)
+    service.schedule_rule_prepare(session, view)
     return view
 
 
 @admin_router.patch("/voice/rules/{rule_id}")
-async def patch_rule(rule_id: int, req: schemas.VoiceRuleEnabledPatch) -> schemas.VoiceRuleView:
+async def patch_rule(
+    rule_id: int, req: schemas.VoiceRuleEnabledPatch, session: Session = Depends(get_db)
+) -> schemas.VoiceRuleView:
     view = await run_in_threadpool(service.set_enabled, rule_id, req.enabled)
-    service.schedule_rule_prepare(view)
+    service.schedule_rule_prepare(session, view)
     return view
 
 
@@ -133,8 +139,10 @@ async def preview(req: schemas.VoicePreviewRequest) -> schemas.VoicePreviewView:
 
 
 @admin_router.post("/voice/rules/{rule_id}/push")
-async def push_rule(rule_id: int, req: schemas.VoicePushRequest) -> schemas.VoicePushView:
-    return await service.push_to_device(rule_id, req.device_id)
+async def push_rule(
+    rule_id: int, req: schemas.VoicePushRequest, session: Session = Depends(get_db)
+) -> schemas.VoicePushView:
+    return await service.push_to_device(session, rule_id, req.device_id)
 
 
 @admin_router.get("/voice/deliveries")

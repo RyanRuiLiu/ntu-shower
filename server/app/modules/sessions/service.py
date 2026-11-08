@@ -7,6 +7,8 @@ import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
+from sqlalchemy.orm import Session
+
 from app.core import actions, outcomes, protocol, reason_codes
 from app.core.config import settings
 from app.core.connections import manager
@@ -134,9 +136,9 @@ async def _acquire_with_deadline(lock: asyncio.Lock, deadline: float) -> AsyncIt
         lock.release()
 
 
-def _supported_actions(device_id: str) -> list[str]:
+def _supported_actions(session: Session, device_id: str) -> list[str]:
     """设备在 link.hello 中声明的能力集合；未声明或设备不存在时为空。"""
-    device = devices_service.get_device(device_id)
+    device = devices_service.get_device(session, device_id)
     if device is None:
         return []
     capabilities = device.get("capabilities")
@@ -144,16 +146,18 @@ def _supported_actions(device_id: str) -> list[str]:
 
 
 async def send_command_and_wait(
+    session: Session,
     device_id: str,
     action: str,
     params: JsonObject,
     timeout_s: float = DEFAULT_TIMEOUT_S,
 ) -> CommandOutcome:
     """下发命令并等待结果；出口保证 terminal_message 有中文，可原样显示。"""
-    return _with_message(await _send_and_wait(device_id, action, params, timeout_s))
+    return _with_message(await _send_and_wait(session, device_id, action, params, timeout_s))
 
 
 async def _send_and_wait(
+    session: Session,
     device_id: str,
     action: str,
     params: JsonObject,
@@ -164,7 +168,7 @@ async def _send_and_wait(
     同通道内串行排队，后来者等前面那条做完；仅当队列满时拒绝（过载信号）。
     """
     command_id = str(uuid.uuid4())
-    supported = _supported_actions(device_id)
+    supported = _supported_actions(session, device_id)
     # 空能力集表示设备未声明：不据此拦截，否则升级服务端会锁死在网设备
     if supported and action not in supported:
         command_audit.insert_command(

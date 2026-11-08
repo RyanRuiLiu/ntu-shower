@@ -77,11 +77,7 @@ def revoke_all(session: Session, device_id: str, now: datetime | None = None) ->
         )
     ).all()
     if active_ids:
-        session.execute(
-            update(DeviceCredential)
-            .where(DeviceCredential.id.in_(active_ids))
-            .values(revoked_at=stamp)
-        )
+        session.execute(update(DeviceCredential).where(DeviceCredential.id.in_(active_ids)).values(revoked_at=stamp))
         session.commit()
     return len(active_ids)
 

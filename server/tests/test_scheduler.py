@@ -111,11 +111,11 @@ def _prepare(
     monkeypatch.setattr(scheduler, "_snapshots", lambda _device_id: candidates)
     calls = sent if sent is not None else []
 
-    async def fake_settle(device_id: str, req: SettleRequest) -> CommandOutcome:
+    async def fake_settle(_session: object, device_id: str, req: SettleRequest) -> CommandOutcome:
         calls.append((device_id, "session.settle", {"cert_no": req.cert_no, "password": req.password}))
         return CommandOutcome(status=outcomes.OK.value, reason_code="", terminal_message="", data=None)
 
-    async def fake_assign(device_id: str, req: AssignRequest) -> CommandOutcome:
+    async def fake_assign(_session: object, device_id: str, req: AssignRequest) -> CommandOutcome:
         calls.append(
             (
                 device_id,
@@ -319,7 +319,7 @@ def test_a_rejected_settle_is_recorded_with_its_reason(monkeypatch: pytest.Monke
     async def body() -> None:
         _prepare(monkeypatch, [WAITING])
 
-        async def reject(_device_id: str, _req: object) -> object:
+        async def reject(_session: object, _device_id: str, _req: object) -> object:
             raise ApiProblemError(problems.NO_OCCUPIED_DOOR, "已经没有占用中的喷头了")
 
         monkeypatch.setattr(scheduler.sessions_routes, "perform_settle", reject)
@@ -490,7 +490,7 @@ def test_a_wait_rejection_keeps_the_pending_assign(monkeypatch: pytest.MonkeyPat
     async def body() -> None:
         _arm(monkeypatch)
 
-        async def reject(_device_id: str, _req: object) -> object:
+        async def reject(_session: object, _device_id: str, _req: object) -> object:
             raise ApiProblemError(problems.DOOR_NOT_FREE, "还被占着")
 
         monkeypatch.setattr(scheduler.sessions_routes, "perform_assign", reject)
@@ -510,7 +510,7 @@ def test_any_other_rejection_drops_the_pending_assign(monkeypatch: pytest.Monkey
     async def body() -> None:
         _arm(monkeypatch)
 
-        async def reject(_device_id: str, _req: object) -> object:
+        async def reject(_session: object, _device_id: str, _req: object) -> object:
             raise ApiProblemError(problems.DEVICE_OFFLINE, "设备离线")
 
         monkeypatch.setattr(scheduler.sessions_routes, "perform_assign", reject)
@@ -757,7 +757,7 @@ def test_a_frame_ends_in_a_settle_then_an_assign(
     """
     calls: list[tuple[str, JsonObject]] = []
 
-    async def fake_send(_device_id: str, action: str, params: JsonObject, **_kw: object) -> object:
+    async def fake_send(_session: object, _device_id: str, action: str, params: JsonObject, **_kw: object) -> object:
         calls.append((action, params))
         return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
 
@@ -798,7 +798,7 @@ def test_the_same_session_is_settled_only_once(
     """单次执行：帧再来几次也不会为同一个会话再下一单。"""
     calls: list[tuple[str, JsonObject]] = []
 
-    async def fake_send(_device_id: str, action: str, params: JsonObject, **_kw: object) -> object:
+    async def fake_send(_session: object, _device_id: str, action: str, params: JsonObject, **_kw: object) -> object:
         calls.append((action, params))
         return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
 
@@ -828,7 +828,7 @@ def test_auto_settle_only_settles_and_never_reassigns(
     """
     calls: list[tuple[str, JsonObject]] = []
 
-    async def fake_send(_device_id: str, action: str, params: JsonObject, **_kw: object) -> object:
+    async def fake_send(_session: object, _device_id: str, action: str, params: JsonObject, **_kw: object) -> object:
         calls.append((action, params))
         return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
 
@@ -860,7 +860,7 @@ def test_a_student_outside_the_roster_is_never_touched(
     """
     calls: list[tuple[str, JsonObject]] = []
 
-    async def fake_send(_device_id: str, action: str, params: JsonObject, **_kw: object) -> object:
+    async def fake_send(_session: object, _device_id: str, action: str, params: JsonObject, **_kw: object) -> object:
         calls.append((action, params))
         return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
 

@@ -10,6 +10,7 @@ admin 身份持有的 session/photo 能力位调用同一路径（见 access.dep
 """
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
 from app.core import actions, outcomes
 from app.core.config import settings
@@ -21,6 +22,7 @@ from app.core.problems import (
     SERVER_OVERLOADED,
     ApiProblemError,
 )
+from app.db.deps import get_db
 from app.modules.access.capabilities import Capability
 from app.modules.access.dependencies import enforce, require_identity
 from app.modules.access.schemas import IdentityRecord
@@ -66,12 +68,13 @@ def _reject_overload(result: CommandOutcome) -> CommandOutcome:
     return result
 
 
-async def perform_assign(device_id: str, req: AssignRequest) -> CommandOutcome:
+async def perform_assign(session: Session, device_id: str, req: AssignRequest) -> CommandOutcome:
     """分配喷头的领域逻辑，所有调用方共用。"""
-    require_trusted_online_device(device_id)
+    require_trusted_online_device(device_id, session)
     _require_assignable_door(device_id, req.door_no)
     _reject_duplicate_session(device_id, req.cert_no)
     result = await service.send_command_and_wait(
+        session,
         device_id,
         actions.SESSION_ASSIGN,
         {"door_no": req.door_no, "cert_no": req.cert_no, "password": req.password},
@@ -80,12 +83,13 @@ async def perform_assign(device_id: str, req: AssignRequest) -> CommandOutcome:
     return _reject_overload(result)
 
 
-async def perform_settle(device_id: str, req: SettleRequest) -> CommandOutcome:
+async def perform_settle(session: Session, device_id: str, req: SettleRequest) -> CommandOutcome:
     """结算的领域逻辑。"""
-    require_trusted_online_device(device_id)
+    require_trusted_online_device(device_id, session)
     if not doors_service.is_occupied(device_id, req.cert_no):
         raise ApiProblemError(NO_OCCUPIED_DOOR, "该学号没有正在使用的喷头")
     result = await service.send_command_and_wait(
+        session,
         device_id,
         actions.SESSION_SETTLE,
         {"cert_no": req.cert_no, "password": req.password},
@@ -94,10 +98,11 @@ async def perform_settle(device_id: str, req: SettleRequest) -> CommandOutcome:
     return _reject_overload(result)
 
 
-async def perform_photo(device_id: str) -> CommandOutcome:
+async def perform_photo(session: Session, device_id: str) -> CommandOutcome:
     """拍照的领域逻辑。"""
-    require_trusted_online_device(device_id)
+    require_trusted_online_device(device_id, session)
     result = await service.send_command_and_wait(
+        session,
         device_id,
         actions.CAMERA_CAPTURE,
         {},
@@ -111,10 +116,11 @@ async def assign(
     device_id: str,
     req: AssignRequest,
     caller: IdentityRecord = Depends(require_identity),
+    session: Session = Depends(get_db),
 ) -> CommandOutcome:
     """分配喷头。要求 session 能力位且设备在作用域内。"""
     enforce(caller, Capability.SESSION, device_id)
-    return await perform_assign(device_id, req)
+    return await perform_assign(session, device_id, req)
 
 
 @router.post("/devices/{device_id}/settle")
@@ -122,14 +128,17 @@ async def settle(
     device_id: str,
     req: SettleRequest,
     caller: IdentityRecord = Depends(require_identity),
+    session: Session = Depends(get_db),
 ) -> CommandOutcome:
     """结算。要求 session 能力位且设备在作用域内。"""
     enforce(caller, Capability.SESSION, device_id)
-    return await perform_settle(device_id, req)
+    return await perform_settle(session, device_id, req)
 
 
 @router.post("/devices/{device_id}/photo")
-async def photo(device_id: str, caller: IdentityRecord = Depends(require_identity)) -> CommandOutcome:
+async def photo(
+    device_id: str, caller: IdentityRecord = Depends(require_identity), session: Session = Depends(get_db)
+) -> CommandOutcome:
     """摄像头拍照。要求 photo 能力位且设备在作用域内。"""
     enforce(caller, Capability.PHOTO, device_id)
-    return await perform_photo(device_id)
+    return await perform_photo(session, device_id)

@@ -11,10 +11,12 @@ import asyncio
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from app.core.connections import manager
 from app.core.logging import log_event
 from app.core.problems import INVALID_CONFIG, ApiProblemError
+from app.db.deps import get_db
 from app.modules.access.dependencies import require_admin
 from app.modules.devices.dependencies import require_trusted_online_device
 from app.modules.sessions import scheduler as sessions_scheduler
@@ -147,9 +149,11 @@ def get_device_config(device_id: str) -> DeviceConfigView:
 
 
 @admin_router.put("/devices/{device_id}/config")
-async def put_device_config(device_id: str, req: ConfigUpdateRequest) -> DeviceConfigUpdateReport:
+async def put_device_config(
+    device_id: str, req: ConfigUpdateRequest, session: Session = Depends(get_db)
+) -> DeviceConfigUpdateReport:
     """设置设备级覆盖并推送给该设备。"""
-    require_trusted_online_device(device_id)
+    require_trusted_online_device(device_id, session)
     revision, overrides = store.put_device_overrides(device_id, _validated_device_overrides(req.config))
     sessions_scheduler.reload()
     result = await sessions_service.push_config_update(device_id, revision, store.device_effective(device_id))

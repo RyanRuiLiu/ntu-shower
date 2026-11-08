@@ -6,12 +6,14 @@ MP3 字节；`audio.py` 自身的外部命令边界另有单元测试（test_voi
 
 import asyncio
 import json
+from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 from tests import device_link, frames
 
 from app.core.clock import now_rfc3339
@@ -140,6 +142,7 @@ def _ok_outcome(downloaded: bool | None = None) -> CommandOutcome:
 
 def _collector(calls: list[tuple[str, dict[str, object]]], outcome: CommandOutcome | None = None) -> object:
     async def send(
+        _session: object,
         _device_id: str,
         action: str,
         params: dict[str, object],
@@ -1354,9 +1357,12 @@ def test_segment_and_target_normalization_guards(fresh_db: str) -> None:
     with pytest.raises(service.InvalidVoiceRuleError, match="不能有空值"):
         service._normalized_targets([" "], "设备")
 
-    with pytest.raises(service.InvalidVoiceRuleError, match="至少选择一个事件"):
+    with (
+        pytest.raises(service.InvalidVoiceRuleError, match="至少选择一个事件"),
+        _svc_session() as session,
+    ):
         service._normalize_rule(
-            [schemas.WILDCARD], ["C1"], [], [], [schemas.PauseSegment(kind="pause", ms=500)], [], None
+            session, [schemas.WILDCARD], ["C1"], [], [], [schemas.PauseSegment(kind="pause", ms=500)], [], None
         )
 
 
@@ -1378,14 +1384,15 @@ def test_rule_repository_races(
         events=[DoorEventKind.PAUSED],
         segments=[schemas.AssetSegment(kind="asset", asset_id=assets["请到"])],
     )
-    with pytest.raises(ApiProblemError) as error:
-        service.create_rule(request)
+    with pytest.raises(ApiProblemError) as error, _svc_session() as session:
+        service.create_rule(session, request)
     assert error.value.problem.code == "voice-rule-not-found"
 
     monkeypatch.setattr(repository, "get_rule", original_get)
     monkeypatch.setattr(repository, "update_rule", lambda *_args, **_kwargs: 0)
     with pytest.raises(ApiProblemError):
         service.update_rule(
+            session,
             rule_id,
             schemas.VoiceRuleUpdate(
                 devices=[DEVICE_ID],
@@ -1402,6 +1409,7 @@ def test_rule_repository_races(
     monkeypatch.setattr(repository, "update_rule", lambda *_args, **_kwargs: 1)
     with pytest.raises(ApiProblemError):
         service.update_rule(
+            session,
             rule_id,
             schemas.VoiceRuleUpdate(
                 devices=[DEVICE_ID],
@@ -1423,23 +1431,25 @@ def test_schedule_and_preview_edge_cases(
     assets: dict[str, str],
 ) -> None:
     service._spawn_prepare(DEVICE_ID, [])
-    service.schedule_rule_prepare(
-        schemas.VoiceRuleView(
-            id=999,
-            devices=[DEVICE_ID],
-            certs=["C1"],
-            exempt=[],
-            events=[DoorEventKind.ASSIGNED],
-            time_windows=[],
-            segments=[schemas.AssetSegment(kind="asset", asset_id=assets["请到"])],
-            summary="请到",
-            time_summary="不限",
-            volume=3,
-            enabled=True,
-            created_at=now_rfc3339(),
-            updated_at=now_rfc3339(),
+    with _svc_session() as session:
+        service.schedule_rule_prepare(
+            session,
+            schemas.VoiceRuleView(
+                id=999,
+                devices=[DEVICE_ID],
+                certs=["C1"],
+                exempt=[],
+                events=[DoorEventKind.ASSIGNED],
+                time_windows=[],
+                segments=[schemas.AssetSegment(kind="asset", asset_id=assets["请到"])],
+                summary="请到",
+                time_summary="不限",
+                volume=3,
+                enabled=True,
+                created_at=now_rfc3339(),
+                updated_at=now_rfc3339(),
+            ),
         )
-    )
     assert service._preview([service.ClipPlan("f" * 64, "f" * 64, 1, 1)]).segments == []
 
 
@@ -1478,8 +1488,8 @@ def test_push_rejects_malformed_rule(
         bool(row["enabled"]),
         now_rfc3339(),
     )
-    with pytest.raises(ApiProblemError) as error:
-        asyncio.run(service.push_to_device(rule["id"], DEVICE_ID))
+    with pytest.raises(ApiProblemError) as error, _svc_session() as session:
+        asyncio.run(service.push_to_device(session, rule["id"], DEVICE_ID))
     assert error.value.problem is INVALID_VOICE_RULE
 
 
@@ -1548,7 +1558,8 @@ def test_dispatch_uses_server_local_time(fresh_db: str, monkeypatch: pytest.Monk
         return []
 
     monkeypatch.setattr(repository, "matching_rules", capture)
-    asyncio.run(service._dispatch_event(_event("2026-01-05T14:00:00.000Z"), 0))
+    with _svc_session() as session:
+        asyncio.run(service._dispatch_event(session, _event("2026-01-05T14:00:00.000Z"), 0))
     local = captured["local"]
     assert getattr(local, "hour", None) == 22
     assert getattr(local, "minute", None) == 0
@@ -1632,3 +1643,12 @@ def test_unit_asset_upload_guards(
         files={"file": ("input.wav", b"invalid", "audio/wav")},
     )
     assert invalid.status_code == 422
+
+
+@contextmanager
+def _svc_session() -> "AbstractContextManager[Session]":
+    """直调 service 层的短会话。"""
+    from app.db.session import session_scope
+
+    with session_scope() as session:
+        yield session

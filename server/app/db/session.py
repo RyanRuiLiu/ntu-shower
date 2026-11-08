@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import contextmanager
 
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -42,4 +43,23 @@ class Database:
         self.engine.dispose()
 
 
-__all__: list[str] = ["Database"]
+@contextmanager
+def session_scope() -> Iterator[Session]:
+    """非请求路径（后台任务、asyncio 任务、脚本）的短生命周期会话。
+
+    请求路径用 `Depends(get_db)`，WS 路径从 `app.state.database` 取；这三者
+    覆盖全部会话来源，没有别的入口。事务边界与请求对齐：正常退出提交，
+    异常时回滚，会话总是关闭。
+    """
+    from app.core.config import settings
+
+    database = Database(settings.effective_database_url)
+    try:
+        with database.new_session() as session:
+            yield session
+            session.commit()
+    finally:
+        database.dispose()
+
+
+__all__: list[str] = ["Database", "session_scope"]

@@ -9,8 +9,11 @@
 
 import asyncio
 import contextlib
+from collections.abc import Callable
+from typing import cast
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from ...auth.tokens import extract_bearer
@@ -20,6 +23,7 @@ from ...core.config import settings
 from ...core.connections import manager
 from ...core.logging import log_event
 from ...core.protocol import JsonObject, as_int, list_of, payload_of, text_of
+from ...db.session import Database
 from ...persistence import device_credentials
 from ..config import store as config_store
 from ..devices import service as devices_service
@@ -35,6 +39,22 @@ router = APIRouter()
 
 #: 主动关闭连接时用的 WS 状态码。与设备端 `GatewayClient.CLOSE_GOING_AWAY` 同值。
 CLOSE_GOING_AWAY = 1001
+
+
+def _db_session(ws: WebSocket) -> Session:
+    """WS 路径的会话来源：应用状态里的 Database，短生命周期。"""
+    database = cast("Database", ws.app.state.database)
+    return database.new_session()
+
+
+async def _call[T](ws: WebSocket, fn: Callable[..., T], *args: object) -> T:
+    """在线程池里执行一个收 `session` 首参的同步服务函数；会话随调用结束关闭。
+
+    WS 帧处理没有请求上下文，设备域服务已改为显式注入；这里是 WS 侧唯一的
+    会话来源，等价于路由层的 `Depends(get_db)`。
+    """
+    with _db_session(ws) as session:
+        return await run_in_threadpool(fn, session, *args)
 
 
 @router.websocket("/gateway/device")
@@ -61,7 +81,8 @@ async def device_gateway(ws: WebSocket) -> None:
         # 它采集的每一帧都要带采集时刻——越早把服务端时刻交给它，最初那几帧时刻越准。
         await ws.send_text(protocol.envelope("link.ping", {"sender_time": now_rfc3339()}))
 
-        devices_service.publish_device_update(device_id)
+        with _db_session(ws) as session:
+            devices_service.publish_device_update(session, device_id)
         ping_task = asyncio.create_task(_server_ping_loop(ws, device_id, pong_seen, offline_reason))
 
         while True:
@@ -92,11 +113,12 @@ async def device_gateway(ws: WebSocket) -> None:
             # 被顶替的那条随后走这里收尾——那一刻设备仍在线，不该记 offline。
             if manager.unregister(device_id, ws):
                 reason = offline_reason[0] if offline_reason else ""
-                await run_in_threadpool(devices_service.record_link_event, device_id, LINK_OFFLINE, reason)
-            await run_in_threadpool(devices_service.set_device_offline, device_id)
+                await _call(ws, devices_service.record_link_event, device_id, LINK_OFFLINE, reason)
+            await _call(ws, devices_service.set_device_offline, device_id)
             await run_in_threadpool(audit.record_gateway, device_id, "disconnect", ip)
             log_event("INFO", "gateway.device-disconnected", "设备断开", device_id=device_id)
-            devices_service.publish_device_update(device_id)
+            with _db_session(ws) as session:
+                devices_service.publish_device_update(session, device_id)
 
 
 async def _verify_device_token(ws: WebSocket) -> tuple[bool, str | None]:
@@ -137,14 +159,15 @@ async def _accept_hello(ws: WebSocket, token_device_id: str | None) -> tuple[str
         await ws.close(code=1008)
         return None
     version_code = as_int(hello_payload.get("version_code"))
-    row = await run_in_threadpool(devices_service.get_device, device_id)
+    row = await _call(ws, devices_service.get_device, device_id)
     trusted = bool(row and row["trusted"])
     # 经 Caddy 代理而来：真实设备 IP 在 X-Real-IP 头里
     ip = ws.headers.get("x-real-ip") or (ws.client.host if ws.client else "")
     # 开机时刻由服务端反推（此刻减设备上报的运行秒数）：运行时长是单调量，
     # 不受设备墙上时钟偏差影响
     booted_at = rfc3339_ago(as_int(hello_payload.get("uptime_s")))
-    await run_in_threadpool(
+    await _call(
+        ws,
         devices_service.register_device,
         device_id,
         text_of(hello_payload, "app_version"),
@@ -163,8 +186,8 @@ async def _accept_hello(ws: WebSocket, token_device_id: str | None) -> tuple[str
     manager.register(device_id, ws)
     # 载入上次记下的钟偏差。从上线到首次 pong 之间有一小段窗口，不载入的话那段时间
     # 读到的是 0（等于不平移）——而刚接手、那边还被占着恰恰最常落在窗口里。
-    await run_in_threadpool(devices_service.load_clock_skew, device_id)
-    await run_in_threadpool(devices_service.record_link_event, device_id, LINK_ONLINE, last_offline_reason)
+    await _call(ws, devices_service.load_clock_skew, device_id)
+    await _call(ws, devices_service.record_link_event, device_id, LINK_ONLINE, last_offline_reason)
     await run_in_threadpool(audit.record_gateway, device_id, "connect", ip)
     log_event(
         "INFO",
@@ -210,7 +233,7 @@ async def _handle_frame(
         # 先记录再回 pong：反过来时 pong 已发出而记录未落，外部会看到时序颠倒。
         # 服务端回的这一份 pong 载荷为空——反方向那份才带 device_time，那是给服务端
         # 算钟偏差用的（见下一条分支）。
-        await run_in_threadpool(devices_service.touch_seen, device_id)
+        await _call(ws, devices_service.touch_seen, device_id)
         await ws.send_text(protocol.envelope("link.pong", {}, reply_to=frame_id))
     elif mtype == "link.pong":
         # 两件事：判活，以及用设备带回来的墙上时刻更新钟偏差。那个偏差把帧里的
@@ -219,8 +242,9 @@ async def _handle_frame(
         #
         # `received_at` 在这一层取一次就往下传：函数执行已经晚于报文到达，让下游再取
         # 一次只会白添一个调用栈的误差。
-        await run_in_threadpool(devices_service.touch_seen, device_id)
-        await run_in_threadpool(
+        await _call(ws, devices_service.touch_seen, device_id)
+        await _call(
+            ws,
             devices_service.update_clock_skew,
             device_id,
             payload.get("device_time"),
@@ -241,7 +265,8 @@ async def _handle_frame(
         device_clock_text = payload.get("device_clock")
         captured_at = payload.get("captured_at")
         if isinstance(device_clock_text, str) and isinstance(captured_at, str):
-            await run_in_threadpool(
+            await _call(
+                ws,
                 devices_service.update_clock_skew,
                 device_id,
                 device_clock_text,
@@ -303,7 +328,7 @@ async def _handle_frame(
             return
         # 落库即回执（无需回帧）：失败回执反而让设备重发同一份大内容；真失败时下一轮
         # 握手会重新上送，日志是幂等的现态读数，不是队列
-        await run_in_threadpool(devices_service.record_log_upload, device_id, kind, content)
+        await _call(ws, devices_service.record_log_upload, device_id, kind, content)
         log_event("INFO", "gateway.log-uploaded", "设备日志已上送", device_id=device_id, kind=kind)
     elif mtype == "ota.progress":
         if not trusted:

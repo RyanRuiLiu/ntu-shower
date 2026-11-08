@@ -59,6 +59,7 @@ from app.core.clock import now_rfc3339, shift_rfc3339
 from app.core.logging import log_event
 from app.core.problems import ApiProblemError
 from app.core.protocol import as_int
+from app.db.session import session_scope
 from app.modules.audit import repository as audit_repository
 from app.modules.config import store as config_store
 from app.modules.doors import service as doors_service
@@ -531,9 +532,10 @@ async def _perform_settle(job: _SettleJob) -> None:
         return
 
     try:
-        result = await sessions_routes.perform_settle(
-            candidate.device_id, SettleRequest(cert_no=candidate.cert_no, password=password)
-        )
+        with session_scope() as session:
+            result = await sessions_routes.perform_settle(
+                session, candidate.device_id, SettleRequest(cert_no=candidate.cert_no, password=password)
+            )
     except ApiProblemError as error:
         _report_problem(error, job)
         return
@@ -568,9 +570,10 @@ async def _perform_assign(job: _AssignJob) -> None:
     """补上那一次分配。**只下一次**，不重试——它是否真成了，下一帧看得出来。"""
     key = (job.device_id, job.door_no)
     try:
-        result = await sessions_routes.perform_assign(
-            job.device_id, AssignRequest(door_no=job.door_no, cert_no=job.cert_no, password=job.password)
-        )
+        with session_scope() as session:
+            result = await sessions_routes.perform_assign(
+                session, job.device_id, AssignRequest(door_no=job.door_no, cert_no=job.cert_no, password=job.password)
+            )
     except ApiProblemError as error:
         if error.problem.code in _WAIT_PROBLEMS:
             # 门还没空、或他名下还有未结束的会话：命令**根本没下发**，所以留着待办等下一帧

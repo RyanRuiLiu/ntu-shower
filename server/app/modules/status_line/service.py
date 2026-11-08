@@ -28,6 +28,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
+from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from app.core import protocol
@@ -63,14 +64,14 @@ class _Snapshot:
     recipients: tuple[_Recipient, ...]
 
 
-def _snapshot() -> _Snapshot:
+def _snapshot(session: Session) -> _Snapshot:
     """读一次设备与喷头现态，拼出状态行载荷。
 
     读库在各领域自己的 service 里完成（设备域、门域），本模块不碰表。
     """
     floors: list[dict[str, Any]] = []
     recipients: list[_Recipient] = []
-    for record in devices_service.list_devices():
+    for record in devices_service.list_devices(session):
         device_id = str(record["device_id"])
         online = bool(record["online"]) and bool(record["trusted"])
         # 只要现态，不要 `list_doors` 那一路带出的上次使用：状态行数的是 door_live，
@@ -103,10 +104,10 @@ class _Pusher:
         self.last_connection: dict[str, int] = {}
         self.last_failure_log = 0.0
 
-    async def tick(self) -> None:
+    async def tick(self, session: Session) -> None:
         loop = asyncio.get_running_loop()
         try:
-            snapshot = await run_in_threadpool(_snapshot)
+            snapshot = await run_in_threadpool(_snapshot, session)
         except Exception as exc:  # noqa: BLE001 —— 一轮读库失败退给统一循环，下一轮重试
             now = loop.time()
             if now - self.last_failure_log >= FAILURE_LOG_INTERVAL_S:
@@ -146,6 +147,6 @@ class _Pusher:
 pusher = _Pusher()
 
 
-async def tick() -> None:
-    """统一循环的一轮入口。"""
-    await pusher.tick()
+async def tick(session: Session) -> None:
+    """统一循环的一轮入口（Background 每轮传入短会话）。"""
+    await pusher.tick(session)

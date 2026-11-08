@@ -111,15 +111,11 @@ def _issued(session: Session, record: IdentityRecord) -> IdentityIssued:
     return {**record, "token": token}
 
 
-def _reject_unknown_devices(_session: Session, device_scope: list[str]) -> None:
-    """作用域里的设备必须真实存在：写错 device_id 的身份永远执行不了。
+def _reject_unknown_devices(session: Session, device_scope: list[str]) -> None:
+    """作用域里的设备必须真实存在：写错 device_id 的身份永远执行不了。"""
+    from app.persistence import devices as devices_store
 
-    过渡期读旧设备表：设备域尚未迁到新数据层，两边同时读会在切换中途出现
-    「设备存在但校验说没有」。设备域迁完后这里一并改到 `persistence.devices`。
-    """
-    from app.modules.devices import repository as devices_repository
-
-    known = {record["device_id"] for record in devices_repository.list_all()}
+    known = {record["device_id"] for record in devices_store.list_all(session)}
     unknown = sorted(set(device_scope) - known - {"*"})
     if unknown:
         raise ApiProblemError(VALIDATION_FAILED, f"作用域含未知设备：{unknown}")

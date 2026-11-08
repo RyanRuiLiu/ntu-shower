@@ -19,11 +19,13 @@ import contextlib
 import uuid
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from sqlalchemy.orm import Session
 
 from app.core import actions, outcomes, protocol, reason_codes
 from app.core.connections import manager
 from app.core.logging import log_event
 from app.core.problems import DEVICE_OFFLINE, ApiProblemError
+from app.db.deps import get_db
 from app.modules.access.dependencies import require_admin
 from app.modules.audit import repository as command_audit
 from app.modules.bridge.schemas import BridgeClosed, BridgeOpened, BridgeStatus
@@ -212,7 +214,7 @@ async def _serve_client(bridge: AdbBridge, reader: asyncio.StreamReader, writer:
 
 
 @admin_router.post("/devices/{device_id}/bridge/open")
-async def adb_open(device_id: str) -> BridgeOpened:
+async def adb_open(device_id: str, session: Session = Depends(get_db)) -> BridgeOpened:
     """打开设备的 ADB 桥：下发 bridge.open 并绑定本机回环 TCP 监听。
 
     整个过程持锁：建立过程有 start_server 与退避重试两处让出事件循环的机会，
@@ -221,7 +223,7 @@ async def adb_open(device_id: str) -> BridgeOpened:
     配对超时前），此时建新会话必然撞上自己已绑定的端口。"设备是否连入"由
     bridge/status 的 device_connected 回答。
     """
-    require_trusted_online_device(device_id)
+    require_trusted_online_device(device_id, session)
     async with registry.op_lock:
         existing = registry.get(device_id)
         if existing is not None:

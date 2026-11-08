@@ -24,8 +24,10 @@
 """
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
 from app.core import actions
+from app.db.deps import get_db
 from app.modules.access.dependencies import require_admin
 from app.modules.devices.dependencies import device_action
 from app.modules.sessions.schemas import CommandOutcome
@@ -41,9 +43,10 @@ router = APIRouter(prefix="/api/v1/devices", dependencies=[Depends(require_admin
 
 
 @router.post("/{device_id}/water/open")
-async def open_valve(device_id: str, req: WaterDoorRequest) -> CommandOutcome:
+async def open_valve(device_id: str, req: WaterDoorRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """授权出水：置指定喷头的授权位；**不直接出水**，真正出水仍需现场按电磁阀。"""
     return await device_action(
+        session,
         device_id,
         actions.WATER_OPEN,
         {"door_no": req.door_no},
@@ -52,9 +55,10 @@ async def open_valve(device_id: str, req: WaterDoorRequest) -> CommandOutcome:
 
 
 @router.post("/{device_id}/water/close")
-async def close_valve(device_id: str, req: WaterDoorRequest) -> CommandOutcome:
+async def close_valve(device_id: str, req: WaterDoorRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """断水：清授权位与出水位；不清按钮位。"""
     return await device_action(
+        session,
         device_id,
         actions.WATER_CLOSE,
         {"door_no": req.door_no},
@@ -63,13 +67,14 @@ async def close_valve(device_id: str, req: WaterDoorRequest) -> CommandOutcome:
 
 
 @router.post("/{device_id}/water/status")
-async def read_status(device_id: str) -> CommandOutcome:
+async def read_status(device_id: str, session: Session = Depends(get_db)) -> CommandOutcome:
     """读该设备 waterList 里每块板的配置与状态。
 
     结果 `data.boards[]`：waterList 的板信息、`F4 B1` 的 `door_num/bath_min`、
     只含 `waterList.nozzlenumber` 条的 `doors[]`。板子多出的门不返回。
     """
     return await device_action(
+        session,
         device_id,
         actions.WATER_STATUS,
         {},

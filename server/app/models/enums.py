@@ -26,6 +26,7 @@ class DeviceLogKind(StrEnum):
     """设备上送日志的种类。"""
 
     DEVICE = "device"
+    CRASH = "crash"
     OTA = "ota"
 
 

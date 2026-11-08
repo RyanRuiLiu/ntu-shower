@@ -426,7 +426,7 @@ def test_a_real_shape_ends_in_a_settle(
     """
     calls: list[tuple[str, object]] = []
 
-    async def fake_send(_device_id: str, action: str, params: object, **_kw: object) -> object:
+    async def fake_send(_session: object, _device_id: str, action: str, params: object, **_kw: object) -> object:
         calls.append((action, params))
         return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
 

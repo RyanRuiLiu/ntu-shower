@@ -211,6 +211,9 @@ def latest_device_log(session: Session, device_id: str, kind: DeviceLogKind) -> 
 
 
 def as_record(row: Device) -> DeviceRecord:
+    # capabilities 若被外部写成非数组（手改库、旧数据形状），按「未声明」处理而不是让
+    # 一条查询崩掉——档案读取在守卫链上，读不出来等于设备完全不可用。
+    caps = row.capabilities if isinstance(row.capabilities, list) else []
     record: DeviceRecord = {
         "device_id": row.device_id,
         "name": row.name,
@@ -218,7 +221,7 @@ def as_record(row: Device) -> DeviceRecord:
         "app_version": row.app_version,
         "version_code": int(row.version_code),
         "os_version": row.os_version,
-        "capabilities": list(row.capabilities),
+        "capabilities": list(caps),
         "online": False,
         "last_seen_at": format_rfc3339(row.last_seen_at) if row.last_seen_at else "",
         "last_ip": row.last_ip or "",

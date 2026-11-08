@@ -21,12 +21,14 @@
 """
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
 
 from app.core.problems import DEVICE_NOT_FOUND, ApiProblemError
+from app.db.deps import get_db
 from app.modules.access.capabilities import Capability
 from app.modules.access.dependencies import require_capability, require_identity
 from app.modules.access.schemas import IdentityRecord
-from app.modules.devices import repository as devices
+from app.persistence import devices as devices_store
 
 from . import service
 from .schemas import MineView, ReplayView, StatsView
@@ -48,15 +50,16 @@ def device_stats(
     caller: IdentityRecord = Depends(require_identity),
     days: int = Query(30, ge=1, le=365, description="统计窗口的天数"),
     tz_offset_minutes: int = _TZ_QUERY,
+    session: Session = Depends(get_db),
 ) -> StatsView:
     """一台设备一次装载：今日、热力图、两个分布、喷头热度、七个榜、各楼层对比。
 
     切设备与切窗口要重拉；榜的页签与方向、分布、回放的拖动都在客户端本地切，不发请求。
     """
     require_capability(caller, Capability.STATS)
-    if devices.get(device_id) is None:
+    if devices_store.get(session, device_id) is None:
         raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {device_id}")
-    return service.device_stats(device_id, days, tz_offset_minutes)
+    return service.device_stats(session, device_id, days, tz_offset_minutes)
 
 
 @router.get("/devices/{device_id}/replay")
@@ -65,6 +68,7 @@ def device_replay(
     caller: IdentityRecord = Depends(require_identity),
     day: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$", description="当地日期 YYYY-MM-DD"),
     tz_offset_minutes: int = _TZ_QUERY,
+    session: Session = Depends(get_db),
 ) -> ReplayView:
     """那一天的完整状态变化序列。
 
@@ -72,7 +76,7 @@ def device_replay(
     写法要扫到那一刻为止的全部历史事件，而滑块每移动一格就触发一次，那样会卡。
     """
     require_capability(caller, Capability.STATS)
-    if devices.get(device_id) is None:
+    if devices_store.get(session, device_id) is None:
         raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {device_id}")
     return service.device_replay(device_id, day, tz_offset_minutes)
 

@@ -16,15 +16,19 @@ import re
 import time
 import uuid
 from collections.abc import Awaitable, Callable
+from datetime import timedelta
 from typing import cast
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI
+from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response, StreamingResponse
 from typing_extensions import TypedDict
+
+from app.db.base import utcnow
 
 from . import db
 from .clock import now_rfc3339
@@ -263,25 +267,29 @@ def list_calls(
     return cast("list[ApiCallRecord]", [dict(r) for r in rows])
 
 
-def prune(retention_days: int) -> int:
+def prune(session: Session, retention_days: int) -> int:
     """删除超过保留期的审计行（api_call 与 command_audit），返回删除行数。
 
     只动审计表：业务数据（喷头状态迁移、使用会话）是运营历史，永久保留；
-    库文件不复缩，页复用即可。两张表的 DELETE 共用一个事务（不走 db.write 的
-    单语句事务）：要么都清、要么都不清，两边保留期才不会错开。
+    库文件不复缩，页复用即可。两张表的 DELETE 共用一个事务：要么都清、
+    要么都不清，两边保留期才不会错开。
     """
-    conn = db.get_conn()
+    from sqlalchemy import delete
+
+    from app.models.ops import ApiCall, CommandAudit
+
+    cutoff = utcnow() - timedelta(days=retention_days)
     removed = 0
-    for table, column in (("api_call", "requested_at"), ("command_audit", "created_at")):
-        cursor = conn.execute(f"DELETE FROM {table} WHERE {column} < datetime('now', ?)", (f"-{retention_days} days",))
-        removed += cursor.rowcount
-    conn.commit()
+    for table, column in ((ApiCall, ApiCall.requested_at), (CommandAudit, CommandAudit.created_at)):
+        result = session.execute(delete(table).where(column < cutoff))
+        removed += int(getattr(result, "rowcount", 0) or 0)
+    session.commit()
     return removed
 
 
-async def prune_once() -> None:
+async def prune_once(session: Session) -> None:
     """清理一轮；生命周期（启动、取消、间隔）由 core/background 统一管理。"""
-    removed = prune(settings.audit_retention_days)
+    removed = prune(session, settings.audit_retention_days)
     if removed:
         log_event(
             "INFO",

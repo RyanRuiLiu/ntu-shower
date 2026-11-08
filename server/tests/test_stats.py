@@ -4,21 +4,66 @@
 断言不会。
 """
 
+from collections.abc import Iterator
+from contextlib import AbstractContextManager
 from datetime import timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+from tests import device_link
 from tests.identity import bearer
 from tests.identity import register as register_identity
 
 from app.core.clock import now_rfc3339, rfc3339_ago, shift_rfc3339, to_local
 from app.core.db import write
+from app.db.base import utcnow
 from app.modules.access.identity import IdentityKind
-from app.modules.devices import repository as devices_repository
-from app.modules.devices.schemas import LINK_OFFLINE, LINK_ONLINE
 from app.modules.doors.schemas import DoorState, state_label
 from app.modules.doors.service import SESSION_MAX_S
 from app.modules.stats import service, spec
+
+
+def _db_session() -> AbstractContextManager[Session]:
+    """单元用例的短会话。"""
+    from contextlib import contextmanager
+
+    @contextmanager
+    def ctx() -> Iterator[Session]:
+        from app.db.session import session_scope
+
+        with session_scope() as session:
+            yield session
+
+    return ctx()
+
+
+def _insert_link_event(device_id: str, event: str, at: str) -> None:
+    """登记一条链路事件；时刻解析失败的原用例在新层的类型上不可能发生，跳过。"""
+    from app.core.clock import parse_rfc3339
+    from app.models.enums import LinkEvent
+    from app.persistence import devices as devices_store
+
+    parsed = parse_rfc3339(at)
+    if parsed is None:
+        return
+    with _db_session() as session:
+        devices_store.insert_link_event(session, device_id, LinkEvent(event), parsed)
+
+
+def _cell(since: str, until: str, tz: int, device_id: str) -> dict[tuple[int, int], float]:
+    from app.db.session import session_scope
+
+    with session_scope() as session:
+        return service._cell_seconds(session, since, until, tz, device_id)
+
+
+def _offline(since: str, until: str, tz: int, device_id: str) -> dict[tuple[int, int], float]:
+    from app.db.session import session_scope
+
+    with session_scope() as session:
+        return service._offline_seconds(session, device_id, since, until, tz)
+
 
 STATS_IDENTITY = "stats-probe"
 DEVICE = "dev-stats"
@@ -123,11 +168,23 @@ def _event(door_no: int, state: DoorState, seconds_ago: int, cert_no: str = "", 
 @pytest.fixture
 def stats_headers(fresh_db: str) -> dict[str, str]:
     """持 `stats` 位的调用方，外加一台已注册的设备。"""
+    from app.db.base import utcnow
+    from app.persistence import devices as devices_store
+
     token = register_identity(STATS_IDENTITY, IdentityKind.OPENID, ["stats"], "统计探针", device_scope=[])
-    write(
-        "INSERT INTO device (device_id, name, trusted) VALUES (?,?,?)",
-        (DEVICE, "测试浴室", 1),
-    )
+    with device_link.db() as session:
+        devices_store.register(
+            session,
+            device_id=DEVICE,
+            app_version="0.5.0",
+            version_code=1,
+            os_version="4.4.4",
+            capabilities=[],
+            ip="127.0.0.1",
+            booted_at=utcnow(),
+            seen_at=utcnow(),
+        )
+        devices_store.set_name(session, DEVICE, "测试浴室")
     return bearer(token)
 
 
@@ -671,10 +728,25 @@ def test_compare_rows_follow_the_device_display_order(client: TestClient, seeded
     走，而它是各楼层的基准读数，顺序该与设备下拉同源（`devices.list_all`）。让另一台
     设备登记在前面、请求的却是后面那台，顺序才试得出来。
     """
-    write(
-        "INSERT INTO device (device_id, name, trusted, sort_order) VALUES (?,?,?,?)", ("dev-stats-b1", "B1 浴室", 1, 0)
-    )
-    write("UPDATE device SET sort_order = 1 WHERE device_id = ?", (DEVICE,))
+    from sqlalchemy import text
+
+    from app.persistence import devices as devices_store
+
+    with device_link.db() as session:
+        devices_store.register(
+            session,
+            device_id="dev-stats-b1",
+            app_version="0.5.0",
+            version_code=1,
+            os_version="4.4.4",
+            capabilities=[],
+            ip="127.0.0.1",
+            booted_at=utcnow(),
+            seen_at=utcnow(),
+        )
+        devices_store.set_name(session, "dev-stats-b1", "B1 浴室")
+        session.execute(text("UPDATE devices SET sort_order = 1 WHERE device_id = :d"), {"d": DEVICE})
+        session.commit()
 
     body = client.get(f"/api/v1/stats/devices/{DEVICE}?days=30", headers=seeded).json()
 
@@ -685,7 +757,7 @@ def test_compare_rows_follow_the_device_display_order(client: TestClient, seeded
 
 
 @pytest.mark.usefixtures("client")
-def test_heat_denominator_excludes_offline_time() -> None:
+def test_heat_denominator_excludes_offline_time(fresh_db: str) -> None:
     """热力图分母剔除设备离线的时段（口径 8）。
 
     离线期间没有帧、占用分子必为空，分母若照算，每次掉线之后整张图都系统性偏低。
@@ -694,10 +766,24 @@ def test_heat_denominator_excludes_offline_time() -> None:
     不渗进其他用例的窗口。
     """
     link_device = "dev-stats-link"
-    devices_repository.insert_link_event(link_device, LINK_OFFLINE, "2026-09-28T04:00:00Z")
-    devices_repository.insert_link_event(link_device, LINK_ONLINE, "2026-09-28T06:00:00Z")
+    from app.persistence import devices as devices_store
 
-    elapsed = service._cell_seconds("2026-09-28T04:00:00Z", "2026-09-29T04:00:00Z", TZ, link_device)
+    with _db_session() as session:
+        devices_store.register(
+            session,
+            device_id=link_device,
+            app_version="0.5.0",
+            version_code=1,
+            os_version="4.4.4",
+            capabilities=[],
+            ip="127.0.0.1",
+            booted_at=utcnow(),
+            seen_at=utcnow(),
+        )
+    _insert_link_event(link_device, "offline", "2026-09-28T04:00:00Z")
+    _insert_link_event(link_device, "online", "2026-09-28T06:00:00Z")
+
+    elapsed = _cell("2026-09-28T04:00:00Z", "2026-09-29T04:00:00Z", TZ, link_device)
 
     assert elapsed[(0, 1)] == 0.0  # 周一 12 时，整格离线
     assert elapsed[(0, 2)] == 0.0  # 周一 13 时，整格离线
@@ -705,10 +791,10 @@ def test_heat_denominator_excludes_offline_time() -> None:
     assert elapsed[(1, 0)] == 3600.0  # 周二 11 时，与离线无关
 
     # 解析不了的时刻成不了分母，也不抛错：坏窗口给空表，坏事件被跳过。
-    assert service._cell_seconds("not-a-time", "2026-09-29T04:00:00Z", TZ, link_device) == {}
-    assert service._offline_seconds("not-a-time", "not-a-time", TZ, link_device) == {}
-    devices_repository.insert_link_event(link_device, LINK_OFFLINE, "0")
-    assert service._cell_seconds("2026-09-28T04:00:00Z", "2026-09-29T04:00:00Z", TZ, link_device) == elapsed
+    assert _cell("not-a-time", "2026-09-29T04:00:00Z", TZ, link_device) == {}
+    assert _offline("not-a-time", "not-a-time", TZ, link_device) == {}
+    _insert_link_event(link_device, "offline", "0")  # 时刻解析不了：写入被跳过
+    assert _cell("2026-09-28T04:00:00Z", "2026-09-29T04:00:00Z", TZ, link_device) == elapsed
 
 
 def test_each_board_names_a_detail_field_that_exists(client: TestClient, seeded: dict[str, str]) -> None:

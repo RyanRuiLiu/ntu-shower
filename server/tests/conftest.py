@@ -187,16 +187,27 @@ def ops_headers(fresh_db: str) -> dict[str, str]:
     同时登记一台已信任设备 dev-test-0001：用户面操作类接口的守卫链要求设备
     存在且已信任，需要现成目标的用例直接用常量 TRUSTED_DEVICE_ID。
     """
+    from app.db.base import utcnow
     from app.db.session import Database
     from app.modules.access.identity import IdentityKind
-    from app.modules.devices import repository as devices_repository
+    from app.persistence import devices as devices_store
     from app.persistence import principals as principals_store
 
-    devices_repository.register(TRUSTED_DEVICE_ID, "0.4.13", 57, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
-    devices_repository.set_trusted(TRUSTED_DEVICE_ID, True)
     database = Database(f"sqlite:///{Path(fresh_db).as_posix()}")
     try:
         with database.new_session() as session:
+            devices_store.register(
+                session,
+                device_id=TRUSTED_DEVICE_ID,
+                app_version="0.4.13",
+                version_code=57,
+                os_version="4.4.4",
+                capabilities=[],
+                ip="127.0.0.1",
+                booted_at=utcnow(),
+                seen_at=utcnow(),
+            )
+            devices_store.set_trusted(session, TRUSTED_DEVICE_ID, True)
             principals_store.put(session, OPS_IDENTITY, IdentityKind.WEB, ["session", "photo"], "测试用", ["*"])
             token = principals_store.issue_token(session, OPS_IDENTITY)
     finally:
