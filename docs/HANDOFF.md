@@ -15,7 +15,7 @@
 | 持久化 | 全部域（`server/app/persistence/`：principals/devices/audit/ota/voice/config/extend_hours/doors/device_credentials） | 各域测试 |
 | 认证 | `principals` 单主体表、Bearer 凭据、会话 Cookie、设备令牌 | `test_auth_endpoints.py` |
 | **全部域切换** | access、devices（+12 域穿透）、ota、audit 全部、voice 全部、**config store、extend_hours、doors（977 行状态机）、stats** —— 服务层显式 session 注入，路由 `Depends(get_db)` / WS `_call` 短会话 / 后台任务 `session_scope()` 三入口定稿 | `1065 passed` / `mypy --strict` |
-| 转换工具 | `server/tools/convert_v1_to_v2.py` 21 张表 + `--token-output` 给现有设备补凭据 | 生产副本 48 万行逐表 ok，6 台设备各一枚摘要 |
+| 转换工具 | `server/tools/convert_v1_to_v2.py` 21 张表（`--token-output` 为可选运维通道） | 真实生产副本 53 万行逐表 ok，全链路演练绿 |
 | 编排 | `deploy/stack/`（compose/Caddyfile/三个脚本） | `docker compose config` + `caddy fmt` |
 | 旧层退役 | `init_schema` 与 8 处 `init_tables` 删除；6 个旧 repository 残壳删除；`rebuild_derived.py` 随旧层退场；表结构唯一归 Alembic | 全新库 23 张表，`alembic check` 无差异 |
 | 调度 | `server/app/core/background.py` 统一三个间隔任务；审计行 `session_id` 恢复传值（doors 已在新层，外键成立） | 测试 |
@@ -43,17 +43,17 @@
 
 ## 剩余工作（分支外，用户执行）
 
-1. **设备令牌下发**：切换时 `--token-output` 给每台设备签发凭据，明文逐台写进设备，用完删除。管理面凭据轮换端点未接入（`persistence/device_credentials.py` 的 `list_for_device`/`revoke_all` 已备好）
+1. **设备接入凭据：claim 自注册已实现**（决策 2026-11-09）：APK 构建期内置共享 claim 令牌，设备首次连接调 `POST /api/v1/devices/enroll` 自动换每台自己的凭据；服务端 `DEVICE_ENROLL_TOKEN` 留空即通道关闭。`--token-output` 退为可选运维通道。管理面凭据轮换端点未接入（`list_for_device`/`revoke_all` 已备好）
 2. **待定夺**：主页托管（独立容器 vs Caddy 直接托管 `/srv/www`）；两份 compose.yaml 合并（顶层单服务版 vs `deploy/stack` 全栈版）
 
 ## 切换执行清单（停机窗口，用户执行）
 
-1. 发新版 APK（带设备令牌能力）
+1. 构建并经旧服务端 OTA 发布带自注册能力的新 APK（gradle `-PdeviceEnrollToken=<共享claim>` 与服务器 .env 的 `DEVICE_ENROLL_TOKEN` 同值），等 6 台设备升级完成——它们继续在旧服务上正常运行
 2. 无人使用时停旧服务
 3. `deploy/stack/scripts/backup.sh` 备份
-4. `PYTHONPATH=. python tools/convert_v1_to_v2.py --source 旧库 --target 新库 --token-output /root/device-tokens.txt`
-5. 把 `device-tokens.txt` 里的明文逐台写进设备，用完删除该文件
-6. 起新服务（migrate 服务跑 `alembic upgrade head`）
+4. `PYTHONPATH=. python tools/convert_v1_to_v2.py --source 旧库 --target 新库`
+5. 起新服务（migrate 服务跑 `alembic upgrade head`，no-op）+ Caddy 接管 80/443
+6. 设备陆续重连：每台自动自注册换凭据，管理台确认 6 台在线与信任位
 
 ## 工作流约定
 
