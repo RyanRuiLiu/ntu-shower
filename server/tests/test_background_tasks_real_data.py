@@ -430,7 +430,7 @@ def test_a_real_shape_ends_in_a_settle(
         calls.append((action, params))
         return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
 
-    monkeypatch.setattr(scheduler.config_store, "effective", lambda _device_id: CONFIG)
+    monkeypatch.setattr(scheduler.config_store, "effective", lambda _session, _device_id: CONFIG)
     monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
     doors_service.process_snapshot(
         "dev-1",

@@ -86,17 +86,17 @@ def get_config_spec() -> ConfigSpecCatalog:
 
 
 @admin_router.get("/config")
-def get_global_config() -> GlobalConfigView:
+def get_global_config(session: Session = Depends(get_db)) -> GlobalConfigView:
     """全局配置的当前有效值（默认值叠加全局覆盖）。"""
-    revision, _overrides = store.get_global_overrides()
-    return {"revision": revision, "config": store.global_effective()}
+    revision, _overrides = store.get_global_overrides(session)
+    return {"revision": revision, "config": store.global_effective(session)}
 
 
 @admin_router.put("/config")
-async def put_global_config(req: ConfigUpdateRequest) -> GlobalConfigUpdateReport:
+async def put_global_config(req: ConfigUpdateRequest, session: Session = Depends(get_db)) -> GlobalConfigUpdateReport:
     """更新全局覆盖，并把新的有效配置推送给所有在线设备。"""
-    _before_revision, before = store.get_global_overrides()
-    revision, overrides = store.put_global_overrides(_validated(req.config))
+    _before_revision, before = store.get_global_overrides(session)
+    revision, overrides = store.put_global_overrides(session, _validated(req.config))
     # 后台任务的阈值与名单也在配置里，而定时器是按旧值挂着的——这里立刻重算，保存即生效。
     sessions_scheduler.reload()
     notified: list[ConfigPushNotice] = []
@@ -109,7 +109,7 @@ async def put_global_config(req: ConfigUpdateRequest) -> GlobalConfigUpdateRepor
         targets = list(manager.online_connections())
         results = await asyncio.gather(
             *(
-                sessions_service.push_config_update(device_id, revision, store.device_effective(device_id))
+                sessions_service.push_config_update(device_id, revision, store.device_effective(session, device_id))
                 for device_id, _ws in targets
             )
         )
@@ -130,20 +130,20 @@ async def put_global_config(req: ConfigUpdateRequest) -> GlobalConfigUpdateRepor
         changed=len(overrides),
         notified=len(notified),
     )
-    return {"revision": revision, "config": store.global_effective(), "notified": notified}
+    return {"revision": revision, "config": store.global_effective(session), "notified": notified}
 
 
 @admin_router.get("/devices/{device_id}/config")
-def get_device_config(device_id: str) -> DeviceConfigView:
+def get_device_config(device_id: str, session: Session = Depends(get_db)) -> DeviceConfigView:
     """该设备的有效配置与它自己的覆盖项（区分"被特殊设置过"与"跟随全局"）。
 
     `revision` 是**这台设备自己的覆盖修订号**，没有覆盖时为 0；它与全局那个各自计数、
     不能比大小。要看全局的走 `GET /api/v1/config`。
     """
-    override = store.get_device_overrides(device_id)
+    override = store.get_device_overrides(session, device_id)
     return {
         "revision": override[0] if override else 0,
-        "config": store.effective(device_id),
+        "config": store.effective(session, device_id),
         "overrides": override[1] if override else None,
     }
 
@@ -154,9 +154,9 @@ async def put_device_config(
 ) -> DeviceConfigUpdateReport:
     """设置设备级覆盖并推送给该设备。"""
     require_trusted_online_device(device_id, session)
-    revision, overrides = store.put_device_overrides(device_id, _validated_device_overrides(req.config))
+    revision, overrides = store.put_device_overrides(session, device_id, _validated_device_overrides(req.config))
     sessions_scheduler.reload()
-    result = await sessions_service.push_config_update(device_id, revision, store.device_effective(device_id))
+    result = await sessions_service.push_config_update(device_id, revision, store.device_effective(session, device_id))
     log_event(
         "INFO",
         "config.device-updated",
@@ -168,7 +168,7 @@ async def put_device_config(
     return {
         "device_id": device_id,
         "revision": revision,
-        "config": store.effective(device_id),
+        "config": store.effective(session, device_id),
         "notified": result.get("notified", False),
         "applied": result.get("applied", False),
         "reason": result.get("reason", ""),
@@ -176,7 +176,7 @@ async def put_device_config(
 
 
 @admin_router.delete("/devices/{device_id}/config")
-async def delete_device_config(device_id: str) -> DeviceConfigRemovalReport:
+async def delete_device_config(device_id: str, session: Session = Depends(get_db)) -> DeviceConfigRemovalReport:
     """删除设备级覆盖：该设备回落为跟随全局，并把回落后的值推给它。
 
     **改了生效值就得让设备知道**——与 PUT 同一条规矩。只落库不推的话，那台设备会一直
@@ -185,14 +185,14 @@ async def delete_device_config(device_id: str) -> DeviceConfigRemovalReport:
     修订号取全局那个：覆盖删掉之后这台设备已经没有自己的修订号，而它此刻的生效值就是
     全局版本。而设备端的 `config.ack` 也不回传修订号，所以这个值只进日志与审计。
     """
-    removed = store.delete_device_overrides(device_id)
+    removed = store.delete_device_overrides(session, device_id)
     if not removed:
-        return {"device_id": device_id, "override_removed": False, "config": store.effective(device_id)}
+        return {"device_id": device_id, "override_removed": False, "config": store.effective(session, device_id)}
 
     # 该设备回落为跟随全局：后台任务的定时器也要按新值重算
     sessions_scheduler.reload()
-    revision, _overrides = store.get_global_overrides()
-    result = await sessions_service.push_config_update(device_id, revision, store.device_effective(device_id))
+    revision, _overrides = store.get_global_overrides(session)
+    result = await sessions_service.push_config_update(device_id, revision, store.device_effective(session, device_id))
     log_event(
         "INFO",
         "config.device-override-removed",
@@ -201,4 +201,4 @@ async def delete_device_config(device_id: str) -> DeviceConfigRemovalReport:
         revision=revision,
         notified=result.get("notified", False),
     )
-    return {"device_id": device_id, "override_removed": True, "config": store.effective(device_id)}
+    return {"device_id": device_id, "override_removed": True, "config": store.effective(session, device_id)}

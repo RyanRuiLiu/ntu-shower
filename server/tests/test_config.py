@@ -9,29 +9,34 @@ from fastapi.testclient import TestClient
 from tests import device_link
 
 from app.core import config as config_module
-from app.core.db import get_conn, write
+from app.db.session import session_scope
 from app.modules.config import store
 from app.modules.config.spec import CONFIG_SPECS
+from app.persistence import config as config_store_persistence
 
 # ── 存储层：默认值、覆盖、只存差异 ──
 
 
 def test_defaults_come_from_spec_registry(fresh_db: str) -> None:
-    revision, overrides = store.get_global_overrides()
+    with session_scope() as session:
+        revision, overrides = store.get_global_overrides(session)
 
-    assert revision == 1
-    assert overrides == {}
-    effective = store.global_effective()
-    assert effective["heartbeat_interval_s"] == 30
-    assert effective["overlay_enabled"] is True
+        assert revision == 1
+        assert overrides == {}
+        effective = store.global_effective(session)
+        assert effective["heartbeat_interval_s"] == 30
+        assert effective["overlay_enabled"] is True
 
 
 def test_put_global_stores_only_differences(fresh_db: str) -> None:
     """提交整个表单也只留下真正的差异：默认值保持可演进。"""
-    revision, overrides = store.put_global_overrides({"heartbeat_interval_s": 15, "ota_check_interval_s": 3600})
+    with session_scope() as session:
+        revision, overrides = store.put_global_overrides(
+            session, {"heartbeat_interval_s": 15, "ota_check_interval_s": 3600}
+        )
 
-    assert revision == 2
-    assert overrides == {"heartbeat_interval_s": 15}
+        assert revision == 2
+        assert overrides == {"heartbeat_interval_s": 15}
 
 
 def test_update_global_keeps_the_keys_it_did_not_touch(fresh_db: str) -> None:
@@ -41,26 +46,31 @@ def test_update_global_keeps_the_keys_it_did_not_touch(fresh_db: str) -> None:
     回传完整的全局有效配置。只回传要改的那一项，管理员设过的开关会因为"没出现在输入里"
     而被当成等于默认值剔掉——表现是"我加个人进名单，自动结算被关了"。
     """
-    store.put_global_overrides({"auto_settle_enabled": True, "auto_settle_students": {"2026000001": "000000"}})
+    with session_scope() as session:
+        store.put_global_overrides(
+            session, {"auto_settle_enabled": True, "auto_settle_students": {"2026000001": "000000"}}
+        )
 
-    store.update_global(
-        lambda config: {**config, "auto_settle_students": {"2026000001": "000000", "2026000003": "111111"}}
-    )
+        store.update_global(
+            session,
+            lambda config: {**config, "auto_settle_students": {"2026000001": "000000", "2026000003": "111111"}},
+        )
 
-    effective = store.global_effective()
-    assert effective["auto_settle_enabled"] is True
-    assert effective["auto_settle_students"] == {"2026000001": "000000", "2026000003": "111111"}
+        effective = store.global_effective(session)
+        assert effective["auto_settle_enabled"] is True
+        assert effective["auto_settle_students"] == {"2026000001": "000000", "2026000003": "111111"}
 
 
 def test_update_global_drops_a_roster_emptied_back_to_default(fresh_db: str) -> None:
     """名单清空到等于默认值时那个键从覆盖里消失，回落默认——语义相同。"""
-    store.put_global_overrides({"auto_settle_students": {"2026000001": "000000"}})
+    with session_scope() as session:
+        store.put_global_overrides(session, {"auto_settle_students": {"2026000001": "000000"}})
 
-    store.update_global(lambda config: {**config, "auto_settle_students": {}})
+        store.update_global(session, lambda config: {**config, "auto_settle_students": {}})
 
-    _revision, overrides = store.get_global_overrides()
-    assert "auto_settle_students" not in overrides
-    assert store.global_effective()["auto_settle_students"] == {}
+        _revision, overrides = store.get_global_overrides(session)
+        assert "auto_settle_students" not in overrides
+        assert store.global_effective(session)["auto_settle_students"] == {}
 
 
 #: 生产 `global_config` 里真实存在的那一组覆盖键（2026-10-04 只读查询所得，值取同形状的
@@ -87,24 +97,26 @@ def test_update_global_keeps_every_override_that_production_actually_has(fresh_d
 
     键组取自线上（不是随手编几个）：少带回一个，那个开关或那份名单就会被写回默认值。
     """
-    store.put_global_overrides(dict(PRODUCTION_OVERRIDES))
-    before = store.get_global_overrides()[1]
-    assert before == PRODUCTION_OVERRIDES, "夹具没能完整写进库里，后面的比对就不成立"
+    with session_scope() as session:
+        store.put_global_overrides(session, dict(PRODUCTION_OVERRIDES))
+        before = store.get_global_overrides(session)[1]
+        assert before == PRODUCTION_OVERRIDES, "夹具没能完整写进库里，后面的比对就不成立"
 
-    new_cert = "2026000005"
-    store.update_global(
-        lambda config: {
-            **config,
-            "auto_settle_students": {**config["auto_settle_students"], new_cert: "000000"},
-        }
-    )
+        new_cert = "2026000005"
+        store.update_global(
+            session,
+            lambda config: {
+                **config,
+                "auto_settle_students": {**config["auto_settle_students"], new_cert: "000000"},
+            },
+        )
 
-    after = store.get_global_overrides()[1]
-    for key, value in before.items():
-        if key == "auto_settle_students":
-            continue
-        assert after[key] == value, f"{key} 被这次登记改动了"
-    assert after["auto_settle_students"] == {**before["auto_settle_students"], new_cert: "000000"}
+        after = store.get_global_overrides(session)[1]
+        for key, value in before.items():
+            if key == "auto_settle_students":
+                continue
+            assert after[key] == value, f"{key} 被这次登记改动了"
+        assert after["auto_settle_students"] == {**before["auto_settle_students"], new_cert: "000000"}
 
 
 def test_concurrent_joins_keep_every_entry(fresh_db: str) -> None:
@@ -119,12 +131,14 @@ def test_concurrent_joins_keep_every_entry(fresh_db: str) -> None:
 
     def join(cert_no: str) -> None:
         start.wait()
-        store.update_global(
-            lambda config: {
-                **config,
-                "auto_settle_students": {**config["auto_settle_students"], cert_no: "000000"},
-            }
-        )
+        with session_scope() as session:  # 会话不能跨线程共享，每个线程各开各的
+            store.update_global(
+                session,
+                lambda config: {
+                    **config,
+                    "auto_settle_students": {**config["auto_settle_students"], cert_no: "000000"},
+                },
+            )
 
     threads = [threading.Thread(target=join, args=(cert_no,)) for cert_no in cert_nos]
     for thread in threads:
@@ -132,7 +146,8 @@ def test_concurrent_joins_keep_every_entry(fresh_db: str) -> None:
     for thread in threads:
         thread.join()
 
-    assert set(store.global_effective()["auto_settle_students"]) == set(cert_nos)
+    with session_scope() as session:
+        assert set(store.global_effective(session)["auto_settle_students"]) == set(cert_nos)
 
 
 def test_device_overrides_drop_server_keys(fresh_db: str) -> None:
@@ -143,59 +158,68 @@ def test_device_overrides_drop_server_keys(fresh_db: str) -> None:
     与 `global_effective()` **构造上**给出同一个值：后台任务按前者判、接口按后者报状态，
     一旦分叉，表现是"开关明明开着却没生效"，而库里看不出任何异常。
     """
-    write(
-        "INSERT OR REPLACE INTO device_config (device_id, revision, config) VALUES (?,?,?)",
-        ("dev-A", 7, json.dumps({"overlay_enabled": False, "auto_settle_enabled": False})),
-    )
+    with session_scope() as session:
+        # 走持久化层直接落库，绕过 store 的写入口校验——它本来就该拒掉服务端键
+        config_store_persistence.put_device(
+            session, "dev-A", 7, {"overlay_enabled": False, "auto_settle_enabled": False}
+        )
 
-    _revision, overrides = store.get_device_overrides("dev-A")
+        _revision, overrides = store.get_device_overrides(session, "dev-A")
 
-    assert overrides == {"overlay_enabled": False}
-    assert store.effective("dev-A")["auto_settle_enabled"] == store.global_effective()["auto_settle_enabled"]
+        assert overrides == {"overlay_enabled": False}
+        assert (
+            store.effective(session, "dev-A")["auto_settle_enabled"]
+            == store.global_effective(session)["auto_settle_enabled"]
+        )
 
 
 def test_default_change_reaches_devices_with_overrides(fresh_db: str) -> None:
     """设备覆盖不得冻结全局变更：默认值改了，有覆盖与无覆盖的设备都要跟上。"""
-    store.put_device_overrides("dev-A", {"overlay_enabled": False})
-    store.put_global_overrides({"heartbeat_interval_s": 20})
+    with session_scope() as session:
+        store.put_device_overrides(session, "dev-A", {"overlay_enabled": False})
+        store.put_global_overrides(session, {"heartbeat_interval_s": 20})
 
-    assert store.effective("dev-A")["heartbeat_interval_s"] == 20
-    assert store.effective("dev-B")["heartbeat_interval_s"] == 20
-    assert store.effective("dev-A")["overlay_enabled"] is False
+        assert store.effective(session, "dev-A")["heartbeat_interval_s"] == 20
+        assert store.effective(session, "dev-B")["heartbeat_interval_s"] == 20
+        assert store.effective(session, "dev-A")["overlay_enabled"] is False
 
 
 def test_device_override_wins_over_global(fresh_db: str) -> None:
-    store.put_global_overrides({"heartbeat_interval_s": 15})
-    store.put_device_overrides("dev-1", {"heartbeat_interval_s": 10})
+    with session_scope() as session:
+        store.put_global_overrides(session, {"heartbeat_interval_s": 15})
+        store.put_device_overrides(session, "dev-1", {"heartbeat_interval_s": 10})
 
-    assert store.effective("dev-1")["heartbeat_interval_s"] == 10
-    assert store.effective("dev-other")["heartbeat_interval_s"] == 15
+        assert store.effective(session, "dev-1")["heartbeat_interval_s"] == 10
+        assert store.effective(session, "dev-other")["heartbeat_interval_s"] == 15
 
 
 def test_device_override_leaves_other_keys_following_global(fresh_db: str) -> None:
-    store.put_global_overrides({"ota_check_interval_s": 7200})
-    store.put_device_overrides("dev-1", {"heartbeat_interval_s": 10})
+    with session_scope() as session:
+        store.put_global_overrides(session, {"ota_check_interval_s": 7200})
+        store.put_device_overrides(session, "dev-1", {"heartbeat_interval_s": 10})
 
-    effective = store.effective("dev-1")
-    assert effective["heartbeat_interval_s"] == 10
-    assert effective["ota_check_interval_s"] == 7200
+        effective = store.effective(session, "dev-1")
+        assert effective["heartbeat_interval_s"] == 10
+        assert effective["ota_check_interval_s"] == 7200
 
 
 def test_delete_override_falls_back_to_global(fresh_db: str) -> None:
-    store.put_device_overrides("dev-1", {"heartbeat_interval_s": 10})
+    with session_scope() as session:
+        store.put_device_overrides(session, "dev-1", {"heartbeat_interval_s": 10})
 
-    assert store.delete_device_overrides("dev-1") is True
-    assert store.effective("dev-1")["heartbeat_interval_s"] == 30
-    assert store.delete_device_overrides("dev-1") is False
+        assert store.delete_device_overrides(session, "dev-1") is True
+        assert store.effective(session, "dev-1")["heartbeat_interval_s"] == 30
+        assert store.delete_device_overrides(session, "dev-1") is False
 
 
 def test_device_effective_excludes_server_only_keys(fresh_db: str) -> None:
     """服务端自己的键不下发给设备。"""
-    device_view = store.device_effective("dev-1")
+    with session_scope() as session:
+        device_view = store.device_effective(session, "dev-1")
 
-    assert "renew_session_threshold_s" not in device_view
-    assert "ping_interval_s" not in device_view
-    assert "heartbeat_interval_s" in device_view
+        assert "renew_session_threshold_s" not in device_view
+        assert "ping_interval_s" not in device_view
+        assert "heartbeat_interval_s" in device_view
 
 
 def test_unknown_keys_in_stored_overrides_are_ignored(fresh_db: str) -> None:
@@ -205,27 +229,25 @@ def test_unknown_keys_in_stored_overrides_are_ignored(fresh_db: str) -> None:
     `device_effective` 与配置路由的 `_device_scope` 都要按键查登记表，查不到就是
     KeyError——两处都在设备上线的路上（`link.hello_ack`），表现是设备一连上就被断开。
 
-    直接写库而不走 `put_*`：那两处入口本来就该拒绝未知键，这里要造的是"表变了、库没变"。
+    走持久化层直接写库而不走 `put_*`：那两处入口本来就该拒绝未知键，这里要造的是
+    "表变了、库没变"。
     """
-    store.put_global_overrides({"heartbeat_interval_s": 45})
-    conn = get_conn()
-    conn.execute(
-        "UPDATE global_config SET config = ? WHERE id = 1",
-        ('{"heartbeat_interval_s": 45, "gone_key": 1}',),
-    )
-    conn.commit()
+    with session_scope() as session:
+        store.put_global_overrides(session, {"heartbeat_interval_s": 45})
+        config_store_persistence.put_global(session, 1, {"heartbeat_interval_s": 45, "gone_key": 1})
 
-    effective = store.global_effective()
-    assert effective["heartbeat_interval_s"] == 45
-    assert "gone_key" not in effective
-    assert store.device_effective("dev-1")["heartbeat_interval_s"] == 45
+        effective = store.global_effective(session)
+        assert effective["heartbeat_interval_s"] == 45
+        assert "gone_key" not in effective
+        assert store.device_effective(session, "dev-1")["heartbeat_interval_s"] == 45
 
 
 def test_put_device_override_bumps_revision(fresh_db: str) -> None:
-    rev1, _ = store.put_device_overrides("dev-1", {"heartbeat_interval_s": 10})
-    rev2, _ = store.put_device_overrides("dev-1", {"heartbeat_interval_s": 11})
+    with session_scope() as session:
+        rev1, _ = store.put_device_overrides(session, "dev-1", {"heartbeat_interval_s": 10})
+        rev2, _ = store.put_device_overrides(session, "dev-1", {"heartbeat_interval_s": 11})
 
-    assert rev2 > rev1
+        assert rev2 > rev1
 
 
 # ── 校验 ──
@@ -306,21 +328,22 @@ def test_validate_accepts_and_rejects_weekdays(fresh_db: str) -> None:
 
 def test_notice_defaults_are_registered(fresh_db: str) -> None:
     """13 个提示键的默认值随登记表生效；总开关默认关闭。"""
-    effective = store.global_effective()
+    with session_scope() as session:
+        effective = store.global_effective(session)
 
-    assert effective["notice_enabled"] is False
-    assert effective["notice_text"] == ""
-    assert effective["notice_text_size_sp"] == 48
-    assert effective["notice_text_color"] == "#d94f16"
-    assert effective["notice_x_dp"] == 40
-    assert effective["notice_y_dp"] == 40
-    assert effective["notice_time_enabled"] is False
-    assert effective["notice_time_start"] == "22:00"
-    assert effective["notice_time_end"] == "23:00"
-    assert effective["notice_weekdays"] == "1,2,3,4,5,6,7"
-    assert effective["notice_occupancy_enabled"] is False
-    assert effective["notice_occupancy_min"] == 0
-    assert effective["notice_occupancy_max"] == 48
+        assert effective["notice_enabled"] is False
+        assert effective["notice_text"] == ""
+        assert effective["notice_text_size_sp"] == 48
+        assert effective["notice_text_color"] == "#d94f16"
+        assert effective["notice_x_dp"] == 40
+        assert effective["notice_y_dp"] == 40
+        assert effective["notice_time_enabled"] is False
+        assert effective["notice_time_start"] == "22:00"
+        assert effective["notice_time_end"] == "23:00"
+        assert effective["notice_weekdays"] == "1,2,3,4,5,6,7"
+        assert effective["notice_occupancy_enabled"] is False
+        assert effective["notice_occupancy_min"] == 0
+        assert effective["notice_occupancy_max"] == 48
 
 
 def test_defaults_returns_independent_maps(fresh_db: str) -> None:

@@ -54,6 +54,8 @@ import time
 from dataclasses import dataclass
 from typing import Protocol
 
+from sqlalchemy.orm import Session
+
 from app.core import actions, outcomes, problems
 from app.core.clock import now_rfc3339, shift_rfc3339
 from app.core.logging import log_event
@@ -325,9 +327,9 @@ def _snapshots(device_id: str) -> list[Candidate]:
     return found
 
 
-def _plan(device_id: str) -> dict[int, tuple[float, Candidate, Trigger]]:
+def _plan(session: Session, device_id: str) -> dict[int, tuple[float, Candidate, Trigger]]:
     """该设备每个喷头下一个到点：`door_no → (到点时刻, 候选, 触发)`。"""
-    config = config_store.effective(device_id)
+    config = config_store.effective(session, device_id)
     now = now_rfc3339()
     planned: dict[int, tuple[float, Candidate, Trigger]] = {}
     for candidate in _snapshots(device_id):
@@ -376,7 +378,8 @@ def reschedule(device_id: str) -> None:
         return
     worker = _worker(device_id)
     loop = asyncio.get_running_loop()
-    planned = _plan(device_id)
+    with session_scope() as session:
+        planned = _plan(session, device_id)
 
     for door_no, existing in list(worker.timers.items()):
         if door_no not in planned:
@@ -406,7 +409,7 @@ def _forget_closed_sessions(device_id: str) -> None:
         _attempted.discard(key)
 
 
-def snapshot() -> list[dict[str, object]]:
+def snapshot(session: Session) -> list[dict[str, object]]:
     """调度器此刻的即时计划：每个已排定的到点，连同"为什么是这一刻"的细节。
 
     给运维可见性用（概览页的后台任务卡）：**只读**——计划由 `reschedule` 维护，这里只
@@ -427,7 +430,7 @@ def snapshot() -> list[dict[str, object]]:
         started = candidate.assigned_at if spec.start == "assigned_at" else candidate.paused_at
         # 本轮链的用量上限随功能而定（预约续期有、其余没有）；连同起算时刻一起给，
         # 面板才能回答"这一轮什么时候到头"。
-        config = config_store.effective(device_id)
+        config = config_store.effective(session, device_id)
         max_duration = as_int(config[spec.max_duration_key]) if spec.max_duration_key is not None else None
         rows.append(
             {
@@ -453,7 +456,8 @@ def snapshot() -> list[dict[str, object]]:
 def _fire(device_id: str, candidate: Candidate, trigger: Trigger) -> None:
     """到点：复查 → 入队。只做这两件事，重活交给 worker，免得占着事件循环。"""
     _worker(device_id).timers.pop(candidate.door_no, None)
-    config = config_store.effective(device_id)
+    with session_scope() as session:
+        config = config_store.effective(session, device_id)
     fresh = {item.session_id: item for item in _snapshots(device_id)}.get(candidate.session_id)
 
     reason = recheck(fresh, expected=candidate, trigger=trigger, config=config, now=now_rfc3339())
@@ -528,7 +532,8 @@ async def _perform_settle(job: _SettleJob) -> None:
     feature = job.feature
     _attempted.add((candidate.device_id, candidate.session_id, feature))
 
-    config = config_store.effective(candidate.device_id)
+    with session_scope() as session:
+        config = config_store.effective(session, candidate.device_id)
     still = still_allowed(candidate.cert_no, feature, config)
     if still is not None:
         _record("skipped", "下单前复查未通过，放弃这一次", job, reason=still)

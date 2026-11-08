@@ -79,6 +79,7 @@ from app.core.clock import now_rfc3339, parse_rfc3339, shift_rfc3339, to_local, 
 from app.core.logging import log_event
 from app.core.problems import ApiProblemError
 from app.core.protocol import as_int
+from app.db.session import session_scope
 from app.modules.config import store as config_store
 from app.modules.config.schemas import ConfigValues
 from app.modules.devices import service as devices_service
@@ -206,7 +207,7 @@ def _hhmm_minutes(text: str) -> int | None:
     return moment.hour * 60 + moment.minute
 
 
-def current_shifts() -> list[dict[str, object]]:
+def current_shifts(session: Session) -> list[dict[str, object]]:
     """正在延长中的设备：拨快幅度、拨快时刻、MCU 里武装的截止、恢复条件与放回进度。
 
     只读的运维可见性（概览页的后台任务卡）：表里一行就是"这台设备钟是拨快着的"。
@@ -217,7 +218,7 @@ def current_shifts() -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for row in repository.list_shifted():
         shift = _as_shift(row)
-        config = config_store.effective(shift.device_id)
+        config = config_store.effective(session, shift.device_id)
         zone = as_int(config["extend_hours_zone_offset_minutes"])
         shift_local = to_local(shift.shifted_at, zone)
         now_local = to_local(now_rfc3339(), zone)
@@ -410,7 +411,7 @@ async def _maybe_shift(session: Session, device_id: str) -> None:
     断电（实测）。这一行同时是"这台设备正在延长中"的锁——没有它，下一轮扫描会再拨
     一次；命令失败时清掉它，于是下一轮照常重试。
     """
-    config = config_store.effective(device_id)
+    config = config_store.effective(session, device_id)
     if not config["extend_hours_enabled"]:
         return
     if repository.get(device_id) is not None:
@@ -485,7 +486,8 @@ def on_frame(device_id: str) -> None:
         return
     if _reassign_tasks:
         return
-    students = roster(config_store.effective(device_id), "extend_hours_students")
+    with session_scope() as session:
+        students = roster(config_store.effective(session, device_id), "extend_hours_students")
     if not students:
         return
     task = asyncio.create_task(_reassign_task(shift, students))
@@ -600,7 +602,7 @@ async def tick_once(session: Session) -> None:
     """
     for record in devices_service.list_devices(session):
         await _maybe_shift(session, record["device_id"])
-        config = config_store.effective(record["device_id"])
+        config = config_store.effective(session, record["device_id"])
         await _maybe_correct_clock(session, record["device_id"], config)
     for row in repository.list_shifted():
         shift = _as_shift(row)
@@ -615,7 +617,7 @@ async def tick_once(session: Session) -> None:
                 device_id=shift.device_id,
             )
             continue
-        await _advance(session, shift, config_store.effective(shift.device_id))
+        await _advance(session, shift, config_store.effective(session, shift.device_id))
 
 
 async def _advance(session: Session, shift: Shift, config: ConfigValues) -> None:

@@ -435,7 +435,7 @@ def test_server_ping_loop_probes_and_enforces_pong(
 ) -> None:
     """服务端按配置间隔主动 ping：回 pong 则链路保持，一个周期无 pong 则主动关链。"""
     # 间隔给 0.2 秒：两个完整周期亚秒级跑完，行为与真实间隔无关
-    monkeypatch.setattr("app.modules.config.store.effective", lambda _device_id: {"ping_interval_s": 0.2})
+    monkeypatch.setattr("app.modules.config.store.effective", lambda _session, _device_id: {"ping_interval_s": 0.2})
     device_id = "dev-ping-loop"
     with client.websocket_connect("/gateway/device") as ws:
         ws.send_text(frames.hello_frame(device_id))

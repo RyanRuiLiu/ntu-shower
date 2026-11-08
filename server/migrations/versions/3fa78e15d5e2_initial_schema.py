@@ -1,8 +1,8 @@
 """initial schema
 
-Revision ID: d7df653ccb02
+Revision ID: 3fa78e15d5e2
 Revises: 
-Create Date: 2026-11-08 15:42:24.814026
+Create Date: 2026-11-08 21:16:46.366715
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from app.db.base import UtcDateTime
 
 # revision identifiers, used by Alembic.
-revision: str = 'd7df653ccb02'
+revision: str = '3fa78e15d5e2'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -173,13 +173,15 @@ def upgrade() -> None:
 
     op.create_table('device_configs',
     sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('device_id', sa.Integer(), nullable=False),
+    sa.Column('device_id', sa.Integer(), nullable=True),
+    sa.Column('device_key', sa.String(length=64), nullable=False),
     sa.Column('revision', sa.Integer(), nullable=False),
     sa.Column('config', sa.JSON(), nullable=False),
     sa.Column('updated_at', UtcDateTime(), nullable=False),
     sa.ForeignKeyConstraint(['device_id'], ['devices.id'], name=op.f('fk_device_configs_device_id_devices'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_device_configs')),
-    sa.UniqueConstraint('device_id', name=op.f('uq_device_configs_device_id'))
+    sa.UniqueConstraint('device_id', name=op.f('uq_device_configs_device_id')),
+    sa.UniqueConstraint('device_key', name=op.f('uq_device_configs_device_key'))
     )
     op.create_table('device_credentials',
     sa.Column('id', sa.Integer(), nullable=False),

@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, ForeignKey, Integer
+from sqlalchemy import JSON, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db.base import Base, UtcDateTime, utcnow
@@ -21,7 +21,9 @@ class DeviceConfig(Base):
     __tablename__ = "device_configs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    device_id: Mapped[int] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"), unique=True)
+    device_id: Mapped[int | None] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"), unique=True)
+    #: 设备文本业务键留底：覆盖的历史不因设备除档而失联
+    device_key: Mapped[str] = mapped_column(String(64), default="", unique=True)
     revision: Mapped[int] = mapped_column(Integer)
     config: Mapped[dict[str, Any]] = mapped_column(JSON)
     updated_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow, onupdate=utcnow)

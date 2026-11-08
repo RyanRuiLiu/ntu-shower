@@ -26,7 +26,9 @@ def session(tmp_path: Path) -> Iterator[Session]:
 
 
 def test_global_defaults_to_empty(session: Session) -> None:
-    assert config.get_global(session) == (0, {})
+    # 库里还没有这一行（全新安装）时对外呈现修订号 1：与旧层 init_tables 预置的
+    # 行语义一致，GET 报 1、第一次写入变成 2（契约由 test_global_config_roundtrip 锁定）。
+    assert config.get_global(session) == (1, {})
 
 
 def test_global_roundtrip(session: Session) -> None:
@@ -55,7 +57,11 @@ def test_device_override_roundtrip(session: Session) -> None:
     assert config.get_device(session, "dev-a") == (2, {"voice.volume": 4})
 
 
-def test_missing_device_is_a_noop(session: Session) -> None:
+def test_missing_device_keeps_its_row_by_text_key(session: Session) -> None:
+    """未登记设备的覆盖照写：`device_key` 文本键留底，历史不因设备除档而失联。
+
+    与审计三表同一模式：外键置空、业务键保留。读侧按文本键取回，与登记与否无关。
+    """
     assert config.get_device(session, "missing") is None
     config.put_device(session, "missing", 1, {"x": 1})
-    assert config.get_device(session, "missing") is None
+    assert config.get_device(session, "missing") == (1, {"x": 1})

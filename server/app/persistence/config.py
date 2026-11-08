@@ -15,12 +15,16 @@ from ..models.identity import Device
 from ..models.settings import AppSettings, DeviceConfig
 
 GLOBAL_ROW_ID = 1
+#: 库里还没有这一行时（全新安装、尚未写过任何覆盖）对外呈现的修订号。
+#: 旧层的 `init_tables` 预置过 revision=1 的行；转换工具会把生产库的真实修订号
+#: 原样搬过来，两侧语义一致：GET 报 1，第一次写入变成 2。
+FRESH_REVISION = 1
 
 
 def get_global(session: Session) -> tuple[int, dict[str, Any]]:
     row = session.get(AppSettings, GLOBAL_ROW_ID)
     if row is None:
-        return (0, {})
+        return (FRESH_REVISION, {})
     return (int(row.revision), dict(row.config))
 
 
@@ -35,26 +39,36 @@ def put_global(session: Session, revision: int, values: dict[str, Any]) -> None:
 
 
 def get_device(session: Session, device_id: str) -> tuple[int, dict[str, Any]] | None:
-    device_pk = session.scalar(select(Device.id).where(Device.device_id == device_id))
-    if device_pk is None:
-        return None
-    row = session.scalars(select(DeviceConfig).where(DeviceConfig.device_id == device_pk)).one_or_none()
+    row = session.scalars(select(DeviceConfig).where(DeviceConfig.device_key == device_id)).one_or_none()
     if row is None:
         return None
     return (int(row.revision), dict(row.config))
 
 
 def put_device(session: Session, device_id: str, revision: int, values: dict[str, Any]) -> None:
-    device_pk = session.scalar(select(Device.id).where(Device.device_id == device_id))
-    if device_pk is None:
-        return
-    row = session.scalars(select(DeviceConfig).where(DeviceConfig.device_id == device_pk)).one_or_none()
+    row = session.scalars(select(DeviceConfig).where(DeviceConfig.device_key == device_id)).one_or_none()
     if row is None:
-        session.add(DeviceConfig(device_id=device_pk, revision=revision, config=values))
+        session.add(
+            DeviceConfig(
+                device_id=session.scalar(select(Device.id).where(Device.device_id == device_id)),
+                device_key=device_id,
+                revision=revision,
+                config=values,
+            )
+        )
     else:
         row.revision = revision
         row.config = values
     session.commit()
 
 
-__all__: list[str] = ["GLOBAL_ROW_ID", "get_device", "get_global", "put_device", "put_global"]
+def delete_device(session: Session, device_id: str) -> bool:
+    row = session.scalars(select(DeviceConfig).where(DeviceConfig.device_key == device_id)).one_or_none()
+    if row is None:
+        return False
+    session.delete(row)
+    session.commit()
+    return True
+
+
+__all__: list[str] = ["GLOBAL_ROW_ID", "delete_device", "get_device", "get_global", "put_device", "put_global"]

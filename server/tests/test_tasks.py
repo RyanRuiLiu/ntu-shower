@@ -10,6 +10,7 @@ import string
 import pytest
 from fastapi.testclient import TestClient
 
+from app.db.session import session_scope
 from app.modules.access.identity import IdentityKind
 from app.modules.config import store as config_store
 from app.modules.config.spec import SPECS_BY_KEY, ConfigKind, ConfigScope
@@ -113,14 +114,15 @@ def test_description_template_has_no_unfilled_placeholder(fresh_db: str) -> None
     """
     formatter = string.Formatter()
 
-    for spec in TASKS:
-        config = config_store.global_effective()
-        values = spec.fill(config)
-        names = {name for _literal, name, _spec, _conv in formatter.parse(spec.template) if name}
+    with session_scope() as session:
+        for spec in TASKS:
+            config = config_store.global_effective(session)
+            values = spec.fill(config)
+            names = {name for _literal, name, _spec, _conv in formatter.parse(spec.template) if name}
 
-        assert names, f"{spec.key} 的文案里没有占位符，数值不就成了写死的？"
-        assert names == set(values), f"{spec.key} 的占位符与取值对不上：{names} vs {set(values)}"
-        assert "{" not in spec.template.format(**values)
+            assert names, f"{spec.key} 的文案里没有占位符，数值不就成了写死的？"
+            assert names == set(values), f"{spec.key} 的占位符与取值对不上：{names} vs {set(values)}"
+            assert "{" not in spec.template.format(**values)
 
 
 def test_description_follows_the_configured_threshold(fresh_db: str) -> None:
@@ -129,11 +131,12 @@ def test_description_follows_the_configured_threshold(fresh_db: str) -> None:
     这就是"文案里不写死数值"的全部意义：`auto_settle_pause_threshold_s` 是可配的，若文案里
     印着"60 秒"，管理员改成 120 之后用户读到的就是假的，而两处都不会报错。
     """
-    before = tasks_service.describe(TASKS_BY_KEY["auto_settle"], config_store.global_effective())
-    assert "1分钟" in before
+    with session_scope() as session:
+        before = tasks_service.describe(TASKS_BY_KEY["auto_settle"], config_store.global_effective(session))
+        assert "1分钟" in before
 
-    config_store.put_global_overrides({"auto_settle_pause_threshold_s": 120})
-    after = tasks_service.describe(TASKS_BY_KEY["auto_settle"], config_store.global_effective())
+        config_store.put_global_overrides(session, {"auto_settle_pause_threshold_s": 120})
+        after = tasks_service.describe(TASKS_BY_KEY["auto_settle"], config_store.global_effective(session))
 
     assert "2分钟" in after
     assert "1分钟" not in after
@@ -188,7 +191,8 @@ def test_listing_reports_every_task(client: TestClient, tasks_headers: dict[str,
 
 def test_listing_reports_the_administrators_switch(client: TestClient, tasks_headers: dict[str, str]) -> None:
     """`enabled` 如实反映配置，且只是**读**——它决定登记的那个人到底会不会被服务。"""
-    config_store.put_global_overrides({"auto_settle_enabled": True})
+    with session_scope() as session:
+        config_store.put_global_overrides(session, {"auto_settle_enabled": True})
 
     body = client.get("/api/v1/tasks", params={"cert_no": CERT_NO}, headers=tasks_headers).json()
     states = {item["key"]: item["enabled"] for item in body}
@@ -210,7 +214,9 @@ def test_joining_writes_the_roster_and_leaving_removes_it(client: TestClient, ta
 
     assert joined.status_code == 200
     assert joined.json()["joined"] is True
-    assert config_store.global_effective()["auto_settle_students"] == {CERT_NO: "000000"}
+    with session_scope() as session:
+        effective = config_store.global_effective(session)
+    assert effective["auto_settle_students"] == {CERT_NO: "000000"}
 
     left = client.put(
         "/api/v1/tasks/auto_settle",
@@ -220,7 +226,9 @@ def test_joining_writes_the_roster_and_leaving_removes_it(client: TestClient, ta
 
     assert left.status_code == 200
     assert left.json()["joined"] is False
-    assert config_store.global_effective()["auto_settle_students"] == {}
+    with session_scope() as session:
+        effective = config_store.global_effective(session)
+    assert effective["auto_settle_students"] == {}
 
 
 def test_each_task_has_its_own_roster(client: TestClient, tasks_headers: dict[str, str]) -> None:
@@ -231,7 +239,8 @@ def test_each_task_has_its_own_roster(client: TestClient, tasks_headers: dict[st
         headers=tasks_headers,
     )
 
-    effective = config_store.global_effective()
+    with session_scope() as session:
+        effective = config_store.global_effective(session)
     assert effective["auto_settle_students"] == {CERT_NO: "000000"}
     assert effective["renew_wait_students"] == {}
     assert effective["renew_session_students"] == {}
@@ -243,21 +252,26 @@ def test_leaving_only_removes_that_student(client: TestClient, tasks_headers: di
 
     这条钉的是"读—改—写拿到的是整份名单、只动自己那一行"，而不是整份替换。
     """
-    config_store.put_global_overrides({"auto_settle_students": {OTHER_CERT_NO: "111111"}})
+    with session_scope() as session:
+        config_store.put_global_overrides(session, {"auto_settle_students": {OTHER_CERT_NO: "111111"}})
 
     client.put(
         "/api/v1/tasks/auto_settle",
         json={"cert_no": CERT_NO, "password": "000000", "joined": True},
         headers=tasks_headers,
     )
-    assert config_store.global_effective()["auto_settle_students"] == {OTHER_CERT_NO: "111111", CERT_NO: "000000"}
+    with session_scope() as session:
+        effective = config_store.global_effective(session)
+    assert effective["auto_settle_students"] == {OTHER_CERT_NO: "111111", CERT_NO: "000000"}
 
     client.put(
         "/api/v1/tasks/auto_settle",
         json={"cert_no": CERT_NO, "password": "000000", "joined": False},
         headers=tasks_headers,
     )
-    assert config_store.global_effective()["auto_settle_students"] == {OTHER_CERT_NO: "111111"}
+    with session_scope() as session:
+        effective = config_store.global_effective(session)
+    assert effective["auto_settle_students"] == {OTHER_CERT_NO: "111111"}
 
 
 def test_joining_never_touches_the_administrators_switch(client: TestClient, tasks_headers: dict[str, str]) -> None:
@@ -267,7 +281,8 @@ def test_joining_never_touches_the_administrators_switch(client: TestClient, tas
     "没出现在输入里"被 `_as_overrides` 当成等于默认值而剔掉，表现是"我加个人进名单，
     自动结算被关了"。
     """
-    config_store.put_global_overrides({"auto_settle_enabled": True})
+    with session_scope() as session:
+        config_store.put_global_overrides(session, {"auto_settle_enabled": True})
 
     client.put(
         "/api/v1/tasks/auto_settle",
@@ -275,14 +290,17 @@ def test_joining_never_touches_the_administrators_switch(client: TestClient, tas
         headers=tasks_headers,
     )
 
-    effective = config_store.global_effective()
+    with session_scope() as session:
+        effective = config_store.global_effective(session)
     assert effective["auto_settle_enabled"] is True
     assert effective["auto_settle_students"] == {CERT_NO: "000000"}
 
 
 def test_joining_is_allowed_while_the_switch_is_off(client: TestClient, tasks_headers: dict[str, str]) -> None:
     """管理员没开也允许登记——这正是界面第三态"已登记 · 待管理员开启"的来源。"""
-    assert config_store.global_effective()["renew_session_enabled"] is False
+    with session_scope() as session:
+        effective = config_store.global_effective(session)
+    assert effective["renew_session_enabled"] is False
 
     joined = client.put(
         "/api/v1/tasks/renew_session",
@@ -306,7 +324,9 @@ def test_roster_entries_are_trimmed_at_both_ends(client: TestClient, tasks_heade
         headers=tasks_headers,
     )
 
-    assert config_store.global_effective()["auto_settle_students"] == {CERT_NO: "000000"}
+    with session_scope() as session:
+        effective = config_store.global_effective(session)
+    assert effective["auto_settle_students"] == {CERT_NO: "000000"}
 
 
 def test_unknown_task_is_not_found(client: TestClient, tasks_headers: dict[str, str]) -> None:

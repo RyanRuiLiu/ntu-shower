@@ -70,7 +70,7 @@ def _prepare(
     server_now = shift_rfc3339(local_now, -ZONE_MINUTES * 60)
     assert server_now is not None
     monkeypatch.setattr(extend_hours, "now_rfc3339", lambda: server_now)
-    monkeypatch.setattr(config_store, "effective", lambda _device_id: CONFIG)
+    monkeypatch.setattr(config_store, "effective", lambda _session, _device_id: CONFIG)
 
     async def fake_send(_session: object, _device_id: str, action: str, params: object, **_kw: object) -> object:
         if sent is not None:
@@ -852,7 +852,7 @@ def test_tick_advances_each_extending_device_with_its_own_config(
         "dev-ext-a": {**base, "power_on_at": "10:55"},
         "dev-ext-b": {**base, "power_on_at": "08:00"},
     }
-    monkeypatch.setattr(config_store, "effective", lambda device_id: configs[device_id])
+    monkeypatch.setattr(config_store, "effective", lambda _session, device_id: configs[device_id])
     server_now = "2026-10-05T16:50:00.000Z"  # 表盘 00:50（UTC+8）
     monkeypatch.setattr(extend_hours, "now_rfc3339", lambda: server_now)
     device_clock.load("dev-ext-a", 0.0)

@@ -898,11 +898,11 @@ def _task_done(task: asyncio.Task[None]) -> None:
 
 
 async def handle_events(events: tuple[DoorEvent, ...]) -> None:
-    value = config_store.global_effective()["voice_event_max_age_s"]
-    max_age = value if isinstance(value, int) else 0
     from app.db.session import session_scope
 
     with session_scope() as session:
+        value = config_store.global_effective(session)["voice_event_max_age_s"]
+        max_age = value if isinstance(value, int) else 0
         for event in events:
             try:
                 await _dispatch_event(session, event, max_age)
@@ -931,7 +931,7 @@ async def _dispatch_event(session: Session, event: DoorEvent, max_age: int) -> N
         return
     if not event.cert_no:
         return
-    zone_offset = config_store.global_effective()["extend_hours_zone_offset_minutes"]
+    zone_offset = config_store.global_effective(session)["extend_hours_zone_offset_minutes"]
     if not isinstance(zone_offset, int):
         log_event(
             "ERROR",

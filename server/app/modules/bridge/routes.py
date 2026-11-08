@@ -17,9 +17,11 @@
 import asyncio
 import contextlib
 import uuid
+from typing import cast
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.core import actions, outcomes, protocol, reason_codes
 from app.core.connections import manager
@@ -27,6 +29,7 @@ from app.core.logging import log_event
 from app.core.problems import DEVICE_OFFLINE, ApiProblemError
 from app.db.base import utcnow
 from app.db.deps import get_db
+from app.db.session import Database
 from app.models.enums import CommandStatus
 from app.modules.access.dependencies import require_admin
 from app.modules.bridge.schemas import BridgeClosed, BridgeOpened, BridgeStatus
@@ -57,13 +60,27 @@ def _bridge_audit_id() -> str:
     return f"bridge-{uuid.uuid4()}"
 
 
-def _bridge_timeout_s(key: str) -> float:
+def _read_bridge_timeouts(ws: WebSocket) -> tuple[float, float]:
+    """设备 WS 握手路径读两个桥超时：应用状态里的 Database 开短会话。
+
+    WS 路径没有请求会话，与 gateway 的 `_db_session` 同一约定；两值一次读齐，
+    免得一次握手开两个会话。
+    """
+    database = cast("Database", ws.app.state.database)
+    with database.new_session() as session:
+        return (
+            _bridge_timeout_s(session, "bridge_max_lifetime_s"),
+            _bridge_timeout_s(session, "bridge_pair_timeout_s"),
+        )
+
+
+def _bridge_timeout_s(session: Session, key: str) -> float:
     """读一个桥接超时（秒）。
 
     三个键都是 SERVER 归属：桥建在服务端侧，取全局有效值即可。不硬编码，调试
     通道该开多久是运维判断的事，项目规范把超时归在必须可调的那一类。
     """
-    value = config_store.global_effective()[key]
+    value = config_store.global_effective(session)[key]
     return float(value) if isinstance(value, int) else 0.0
 
 
@@ -95,8 +112,7 @@ async def device_bridge(ws: WebSocket) -> None:
     nonce = ws.query_params.get("nonce") or ""
     await ws.accept()
 
-    lifetime_s = _bridge_timeout_s("bridge_max_lifetime_s")
-    pair_s = _bridge_timeout_s("bridge_pair_timeout_s")
+    lifetime_s, pair_s = await run_in_threadpool(_read_bridge_timeouts, ws)
     loop = asyncio.get_running_loop()
 
     bridge = registry.get(device_id)
@@ -308,7 +324,7 @@ async def adb_close(device_id: str, session: Session = Depends(get_db)) -> Bridg
 
 
 @admin_router.get("/devices/{device_id}/bridge")
-async def adb_status(device_id: str) -> BridgeStatus:
+async def adb_status(device_id: str, session: Session = Depends(get_db)) -> BridgeStatus:
     """桥接状态可观测（管理面）。
 
     `expires_in_s` 给出距离绝对寿命到点的秒数——运维据此判断还来不来得及做完
@@ -316,11 +332,11 @@ async def adb_status(device_id: str) -> BridgeStatus:
 
     `ssh_target` 与桥开没开无关，所以关着时也给：网页端要靠它拼出本机那条连接命令。
     """
-    ssh_target = str(config_store.global_effective()["bridge_ssh_target"])
+    ssh_target = str(config_store.global_effective(session)["bridge_ssh_target"])
     bridge = registry.get(device_id)
     if bridge is None:
         return {"device_id": device_id, "open": False, "ssh_target": ssh_target}
-    lifetime_s = _bridge_timeout_s("bridge_max_lifetime_s")
+    lifetime_s = _bridge_timeout_s(session, "bridge_max_lifetime_s")
     remaining = max(0.0, lifetime_s - (asyncio.get_running_loop().time() - bridge.opened_at))
     return {
         "device_id": device_id,

@@ -152,7 +152,7 @@ def update_clock_skew(session: Session, device_id: str, device_time: object, rec
     阈值取自配置：单次观测与当前值差得超过它，说明设备钟被动了（重启归零、被手动改
     钟），直接采信新值而不平滑——继续平滑会让之后几次映射都按错误的偏差算。
     """
-    threshold = as_int(config_store.effective(device_id).get("clock_jump_threshold_s"), default=60)
+    threshold = as_int(config_store.effective(session, device_id).get("clock_jump_threshold_s"), default=60)
     skew = device_clock.update(device_id, device_time, received_at, threshold)
     repository.set_clock_skew(session, device_id, skew)
 

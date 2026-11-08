@@ -18,8 +18,13 @@ from tests import device_link, frames
 from app.core.clock import now_rfc3339
 from app.core.problems import INVALID_VOICE_RULE, ApiProblemError
 from app.db.base import utcnow
+from app.db.session import session_scope
 from app.modules.devices import service as devices_service
 from app.modules.doors.events import DoorEvent, DoorEventKind
+from app.modules.sessions import service as sessions_service
+from app.modules.sessions.schemas import CommandOutcome
+from app.modules.voice import audio, schemas, service
+from app.persistence import voice as repository
 
 
 def _match(device_id: str, cert_no: str, event: str, local: datetime) -> list[dict[str, Any]]:
@@ -34,18 +39,12 @@ def _repo_call(name: str, *args: object, **kwargs: object) -> object:
         return fn(session, *args, **kwargs)
 
 
+@contextmanager
 def _svc_session() -> "AbstractContextManager[Session]":
-    """持久化直调的短会话。"""
-    from app.db.session import session_scope
-
+    """直调持久化层与 service 层的短会话。"""
     with session_scope() as session:
         yield session
 
-
-from app.modules.sessions import service as sessions_service
-from app.modules.sessions.schemas import CommandOutcome
-from app.modules.voice import audio, schemas, service
-from app.persistence import voice as repository
 
 DEVICE_ID = "dev-voice"
 OTHER_DEVICE_ID = "dev-voice-other"
@@ -574,9 +573,8 @@ def test_time_window_filters_and_priority(
     )
     with _svc_session() as session:
         night_row = repository.get_rule(session, int(night["id"]))
-    assert night_row is not None and list(night_row["time_windows"]) == [
-        {"days": [1, 2, 3, 4, 5, 6, 7], "start": "22:00", "end": "06:00"}
-    ]
+    assert night_row is not None
+    assert list(night_row["time_windows"]) == [{"days": [1, 2, 3, 4, 5, 6, 7], "start": "22:00", "end": "06:00"}]
     assert night["time_summary"] == "每天 22:00–次日 06:00"
 
     noon = datetime(2026, 1, 5, 12, 0)
@@ -1664,12 +1662,3 @@ def test_unit_asset_upload_guards(
         files={"file": ("input.wav", b"invalid", "audio/wav")},
     )
     assert invalid.status_code == 422
-
-
-@contextmanager
-def _svc_session() -> "AbstractContextManager[Session]":
-    """直调 service 层的短会话。"""
-    from app.db.session import session_scope
-
-    with session_scope() as session:
-        yield session

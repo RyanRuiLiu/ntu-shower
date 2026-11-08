@@ -208,7 +208,7 @@ async def _accept_hello(ws: WebSocket, token_device_id: str | None) -> tuple[str
                 "server_time": now_rfc3339(),
                 # 只给设备端消费的键（effective 再按 scope 过滤）：服务端自己的键
                 # 不占设备的解析路径，两条下发的路（这里与 config.update）给的键集要一致。
-                "config": await run_in_threadpool(config_store.device_effective, device_id),
+                "config": await _call(ws, config_store.device_effective, device_id),
                 "upgrade": await _call(ws, ota_store.latest_for, device_id, version_code),
             },
             reply_to=text_of(hello, "id"),
@@ -364,7 +364,7 @@ async def _server_ping_loop(ws: WebSocket, device_id: str, pong_seen: asyncio.Ev
     连接关闭即正常退出；其他异常记录后退出，静默吞掉会让存活判定无声失效。
     """
     while True:
-        config = await run_in_threadpool(config_store.effective, device_id)
+        config = await _call(ws, config_store.effective, device_id)
         interval = as_int(config.get("ping_interval_s"), default=60)
         # 先等满一个周期再发首个 ping：刚握手成功的连接不需要立刻验证存活
         await asyncio.sleep(interval)

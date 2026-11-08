@@ -108,7 +108,7 @@ def _prepare(
     真前置）与项目原有的 `test_sessions.py` 覆盖。所以这里连入口一起换掉，每条测试只
     验一层。
     """
-    monkeypatch.setattr(scheduler.config_store, "effective", lambda _device_id: CONFIG)
+    monkeypatch.setattr(scheduler.config_store, "effective", lambda _session, _device_id: CONFIG)
     monkeypatch.setattr(scheduler, "_snapshots", lambda _device_id: candidates)
     calls = sent if sent is not None else []
 
@@ -177,7 +177,8 @@ def test_each_door_gets_exactly_one_timer(monkeypatch: pytest.MonkeyPatch) -> No
 
         assert list(handles) == [3]
         # 三个功能的状态互不相交，所以"已暂停"只有自动结算会认领
-        assert next(iter(scheduler._plan("dev-1").values()))[2].feature == FEATURE_AUTO_SETTLE
+        with session_scope() as session:
+            assert next(iter(scheduler._plan(session, "dev-1").values()))[2].feature == FEATURE_AUTO_SETTLE
 
     asyncio.run(body())
 
@@ -359,7 +360,9 @@ def test_settle_stops_when_there_is_no_password(monkeypatch: pytest.MonkeyPatch,
     async def body() -> None:
         calls = _prepare(monkeypatch, [WAITING], sent=[])
         monkeypatch.setattr(
-            scheduler.config_store, "effective", lambda _device_id: {**CONFIG, "renew_wait_students": {}}
+            scheduler.config_store,
+            "effective",
+            lambda _session, _device_id: {**CONFIG, "renew_wait_students": {}},
         )
         await scheduler._perform_settle(_settle_job(FEATURE_RENEW_WAIT))
 
@@ -401,7 +404,9 @@ def test_settle_stops_when_the_roster_changed_underneath(monkeypatch: pytest.Mon
     async def body() -> None:
         calls = _prepare(monkeypatch, [WAITING], sent=[])
         monkeypatch.setattr(
-            scheduler.config_store, "effective", lambda _device_id: {**CONFIG, "renew_wait_enabled": False}
+            scheduler.config_store,
+            "effective",
+            lambda _session, _device_id: {**CONFIG, "renew_wait_enabled": False},
         )
         await scheduler._perform_settle(_settle_job(FEATURE_RENEW_WAIT))
 
@@ -765,7 +770,7 @@ def test_a_frame_ends_in_a_settle_then_an_assign(
         calls.append((action, params))
         return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
 
-    monkeypatch.setattr(scheduler.config_store, "effective", lambda _device_id: CONFIG)
+    monkeypatch.setattr(scheduler.config_store, "effective", lambda _session, _device_id: CONFIG)
     monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
 
     # 一小时前分配、一直没开阀：预约续期的 270 秒早已过点
@@ -806,7 +811,7 @@ def test_the_same_session_is_settled_only_once(
         calls.append((action, params))
         return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
 
-    monkeypatch.setattr(scheduler.config_store, "effective", lambda _device_id: CONFIG)
+    monkeypatch.setattr(scheduler.config_store, "effective", lambda _session, _device_id: CONFIG)
     monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
     doors_service.process_snapshot("dev-1", _frame(captured_at=_ago(3600), card_no=1001, open_time=_ago(3600)))
 
@@ -836,7 +841,7 @@ def test_auto_settle_only_settles_and_never_reassigns(
         calls.append((action, params))
         return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
 
-    monkeypatch.setattr(scheduler.config_store, "effective", lambda _device_id: CONFIG)
+    monkeypatch.setattr(scheduler.config_store, "effective", lambda _session, _device_id: CONFIG)
     monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
     doors_service.process_snapshot(
         "dev-1", _frame(captured_at=_ago(120), card_no=1001, open_time=_ago(300), close_time=_ago(120), bath_time_s=120)
@@ -868,7 +873,7 @@ def test_a_student_outside_the_roster_is_never_touched(
         calls.append((action, params))
         return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
 
-    monkeypatch.setattr(scheduler.config_store, "effective", lambda _device_id: CONFIG)
+    monkeypatch.setattr(scheduler.config_store, "effective", lambda _session, _device_id: CONFIG)
     monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
     doors_service.process_snapshot(
         "dev-1", _frame(captured_at=_ago(3600), card_no=1001, cert_no="2026000006", open_time=_ago(3600))
@@ -913,7 +918,8 @@ def test_snapshot_reports_scheduled_timers(fresh_db: str) -> None:
             handle=loop.call_later(5.0, lambda: None),
         )
         try:
-            rows = scheduler.snapshot()
+            with session_scope() as session:
+                rows = scheduler.snapshot(session)
         finally:
             worker.timers.clear()
         assert rows == [

@@ -58,13 +58,15 @@ admin_router = APIRouter(prefix="/api/v1/devices", dependencies=[Depends(require
 LOG_KINDS = ("device", "crash", "ota")
 
 
-def _ui_timeout_s(device_id: str) -> float:
+def _ui_timeout_s(session: Session, device_id: str) -> float:
     """界面操作的等待上限，取该设备的配置项 `ui_operation_timeout_s`。
 
     每个 `ui.*` 命令都要等设备完成一次节点遍历或一次手势注入，耗时随界面复杂度
     变化；做成配置项后现场改一次即对全部设备生效。
     """
-    timeout_s = as_int(config_store.effective(device_id)["ui_operation_timeout_s"], int(DEVICE_ACTION_TIMEOUT_S))
+    timeout_s = as_int(
+        config_store.effective(session, device_id)["ui_operation_timeout_s"], int(DEVICE_ACTION_TIMEOUT_S)
+    )
     return float(timeout_s)
 
 
@@ -267,7 +269,7 @@ async def dump_ui_tree(device_id: str, session: Session = Depends(get_db)) -> Co
 
     格式与 uiautomator dump 一致；节点上限取配置项 ui_dump_max_nodes。
     """
-    return await device_action(session, device_id, actions.UI_DUMP, {}, _ui_timeout_s(device_id))
+    return await device_action(session, device_id, actions.UI_DUMP, {}, _ui_timeout_s(session, device_id))
 
 
 @admin_router.post("/{device_id}/touch")
@@ -282,28 +284,32 @@ async def touch(device_id: str, req: DeviceUiTouchRequest, session: Session = De
         params["to_y"] = req.to_y
     if req.duration_ms is not None:
         params["duration_ms"] = req.duration_ms
-    return await device_action(session, device_id, actions.UI_TOUCH, params, _ui_timeout_s(device_id))
+    return await device_action(session, device_id, actions.UI_TOUCH, params, _ui_timeout_s(session, device_id))
 
 
 @admin_router.post("/{device_id}/scroll")
 async def scroll(device_id: str, req: DeviceUiScrollRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """滚动可滚动容器。与 touch 的滑动分开：作用于容器而非坐标。"""
     return await device_action(
-        session, device_id, actions.UI_SCROLL, {"direction": req.direction}, _ui_timeout_s(device_id)
+        session, device_id, actions.UI_SCROLL, {"direction": req.direction}, _ui_timeout_s(session, device_id)
     )
 
 
 @admin_router.post("/{device_id}/key")
 async def send_key(device_id: str, req: DeviceUiKeyRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """发送系统按键（闭集，路由层 422 挡下非法值）。"""
-    return await device_action(session, device_id, actions.UI_KEY, {"key": req.key}, _ui_timeout_s(device_id))
+    return await device_action(session, device_id, actions.UI_KEY, {"key": req.key}, _ui_timeout_s(session, device_id))
 
 
 @admin_router.post("/{device_id}/input")
 async def input_text(device_id: str, req: DeviceUiTextRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """向当前焦点控件输入文本；channel 在两条并列通路中显式选择。"""
     return await device_action(
-        session, device_id, actions.UI_INPUT, {"text": req.text, "channel": req.channel}, _ui_timeout_s(device_id)
+        session,
+        device_id,
+        actions.UI_INPUT,
+        {"text": req.text, "channel": req.channel},
+        _ui_timeout_s(session, device_id),
     )
 
 
