@@ -2,7 +2,6 @@
 
 import asyncio
 import contextlib
-import json
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -14,8 +13,10 @@ from app.core.config import settings
 from app.core.connections import manager
 from app.core.logging import log_event, trace_id_var
 from app.core.protocol import JsonObject
-from app.modules.audit import repository as command_audit
+from app.db.base import utcnow
+from app.models.enums import CommandStatus
 from app.modules.devices import service as devices_service
+from app.persistence import audit as command_audit
 
 from .schemas import CommandOutcome, ConfigPushResult
 
@@ -171,10 +172,15 @@ async def _send_and_wait(
     supported = _supported_actions(session, device_id)
     # 空能力集表示设备未声明：不据此拦截，否则升级服务端会锁死在网设备
     if supported and action not in supported:
-        command_audit.insert_command(
-            command_id, device_id, action, trace_id_var.get(), json.dumps(params, ensure_ascii=False)
+        command_audit.insert_command(session, command_id, device_id, action, utcnow(), trace_id_var.get(), params)
+        command_audit.finish(
+            session,
+            command_id,
+            CommandStatus(outcomes.FAILED.value),
+            reason_codes.DEVICE_UNSUPPORTED_ACTION.code,
+            "",
+            utcnow(),
         )
-        command_audit.finish(command_id, outcomes.FAILED.value, reason_codes.DEVICE_UNSUPPORTED_ACTION.code, "")
         return {
             "status": outcomes.FAILED.value,
             "reason_code": reason_codes.DEVICE_UNSUPPORTED_ACTION.code,
@@ -185,9 +191,7 @@ async def _send_and_wait(
     channel = actions.ACTION_CHANNELS[action]
     key = (device_id, channel)
     if _channel_waiting.get(key, 0) >= CHANNEL_QUEUE_MAX:
-        command_audit.insert_command(
-            command_id, device_id, action, trace_id_var.get(), json.dumps(params, ensure_ascii=False)
-        )
+        command_audit.insert_command(session, command_id, device_id, action, utcnow(), trace_id_var.get(), params)
         log_event(
             "INFO",
             "command.rejected",
@@ -197,7 +201,14 @@ async def _send_and_wait(
             action=action,
             channel=channel,
         )
-        command_audit.finish(command_id, outcomes.REJECTED.value, reason_codes.SERVER_OVERLOADED.code, "")
+        command_audit.finish(
+            session,
+            command_id,
+            CommandStatus(outcomes.REJECTED.value),
+            reason_codes.SERVER_OVERLOADED.code,
+            "",
+            utcnow(),
+        )
         return {
             "status": outcomes.REJECTED.value,
             "reason_code": reason_codes.SERVER_OVERLOADED.code,
@@ -215,21 +226,33 @@ async def _send_and_wait(
             remaining = deadline - loop.time()
             if remaining <= 0:
                 command_audit.insert_command(
-                    command_id, device_id, action, trace_id_var.get(), json.dumps(params, ensure_ascii=False)
+                    session, command_id, device_id, action, utcnow(), trace_id_var.get(), params
                 )
-                command_audit.finish(command_id, outcomes.TIMEOUT.value, reason_codes.DEADLINE_EXCEEDED.code, "")
+                command_audit.finish(
+                    session,
+                    command_id,
+                    CommandStatus(outcomes.TIMEOUT.value),
+                    reason_codes.DEADLINE_EXCEEDED.code,
+                    "",
+                    utcnow(),
+                )
                 return CommandOutcome(
                     status=outcomes.TIMEOUT.value,
                     reason_code=reason_codes.DEADLINE_EXCEEDED.code,
                     terminal_message="",
                     data=None,
                 )
-            return await _dispatch(command_id, device_id, action, params, remaining)
+            return await _dispatch(session, command_id, device_id, action, params, remaining)
     except TimeoutError:
-        command_audit.insert_command(
-            command_id, device_id, action, trace_id_var.get(), json.dumps(params, ensure_ascii=False)
+        command_audit.insert_command(session, command_id, device_id, action, utcnow(), trace_id_var.get(), params)
+        command_audit.finish(
+            session,
+            command_id,
+            CommandStatus(outcomes.TIMEOUT.value),
+            reason_codes.DEADLINE_EXCEEDED.code,
+            "",
+            utcnow(),
         )
-        command_audit.finish(command_id, outcomes.TIMEOUT.value, reason_codes.DEADLINE_EXCEEDED.code, "")
         return CommandOutcome(
             status=outcomes.TIMEOUT.value,
             reason_code=reason_codes.DEADLINE_EXCEEDED.code,
@@ -245,6 +268,7 @@ async def _send_and_wait(
 
 
 async def _dispatch(
+    session: Session,
     command_id: str,
     device_id: str,
     action: str,
@@ -277,9 +301,7 @@ async def _dispatch(
             },
             frame_id=command_id,
         )
-        command_audit.insert_command(
-            command_id, device_id, action, trace_id_var.get(), json.dumps(params, ensure_ascii=False)
-        )
+        command_audit.insert_command(session, command_id, device_id, action, utcnow(), trace_id_var.get(), params)
         if not await manager.send_to(device_id, envelope):
             log_event(
                 "WARNING",
@@ -345,15 +367,17 @@ async def _dispatch(
             reason_codes.describe(outcome["reason_code"]) if outcome["reason_code"] else ""
         )
         command_audit.finish(
+            session,
             command_id,
-            outcome["status"],
+            CommandStatus(outcome["status"]),
             outcome["reason_code"],
             terminal_message,
+            utcnow(),
             audit_data(action, outcome["data"]),
         )
 
 
-def audit_data(action: str, data: object) -> str | None:
+def audit_data(action: str, data: object) -> dict[str, object] | None:
     """命令结果里进审计的 data：只记不可重现的文本结果。
 
     device.exec 的输出是不可重现的运维事实，必须留痕，体积有配置上限；
@@ -362,7 +386,7 @@ def audit_data(action: str, data: object) -> str | None:
     """
     if action != actions.DEVICE_EXEC or not isinstance(data, dict):
         return None
-    return json.dumps(data, ensure_ascii=False)
+    return data
 
 
 def resolve(command_id: str, payload: JsonObject) -> bool:

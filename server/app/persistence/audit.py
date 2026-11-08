@@ -42,13 +42,11 @@ def insert_command(
     trace_id: str = "",
     params: dict[str, Any] | None = None,
 ) -> None:
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return
     session.add(
         CommandAudit(
             command_id=command_id,
-            device_id=device_pk,
+            device_id=_device_pk(session, device_id),
+            device_key=device_id,
             action=action,
             created_at=created_at,
             trace_id=trace_id,
@@ -91,20 +89,15 @@ def abort_pending(session: Session, now: datetime) -> int:
 
 
 def list_commands(session: Session, device_id: str | None = None, limit: int = 50) -> list[CommandAuditRecord]:
-    statement = (
-        select(CommandAudit, Device.device_id)
-        .outerjoin(Device, CommandAudit.device_id == Device.id)
-        .order_by(CommandAudit.id.desc())
-        .limit(limit)
-    )
+    statement = select(CommandAudit).order_by(CommandAudit.id.desc()).limit(limit)
     if device_id:
-        statement = statement.where(Device.device_id == device_id)
+        statement = statement.where(CommandAudit.device_key == device_id)
     records: list[CommandAuditRecord] = []
-    for row, business_id in session.execute(statement).all():
+    for row in session.scalars(statement).all():
         records.append(
             {
                 "command_id": row.command_id,
-                "device_id": business_id or "",
+                "device_id": row.device_key,
                 "action": row.action,
                 "params": _dumps(row.params),
                 "created_at": format_rfc3339(row.created_at),

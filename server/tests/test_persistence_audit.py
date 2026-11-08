@@ -83,10 +83,10 @@ def test_background_task_runs_are_ordered_and_filtered(session: Session) -> None
     assert only_a[0]["outcome"] == "assigned"
 
 
-def test_missing_device_is_a_noop(session: Session) -> None:
+def test_missing_device_keeps_its_key(session: Session) -> None:
+    """设备不在册时命令行仍要落（审计的事实性不依赖主数据），以文本键过滤可查。"""
     audit.insert_command(session, "cmd-x", "missing", "session.assign", NOW)
-    audit.insert_background_task_run(session, "missing", 1, "c", "assign", BackgroundOutcome.SKIPPED, NOW)
     audit.finish(session, "cmd-x", CommandStatus.OK, "", "", NOW)
-    assert audit.list_commands(session) == []
-    assert audit.list_background_task_runs(session) == []
-    assert audit.abort_pending(session, NOW) == 0
+    rows = audit.list_commands(session, device_id="missing")
+    assert [row["command_id"] for row in rows] == ["cmd-x"]
+    assert rows[0]["device_id"] == "missing"

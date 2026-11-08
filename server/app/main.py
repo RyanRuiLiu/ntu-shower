@@ -36,11 +36,11 @@ from typing_extensions import TypedDict
 from .auth.routes import router as auth_router
 from .core import audit, db
 from .core.background import Background
-from .core.clock import now_rfc3339
 from .core.config import settings
 from .core.errors import install_error_handlers
 from .core.logging import configure_logging, log_event
 from .core.version import APP_VERSION
+from .db.base import utcnow
 from .db.session import Database
 from .modules.access.routes import admin_router as identities_admin_router
 from .modules.access.routes import router as identity_router
@@ -72,6 +72,7 @@ from .modules.voice import repository as voice_repository
 from .modules.voice.routes import admin_router as voice_admin_router
 from .modules.voice.routes import router as voice_router
 from .modules.water.routes import router as water_router
+from .persistence import audit as command_audit_store
 
 #: 要求浏览器每次回来验证的前端资源后缀。
 STATIC_SUFFIXES = (".html", ".js", ".css")
@@ -98,11 +99,22 @@ def init_schema() -> None:
     config_store.init_tables()
     audit.init_tables()
     command_audit_repository.init_tables()
-    aborted = command_audit_repository.abort_pending(now_rfc3339())
-    if aborted:
-        log_event("WARNING", "command.aborted-on-startup", "启动时收尾未完成命令", count=aborted)
     extend_hours_repository.init_tables()
     voice_repository.init_tables()
+
+
+def _abort_pending_commands() -> None:
+    """启动时收尾上一进程留下的 pending 命令（审计页不再永久显示进行中）。
+
+    在 lifespan 里调而不是 init_schema：新表的建立归 Alembic（compose 的 migrate
+    服务先于应用启动），init_schema 的旧建表阶段它们还不存在。
+    """
+    from .db.session import session_scope
+
+    with session_scope() as session:
+        aborted = command_audit_store.abort_pending(session, utcnow())
+    if aborted:
+        log_event("WARNING", "command.aborted-on-startup", "启动时收尾未完成命令", count=aborted)
 
 
 def create_app() -> FastAPI:
@@ -121,6 +133,7 @@ def create_app() -> FastAPI:
         background.interval("extend-hours", extend_hours_service.TICK_INTERVAL_S, extend_hours_service.tick_once)
         background.interval("status-line", status_line_service.PUSH_INTERVAL_S, status_line_service.tick)
         background.interval("audit-prune", audit.PRUNE_INTERVAL_S, audit.prune_once)
+        _abort_pending_commands()
         background.start()
         # 事件驱动型任务保持自己的模型：按设备惰性起 worker，不占统一循环。
         sessions_scheduler.start()

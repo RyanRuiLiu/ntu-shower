@@ -56,7 +56,9 @@ class CommandAudit(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     #: 端到端幂等身份，重投不会产生第二条
     command_id: Mapped[str] = mapped_column(String(64), unique=True)
-    device_id: Mapped[int] = mapped_column(ForeignKey("devices.id", ondelete="SET NULL"))
+    device_id: Mapped[int | None] = mapped_column(ForeignKey("devices.id", ondelete="SET NULL"), default=None)
+    #: 调用目标的文本业务键留底：审计的事实性不依赖设备是否在册
+    device_key: Mapped[str] = mapped_column(String(64), default="")
     action: Mapped[str] = mapped_column(String(64))
     params: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, index=True, default=utcnow)
