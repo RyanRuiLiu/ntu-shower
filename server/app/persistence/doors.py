@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..core.clock import format_rfc3339, seconds_between
+from ..core.clock import format_rfc3339, parse_rfc3339, seconds_between
 from ..models.doors import DoorSnapshot, DoorState, DoorStateEvent
 from ..models.enums import ObservedSpan, SegmentSource
 from ..models.identity import Device
@@ -581,6 +581,173 @@ def list_snapshots(session: Session, device_id: str) -> list[dict[str, Any]]:
     ]
 
 
+# ── 统计读 ──
+# 统计层（modules/stats）是这些表的主要读方。窗口条件在这里换算成 datetime，
+# 出去的行仍经统一视图（时刻是 RFC 3339 文本），统计层不碰存储形状。
+
+
+def sessions_in_window(session: Session, device_id: str, since: str, until: str) -> list[dict[str, Any]]:
+    """这台设备在 [since, until) 分配的会话，按分配时刻升序。"""
+    device_pk = _device_pk(session, device_id)
+    if device_pk is None:
+        return []
+    low, high = _parse_moment(since), _parse_moment(until)
+    rows = session.scalars(
+        select(UsageSession)
+        .where(
+            UsageSession.device_id == device_pk,
+            UsageSession.assigned_at >= low,
+            UsageSession.assigned_at < high,
+        )
+        .order_by(UsageSession.assigned_at)
+    ).all()
+    return [_session_view(row, device_id) for row in rows]
+
+
+def sessions_of_cert(session: Session, cert_no: str, since: str, until: str) -> list[dict[str, Any]]:
+    """这个学号在窗口内分配的会话（跨设备），按分配时刻升序。"""
+    low, high = _parse_moment(since), _parse_moment(until)
+    rows = session.scalars(
+        select(UsageSession)
+        .where(UsageSession.cert_no == cert_no, UsageSession.assigned_at >= low, UsageSession.assigned_at < high)
+        .order_by(UsageSession.assigned_at)
+    ).all()
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        business_id = session.scalar(select(Device.device_id).where(Device.id == row.device_id)) or ""
+        result.append(_session_view(row, str(business_id)))
+    return result
+
+
+def segments_in_session_window(session: Session, device_id: str, since: str, until: str) -> list[dict[str, Any]]:
+    """窗口内会话的段（联会话取窗口），按会话 id 与开阀时刻升序——一次取全，调用方分组。"""
+    device_pk = _device_pk(session, device_id)
+    if device_pk is None:
+        return []
+    low, high = _parse_moment(since), _parse_moment(until)
+    rows = (
+        session.execute(
+            select(UsageSegment)
+            .join(UsageSession, UsageSession.id == UsageSegment.session_id)
+            .where(
+                UsageSession.device_id == device_pk,
+                UsageSession.assigned_at >= low,
+                UsageSession.assigned_at < high,
+            )
+            .order_by(UsageSegment.session_id, UsageSegment.opened_at)
+        )
+        .scalars()
+        .all()
+    )
+    return [_segment_view(row, device_id) for row in rows]
+
+
+def door_count(session: Session, device_id: str) -> int:
+    """这台设备上报过现态的喷头数。"""
+    device_pk = _device_pk(session, device_id)
+    if device_pk is None:
+        return 0
+    return int(session.scalar(select(func.count()).select_from(DoorState).where(DoorState.device_id == device_pk)) or 0)
+
+
+def door_count_in_state(session: Session, device_id: str, state: str) -> int:
+    """这台设备处于指定状态的喷头数。"""
+    device_pk = _device_pk(session, device_id)
+    if device_pk is None:
+        return 0
+    return int(
+        session.scalar(
+            select(func.count())
+            .select_from(DoorState)
+            .where(DoorState.device_id == device_pk, DoorState.state == state)
+        )
+        or 0
+    )
+
+
+def average_flow_by_cert(session: Session, since: str, until: str, exclude_cert: str | None = None) -> dict[str, float]:
+    """窗口内每个人的平均出水秒数（只算出过水的），整段聚合、不拉行。"""
+    low, high = _parse_moment(since), _parse_moment(until)
+    statement = (
+        select(UsageSession.cert_no, func.avg(UsageSession.flow_s))
+        .where(
+            UsageSession.assigned_at >= low,
+            UsageSession.assigned_at < high,
+            UsageSession.cert_no != "",
+            UsageSession.flow_s > 0,
+        )
+        .group_by(UsageSession.cert_no)
+    )
+    if exclude_cert:
+        statement = statement.where(UsageSession.cert_no != exclude_cert)
+    return {str(cert): float(average) for cert, average in session.execute(statement).all()}
+
+
+def events_in_window(session: Session, device_id: str, start: str, end: str) -> list[dict[str, Any]]:
+    """这台设备在 [start, end) 的状态迁移，按发生时刻升序。"""
+    device_pk = _device_pk(session, device_id)
+    if device_pk is None:
+        return []
+    low, high = _parse_moment(start), _parse_moment(end)
+    rows = session.scalars(
+        select(DoorStateEvent)
+        .where(
+            DoorStateEvent.device_id == device_pk, DoorStateEvent.occurred_at >= low, DoorStateEvent.occurred_at < high
+        )
+        .order_by(DoorStateEvent.occurred_at)
+    ).all()
+    return [
+        {
+            "door_no": int(row.door_no),
+            "from_state": str(row.from_state),
+            "to_state": str(row.to_state),
+            "card_no": int(row.card_no),
+            "cert_no": str(row.cert_no),
+            "bath_time_s": int(row.bath_time_s),
+            "occurred_at": _ts(row.occurred_at),
+        }
+        for row in rows
+    ]
+
+
+def last_closed_by_door(session: Session, device_id: str, before: str) -> list[dict[str, Any]]:
+    """每扇门在 `before` 之前的最后一次关阀（段联会话取占用者）。"""
+    device_pk = _device_pk(session, device_id)
+    if device_pk is None:
+        return []
+    high = _parse_moment(before)
+    ranked = (
+        select(
+            UsageSegment.door_no,
+            UsageSegment.closed_at,
+            UsageSession.cert_no,
+            func.row_number()
+            .over(partition_by=UsageSegment.door_no, order_by=UsageSegment.closed_at.desc())
+            .label("rn"),
+        )
+        .join(UsageSession, UsageSession.id == UsageSegment.session_id)
+        .where(UsageSegment.device_id == device_pk, UsageSegment.closed_at.is_not(None), UsageSegment.closed_at < high)
+        .subquery()
+    )
+    rows = session.execute(
+        select(ranked.c.door_no, ranked.c.closed_at, ranked.c.cert_no)
+        .where(ranked.c.rn == 1)
+        .order_by(ranked.c.door_no)
+    ).all()
+    return [
+        {"door_no": int(door_no), "closed_at": _ts(closed_at), "cert_no": str(cert_no)}
+        for door_no, closed_at, cert_no in rows
+    ]
+
+
+def _parse_moment(value: str) -> datetime:
+    """窗口端点的转换：统计层的窗口端点必然是合法 RFC 3339，坏值在调用方就挡了。"""
+    moment = parse_rfc3339(value)
+    if moment is None:
+        raise ValueError(f"窗口端点不是合法时刻：{value!r}")
+    return moment
+
+
 def list_doors(session: Session, device_id: str | None = None) -> list[DoorView]:
     """喷头现态列表，带上次完整使用的时刻、时长与凭证。"""
     statement = select(DoorState, Device.device_id).join(Device, Device.id == DoorState.device_id)
@@ -636,7 +803,10 @@ __all__: list[str] = [
     "open_segment",
     "open_session",
     "run_started_at",
+    "segments_in_session_window",
     "segments_of_session",
+    "sessions_in_window",
+    "sessions_of_cert",
     "touch_session",
     "upsert_door_live",
 ]

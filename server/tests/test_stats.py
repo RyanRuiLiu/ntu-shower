@@ -15,13 +15,40 @@ from tests import device_link
 from tests.identity import bearer
 from tests.identity import register as register_identity
 
-from app.core.clock import now_rfc3339, rfc3339_ago, shift_rfc3339, to_local
-from app.core.db import write
+from app.core.clock import now_rfc3339, parse_rfc3339, rfc3339_ago, shift_rfc3339, to_local
 from app.db.base import utcnow
 from app.modules.access.identity import IdentityKind
 from app.modules.doors.schemas import DoorState, state_label
 from app.modules.doors.service import SESSION_MAX_S
 from app.modules.stats import service, spec
+
+
+def _dt(value: str):
+    """RFC 3339 文本 → UTC datetime（模型列的落库形状）。"""
+    from datetime import UTC, datetime
+
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+
+
+def _put(row: object) -> int:
+    """落一行种子并返回自增 id。"""
+    from app.db.session import session_scope
+
+    with session_scope() as session:
+        session.add(row)
+        session.commit()
+        session.flush()
+        return int(row.id)
+
+
+def _device_pk() -> int | None:
+    from sqlalchemy import select
+
+    from app.db.session import session_scope
+    from app.models.identity import Device
+
+    with session_scope() as session:
+        return session.scalar(select(Device.id).where(Device.device_id == DEVICE))
 
 
 def _db_session() -> AbstractContextManager[Session]:
@@ -40,7 +67,6 @@ def _db_session() -> AbstractContextManager[Session]:
 
 def _insert_link_event(device_id: str, event: str, at: str) -> None:
     """登记一条链路事件；时刻解析失败的原用例在新层的类型上不可能发生，跳过。"""
-    from app.core.clock import parse_rfc3339
     from app.models.enums import LinkEvent
     from app.persistence import devices as devices_store
 
@@ -84,6 +110,21 @@ def _this_floor(body: dict) -> dict:
     return next(item for item in body["compare"] if item["device_id"] == body["device_id"])
 
 
+def _seed_doors() -> None:
+    """给七扇门各落一行 FREE 现态：统计的喷头数与今日摘要的占用数都读它。"""
+    from app.models.doors import DoorState as DoorStateRow
+
+    for door in range(1, 8):
+        _put(
+            DoorStateRow(
+                device_id=_device_pk(),
+                door_no=door,
+                state=DoorState.FREE,
+                reported_at=_dt(now_rfc3339()),
+            )
+        )
+
+
 def _session(
     door_no: int,
     cert_no: str,
@@ -102,66 +143,86 @@ def _session(
     `gap=True` 造一场跨盲区的会话：`last_seen_at` 与 `ended_at` 相差超过一次占用的
     物理上限，占用类指标应当把它排除。
     """
-    assigned = _moment(seconds_ago)
+    from app.models.usage import UsageSession
+
+    assigned = _dt(_moment(seconds_ago))
     span = duration_s if duration_s is not None else flow_s
-    ended = _moment(max(0, seconds_ago - span))
-    last_seen = _moment(max(0, seconds_ago - flow_s - SESSION_MAX_S - 60)) if gap else ended
-    write(
-        "INSERT INTO usage_session (device_id, door_no, cert_no, assigned_at, assigned_source,"
-        " observed_span, ended_at, last_seen_at, flow_s, device_flow_s, segments_complete)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-        (
-            DEVICE,
-            door_no,
-            cert_no,
-            assigned,
-            "observed",
-            "gap" if gap else "continuous",
-            ended,
-            last_seen,
-            flow_s,
-            flow_s,
-            1,
-        ),
+    ended = _dt(_moment(max(0, seconds_ago - span)))
+    last_seen = _dt(_moment(max(0, seconds_ago - flow_s - SESSION_MAX_S - 60))) if gap else ended
+    session_id = _put(
+        UsageSession(
+            device_id=_device_pk(),
+            door_no=door_no,
+            cert_no=cert_no,
+            assigned_at=assigned,
+            assigned_source="observed",
+            observed_span="gap" if gap else "continuous",
+            ended_at=ended,
+            last_seen_at=last_seen,
+            flow_s=flow_s,
+            device_flow_s=flow_s,
+            segments_complete=True,
+        )
     )
-    row = write("SELECT last_insert_rowid() AS id").fetchone()
-    session_id = int(row["id"])
     if open_after_s is not None:
         # 一段：开阀时刻比分配晚 open_after_s，关阀在它之后 flow_s 秒。
-        opened = _moment(max(0, seconds_ago - open_after_s))
-        closed = _moment(max(0, seconds_ago - open_after_s - flow_s))
-        write(
-            "INSERT INTO usage_segment (session_id, device_id, door_no, opened_at, closed_at, flow_s,"
-            " source, opened_raw, closed_raw) VALUES (?,?,?,?,?,?,?,?,?)",
-            (session_id, DEVICE, door_no, opened, closed, flow_s, "measured", "", ""),
+        from app.models.usage import UsageSegment
+
+        opened = _dt(_moment(max(0, seconds_ago - open_after_s)))
+        closed = _dt(_moment(max(0, seconds_ago - open_after_s - flow_s)))
+        _put(
+            UsageSegment(
+                session_id=session_id,
+                device_id=_device_pk(),
+                door_no=door_no,
+                opened_at=opened,
+                closed_at=closed,
+                flow_s=flow_s,
+                source="measured",
+            )
         )
     return session_id
 
 
 def _segment(session_id: int, door_no: int, seconds_ago: int, flow_s: int) -> None:
     """给已有会话补一段，用来造"关了几次阀"的分布。"""
-    write(
-        "INSERT INTO usage_segment (session_id, device_id, door_no, opened_at, closed_at, flow_s,"
-        " source, opened_raw, closed_raw) VALUES (?,?,?,?,?,?,?,?,?)",
-        (
-            session_id,
-            DEVICE,
-            door_no,
-            _moment(seconds_ago),
-            _moment(max(0, seconds_ago - flow_s)),
-            flow_s,
-            "measured",
-            "",
-            "",
-        ),
+    from app.models.usage import UsageSegment
+
+    _put(
+        UsageSegment(
+            session_id=session_id,
+            device_id=_device_pk(),
+            door_no=door_no,
+            opened_at=_dt(_moment(seconds_ago)),
+            closed_at=_dt(_moment(max(0, seconds_ago - flow_s))),
+            flow_s=flow_s,
+            source="measured",
+        )
     )
 
 
-def _event(door_no: int, state: DoorState, seconds_ago: int, cert_no: str = "", bath_s: int = 0) -> None:
-    write(
-        "INSERT INTO door_state_event (occurred_at, device_id, door_no, from_state, to_state,"
-        " card_no, cert_no, bath_time_s) VALUES (?,?,?,?,?,?,?,?)",
-        (_moment(seconds_ago), DEVICE, door_no, DoorState.FREE.value, state.value, 0, cert_no, bath_s),
+def _event(
+    door_no: int,
+    state: DoorState,
+    seconds_ago: int | None = None,
+    cert_no: str = "",
+    bath_s: int = 0,
+    *,
+    at: str | None = None,
+) -> None:
+    from app.models.doors import DoorStateEvent
+
+    _put(
+        DoorStateEvent(
+            occurred_at=_dt(at) if at is not None else _dt(_moment(seconds_ago or 0)),
+            device_id=_device_pk(),
+            door_no=door_no,
+            from_state=DoorState.FREE,
+            to_state=state,
+            card_no=0,
+            cert_no=cert_no,
+            bath_time_s=bath_s,
+        )
     )
 
 
@@ -191,10 +252,16 @@ def stats_headers(fresh_db: str) -> dict[str, str]:
 @pytest.fixture
 def seeded(fresh_db: str, stats_headers: dict[str, str]) -> dict[str, str]:
     """一场够用的数据集：跨窗口的会话、带等待的一段、一场跨盲区的会话。"""
+    from app.models.doors import DoorState as DoorStateRow
+
     for door in range(1, 8):
-        write(
-            "INSERT INTO door_live (device_id, door_no, state, reported_at) VALUES (?,?,?,?)",
-            (DEVICE, door, DoorState.FREE.value, now_rfc3339()),
+        _put(
+            DoorStateRow(
+                device_id=_device_pk(),
+                door_no=door,
+                state=DoorState.FREE,
+                reported_at=_dt(now_rfc3339()),
+            )
         )
     _session(1, "2200000001", 3600, 600, open_after_s=30)
     _session(2, "2200000002", 7200, 900)
@@ -395,11 +462,7 @@ def test_replay_returns_that_day_only(client: TestClient, seeded: dict[str, str]
     for _offset, (state, index) in enumerate([(DoorState.WAITING, 0), (DoorState.BATHING, 60), (DoorState.FREE, 120)]):
         at = shift_rfc3339(f"{day.date().isoformat()}T02:00:00.000Z", index)
         assert at is not None
-        write(
-            "INSERT INTO door_state_event (occurred_at, device_id, door_no, from_state, to_state,"
-            " card_no, cert_no, bath_time_s) VALUES (?,?,?,?,?,?,?,?)",
-            (at, DEVICE, 1, DoorState.FREE.value, state.value, 0, "", 0),
-        )
+        _event(1, state, None, at=at)
 
     body = client.get(
         f"/api/v1/stats/devices/{DEVICE}/replay?day={day.date().isoformat()}&tz_offset_minutes={TZ}",
@@ -449,11 +512,7 @@ def test_average_board_lists_everyone_who_flowed(client: TestClient, stats_heade
     原先有一条"满 3 次"的门槛。去掉它是因为**门槛在页面上只表现为"榜上少了几个人"**
     ——读者看不出那是筛过，只会以为那些人没洗过。有快就有慢，样本薄是他自己的事。
     """
-    for door in range(1, 8):
-        write(
-            "INSERT INTO door_live (device_id, door_no, state, reported_at) VALUES (?,?,?,?)",
-            (DEVICE, door, DoorState.FREE.value, now_rfc3339()),
-        )
+    _seed_doors()
     # 甲只洗过一次；乙开过一次会话但没出水。
     _session(1, "2200000001", 3600, 600)
     _session(2, "2200000002", 7200, 0)
@@ -516,11 +575,7 @@ def test_one_open_and_one_close_counts_as_one_close(client: TestClient, stats_he
     "段数减 1"，于是"分配 → 开阀 → 暂停 → 结算"这种正常流程被记成**关 0 次**，而那一档
     看起来只是"有人一次都没停过"。
     """
-    for door in range(1, 8):
-        write(
-            "INSERT INTO door_live (device_id, door_no, state, reported_at) VALUES (?,?,?,?)",
-            (DEVICE, door, DoorState.FREE.value, now_rfc3339()),
-        )
+    _seed_doors()
     _session(1, "2200000001", 3600, 600, open_after_s=30)
 
     body = client.get(f"/api/v1/stats/devices/{DEVICE}?days=90", headers=stats_headers).json()
@@ -559,11 +614,7 @@ def test_a_streak_of_one_day_counts_as_one(client: TestClient, stats_headers: di
     这条边界完全落在 `_streak_days` 那行 `longest = current = 1` 上：只有一天时
     `pairwise` 是空的、循环不跑。改成 0 不会报错，只会让"来过一天"和"没来过"一样。
     """
-    for door in range(1, 8):
-        write(
-            "INSERT INTO door_live (device_id, door_no, state, reported_at) VALUES (?,?,?,?)",
-            (DEVICE, door, DoorState.FREE.value, now_rfc3339()),
-        )
+    _seed_doors()
     _session(1, "2200000001", 3600, 600)
 
     body = client.get(f"/api/v1/stats/devices/{DEVICE}?days=90", headers=stats_headers).json()
@@ -581,11 +632,7 @@ def test_a_tie_on_the_main_column_falls_back_to_the_detail(client: TestClient, s
     不定这一层的话，先后由查询返回的顺序决定——同一批数据两次请求可能给出不同的先后，
     而页面上只是名次悄悄换了，看不出是没定序。
     """
-    for door in range(1, 8):
-        write(
-            "INSERT INTO door_live (device_id, door_no, state, reported_at) VALUES (?,?,?,?)",
-            (DEVICE, door, DoorState.FREE.value, now_rfc3339()),
-        )
+    _seed_doors()
     # 甲：两场，每场占用 3600 秒（分配后 3000 秒才开阀）。
     _session(1, "2200000001", 20000, 600, duration_s=3600, open_after_s=3000)
     _session(2, "2200000001", 40000, 600, duration_s=3600, open_after_s=3000)
@@ -614,11 +661,7 @@ def test_wait_measures_full_occupancy_not_the_gap_before_opening(
 
     这不是咬文嚼字：满员是"挤不进去"，分配后开阀是"自己的喷头自己多久才用"。
     """
-    for door in range(1, 8):
-        write(
-            "INSERT INTO door_live (device_id, door_no, state, reported_at) VALUES (?,?,?,?)",
-            (DEVICE, door, DoorState.FREE.value, now_rfc3339()),
-        )
+    _seed_doors()
     # 4 场并行占用，各自 3000 秒；每人分配后 900 秒才开阀。
     for door in range(1, 5):
         _session(door, f"220000000{door}", 6000, 1800, duration_s=3000, open_after_s=900)
@@ -636,11 +679,7 @@ def test_wait_is_the_window_where_every_door_is_taken(client: TestClient, stats_
     7 场先后占满（第一场最早开始、最后一场最晚开始），第 8 场起来之前先释放一个：
     从"占满"到"空出"之间的秒数，就是这一次等待。
     """
-    for door in range(1, 8):
-        write(
-            "INSERT INTO door_live (device_id, door_no, state, reported_at) VALUES (?,?,?,?)",
-            (DEVICE, door, DoorState.FREE.value, now_rfc3339()),
-        )
+    _seed_doors()
     # 七场把喷头占满：最早的一场 10000 秒前开始，最晚的 4000 秒前开始（即 4000 秒前满员）。
     for door in range(1, 8):
         _session(door, f"220000000{door}", 6000 + door * 500, 1800, duration_s=9000)

@@ -78,7 +78,7 @@ def device_replay(
     require_capability(caller, Capability.STATS)
     if devices_store.get(session, device_id) is None:
         raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {device_id}")
-    return service.device_replay(device_id, day, tz_offset_minutes)
+    return service.device_replay(session, device_id, day, tz_offset_minutes)
 
 
 @router.get("/mine")
@@ -87,6 +87,7 @@ def mine_stats(
     cert_no: str = Query(min_length=1, description="要查的学号"),
     days: int = Query(30, ge=1, le=365),
     tz_offset_minutes: int = _TZ_QUERY,
+    session: Session = Depends(get_db),
 ) -> MineView:
     """个人的跨设备统计。
 
@@ -94,4 +95,4 @@ def mine_stats(
     的「能力划分」）。`stats` 位本身就是那道门。
     """
     require_capability(caller, Capability.STATS)
-    return service.mine_stats(cert_no, days, tz_offset_minutes)
+    return service.mine_stats(session, cert_no, days, tz_offset_minutes)

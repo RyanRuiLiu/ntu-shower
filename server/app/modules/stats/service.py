@@ -56,16 +56,16 @@ import statistics
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta, timezone
 from itertools import pairwise
-from sqlite3 import Row
+from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.core.clock import format_rfc3339, now_rfc3339, parse_rfc3339, rfc3339_ago, seconds_between, to_local
-from app.core.db import get_conn, read_one
 from app.modules.devices.schemas import LINK_OFFLINE
 from app.modules.doors.schemas import DoorState, state_label
 from app.modules.doors.service import SESSION_MAX_S
 from app.persistence import devices as devices_store
+from app.persistence import doors as doors_store
 
 from . import spec
 from .schemas import (
@@ -85,9 +85,6 @@ from .schemas import (
     TodaySummary,
 )
 
-#: 会话行的列清单。列名只在这里出现一次，避免几条查询各写一遍之后分叉。
-_SESSION_COLUMNS = "id, assigned_at, ended_at, last_seen_at, flow_s, door_no, cert_no, observed_span"
-
 # ── 取数 ─────────────────────────────────────────────
 
 
@@ -96,50 +93,31 @@ def _window(days: int) -> tuple[str, str]:
     return rfc3339_ago(days * 86400), now_rfc3339()
 
 
-def _sessions(device_id: str, since: str, until: str) -> list[Row]:
+def _sessions(session: Session, device_id: str, since: str, until: str) -> list[dict[str, Any]]:
     """窗口内这台设备的会话，按分配时刻升序。"""
-    return (
-        get_conn()
-        .execute(
-            f"SELECT {_SESSION_COLUMNS} FROM usage_session"
-            " WHERE device_id = ? AND assigned_at >= ? AND assigned_at < ?"
-            " ORDER BY assigned_at",
-            (device_id, since, until),
-        )
-        .fetchall()
-    )
+    return doors_store.sessions_in_window(session, device_id, since, until)
 
 
-def _segments_by_session(device_id: str, since: str, until: str) -> dict[int, list[Row]]:
+def _segments_by_session(session: Session, device_id: str, since: str, until: str) -> dict[int, list[dict[str, Any]]]:
     """会话 id → 它的段（按开阀时刻升序）。
 
     一次取全窗口内的段再分组，比每场会话各查一次少两千多次往返。
     """
-    rows = (
-        get_conn()
-        .execute(
-            "SELECT g.session_id, g.opened_at, g.closed_at, g.flow_s"
-            " FROM usage_segment g JOIN usage_session s ON s.id = g.session_id"
-            " WHERE s.device_id = ? AND s.assigned_at >= ? AND s.assigned_at < ?"
-            " ORDER BY g.session_id, g.opened_at",
-            (device_id, since, until),
-        )
-        .fetchall()
-    )
-    grouped: dict[int, list[Row]] = defaultdict(list)
+    rows = doors_store.segments_in_session_window(session, device_id, since, until)
+    grouped: dict[int, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         grouped[int(row["session_id"])].append(row)
     return grouped
 
 
-def _usable_for_occupancy(row: Row) -> bool:
+def _usable_for_occupancy(row: dict[str, Any]) -> bool:
     """这一场能不能进占用与等待类指标（口径 4）。"""
     if str(row["observed_span"]) != "continuous":
         return False
     return seconds_between(row["last_seen_at"], row["ended_at"]) <= SESSION_MAX_S
 
 
-def _flowed(rows: list[Row]) -> list[Row]:
+def _flowed(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """出过水的会话（`flow_s > 0`）。
 
     **除「会话数」一榜外，每一项统计的输入都从这里过。** 它与上面那个占用判据是
@@ -154,9 +132,8 @@ def _flowed(rows: list[Row]) -> list[Row]:
     return [row for row in rows if int(row["flow_s"]) > 0]
 
 
-def _door_count(device_id: str) -> int:
-    row = read_one("SELECT COUNT(*) AS n FROM door_live WHERE device_id = ?", (device_id,))
-    return int(row["n"]) if row is not None else 0
+def _door_count(session: Session, device_id: str) -> int:
+    return doors_store.door_count(session, device_id)
 
 
 def _device_name(session: Session, device_id: str) -> str:
@@ -273,7 +250,7 @@ def _cell_seconds(
 
 
 def _heat(
-    session: Session, rows: list[Row], since: str, until: str, offset_minutes: int, device_id: str
+    session: Session, rows: list[dict[str, Any]], since: str, until: str, offset_minutes: int, device_id: str
 ) -> list[list[float]]:
     """`[星期][小时]` 的平均占用喷头数。
 
@@ -406,7 +383,7 @@ def _copy(days: int) -> dict[str, str]:
     return {key: text.replace("{days}", str(days)) for key, text in spec.STATS_COPY.items()}
 
 
-def _totals(flowed: list[Row]) -> StatsTotals:
+def _totals(flowed: list[dict[str, Any]]) -> StatsTotals:
     """窗口内的汇总。**只给出页面上真正会读的那一个**。
 
     人次、平均淋浴时长、平均等待都在「各楼层」那张表里（含本设备那一行），不在这里
@@ -418,29 +395,24 @@ def _totals(flowed: list[Row]) -> StatsTotals:
     return {"flow_median_s": _median([int(row["flow_s"]) for row in flowed])}
 
 
-def _today_summary(device_id: str, flowed: list[Row], offset_minutes: int) -> TodaySummary:
+def _today_summary(session: Session, device_id: str, flowed: list[dict[str, Any]], offset_minutes: int) -> TodaySummary:
     """今日截至现在。进行中的会话不计入人次与均值——它们的时长还没走完。
 
     `flowed` 是窗口内的**全部**出水会话，比今日宽；今日是它的子集，本地筛一遍即可。
     口径是**出水**：没淋浴的那次不算洗过。
     """
     since, until = _day_start(now_rfc3339(), offset_minutes), now_rfc3339()
-    flows = [
-        int(row["flow_s"]) for row in flowed if row["ended_at"] is not None and since <= str(row["assigned_at"]) < until
-    ]
-    bathing = read_one(
-        "SELECT COUNT(*) AS n FROM door_live WHERE device_id = ? AND state = ?",
-        (device_id, DoorState.BATHING.value),
-    )
+    flows = [int(row["flow_s"]) for row in flowed if row["ended_at"] != "" and since <= str(row["assigned_at"]) < until]
+    bathing = doors_store.door_count_in_state(session, device_id, DoorState.BATHING.value)
     return {
         "as_of": until,
         "served": len(flows),
-        "bathing": int(bathing["n"]) if bathing is not None else 0,
+        "bathing": bathing,
         "flow_avg_s": _average(flows),
     }
 
 
-def _histogram_value(key: str, row: Row, segments: dict[int, list[Row]]) -> int:
+def _histogram_value(key: str, row: dict[str, Any], segments: dict[int, list[dict[str, Any]]]) -> int:
     """这一场落进这个分布时该用的值。
 
     两个分布各取一个量：淋浴时长直接读 `flow_s`；关阀次数**数的是段**——一段就是
@@ -455,7 +427,7 @@ def _histogram_value(key: str, row: Row, segments: dict[int, list[Row]]) -> int:
     return sum(1 for part in segments.get(int(row["id"]), []) if part["closed_at"])
 
 
-def _histograms(flowed: list[Row], segments: dict[int, list[Row]]) -> list[HistogramView]:
+def _histograms(flowed: list[dict[str, Any]], segments: dict[int, list[dict[str, Any]]]) -> list[HistogramView]:
     """两个分布：淋浴时长与关阀次数。分档边界取自 `spec.HISTOGRAMS`。
 
     **两个分布都只统计出过水的会话**：没淋浴的那次 `flow_s` 为 0，会整批落进最低那一档
@@ -479,7 +451,7 @@ def _histograms(flowed: list[Row], segments: dict[int, list[Row]]) -> list[Histo
     return views
 
 
-def _door_rows(flowed: list[Row]) -> list[DoorUsageRow]:
+def _door_rows(flowed: list[dict[str, Any]]) -> list[DoorUsageRow]:
     """每个喷头的使用次数与平均淋浴时长。
 
     **只统计出过水的会话**："使用次数"问的是洗了几次，分配了却没出水的那次不算用过。
@@ -493,7 +465,7 @@ def _door_rows(flowed: list[Row]) -> list[DoorUsageRow]:
     ]
 
 
-def _full_wait_seconds(rows: list[Row], door_count: int) -> list[int]:
+def _full_wait_seconds(rows: list[dict[str, Any]], door_count: int) -> list[int]:
     """一次**等待**的时长（秒）：**从"最后一个空位被占"到"第一个空位空出来"**。
 
     喷头全满的那一段，就是"想来的人挤不进去"的那一段。空位一出现，这一次等待结束；
@@ -531,9 +503,9 @@ def _full_wait_seconds(rows: list[Row], door_count: int) -> list[int]:
 # ── 榜单 ─────────────────────────────────────────────
 
 
-def _by_cert(rows: list[Row]) -> dict[str, list[Row]]:
+def _by_cert(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     """按学号分组，跳过没有学号的会话。"""
-    grouped: dict[str, list[Row]] = defaultdict(list)
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         cert = str(row["cert_no"])
         if cert:
@@ -541,7 +513,7 @@ def _by_cert(rows: list[Row]) -> dict[str, list[Row]]:
     return grouped
 
 
-def _streak_days(rows: list[Row], offset_minutes: int) -> int:
+def _streak_days(rows: list[dict[str, Any]], offset_minutes: int) -> int:
     """最长的连续使用天数（按当地日期）。同一天淋浴两次算一天。"""
     days = sorted({local.date() for row in rows if (local := to_local(row["assigned_at"], offset_minutes))})
     if not days:
@@ -553,7 +525,7 @@ def _streak_days(rows: list[Row], offset_minutes: int) -> int:
     return longest
 
 
-def _mean_start_minute(rows: list[Row], offset_minutes: int) -> int:
+def _mean_start_minute(rows: list[dict[str, Any]], offset_minutes: int) -> int:
     """平均开始时刻，当地 0 点起的分钟数。"""
     minutes = [
         local.hour * 60 + local.minute
@@ -563,7 +535,7 @@ def _mean_start_minute(rows: list[Row], offset_minutes: int) -> int:
     return round(sum(minutes) / len(minutes)) if minutes else 0
 
 
-def _leaderboards(rows: list[Row], offset_minutes: int) -> list[LeaderboardView]:
+def _leaderboards(rows: list[dict[str, Any]], offset_minutes: int) -> list[LeaderboardView]:
     """全部榜，按 `spec.BOARDS` 的顺序。**排序在服务端做**，`rank` 就是最终名次。
 
     `rows` 传**全部会话**，所以这里先按 `_flowed` 分成两拨：「会话数」一榜答的是"占了
@@ -626,7 +598,7 @@ def _board_rows(
     order: str,
     everyone: list[tuple[str, dict[str, int]]],
     washed: list[tuple[str, dict[str, int]]],
-    singles: list[Row],
+    singles: list[dict[str, Any]],
 ) -> list[LeaderboardRow]:
     """一个榜在一个方向上的行。
 
@@ -736,12 +708,12 @@ def _compare_rows(
         if device_id == current["device_id"]:
             rows.append(current)
             continue
-        sessions = _sessions(device_id, since, until)
+        sessions = _sessions(session, device_id, since, until)
         flowed = _flowed(sessions)
         usable = [row for row in sessions if _usable_for_occupancy(row)]
         low, high = _peak_hours(_heat(session, usable, since, settled, offset_minutes, device_id))
         # 只查一次喷头数：行里要用、等待算法也要用，两次 COUNT 是白走一趟库。
-        door_count = _door_count(device_id)
+        door_count = _door_count(session, device_id)
         rows.append(
             CompareRow(
                 device_id=device_id,
@@ -772,12 +744,12 @@ def state_options() -> list[LabeledOption]:
 def device_stats(session: Session, device_id: str, days: int, tz_offset_minutes: int) -> StatsView:
     """一台设备一次装载。切设备与切窗口重拉，其余在客户端本地切。"""
     since, until = _window(days)
-    rows = _sessions(device_id, since, until)
+    rows = _sessions(session, device_id, since, until)
     flowed = _flowed(rows)
-    segments = _segments_by_session(device_id, since, until)
+    segments = _segments_by_session(session, device_id, since, until)
     usable = [row for row in rows if _usable_for_occupancy(row)]
     # 喷头数只查一次：响应里要给、各楼层本设备那一行要给、等待算法也要给。
-    door_count = _door_count(device_id)
+    door_count = _door_count(session, device_id)
     # 热力图与高峰时段只看**已完整过去的日子**。今天还没走完，把它算进分母会让今天
     # 所在那一列按"零占用"参与平均——窗口越短偏得越狠（近 7 天时今天占分母的七分之一）。
     # 今天的数据由 TodaySummary 单独回答。
@@ -795,7 +767,7 @@ def device_stats(session: Session, device_id: str, days: int, tz_offset_minutes:
         "hour_count": spec.HOUR_COUNT,
         "states": state_options(),
         "totals": _totals(flowed),
-        "today": _today_summary(device_id, flowed, tz_offset_minutes),
+        "today": _today_summary(session, device_id, flowed, tz_offset_minutes),
         "heat": heat,
         "heat_levels": _heat_levels(heat),
         "heat_title": spec.HEAT_TITLE,
@@ -827,7 +799,7 @@ def device_stats(session: Session, device_id: str, days: int, tz_offset_minutes:
     }
 
 
-def mine_stats(cert_no: str, days: int, tz_offset_minutes: int) -> MineView:
+def mine_stats(session: Session, cert_no: str, days: int, tz_offset_minutes: int) -> MineView:
     """个人统计。**跨设备**——同一个人可能在不同楼层淋浴，所以不与主视图同端点。
 
     它跟着统计窗口变：切到"近 7 天"，这里的每一个数都要是 7 天的。
@@ -835,16 +807,7 @@ def mine_stats(cert_no: str, days: int, tz_offset_minutes: int) -> MineView:
     也不该参与"比多少人洗得快"——那是同一套口径的另一面。
     """
     since, until = _window(days)
-    rows = (
-        get_conn()
-        .execute(
-            f"SELECT {_SESSION_COLUMNS} FROM usage_session"
-            " WHERE cert_no = ? AND assigned_at >= ? AND assigned_at < ?"
-            " ORDER BY assigned_at",
-            (cert_no, since, until),
-        )
-        .fetchall()
-    )
+    rows = doors_store.sessions_of_cert(session, cert_no, since, until)
     mine = _flowed(rows)
 
     flows = [int(row["flow_s"]) for row in mine]
@@ -864,13 +827,13 @@ def mine_stats(cert_no: str, days: int, tz_offset_minutes: int) -> MineView:
         "flow_longest_s": max(flows) if flows else 0,
         "door_no": max(doors, key=lambda door: doors[door]) if doors else None,
         "hour_mode": max(hours, key=lambda hour: hours[hour]) if hours else None,
-        "faster_than_pct": _faster_than_percent(cert_no, mine, since, until),
+        "faster_than_pct": _faster_than_percent(session, cert_no, mine, since, until),
         "last_at": str(last["assigned_at"]) if last is not None else "",
         "last_flow_s": int(last["flow_s"]) if last is not None else 0,
     }
 
 
-def _faster_than_percent(cert_no: str, mine: list[Row], since: str, until: str) -> int:
+def _faster_than_percent(session: Session, cert_no: str, mine: list[dict[str, Any]], since: str, until: str) -> int:
     """比百分之多少的人淋浴时长短。**按人比**——这句话的主语是人，不是会话数。
 
     别人的水平用一个聚合查询取，**不把他们的行拉回来**：算一个百分位只要各人的均值，
@@ -881,25 +844,15 @@ def _faster_than_percent(cert_no: str, mine: list[Row], since: str, until: str) 
     """
     if not mine:
         return 0
-    others = (
-        get_conn()
-        .execute(
-            "SELECT AVG(flow_s) AS average FROM usage_session"
-            " WHERE assigned_at >= ? AND assigned_at < ? AND cert_no <> '' AND cert_no <> ?"
-            " AND flow_s > 0"
-            " GROUP BY cert_no",
-            (since, until, cert_no),
-        )
-        .fetchall()
-    )
-    if not others:
+    averages = doors_store.average_flow_by_cert(session, since, until, exclude_cert=cert_no)
+    if not averages:
         return 0
     mine_average = _average([int(row["flow_s"]) for row in mine])
-    shorter = sum(1 for row in others if float(row["average"]) > mine_average)
-    return round(shorter * 100 / len(others))
+    shorter = sum(1 for average in averages.values() if average > mine_average)
+    return round(shorter * 100 / len(averages))
 
 
-def device_replay(device_id: str, day: str, tz_offset_minutes: int) -> ReplayView:
+def device_replay(session: Session, device_id: str, day: str, tz_offset_minutes: int) -> ReplayView:
     """某一天的状态变化序列，客户端按滑块位置重放。
 
     一次拉一天（实测 162 条、10.5 KB）而不是按时刻查：后者要扫到那一刻为止的全部
@@ -911,17 +864,7 @@ def device_replay(device_id: str, day: str, tz_offset_minutes: int) -> ReplayVie
     local_midnight = datetime.fromisoformat(day).replace(tzinfo=timezone(timedelta(minutes=tz_offset_minutes)))
     start = format_rfc3339(local_midnight.astimezone(UTC))
     end = format_rfc3339((local_midnight + timedelta(days=1)).astimezone(UTC))
-    rows = (
-        get_conn()
-        .execute(
-            "SELECT door_no, occurred_at, to_state, cert_no, bath_time_s"
-            " FROM door_state_event"
-            " WHERE device_id = ? AND occurred_at >= ? AND occurred_at < ?"
-            " ORDER BY occurred_at",
-            (device_id, start, end),
-        )
-        .fetchall()
-    )
+    rows = doors_store.events_in_window(session, device_id, start, end)
     return {
         "device_id": device_id,
         "date": day,
@@ -938,11 +881,11 @@ def device_replay(device_id: str, day: str, tz_offset_minutes: int) -> ReplayVie
             )
             for row in rows
         ],
-        "last_closed": _last_closed_by_door(device_id, start),
+        "last_closed": _last_closed_by_door(session, device_id, start),
     }
 
 
-def _last_closed_by_door(device_id: str, before: str) -> list[ReplayDoorLast]:
+def _last_closed_by_door(session: Session, device_id: str, before: str) -> list[ReplayDoorLast]:
     """每扇门在 `before` 之前的最后一次关阀。
 
     **为什么不在客户端从当天的事件里推**：那一次发生在更早的日子，而回放一次只拉一天
@@ -951,20 +894,7 @@ def _last_closed_by_door(device_id: str, before: str) -> list[ReplayDoorLast]:
     段表没有学号，所以联 `usage_session` 取那一次是谁。`row_number()` 按关阀时刻倒序，
     取每门第一条；`closed_at` 为空的行是在途段（尚未关阀），不能算"上一次关阀"。
     """
-    rows = (
-        get_conn()
-        .execute(
-            "SELECT door_no, closed_at, cert_no FROM ("
-            "  SELECT g.door_no, g.closed_at, s.cert_no,"
-            "         row_number() over (PARTITION BY g.door_no ORDER BY g.closed_at DESC) AS rn"
-            "  FROM usage_segment g JOIN usage_session s ON s.id = g.session_id"
-            "  WHERE g.device_id = ? AND g.closed_at < ?"
-            "    AND g.closed_at IS NOT NULL AND g.closed_at <> ''"
-            ") WHERE rn = 1 ORDER BY door_no",
-            (device_id, before),
-        )
-        .fetchall()
-    )
+    rows = doors_store.last_closed_by_door(session, device_id, before)
     return [
         ReplayDoorLast(door_no=int(row["door_no"]), closed_at=str(row["closed_at"]), cert_no=str(row["cert_no"]))
         for row in rows
