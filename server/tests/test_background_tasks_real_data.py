@@ -321,7 +321,7 @@ def test_the_real_pause_would_be_cut_by_a_sixty_second_threshold(real_rows: None
 
 def test_the_real_incomplete_session_reports_a_mismatch(real_rows: None) -> None:
     """段没记齐的那一场：设备报 900 秒，我们的两段只累到 600——差额就是"有段没进表"。"""
-    row = [item for item in door_link.list_sessions("dev-1") if item["door_no"] == 2][0]
+    row = next(item for item in door_link.list_sessions("dev-1") if item["door_no"] == 2)
 
     assert row["flow_s"] < row["device_flow_s"]
     assert row["segments_complete"] is False

@@ -25,14 +25,6 @@ from app.core.clock import now_rfc3339, parse_rfc3339, rfc3339_ago, shift_rfc333
 from app.core.problems import ApiProblemError, Problem
 from app.core.protocol import JsonObject
 from app.db.session import session_scope
-
-
-def _read_snapshots(device_id: str) -> list:
-    """直读 _snapshots 的短会话包装：测试直调辅助。"""
-    with session_scope() as session:
-        return scheduler._snapshots(session, device_id)
-
-
 from app.modules.doors.schemas import DoorState
 from app.modules.sessions import scheduler
 from app.modules.sessions import service as sessions_service
@@ -44,6 +36,13 @@ from app.modules.sessions.decision import (
 )
 from app.modules.sessions.schemas import AssignRequest, CommandOutcome, SettleRequest
 from app.persistence import audit as audit_repository
+
+
+def _read_snapshots(device_id: str) -> list:
+    """直读 _snapshots 的短会话包装：测试直调辅助。"""
+    with session_scope() as session:
+        return scheduler._snapshots(session, device_id)
+
 
 SCHEDULER_PATH = Path(scheduler.__file__)
 

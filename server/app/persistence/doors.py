@@ -744,7 +744,8 @@ def _parse_moment(value: str) -> datetime:
     """窗口端点的转换：统计层的窗口端点必然是合法 RFC 3339，坏值在调用方就挡了。"""
     moment = parse_rfc3339(value)
     if moment is None:
-        raise ValueError(f"窗口端点不是合法时刻：{value!r}")
+        message = f"窗口端点不是合法时刻：{value!r}"
+        raise ValueError(message)
     return moment
 
 

@@ -2,6 +2,7 @@ package com.ryanliu.ntushower.transport
 
 import org.json.JSONArray
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -50,5 +51,19 @@ class EnrollmentTest {
     fun `unparseable bodies are failures`() {
         assertNull(Enrollment.parseToken("not json"))
         assertNull(Enrollment.parseToken("<html>gateway error</html>"))
+    }
+
+    @Test
+    fun `policy violation close code triggers claim re-enrollment`() {
+        // RFC 6455 1008：服务端按策略拒绝（凭据无效/缺失），必须清凭据重新自注册
+        assertTrue(Enrollment.shouldReEnroll(Enrollment.WS_CLOSE_POLICY_VIOLATION))
+    }
+
+    @Test
+    fun `ordinary close codes only reconnect without re-enrolling`() {
+        // 正常关闭、端点离开、网络异常、内部错误：一律走普通重连，清掉有效凭据反而多余
+        listOf(1000, 1001, 1006, 1011, 4000).forEach { code ->
+            assertFalse("close=$code should not re-enroll", Enrollment.shouldReEnroll(code))
+        }
     }
 }

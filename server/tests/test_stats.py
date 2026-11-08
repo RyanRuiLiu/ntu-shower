@@ -6,7 +6,7 @@
 
 from collections.abc import Iterator
 from contextlib import AbstractContextManager
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,10 +23,8 @@ from app.modules.doors.service import SESSION_MAX_S
 from app.modules.stats import service, spec
 
 
-def _dt(value: str):
+def _dt(value: str) -> datetime:
     """RFC 3339 文本 → UTC datetime（模型列的落库形状）。"""
-    from datetime import UTC, datetime
-
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
 
 

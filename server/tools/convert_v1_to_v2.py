@@ -557,8 +557,8 @@ def stamp_alembic_head(target: sqlite3.Connection) -> None:
 
     转换用 `create_all` 直接建出与模型一致的 schema；不打这个戳的话，堆栈里
     migrate 服务的 `alembic upgrade head` 会试图再建一遍全部表而失败，业务容器
-    因 depends_on 永远不会启动。盖戳后 upgrade head 是 no-op，与 HANDOFF 里
-    「转换 → 起新服务（migrate 先跑）」的顺序自洽。
+    因 depends_on 永远不会启动。盖戳后 upgrade head 是 no-op，与 RUNBOOK
+    「v1 → v2 停机切换」里「转换 → 起新服务（migrate 先跑）」的顺序自洽。
     """
     from alembic.config import Config as AlembicConfig
     from alembic.script import ScriptDirectory

@@ -36,9 +36,10 @@ import org.json.JSONObject
  * ## 接入凭据与自注册
  *
  * 握手必须带设备自己的接入凭据（`Authorization: Bearer`）。本地没有凭据、或服务端以
- * [CLOSE_BAD_CREDENTIAL] 拒绝（凭据被吊销/除档）时，先经 [EnrollClient] 用 APK 内置的
- * claim 令牌注册一枚新凭据再连接——重装 APK、清数据都能自助恢复，不需要逐台预置。
- * 注册只回答「这是我们的程序」，信任位照旧由服务端档案回答。
+ * [Enrollment.WS_CLOSE_POLICY_VIOLATION]（RFC 6455 1008）拒绝时，先经 [EnrollClient] 用
+ * APK 内置的 claim 令牌注册一枚新凭据再连接——重装 APK、清数据都能自助恢复，不需要逐台
+ * 预置。判断收敛在 [Enrollment.shouldReEnroll]。注册只回答「这是我们的程序」，信任位照旧
+ * 由服务端档案回答。
  *
  * ## 一条连接，几类消息：字段该走哪一条
  *
@@ -283,13 +284,18 @@ class GatewayClient(private val context: Context, private val callback: Callback
             authenticated = false
             lastOfflineReason = "closed:$code"
             lastOfflineAt = ServerClock.nowRfc3339() ?: Clock.wallClockRfc3339()
-            if (code == CLOSE_BAD_CREDENTIAL) {
-                // 凭据被吊销或除档：本地这份已经无效，清掉走重新注册——
-                // 服务端轮换语义的对侧动作。与普通断开共用一条收尾路径。
+            if (Enrollment.shouldReEnroll(code)) {
+                // 1008 = RFC 6455 Policy Violation：服务端按凭据策略拒绝。本地这份
+                // 凭据（可能压根没有——首次安装）已不被接受，清掉并走 claim 自注册
+                // 领一枚新的；注册成功后由 onEnrolled 回调重新发起连接。
+                // 这是 fleet provisioning by claim 的标准流程，不另设兼容分支。
                 DeviceCredential.clear(context)
                 Log.w(TAG, "credential rejected (1008), re-enrolling")
                 handler.post { callback.onDisconnected("credential rejected") }
-                scheduleReconnect()
+                if (!enrollScheduled) {
+                    enrollScheduled = true
+                    enrollClient.enroll(context)
+                }
                 return
             }
             handler.post { callback.onDisconnected("closed: $reason") }
@@ -365,9 +371,6 @@ class GatewayClient(private val context: Context, private val callback: Callback
 
         /** 标准 WebSocket 关闭码：端点主动离开。握手超时属于这一类。 */
         private const val CLOSE_GOING_AWAY = 1001
-
-        /** 服务端设备凭据校验失败的关闭码（见 gateway/routes 的 _verify_device_token）。 */
-        private const val CLOSE_BAD_CREDENTIAL = 1008
 
         /**
          * 等 `link.hello_ack` 的上限。

@@ -428,7 +428,8 @@ def _no_persist(device_id: str) -> NoReturn:
     ack 与「原始帧已落库」严格等价——库满、库锁超时经 SQLAlchemy 自然抛错，这里补上
     外键设计下唯一剩下的「落不了行」路径。
     """
-    raise RuntimeError(f"设备 {device_id} 不在册，原始帧未落库")
+    message = f"设备 {device_id} 不在册，原始帧未落库"
+    raise RuntimeError(message)
 
 
 def _dt(value: object) -> datetime | None:

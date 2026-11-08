@@ -1009,7 +1009,6 @@ Markdown 语法以 CommonMark 0.31.2 为基线，表格使用 GitHub Flavored Ma
 | `docs/SECURITY.md` | 参考 | 开发者、运维、安全责任人 | 资产清单、数据分级实例、威胁模型实例、控制选择与证据、事件响应记录 |
 | `docs/TESTING.md` | 参考 | 开发者、审阅者 | 测试策略、层级、环境、数据、覆盖率政策与证据（实例） |
 | `docs/DECISIONS.md` | 记录 | 全体协作者 | 单个决策的背景、取舍、后果 |
-| `docs/HANDOFF.md` | 操作 | 接续本分支的协作者 | 分支进度、剩余工作、切换执行清单 |
 | `docs/evidence/*.md` | 记录 | 开发者、运维 | 不可复现的外部事实与现场证据记录 |
 | `deploy/README.md` | 操作 | 运维责任人 | 部署资产清单与同步方法 |
 | `protocol/schema/*.json` | 参考 | 三端开发者 | 协议消息结构与校验规则 |

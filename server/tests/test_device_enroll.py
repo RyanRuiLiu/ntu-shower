@@ -4,6 +4,7 @@ import json
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 from tests import device_link
 
 from app.core import config as config_module
@@ -24,7 +25,7 @@ def enroll_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(config_module.settings, "device_enroll_token", CLAIM)
 
 
-def _enroll(client: TestClient, body: dict, claim: str = CLAIM):
+def _enroll(client: TestClient, body: dict, claim: str = CLAIM) -> object:
     return client.post(
         "/api/v1/devices/enroll",
         json=body,
@@ -81,7 +82,7 @@ def test_enroll_rotates_the_credential(
     try:
         with client.websocket_connect("/gateway/device", headers={"Authorization": f"Bearer {first}"}) as ws:
             ws.receive_text()
-    except Exception:
+    except WebSocketDisconnect:
         rejected = True  # 旧凭据已在握手层被拒（close 1008）
     assert rejected
     with client.websocket_connect("/gateway/device", headers={"Authorization": f"Bearer {second}"}) as ws:

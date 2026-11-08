@@ -114,8 +114,13 @@ def test_device_token_required(client: TestClient, fresh_db: str, monkeypatch: p
 
     monkeypatch.setattr(settings, "require_device_token", True)
 
-    with pytest.raises(WebSocketDisconnect), client.websocket_connect("/gateway/device") as ws:
-        ws.send_text(frames.frame("link.hello", {"device_id": device_id}))
+    # 无凭据：握手先 accept，再以 1008（RFC 6455 Policy Violation）关闭。关闭码必须
+    # 随 WebSocket 关闭帧送达客户端——设备端据此清凭据并走 claim 自注册；若退回
+    # accept 前的 HTTP 403，客户端只能看到 onFailure，无法与网络断连区分。
+    with client.websocket_connect("/gateway/device") as ws:
+        with pytest.raises(WebSocketDisconnect) as closed:
+            ws.receive_text()
+        assert int(closed.value.code) == 1008
 
     with client.websocket_connect("/gateway/device", headers={"Authorization": f"Bearer {token}"}) as ws:
         ws.send_text(frames.frame("link.hello", {"device_id": device_id}))

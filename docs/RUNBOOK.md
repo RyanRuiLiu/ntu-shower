@@ -95,6 +95,19 @@ ssh iseekdream.com 'cd /opt/ntu-shower && NTU_SHOWER_TAG=<上一个tag> docker c
   **不要在服务器上直接改**；改法与同步命令见 `deploy/README.md`。
 - 数据库备份在宿主机 timer 上执行、读 `/var/lib/ntu-shower`，与容器无关（加密取舍见 ADR-0018）。
 
+### v1 → v2 停机切换（一次性）
+
+这台机器由 nginx 反代 8110（顶层单服务 `compose.yaml`），切换不动 nginx。`deploy/stack/` 的 Caddy 全栈属另一台机器。按顺序执行：
+
+1. 最终只发布一个版本，版本号取自 `app/core/version.py` 的 `APP_VERSION`（与 build.gradle.kts 由一致性测试锁定）。救火期连发的过渡版带缺陷，切换时下架其发布记录与 APK 文件，保留更早的稳定镜像 tag 作回滚点
+2. 把 `DEVICE_ENROLL_TOKEN` 写进 `/etc/ntu-shower/ntu-shower.env`，值与 APK 构建期注入的 `deviceEnrollToken` 一致；不一致则设备自注册收到 401
+3. 构建签名 APK，经旧服务 OTA 发布，等 6 台设备升级完成
+4. 无人使用时停旧服务
+5. `deploy/stack/scripts/backup.sh` 备份
+6. `PYTHONPATH=. python tools/convert_v1_to_v2.py --source 旧库 --target 新库`
+7. 起新服务（migrate 跑 `alembic upgrade head`，no-op）；nginx 保持反代 8110
+8. 设备以 1008 触发自注册换凭据；管理台确认 6 台在线与信任位
+
 ### 表结构变更的落地
 
 改 `server/app/core/db.py` 的 DDL 后，已存在的库不会跟着变，按下列顺序落地

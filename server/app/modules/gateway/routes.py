@@ -59,11 +59,17 @@ async def _call[T](ws: WebSocket, fn: Callable[..., T], *args: object) -> T:
 
 @router.websocket("/gateway/device")
 async def device_gateway(ws: WebSocket) -> None:
-    """一条设备连接的一生：验凭据 → 握手 → 帧循环 → 收尾。"""
+    """一条设备连接的一生：握手 → 验凭据 → 帧循环 → 收尾。
+
+    凭据校验放在 accept 之后：握手前拒绝在 ASGI 下只能回 HTTP 403，客户端拿不到
+    WebSocket 关闭码，设备端就无法把「凭据被拒」与普通断连区分开、也就不会触发
+    自注册。accept 之后以 1008 关闭是 RFC 6455 给策略拒绝定的关闭码，客户端的
+    `onClosed(1008)` 能收到，据此清凭据重走 claim 注册。
+    """
+    await ws.accept()
     allowed, token_device_id = await _verify_device_token(ws)
     if not allowed:
         return
-    await ws.accept()
     ip = ""
     ping_task: asyncio.Task[None] | None = None
     #: 每次收到设备 pong 由 `_handle_frame` 置位；`_server_ping_loop` 用它判断链路是否还活着。
