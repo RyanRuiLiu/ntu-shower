@@ -103,21 +103,25 @@ class GatewayClient(private val context: Context, private val callback: Callback
     /** 注册去重：注册已在途时不再叠加，避免每帧失败都开一个注册请求。 */
     private var enrollScheduled = false
 
-    private val enrollClient = EnrollClient(context, object : EnrollClient.Callback {
-        override fun onEnrolled() {
-            enrollScheduled = false
-            Log.i(TAG, "credential enrolled, retrying connect")
-            connect()
-        }
+    private val enrollClient =
+        EnrollClient(
+            context,
+            object : EnrollClient.Callback {
+                override fun onEnrolled() {
+                    enrollScheduled = false
+                    Log.i(TAG, "credential enrolled, retrying connect")
+                    connect()
+                }
 
-        override fun onEnrollFailed(reason: String) {
-            enrollScheduled = false
-            lastOfflineReason = "enroll:$reason"
-            lastOfflineAt = ServerClock.nowRfc3339() ?: Clock.wallClockRfc3339()
-            handler.post { callback.onDisconnected("enroll failed: $reason") }
-            scheduleReconnect()
-        }
-    })
+                override fun onEnrollFailed(reason: String) {
+                    enrollScheduled = false
+                    lastOfflineReason = "enroll:$reason"
+                    lastOfflineAt = ServerClock.nowRfc3339() ?: Clock.wallClockRfc3339()
+                    handler.post { callback.onDisconnected("enroll failed: $reason") }
+                    scheduleReconnect()
+                }
+            },
+        )
 
     /**
      * 显式停用标志：[disconnect] 之后不再自动重连，直到下一次 [connect]。
@@ -159,7 +163,10 @@ class GatewayClient(private val context: Context, private val callback: Callback
         val credential = DeviceCredential.read(context)
         if (credential == null) {
             Log.i(TAG, "no gateway credential, enrolling first")
-            ensureEnrolled()
+            if (!enrollScheduled) {
+                enrollScheduled = true
+                enrollClient.enroll(context)
+            }
             return
         }
         val url = "wss://${BuildConfig.SERVER_DOMAIN}/gateway/device"
@@ -169,13 +176,6 @@ class GatewayClient(private val context: Context, private val callback: Callback
             .header("Authorization", "Bearer $credential")
             .build()
         webSocket = client.newWebSocket(request, listener)
-    }
-
-    /** 注册去重入口：已在途就不叠加；context 由构造时的同一线程链路持有。 */
-    private fun ensureEnrolled() {
-        if (enrollScheduled) return
-        enrollScheduled = true
-        enrollClient.enroll(context)
     }
 
     fun disconnect() {

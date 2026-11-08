@@ -15,7 +15,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.Response
-import org.json.JSONObject
 import java.io.IOException
 
 /**
@@ -37,6 +36,7 @@ class EnrollClient(context: Context, private val callback: Callback) {
     interface Callback {
         /** 注册成功、凭据已落盘：上层此刻可以发起网关连接。 */
         fun onEnrolled()
+
         /** 注册失败（网络、服务端拒绝、claim 无效）：上层按退避重试。 */
         fun onEnrollFailed(reason: String)
     }
@@ -44,9 +44,10 @@ class EnrollClient(context: Context, private val callback: Callback) {
     private val handler = Handler(Looper.getMainLooper())
     private val deviceId = DeviceIdentity.deviceId(context)
 
+    // 独立实例：注册是低频一次性请求，callTimeout 封顶防慢速滴漏；TLS/DNS 配置
+    // 与网关同源（HttpClientFactory 单一来源）。
+
     private val client: OkHttpClient by lazy {
-        // 独立实例：注册是低频一次性请求，callTimeout 封顶防慢速滴漏；TLS/DNS 配置
-        // 与网关同源（HttpClientFactory 单一来源）。
         HttpClientFactory.create(context.applicationContext, readTimeoutSeconds = 15, callTimeoutSeconds = 20)
     }
 

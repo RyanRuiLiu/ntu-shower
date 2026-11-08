@@ -38,8 +38,8 @@ android {
         applicationId = "com.ryanliu.ntushower"
         minSdk = 19          // 设备 ROM 固定 Android 4.4，运行时下限不可动
         targetSdk = 19       // 目标设备冻结在 4.4，无升级路径
-        versionCode = 116
-        versionName = "0.6.5"
+        versionCode = 117
+        versionName = "0.6.6"
         buildConfigField("String", "SERVER_DOMAIN", "\"${providers.gradleProperty("serverDomain").get()}\"")
         // 设备自注册的 claim 令牌（fleet provisioning by claim）：全队共享一枚，构建期
         // 注入、不入库。缺省空串 = 注册通道关闭（与服务端 fail closed 对齐）。泄露时
@@ -112,6 +112,9 @@ val frameworkBoundClasses = listOf(
     "**/core/threading/**",
     // 网络栈：依赖真实 TLS/DNS 套接字（纯逻辑部分已抽为 ReconnectBackoff/DnsResolver 报文层）
     "**/transport/GatewayClient*",
+    // 自注册客户端：OkHttp 实际网络调用 + 主线程投递，JVM 测不出；请求组装与
+    // 响应解析已抽成 Enrollment 纯逻辑并有测试
+    "**/transport/EnrollClient*",
     "**/core/net/HttpClientFactory*",
     "**/core/tls/**",
     "**/core/identity/**",

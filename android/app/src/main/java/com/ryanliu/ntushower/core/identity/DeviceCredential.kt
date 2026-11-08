@@ -18,12 +18,11 @@ object DeviceCredential {
 
     private const val FILE = "gateway-token"
 
-    fun read(context: Context): String? =
-        try {
-            context.openFileInput(FILE).bufferedReader().use { it.readLine()?.trim()?.takeIf { t -> t.isNotEmpty() } }
-        } catch (_: FileNotFoundException) {
-            null
-        }
+    fun read(context: Context): String? = try {
+        context.openFileInput(FILE).bufferedReader().use { it.readLine()?.trim()?.takeIf { t -> t.isNotEmpty() } }
+    } catch (_: FileNotFoundException) {
+        null
+    }
 
     fun write(context: Context, token: String) {
         context.openFileOutput(FILE, Context.MODE_PRIVATE).use { it.write(token.toByteArray()) }

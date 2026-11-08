@@ -17,13 +17,12 @@ object Enrollment {
         versionCode: Int,
         osVersion: String,
         capabilities: Set<String>,
-    ): JSONObject =
-        JSONObject()
-            .put("device_id", deviceId)
-            .put("app_version", appVersion)
-            .put("version_code", versionCode)
-            .put("os_version", osVersion)
-            .put("capabilities", JSONArray(capabilities.toList()))
+    ): JSONObject = JSONObject()
+        .put("device_id", deviceId)
+        .put("app_version", appVersion)
+        .put("version_code", versionCode)
+        .put("os_version", osVersion)
+        .put("capabilities", JSONArray(capabilities.toList()))
 
     /**
      * 从注册响应里取出接入凭据明文。
@@ -32,10 +31,9 @@ object Enrollment {
      * 非 JSON），按失败处理——绝不把空令牌落盘，那会让设备在「有文件但内容无效」的
      * 状态里绕过重新注册的自愈路径。
      */
-    fun parseToken(body: String): String? =
-        try {
-            JSONObject(body).optString("token", "").takeIf { it.isNotEmpty() }
-        } catch (_: Exception) {
-            null
-        }
+    fun parseToken(body: String): String? = try {
+        JSONObject(body).optString("token", "").takeIf { it.isNotEmpty() }
+    } catch (_: Exception) {
+        null
+    }
 }
