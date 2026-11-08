@@ -29,13 +29,23 @@
 - `as_record` 对非数组 capabilities 按未声明态处理（守卫链上不能因畸形数据崩）
 - 旧 `modules/devices/repository.py` 只剩 `init_tables()`（第二批删）
 
-### 其余域切换（下一步）
+### 其余域切换（下一步，已完成 4/8）
 
-`doors + stats存储 + config + ota + audit中间件 + voice存储 + extend_hours存储`。
-- **doors 是大头**（service.py 977 行状态机，内部大量旧 Row 细节），`persistence/doors.py` 的函数已备好
-- stats 的**读路径**已在第一批改用 `persistence.devices`（会话注入），自身的 door_live/usage_* 读旧表
-- audit 的**中间件写入**还走旧表（`core/audit.py`），prune 已切新表并有测试；`test_audit.py` 的 prune 用例用 ORM 直造数据验证
-- 注意新表名：`api_calls`/`command_audits`/`device_logs`/`device_link_events`（复数），旧表是单数
+已切：access、devices、ota、**audit 全部**（HTTP 中间件写 api_calls、命令审计 command_audits、后台任务 background_task_runs、bridge 的审计调用；scheduler 的 insert_background_task_run 也切了）。审计三表都留**设备文本键**列（`device_key`）：审计的事实性不依赖设备是否在册（未在册设备的行不能丢）。
+
+剩余（按建议顺序）：
+1. **voice 存储**：service 50 处 `repository.` 直调，`persistence/voice.py` 函数已备好（含 claim/finish_delivery）；第一批已把 create/update/list/push/schedule 链加了 session
+2. **config store**：5 个存储函数切 `persistence/config.py`，但 `effective()/device_effective()` 调用方遍布全域——又是一次小规模穿透（gateway ping loop/scheduler/extend_hours 等，大多已在 `_call`/session_scope 框架内）
+3. **extend_hours 存储**（clock_shift 表）与其 service 内 `repository.get/record/clear/list_shifted`
+4. **doors**（977 行状态机，最大）：`persistence/doors.py` 函数已备好；**注意** scheduler 审计行的 `session_id` 过渡期置 None（旧表会话 id 引用新表 usage_sessions 无对应行），doors 切完后恢复传 `subject.session_id` 并改回测试断言
+5. **stats 存储**（door_live/usage_* 读路径）——依赖 doors 先切
+6. 最终态：删各域旧 repository 与 `init_schema()` 的旧建表
+
+第二批实测教训：
+- 新表名复数：`api_calls`/`command_audits`/`device_logs`/`device_link_events`/`background_task_runs`
+- BackgroundOutcome 枚举补齐了实际出现的全部终局值（含 rejected/failed/assign-expired/no-password/not-applicable）
+- **迁移重生成**：模型改后必须 `rm migrations/versions/*.py && rm -rf __pycache__` 再 autogenerate（alembic 会在旧库上拒绝生成）；迁移文件名每次都变
+- BackgroundTaskRun/CommandAudit 的 `session_id` 外键在 doors 未切前是旧表 id——传 None
 
 ### 设备令牌下发
 
