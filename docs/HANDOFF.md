@@ -27,6 +27,20 @@
 - **RFC 3339 文本与 datetime 的转换收敛在持久化边界**：服务层全程持有文本，`_dt`（可空）/ `_moment`（必填）各一处
 - **重复投递的原始帧按「已落库」回真**；设备不在册的帧抛错扣回执（ack ⇔ 已落库）
 
+## 切换演练（2026-11-09 已完成，全链路绿）
+
+合成 v1 库（21 张源表 42 行，含孤儿行/空帧/开放会话边界）跑通整条切换链：
+
+1. **转换**：`convert_v1_to_v2.py` 21/21 行数 ok（孤儿行按表计数跳过）→ 盖 `alembic_version` 到 head → `alembic upgrade head` no-op
+2. **服务**：真实 uvicorn 起在转换库上，13 项检查全过——转换数据可见（doors 现态/设备清单/配置覆盖生效）、problem+json 边界、设备令牌握手（`link.hello_ack` 带 trusted 与转换来的配置）、坏令牌 close 1008
+3. **容器**：镜像构建成功；生产形态容器（`--read-only --tmpfs /tmp --cap-drop ALL`）起在转换库上正常服务
+
+演练抓出并已修复的缺陷（都在线上才会炸）：
+- 转换工具：`device_configs` 缺 `device_key`（unique 必撞）、审计四表没带文本键、没盖 alembic 戳（migrate 必失败）、`usage_segment` 孤儿跳过没进核验扣减表
+- 启动：`create_app` 的 `db.init_db()` 按默认相对路径建连接，read_only 容器必崩——已改为 lifespan 探活真实连接
+
+**生产切换前仍需（演练覆盖不到的）**：用**真实生产库副本**再跑一遍转换与核对（合成库只验证形状，行数、时长边界与真实数据分布要在副本上复核）；Caddy 层只在服务器上实测（`network_mode: host` 是 Linux 特性，本地 Windows 无法排练）。
+
 ## 剩余工作（分支外，用户执行）
 
 1. **设备令牌下发**：切换时 `--token-output` 给每台设备签发凭据，明文逐台写进设备，用完删除。管理面凭据轮换端点未接入（`persistence/device_credentials.py` 的 `list_for_device`/`revoke_all` 已备好）
