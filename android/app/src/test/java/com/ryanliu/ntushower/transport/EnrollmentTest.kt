@@ -6,7 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** 设备自注册的纯逻辑：请求形状与服务端契约逐字段对齐，响应解析的容错边界。 */
+/** 设备自注册的纯逻辑：请求形状与服务端契约逐字段对齐，响应解析的失败边界。 */
 class EnrollmentTest {
 
     @Test
