@@ -29,7 +29,7 @@
 - `as_record` 对非数组 capabilities 按未声明态处理（守卫链上不能因畸形数据崩）
 - 旧 `modules/devices/repository.py` 只剩 `init_tables()`（第二批删）
 
-### 其余域切换（下一步，已完成 4/8）
+### 其余域切换（下一步，已完成 5/8）
 
 已切：access、devices、ota、**audit 全部**（HTTP 中间件写 api_calls、命令审计 command_audits、后台任务 background_task_runs、bridge 的审计调用；scheduler 的 insert_background_task_run 也切了）。审计三表都留**设备文本键**列（`device_key`）：审计的事实性不依赖设备是否在册（未在册设备的行不能丢）。
 
