@@ -160,22 +160,14 @@ class GatewayClient(private val context: Context, private val callback: Callback
     fun connect() {
         stopped = false
         if (connected) return
-        val credential = DeviceCredential.read(context)
-        if (credential == null) {
-            Log.i(TAG, "no gateway credential, enrolling first")
-            if (!enrollScheduled) {
-                enrollScheduled = true
-                enrollClient.enroll(context)
-            }
-            return
-        }
         val url = "wss://${BuildConfig.SERVER_DOMAIN}/gateway/device"
         Log.i(TAG, "connecting $url (device_id=$deviceId)")
-        val request = Request.Builder()
-            .url(url)
-            .header("Authorization", "Bearer $credential")
-            .build()
-        webSocket = client.newWebSocket(request, listener)
+        val builder = Request.Builder().url(url)
+        // 先试后注册：本地有凭据就带上；没有也照常发起连接。注册只由服务端的
+        // 1008 拒绝触发（见 onClosed）——「没有凭据就不连接」会让设备在无需凭据
+        // 的服务端形态下（如切换前的旧服务）永远进不了连接。
+        DeviceCredential.read(context)?.let { builder.header("Authorization", "Bearer $it") }
+        webSocket = client.newWebSocket(builder.build(), listener)
     }
 
     fun disconnect() {
