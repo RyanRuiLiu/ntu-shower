@@ -14,10 +14,10 @@
 import { syncClock } from './clock.js'
 
 /**
- * 管理台 Bearer 凭据。这个页面只给运维者用，凭据存 localStorage：
- * 刷新页面不该每次重输。凭据由运维签发，明文只留在浏览器本地。
+ * 管理台身份标识。这个页面只给运维者用，标识存 localStorage：
+ * 刷新页面不该每次重输。
  */
-const IDENTITY_KEY = 'ntu-shower.bearer'
+const IDENTITY_KEY = 'ntu-shower.identity'
 
 export function getIdentity() {
   return localStorage.getItem(IDENTITY_KEY) || ''
@@ -42,7 +42,7 @@ async function send(path, options = {}) {
   const { raw = false, ...rest } = options
   const headers = { ...(rest.headers || {}) }
   if (!raw) headers['Content-Type'] = 'application/json'
-  if (hasIdentity()) headers['Authorization'] = 'Bearer ' + getIdentity()
+  if (hasIdentity()) headers['X-Identity'] = getIdentity()
 
   const res = await fetch(path, { ...rest, headers })
   syncClock(res)

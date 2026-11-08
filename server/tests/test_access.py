@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 from tests import device_link
+from tests.conftest import ADMIN_IDENTITY
 from tests.identity import bearer
 
 from app.core.problems import CAPABILITY_DENIED, ApiProblemError
@@ -408,3 +409,33 @@ def test_repeated_registration_overwrites_single_row(client: TestClient, admin_h
 
 def test_resolve_unknown_identity_is_none(fresh_db: str) -> None:
     assert _find("nobody") is None
+
+
+def test_legacy_x_identity_header_resolves_to_principal(client: TestClient, admin_headers: dict[str, str]) -> None:
+    """兼容期：旧调用方自发 `X-Identity` 头（值即主体名）应被当作该主体身份。
+
+    这是切换过渡分支——网页端与外部脚本在切换到 Bearer/会话前仍用此头。
+    """
+    r = client.get("/api/v1/identities", headers={"X-Identity": ADMIN_IDENTITY})
+
+    assert r.status_code == 200
+
+
+def test_legacy_x_identity_unknown_value_is_anonymous(client: TestClient) -> None:
+    """X-Identity 值不匹配任何主体时退化为匿名：管理端点仍 401。"""
+    r = client.get("/api/v1/identities", headers={"X-Identity": "no-such-identity"})
+
+    assert r.status_code == 401
+    assert r.json()["type"].endswith("/problems/unauthenticated")
+
+
+def test_legacy_x_identity_yields_to_bearer_when_both_present(
+    client: TestClient, admin_headers: dict[str, str]
+) -> None:
+    """Bearer 优先于 X-Identity：两者并存时以 Bearer 为准（X-Identity 仅兜底）。"""
+    r = client.get(
+        "/api/v1/identities",
+        headers={**admin_headers, "X-Identity": "irrelevant-value"},
+    )
+
+    assert r.status_code == 200

@@ -371,7 +371,7 @@ function bindTopbar() {
     if (event.key === 'Escape') toggleDeviceInfo(false)
   })
 
-  // 管理面接口都要 Bearer 凭据（admin 能力位），没它连清单都读不到——所以
+  // 管理面接口都要 X-Identity（admin 能力位的身份），没它连清单都读不到——所以
   // 入口放在顶栏，而不是某个视图里（那是全局凭证，不是某个功能的设置）
   listen($('btnIdentity'), 'click', askForIdentity)
 
@@ -464,7 +464,7 @@ function connect() {
  * 还得自己再刷一次页面。
  */
 function askForIdentity() {
-  const input = window.prompt('Bearer 凭据（须具备管理能力位，由运维签发）', getIdentity())
+  const input = window.prompt('身份标识（X-Identity，须具备管理能力位）', getIdentity())
   if (input === null) return
   setIdentity(input.trim())
   toast(input.trim() ? '身份标识已保存' : '身份标识已清除')
@@ -481,7 +481,7 @@ function askForIdentity() {
  */
 function handleAuthError(error) {
   if (error?.status !== 401) return false
-  toast('身份缺失或未授权，请在顶栏填写 Bearer 凭据')
+  toast('身份缺失或未授权，请在顶栏填写身份标识')
   askForIdentity()
   return true
 }
@@ -512,7 +512,7 @@ async function refreshDoors() {
     // 等待期间用户可能已切到别的设备：慢响应不能把别的设备的数据盖到当前选择上
     if (store.deviceId === id) setDoors(doors)
   } catch (error) {
-    // 401 由 handleAuthError 引导补 Bearer 凭据；其余错误直接弹出来，不留一个无声的空列表
+    // 401 由 handleAuthError 引导补身份标识；其余错误直接弹出来，不留一个无声的空列表
     if (!handleAuthError(error)) toast(`获取喷头状态 · ${problemText(error)}`)
   }
 }
