@@ -31,10 +31,11 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 from typing_extensions import TypedDict
 
 from .auth.routes import router as auth_router
-from .core import audit, db
+from .core import audit
 from .core.background import Background
 from .core.config import settings
 from .core.errors import install_error_handlers
@@ -96,15 +97,16 @@ def _abort_pending_commands() -> None:
 def create_app() -> FastAPI:
     # 先装配日志：此后的初始化失败才有痕迹可查
     configure_logging(settings.log_level)
-    db.init_db()  # 触发连接创建并校验库可写；表结构归 Alembic（compose 的 migrate 先于应用启动）
     Path(settings.ota_dir).mkdir(parents=True, exist_ok=True)
     Path(settings.voice_dir).mkdir(parents=True, exist_ok=True)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        # 新数据层的连接在这里建立：迁移尚未完成的模块仍走 core.db，
-        # 两者指向同一个 SQLite 文件，互不干扰。
+        # 数据库是全应用唯一的会话来源；表结构归 Alembic（compose 的 migrate
+        # 服务先于应用启动）。探活一次：库打不开/不可写在这里就炸，不拖到首个请求。
         _app.state.database = Database(settings.effective_database_url)
+        with _app.state.database.new_session() as session:
+            session.execute(text("SELECT 1"))
         # 间隔任务统一装配：各模块只提供「一轮做什么」，生命周期集中在这一个对象上。
         background.interval("extend-hours", extend_hours_service.TICK_INTERVAL_S, extend_hours_service.tick_once)
         background.interval("status-line", status_line_service.PUSH_INTERVAL_S, status_line_service.tick)

@@ -165,8 +165,8 @@ def copy_simple(
         )
     for row in source.execute("SELECT device_id, revision, config FROM device_config").fetchall():
         target.execute(
-            "INSERT INTO device_configs (device_id, revision, config, updated_at) VALUES (?,?,?,?)",
-            (devices[str(row[0])], int(row[1]), row[2] or "{}", now),
+            "INSERT INTO device_configs (device_id, device_key, revision, config, updated_at) VALUES (?,?,?,?,?)",
+            (devices[str(row[0])], str(row[0]), int(row[1]), row[2] or "{}", now),
         )
 
 
@@ -262,8 +262,8 @@ def copy_audit_and_live(source: sqlite3.Connection, target: sqlite3.Connection, 
         target.execute(
             "INSERT INTO api_calls (kind, requested_at, request_id, trace_id, actor_kind, actor,"
             " client_ip, user_agent, method, path, query, request_body, status_code, duration_ms,"
-            " device_id, problem_type, detail, response_body, created_at)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " device_id, device_key, problem_type, detail, response_body, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 row[0],
                 to_storage_time(row[1]) or now,
@@ -280,6 +280,7 @@ def copy_audit_and_live(source: sqlite3.Connection, target: sqlite3.Connection, 
                 int(row[12]),
                 int(row[13]),
                 devices.get(str(row[14])) if row[14] else None,
+                str(row[14] or ""),
                 row[15],
                 row[16],
                 row[17],
@@ -291,12 +292,13 @@ def copy_audit_and_live(source: sqlite3.Connection, target: sqlite3.Connection, 
         " reason_code, terminal_message, trace_id, data FROM command_audit"
     ):
         target.execute(
-            "INSERT INTO command_audits (command_id, device_id, action, params, created_at,"
-            " finished_at, status, reason_code, terminal_message, trace_id, result)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO command_audits (command_id, device_id, device_key, action, params,"
+            " created_at, finished_at, status, reason_code, terminal_message, trace_id, result)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 row[0],
                 devices[str(row[1])],
+                str(row[1]),
                 row[2],
                 row[3],
                 to_storage_time(row[4]) or now,
@@ -313,12 +315,13 @@ def copy_audit_and_live(source: sqlite3.Connection, target: sqlite3.Connection, 
         " outcome, reason, threshold_s FROM background_task_run"
     ):
         target.execute(
-            "INSERT INTO background_task_runs (occurred_at, device_id, door_no, session_id,"
-            " cert_no, feature, action, outcome, reason, threshold_s, created_at)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO background_task_runs (occurred_at, device_id, device_key, door_no,"
+            " session_id, cert_no, feature, action, outcome, reason, threshold_s, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 to_storage_time(row[0]) or now,
                 devices[str(row[1])],
+                str(row[1]),
                 int(row[2]),
                 row[3],
                 row[4] or "",
@@ -473,14 +476,15 @@ def copy_children(
             skipped["rule"] += 1
             continue
         target.execute(
-            "INSERT INTO voice_deliveries (event_key, rule_id, device_id, door_no, cert_no,"
-            " event, segments, segment_count, duration_ms, occurred_at, dispatched_at, done_at,"
-            " downloaded, status, detail, trace_id, created_at)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO voice_deliveries (event_key, rule_id, device_id, device_key, door_no,"
+            " cert_no, event, segments, segment_count, duration_ms, occurred_at, dispatched_at,"
+            " done_at, downloaded, status, detail, trace_id, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 row[0],
                 rule_id,
                 devices[str(row[2])],
+                str(row[2]),
                 int(row[3]),
                 row[4],
                 row[5],
@@ -529,6 +533,7 @@ def issue_device_tokens(target: sqlite3.Connection, devices: dict[str, int], out
 SKIPPED_BY_TABLE: dict[str, str] = {
     "ota_release_install": "release",
     "voice_delivery": "rule",
+    "usage_segment": "session",
 }
 
 
@@ -545,6 +550,25 @@ def verify(source: sqlite3.Connection, target: sqlite3.Connection, skipped: dict
         if expected != actual:
             problems.append(f"  !! {new} 行数不一致（期望 {expected}，实际 {actual}）")
     return problems
+
+
+def stamp_alembic_head(target: sqlite3.Connection) -> None:
+    """把目标库标到迁移基线的 head。
+
+    转换用 `create_all` 直接建出与模型一致的 schema；不打这个戳的话，堆栈里
+    migrate 服务的 `alembic upgrade head` 会试图再建一遍全部表而失败，业务容器
+    因 depends_on 永远不会启动。盖戳后 upgrade head 是 no-op，与 HANDOFF 里
+    「转换 → 起新服务（migrate 先跑）」的顺序自洽。
+    """
+    from alembic.config import Config as AlembicConfig
+    from alembic.script import ScriptDirectory
+
+    ini = Path(__file__).resolve().parent.parent / "alembic.ini"
+    script = ScriptDirectory.from_config(AlembicConfig(str(ini)))
+    head = script.get_current_head()
+    assert head is not None, "迁移基线没有 head"
+    target.execute("CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL)")
+    target.execute("INSERT INTO alembic_version (version_num) VALUES (?)", (head,))
 
 
 def main() -> int:
@@ -588,6 +612,7 @@ def main() -> int:
             return 3
 
         target.execute("BEGIN")
+        stamp_alembic_head(target)  # 事务内盖戳：转换回滚时戳不残留，不会留下"标了 head 却只有半份数据"的库
         devices = copy_devices(source, target)
         copy_identities(source, target)
         copy_simple(source, target, devices)
