@@ -49,11 +49,11 @@ def test_latest_for_respects_version_and_target(fresh_db: str) -> None:
     device_link.register_device_raw("dev-2")
     _publish("0.2.0", 2, target="dev-1,dev-2")
 
-    rel = _repo('latest_for', "dev-1", 1)
+    rel = _repo("latest_for", "dev-1", 1)
     assert rel is not None
     assert rel["version"] == "0.2.0"
-    assert _repo('latest_for', "dev-1", 2) is None  # 同版本号不重复推
-    assert _repo('latest_for', "dev-3", 1) is None  # 未在目标列表
+    assert _repo("latest_for", "dev-1", 2) is None  # 同版本号不重复推
+    assert _repo("latest_for", "dev-3", 1) is None  # 未在目标列表
 
 
 def test_force_release_semantics(fresh_db: str) -> None:
@@ -61,20 +61,20 @@ def test_force_release_semantics(fresh_db: str) -> None:
     device_link.register_device_raw("dev-loop")
     _publish("0.2.5", 7, force=True, target="dev-loop")
 
-    rel = _repo('latest_for', "dev-loop", 7)
+    rel = _repo("latest_for", "dev-loop", 7)
     assert rel is not None
     assert rel["force"] is True
 
-    _repo('mark_installed_upto', "dev-loop", 7)
-    assert _repo('latest_for', "dev-loop", 7) is None
+    _repo("mark_installed_upto", "dev-loop", 7)
+    assert _repo("latest_for", "dev-loop", 7) is None
 
-    assert _repo('rearm', "dev-loop", "0.2.5") is True
-    rel = _repo('latest_for', "dev-loop", 7)
+    assert _repo("rearm", "dev-loop", "0.2.5") is True
+    rel = _repo("latest_for", "dev-loop", 7)
     assert rel is not None
     assert rel["version"] == "0.2.5"
 
     _publish("0.3.0", 8)
-    rel = _repo('latest_for', "dev-loop", 7)
+    rel = _repo("latest_for", "dev-loop", 7)
     assert rel is not None
     assert rel["version"] == "0.3.0"
 
@@ -83,7 +83,7 @@ def test_force_higher_version_wins_over_normal(fresh_db: str) -> None:
     _publish("0.2.0", 2)
     _publish("0.2.0", 2, force=True, target="dev-1")
 
-    rel = _repo('latest_for', "dev-1", 1)
+    rel = _repo("latest_for", "dev-1", 1)
     assert rel is not None
     assert rel["force"] is True
 
@@ -93,18 +93,23 @@ def test_mark_installed_upto_marks_all_lower_versions(fresh_db: str) -> None:
     _publish("0.1.0", 1)
     _publish("0.2.0", 2)
 
-    _repo('mark_installed_upto', "dev-x", 2)
-    assert _repo('is_installed', "dev-x", "0.1.0")
-    assert _repo('is_installed', "dev-x", "0.2.0")
-    assert not _repo('is_installed', "dev-y", "0.2.0")
+    _repo("mark_installed_upto", "dev-x", 2)
+    assert _repo("is_installed", "dev-x", "0.1.0")
+    assert _repo("is_installed", "dev-x", "0.2.0")
+    assert not _repo("is_installed", "dev-y", "0.2.0")
 
 
 def test_delete_release(fresh_db: str) -> None:
     _publish("0.2.0", 2)
 
-    assert _repo('delete_release', "0.2.0") is True
-    assert _repo('delete_release', "0.2.0") is False
-    assert _repo('list_releases', ) == []
+    assert _repo("delete_release", "0.2.0") is True
+    assert _repo("delete_release", "0.2.0") is False
+    assert (
+        _repo(
+            "list_releases",
+        )
+        == []
+    )
 
 
 # ── 服务层：路径安全与保留裁剪 ──
@@ -160,7 +165,12 @@ def test_prune_keeps_recent_and_sweeps_orphans(ota_dir: Path) -> None:
     assert not (ota_dir / "0.1.0.apk").exists()
     assert not (ota_dir / "0.0.9.apk").exists()
     assert (ota_dir / "0.1.1.apk").exists()
-    assert [rel["version"] for rel in _repo('list_releases', )] == ["0.1.2", "0.1.1"]
+    assert [
+        rel["version"]
+        for rel in _repo(
+            "list_releases",
+        )
+    ] == ["0.1.2", "0.1.1"]
 
 
 def test_prune_with_keep_larger_than_count_is_noop(ota_dir: Path) -> None:
@@ -206,7 +216,7 @@ def test_manifest_requires_query_params(client: TestClient) -> None:
 
 def test_manifest_without_release_file_reports_up_to_date(client: TestClient, ota_dir: Path) -> None:
     """库里有记录、文件却不在：当作没有更新，不给设备一个下不动的地址。"""
-    _repo('insert_release', "1.2.3", 8, "b" * 64, mandatory=False, force=False, target="dev-ota-2")
+    _repo("insert_release", "1.2.3", 8, "b" * 64, mandatory=False, force=False, target="dev-ota-2")
 
     r = client.get("/ota/manifest", params={"device_id": "dev-ota-2", "version_code": 6})
 
@@ -334,7 +344,7 @@ def test_rearm_endpoint_clears_install_confirmation(client: TestClient, admin_he
     """有安装确认时 rearm 清掉它（返回 True），没有时幂等返回 False。"""
     device_link.register_device_raw("dev-rearm-1")
     _publish("0.3.1", 8)
-    _repo('mark_installed_upto', "dev-rearm-1", 8)
+    _repo("mark_installed_upto", "dev-rearm-1", 8)
 
     armed = client.post("/api/v1/ota/releases/0.3.1/rearm/dev-rearm-1", headers=admin_headers)
     assert armed.status_code == 200
@@ -351,4 +361,3 @@ def test_release_list_is_public(client: TestClient, ota_dir: Path) -> None:
     releases = client.get("/api/v1/ota/releases").json()
 
     assert any(rel["version"] == "0.2.0" for rel in releases)
-

@@ -39,6 +39,8 @@ class ApiCall(Base):
     status_code: Mapped[int] = mapped_column(Integer)
     duration_ms: Mapped[int] = mapped_column(Integer)
     device_id: Mapped[int | None] = mapped_column(ForeignKey("devices.id", ondelete="SET NULL"), default=None)
+    #: 调用目标的文本业务键留底：设备可能未登记或后来被拆除，审计的事实性不依赖主数据
+    device_key: Mapped[str] = mapped_column(String(64), default="")
     problem_type: Mapped[str | None] = mapped_column(String(64), default=None)
     detail: Mapped[str | None] = mapped_column(Text, default=None)
     response_body: Mapped[str | None] = mapped_column(Text, default=None)

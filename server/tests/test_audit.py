@@ -240,7 +240,9 @@ def test_prune_removes_only_expired_rows(client: TestClient, admin_headers: dict
         session.commit()
         assert audit.prune(session, 90) == 1
         remaining = session.scalars(select(ApiCall.id)).all()
-        assert remaining == [fresh.id]  # 保留期内那行不动
+        # 过期的那行删掉；中间件记下的与刚造的保留期内各行都留
+        assert stale.id not in remaining
+        assert fresh.id in remaining
     with _svc() as session:
         assert audit.prune(session, 90) == 0
 

@@ -31,7 +31,6 @@ from typing_extensions import TypedDict
 from app.db.base import utcnow
 
 from . import db
-from .clock import now_rfc3339
 from .config import settings
 from .logging import log_event, request_id_var, trace_id_var
 
@@ -177,62 +176,51 @@ def record(
     `query` 是请求的查询串；`request_body` 与 `response_body` 是 JSON 体原文；
     `detail` 是失败响应的中文说明（RFC 9457 的 detail）。
     """
-    db.write(
-        "INSERT INTO api_call (kind, requested_at, request_id, trace_id, actor_kind, actor,"
-        " client_ip, user_agent, method, path, query, request_body, status_code, duration_ms,"
-        " device_id, problem_type, detail, response_body)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (
-            "http",
-            now_rfc3339(),
-            request_id_var.get(),
-            trace_id_var.get(),
-            actor_kind,
-            actor,
-            client_ip or None,
-            user_agent or None,
-            method,
-            path,
-            query or None,
-            request_body or None,
-            status_code,
-            duration_ms,
-            device_id or None,
-            problem_type or None,
-            detail or None,
-            store_body(response_body) or None,
-        ),
-    )
+    from app.db.session import session_scope
+    from app.persistence import audit as audit_store
+
+    with session_scope() as session:
+        audit_store.insert_api_call(
+            session,
+            kind="http",
+            method=method,
+            path=path,
+            status_code=status_code,
+            duration_ms=duration_ms,
+            device_id=device_id,
+            actor_kind=actor_kind,
+            actor=actor,
+            client_ip=client_ip or None,
+            user_agent=user_agent or None,
+            query=query or None,
+            request_body=request_body or None,
+            response_body=store_body(response_body) or None,
+            problem_type=problem_type or None,
+            detail=detail or None,
+            request_id=request_id_var.get(),
+            trace_id=trace_id_var.get(),
+        )
 
 
 def record_gateway(device_id: str, event: str, client_ip: str = "") -> None:
     """网关生命周期一行（connect/disconnect）。kind='gateway'，status 约定 0=连接 1=断开。"""
+    from app.db.session import session_scope
+    from app.persistence import audit as audit_store
+
     status_code = 0 if event == "connect" else 1
-    db.write(
-        "INSERT INTO api_call (kind, requested_at, request_id, trace_id, actor_kind, actor,"
-        " client_ip, user_agent, method, path, query, request_body, status_code, duration_ms,"
-        " device_id, problem_type, detail)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (
-            "gateway",
-            now_rfc3339(),
-            uuid.uuid4().hex,
-            "",
-            "device",
-            device_id,
-            client_ip or None,
-            None,
-            "WS",
-            "/gateway/device",
-            None,
-            None,
-            status_code,
-            0,
-            device_id,
-            None,
-            None,
-        ),
-    )
+    with session_scope() as session:
+        audit_store.insert_api_call(
+            session,
+            kind="gateway",
+            method="WS",
+            path="/gateway/device",
+            status_code=status_code,
+            duration_ms=0,
+            device_id=device_id,
+            actor_kind="device",
+            actor=device_id,
+            client_ip=client_ip or None,
+        )
 
 
 def list_calls(
@@ -243,28 +231,14 @@ def list_calls(
     limit: int = 100,
 ) -> list[ApiCallRecord]:
     """按时间倒序取审计记录（/api/v1/audit/calls）。"""
-    sql = (
-        "SELECT kind, requested_at, request_id, trace_id, actor_kind, actor, client_ip,"
-        " user_agent, method, path, query, request_body, status_code, duration_ms, device_id,"
-        " problem_type, detail, response_body FROM api_call"
-    )
-    params: list[object] = []
-    clauses: list[str] = []
-    if device_id:
-        clauses.append("device_id = ?")
-        params.append(device_id)
-    if actor_kind:
-        clauses.append("actor_kind = ?")
-        params.append(actor_kind)
-    if kind:
-        clauses.append("kind = ?")
-        params.append(kind)
-    if clauses:
-        sql += " WHERE " + " AND ".join(clauses)
-    sql += " ORDER BY id DESC LIMIT ?"
-    params.append(limit)
-    rows = db.get_conn().execute(sql, params).fetchall()
-    return cast("list[ApiCallRecord]", [dict(r) for r in rows])
+    from app.db.session import session_scope
+    from app.persistence import audit as audit_store
+
+    with session_scope() as session:
+        return cast(
+            "list[ApiCallRecord]",
+            audit_store.list_api_calls(session, device_id=device_id, actor_kind=actor_kind, kind=kind, limit=limit),
+        )
 
 
 def prune(session: Session, retention_days: int) -> int:

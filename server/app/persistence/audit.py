@@ -15,10 +15,11 @@ from sqlalchemy.orm import Session
 
 from ..core import outcomes, reason_codes
 from ..core.clock import format_rfc3339
-from ..models.enums import BackgroundOutcome, CommandStatus
+from ..db.base import utcnow
+from ..models.enums import ActorKind, BackgroundOutcome, CommandStatus
 from ..models.identity import Device
+from ..models.ops import ApiCall, CommandAudit
 from ..models.ops import BackgroundTaskRun as BackgroundTaskRunRow
-from ..models.ops import CommandAudit
 from ..modules.audit.schemas import BackgroundTaskRun, CommandAuditRecord
 
 
@@ -192,8 +193,112 @@ __all__: list[str] = [
     "abort_pending",
     "count_pending",
     "finish",
+    "insert_api_call",
     "insert_background_task_run",
     "insert_command",
+    "list_api_calls",
     "list_background_task_runs",
     "list_commands",
 ]
+
+
+def insert_api_call(
+    session: Session,
+    *,
+    kind: str,
+    method: str,
+    path: str,
+    status_code: int,
+    duration_ms: int,
+    device_id: str = "",
+    actor_kind: str = "",
+    actor: str = "",
+    client_ip: str | None = None,
+    user_agent: str | None = None,
+    query: str | None = None,
+    request_body: str | None = None,
+    response_body: str | None = None,
+    problem_type: str | None = None,
+    detail: str | None = None,
+    request_id: str = "",
+    trace_id: str = "",
+) -> None:
+    """写一行 api_calls 审计（HTTP 请求与网关生命周期共用）。
+
+    device_id 是文本业务键，这里转整数外键；设备不在册时行仍要落（审计先于档案），
+    外键列留空。
+    """
+    device_pk = _device_pk(session, device_id) if device_id else None
+    requested_at = utcnow()
+    session.add(
+        ApiCall(
+            kind=kind,
+            method=method,
+            path=path,
+            status_code=status_code,
+            duration_ms=duration_ms,
+            device_id=device_pk,
+            device_key=device_id,
+            actor_kind=ActorKind(actor_kind) if actor_kind else ActorKind.ANONYMOUS,
+            actor=actor,
+            client_ip=client_ip,
+            user_agent=user_agent,
+            query=query,
+            request_body=request_body,
+            response_body=response_body,
+            problem_type=problem_type,
+            detail=detail,
+            request_id=request_id,
+            trace_id=trace_id,
+            requested_at=requested_at,
+        )
+    )
+    session.commit()
+    _ = format_rfc3339
+
+
+def list_api_calls(
+    session: Session,
+    *,
+    device_id: str | None = None,
+    actor_kind: str | None = None,
+    kind: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """按时间倒序取审计行（/api/v1/audit/calls）。
+
+    返回形状与旧表一致：device_id 是文本业务键（联表取），requested_at 是 RFC 3339。
+    """
+    stmt = select(ApiCall).order_by(ApiCall.id.desc()).limit(limit)
+    if device_id:
+        stmt = stmt.where(ApiCall.device_key == device_id)
+    if actor_kind:
+        stmt = stmt.where(ApiCall.actor_kind == actor_kind)
+    if kind:
+        stmt = stmt.where(ApiCall.kind == kind)
+    rows = session.scalars(stmt).all()
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        out.append(
+            {
+                "kind": row.kind,
+                "requested_at": format_rfc3339(row.requested_at),
+                "request_id": row.request_id,
+                "trace_id": row.trace_id,
+                "actor_kind": str(row.actor_kind),
+                "actor": row.actor,
+                "client_ip": row.client_ip,
+                "user_agent": row.user_agent,
+                "method": row.method,
+                "path": row.path,
+                "query": row.query,
+                "request_body": row.request_body,
+                "status_code": row.status_code,
+                "duration_ms": row.duration_ms,
+                "device_id": row.device_key,
+                "problem_type": row.problem_type,
+                "detail": row.detail,
+                "response_body": row.response_body,
+            }
+        )
+    return out

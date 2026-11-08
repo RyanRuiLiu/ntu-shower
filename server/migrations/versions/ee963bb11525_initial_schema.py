@@ -1,8 +1,8 @@
 """initial schema
 
-Revision ID: 562fdfcaa21b
+Revision ID: ee963bb11525
 Revises: 
-Create Date: 2026-11-08 00:39:17.194838
+Create Date: 2026-11-08 14:46:29.822158
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from app.db.base import UtcDateTime
 
 # revision identifiers, used by Alembic.
-revision: str = '562fdfcaa21b'
+revision: str = 'ee963bb11525'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -114,7 +114,7 @@ def upgrade() -> None:
     sa.Column('requested_at', UtcDateTime(), nullable=False),
     sa.Column('request_id', sa.String(length=64), nullable=False),
     sa.Column('trace_id', sa.String(length=64), nullable=False),
-    sa.Column('actor_kind', sa.Enum('device', 'anonymous', 'identity', name='actor_kind', native_enum=False, create_constraint=True, length=32), nullable=False),
+    sa.Column('actor_kind', sa.Enum('device', 'anonymous', 'identity', 'token', 'session', name='actor_kind', native_enum=False, create_constraint=True, length=32), nullable=False),
     sa.Column('actor', sa.String(length=64), nullable=False),
     sa.Column('client_ip', sa.String(length=45), nullable=True),
     sa.Column('user_agent', sa.String(length=255), nullable=True),
@@ -125,6 +125,7 @@ def upgrade() -> None:
     sa.Column('status_code', sa.Integer(), nullable=False),
     sa.Column('duration_ms', sa.Integer(), nullable=False),
     sa.Column('device_id', sa.Integer(), nullable=True),
+    sa.Column('device_key', sa.String(length=64), nullable=False),
     sa.Column('problem_type', sa.String(length=64), nullable=True),
     sa.Column('detail', sa.Text(), nullable=True),
     sa.Column('response_body', sa.Text(), nullable=True),
@@ -211,7 +212,7 @@ def upgrade() -> None:
     op.create_table('device_logs',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('device_id', sa.Integer(), nullable=False),
-    sa.Column('kind', sa.Enum('device', 'ota', name='device_log_kind', native_enum=False, create_constraint=True, length=32), nullable=False),
+    sa.Column('kind', sa.Enum('device', 'crash', 'ota', name='device_log_kind', native_enum=False, create_constraint=True, length=32), nullable=False),
     sa.Column('content', sa.Text(), nullable=False),
     sa.Column('uploaded_at', UtcDateTime(), nullable=False),
     sa.Column('created_at', UtcDateTime(), nullable=False),
