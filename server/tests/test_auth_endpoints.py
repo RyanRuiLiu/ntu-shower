@@ -75,14 +75,16 @@ def test_expired_token_is_rejected(client: TestClient, account: None, monkeypatc
     """
     from itsdangerous.timed import TimestampSigner
 
-    monkeypatch.setattr(
-        "itsdangerous.timed.TimestampSigner.get_timestamp",
-        lambda _self: int(time.time()) - settings.session_ttl_seconds - 60,
-    )
+    # context() 只回滚这一段补丁：直接 undo() 会连 autouse 夹具（数据库隔离）的
+    # 补丁一起退掉，CI 上审计中间件就会写进未隔离的默认库。
     payload = base64.b64encode(json.dumps({"u": USER}).encode("utf-8"))
-    # sign(bytes) 返回 bytes，与 SessionMiddleware 落 Cookie 前的 decode 一致
-    stale = TimestampSigner(settings.session_secret).sign(payload).decode("ascii")
-    monkeypatch.undo()
+    with monkeypatch.context() as m:
+        m.setattr(
+            "itsdangerous.timed.TimestampSigner.get_timestamp",
+            lambda _self: int(time.time()) - settings.session_ttl_seconds - 60,
+        )
+        # sign(bytes) 返回 bytes，与 SessionMiddleware 落 Cookie 前的 decode 一致
+        stale = TimestampSigner(settings.session_secret).sign(payload).decode("ascii")
 
     client.cookies.set(SESSION_COOKIE_NAME, stale)
     assert client.get("/api/v1/auth/me").status_code == 401
