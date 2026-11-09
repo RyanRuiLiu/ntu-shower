@@ -148,8 +148,9 @@ ssh iseekdream.com 'cd /opt/ntu-shower && NTU_SHOWER_TAG=<上一个tag> docker c
   `alembic upgrade head`），再用 `tools/audit_timeline.py` 核对时间轴与派生结果。
   2026-10-04 在生产备份副本上的演练记录：36168 帧 → 会话 5625 / 段 9676，越界检查
   全 0，帧数一帧不少。
-- **历史重算**：原始帧保留 30 天；更早的历史在 backups 的旧系统原始库里，需要按新
-  规则重算时用 `tools/replay_history.py` 重放——派生层不复用既有结论。
+- **历史重算**：原始帧保留 30 天。更早的历史在 backups 的旧系统原始库里；重放工具
+  是 v1→v2 切换期的产物，v2 层就位后已随旧持久化层一并移除（git 历史可查）——若将来
+  要按新口径重算，需要新写面向 v2 持久化层的重放入口。
 
 （2026-11-09 实测：空库 `alembic upgrade head` 建出全部表，`alembic check` 无差异，
 两条由 `test_migrations.py` 常驻看守。）
