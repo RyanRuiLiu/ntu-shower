@@ -23,11 +23,11 @@
 
 ```bash
 # ① HTTP/网关审计（谁、何时、调了什么、结果）：本机直连后端。
-#    管理面凭 admin 身份（X-Identity 头），身份在网页端"身份"页签发
-curl -s -H "X-Identity: <admin身份标识>"   "http://127.0.0.1:8110/api/v1/audit/calls?device_id=<设备>&limit=100"
+#    管理面凭 Bearer 凭据（运维签发，服务端只存哈希）
+curl -s -H "Authorization: Bearer <admin凭据>"   "http://127.0.0.1:8110/api/v1/audit/calls?device_id=<设备>&limit=100"
 
 # ② 命令级审计（trace_id 与 ① 互通）
-curl -s -H "X-Identity: <admin身份标识>" "http://127.0.0.1:8110/api/v1/audit/commands?device_id=<设备>"
+curl -s -H "Authorization: Bearer <admin凭据>" "http://127.0.0.1:8110/api/v1/audit/commands?device_id=<设备>"
 
 # ③ 设备端命令痕迹（与 ② 同一 command_id 呼应）
 #    经 ops 页设备面板的命令执行，或 bridge shell：
@@ -58,9 +58,9 @@ ssh iseekdream.com 'docker pull crpi-5rhaq5x8z5ec9tig.cn-hangzhou.personal.cr.al
 # ③ 本地：同步编排文件（deploy 资产唯一事实源；协议 schema 随镜像走，不再单独同步）
 scp compose.yaml iseekdream.com:/opt/ntu-shower/compose.yaml
 
-# ④ 服务器：切换。停旧 systemd 服务与拉起容器之间是唯一的停机窗口（秒级）；
-#    两者都绑 127.0.0.1:8110，不能并存。NTU_SHOWER_TAG 必填（compose 拒绝空值）。
-ssh iseekdream.com 'systemctl stop ntu-shower && cd /opt/ntu-shower && NTU_SHOWER_TAG=<tag> docker compose up -d'
+# ④ 服务器：切换。停旧容器与拉起新容器之间是唯一的停机窗口（秒级）。
+#    NTU_SHOWER_TAG 必填（compose 拒绝空值）。
+ssh iseekdream.com 'cd /opt/ntu-shower && NTU_SHOWER_TAG=<tag> docker compose up -d'
 
 # ⑤ 服务器：验证。healthz 的 version 字段证明目标版本生效（不止在运行）；
 #    设备重连看容器日志的 "WebSocket /gateway/device [accepted]"——设备断电时段切机器的，
@@ -68,8 +68,6 @@ ssh iseekdream.com 'systemctl stop ntu-shower && cd /opt/ntu-shower && NTU_SHOWE
 ssh iseekdream.com 'curl -fsS http://127.0.0.1:8110/healthz; echo; docker ps --filter name=ntu-shower --format "{{.Status}}"'
 ssh iseekdream.com 'docker logs ntu-shower 2>&1 | tail -20'
 
-# ⑥ 服务器：退役旧单元（保留单元文件与 venv 作应急回滚入口，不卸载、不删除）
-ssh iseekdream.com 'systemctl disable ntu-shower'
 ```
 
 **回滚**（部署后发现问题时，回滚到上一个镜像 tag——一条命令，秒级）：
@@ -143,7 +141,7 @@ ffmpeg 统一转成 MP3，因此只需系统有 `ffmpeg` 与 `ffprobe`（需带 
 ```bash
 # ffmpeg / ffprobe（MP3 编码）已内置于镜像（Dockerfile apt 层），无需宿主机安装；
 # 就绪状态与数字素材齐备性走接口看
-ssh iseekdream.com 'curl -sS -H "X-Identity: <admin身份标识>" http://127.0.0.1:8110/api/v1/voice/status'
+ssh iseekdream.com 'curl -sS -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/v1/voice/status'
 ```
 
 `ffmpeg_available=true` 才能上传素材；`digits` 列出已标记的 0–9 数字素材，含数字变量的
@@ -227,7 +225,7 @@ print("install:", con.execute("SELECT * FROM ota_release_install").fetchall())
 PY'
 
 # 止损：下架该发布（最直接）
-curl -X DELETE -H "X-Identity: <admin身份标识>" http://127.0.0.1:8110/api/v1/ota/releases/<版本>
+curl -X DELETE -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/v1/ota/releases/<版本>
 ```
 
 **预防**：`mark_installed_upto` 已在设备 hello 时调用（且早于 `latest_for`），
@@ -250,13 +248,13 @@ ssh iseekdream.com 'docker ps -a --filter name=ntu-shower --format "{{.Status}}"
 **排查**：若某命令被拒且 `reason_code=device.unsupported_action`，先看设备声明里有没有它：
 
 ```bash
-ssh iseekdream.com 'curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.1:8110/api/v1/devices/runtime | python3 -m json.tool'
+ssh iseekdream.com 'curl -s -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/v1/devices/runtime | python3 -m json.tool'
 ```
 
 ### 设备离线
 
 ```bash
-ssh iseekdream.com 'curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.1:8110/api/v1/devices/runtime'
+ssh iseekdream.com 'curl -s -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/v1/devices/runtime'
 ```
 
 注意 `online` 字段是**最后一次上报值**，与内存中的活动连接分开判断；
@@ -294,15 +292,15 @@ ssh iseekdream.com 'curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.
 
 ```bash
 # 打开（设备侧会 root 开启 adbd）
-curl -X POST -H "X-Identity: <admin身份标识>" http://127.0.0.1:8110/api/v1/devices/<id>/bridge/open
+curl -X POST -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/v1/devices/<id>/bridge/open
 # 本地隧道 + adb
 ssh -N -L 15655:127.0.0.1:15655 root@iseekdream.com &
 adb connect 127.0.0.1:15655 && adb devices
 
 # 查看状态：含 expires_in_s（距寿命到点还有多久）
-curl -s -H "X-Identity: <admin身份标识>" http://127.0.0.1:8110/api/v1/devices/<id>/bridge
+curl -s -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/v1/devices/<id>/bridge
 # 用毕关闭
-curl -X POST -H "X-Identity: <admin身份标识>" http://127.0.0.1:8110/api/v1/devices/<id>/bridge/close
+curl -X POST -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/v1/devices/<id>/bridge/close
 ```
 
 两个上限都可配（`bridge_pair_timeout_s` 默认 30 秒——点开桥后建隧道的最长时间；

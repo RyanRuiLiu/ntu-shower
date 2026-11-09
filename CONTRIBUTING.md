@@ -48,7 +48,7 @@ cp .env.example .env
 .venv/Scripts/uvicorn app.main:app --reload --port 8000
 ```
 
-`server/.env` 只保存本地配置；生产 `.env` 由 systemd 注入，不进入仓库。本地开发库可以删除重建；生产库不得删除重建，数据变更按 `docs/runbook.md` 的「配置与数据变更」执行。
+`server/.env` 只保存本地配置；生产 `.env` 由 Compose 的 `env_file` 注入，不进入仓库。本地开发库可以删除重建；生产库不得删除重建，数据变更按 `docs/runbook.md` 的「配置与数据变更」执行。
 
 ## 设备端开发
 
@@ -79,19 +79,15 @@ cp gradle.properties.example gradle.properties
 
 ## 质量门
 
-在 `server/` 与 `android/` 目录分别执行以下命令。该清单与 `.github/workflows/ci.yml` 逐条对应；本地跑绿即 CI 跑绿。
-
-### 服务端
+本地唯一入口是 `scripts/check.sh`，与 `.github/workflows/ci.yml` 逐条对应：
 
 ```bash
-cd server
-ruff format --check app tests
-ruff check app tests
-mypy app --strict
-pytest -q --cov=app --cov-report=term-missing
+sh scripts/check.sh
 ```
 
-### 设备端
+它依次执行：ruff format --check、ruff check、mypy --strict、lint-imports、semgrep（p/python + p/security-audit）、pytest + 覆盖率、markdownlint。提交前由 pre-commit 自动执行同一脚本（`.githooks/pre-commit`）。
+
+设备端单独执行：
 
 ```bash
 cd android
@@ -257,7 +253,6 @@ cd android
 |---|---|
 | 项目入口与导航 | `README.md` |
 | 开发流程与质量门命令 | `CONTRIBUTING.md` |
-| 工程规则 | `CONTRIBUTING.md` |
 | 系统结构与时间轴定义 | `docs/architecture.md` |
 | 数据模型、字段与接口索引 | `docs/reference.md` |
 | 部署、回滚、备份与故障处置 | `docs/runbook.md` |
