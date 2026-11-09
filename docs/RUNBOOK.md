@@ -157,7 +157,7 @@ ssh iseekdream.com 'curl -sS -H "X-Identity: <admin身份标识>" http://127.0.0
 
 `ntu-shower-backup.timer` 每日 00:00 执行 `VACUUM INTO` 在线备份（校验完整性后 gzip 压缩），
 滚动保留 14 份，落在 `/var/backups/ntu-shower/ntu-shower-<时间戳>.db.gz`。
-备份文件含学号、凭证与审计原文，目录权限 700；加密经 ADR-0018 记录为暂不执行（§15.4 例外）。
+备份文件含学号、凭证与审计原文，目录权限 700；加密经 ADR-0018 记录为暂不执行（例外见 `CONTRIBUTING.md`）。
 
 手动触发与查看：
 
@@ -308,6 +308,13 @@ curl -X POST -H "X-Identity: <admin身份标识>" http://127.0.0.1:8110/api/v1/d
 两个上限都可配（`bridge_pair_timeout_s` 默认 30 秒——点开桥后建隧道的最长时间；
 `bridge_max_lifetime_s` 默认 3600 秒）。**隧道本身没有空闲超时**，只靠寿命上限兜着——
 调试通道不该无限期开着。
+
+## 复盘
+
+- 每个 SEV1 与 SEV2 事件必须复盘。
+- 每个发布必须复盘：目标是否达成、发现了什么、下个迭代改什么。
+- 复盘针对系统与流程；改进项必须有责任人、期限与验证方式。
+- 复盘结论写入事件记录或变更记录。
 
 ## 日常任务
 
