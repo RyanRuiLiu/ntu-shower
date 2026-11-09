@@ -65,6 +65,9 @@ jobs:
       # 本机默认 6 进程并行（见 pyproject addopts）；CI runner 核数少，显式串行
       # 保持原有可复现语义，-n 0 覆盖 addopts 里的 -n 6。
       - run: pytest -q -n 0 --cov=app --cov-report=term-missing
+      - name: Markdown lint
+        working-directory: .
+        run: npx --yes markdownlint-cli2@0.20.0 "*.md" "docs/*.md" --config .markdownlint.json
 
   android:
     runs-on: ubuntu-latest

@@ -9,3 +9,4 @@ cd "$(dirname "$0")/../server"
 ./.venv/Scripts/lint-imports.exe
 .venv/Scripts/semgrep.exe scan --config p/python --config p/security-audit app --error --quiet
 .venv/Scripts/python.exe -m pytest -q --cov=app --cov-report=term-missing
+( cd .. && npx --yes markdownlint-cli2@0.20.0 "*.md" "docs/*.md" --config .markdownlint.json )
