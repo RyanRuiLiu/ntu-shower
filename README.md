@@ -17,7 +17,6 @@
 |---|---|
 | `README.md` | 项目入口、快速开始与文档导航 |
 | `CONTRIBUTING.md` | 开发环境、质量门、提交、审阅与发布准备 |
-| `STANDARDS.md` | 全生命周期工程标准 |
 | `CHANGELOG.md` | 发布历史与用户可见变更 |
 | `AGENTS.md` | AI 协作者的阅读顺序与停止条件 |
 | `.github/workflows/` | 持续集成 |
@@ -72,10 +71,9 @@ cp gradle.properties.example gradle.properties
 | [`docs/SECURITY.md`](docs/SECURITY.md) | 资产、数据分级、信任边界、安全控制与事件响应 |
 | [`docs/TESTING.md`](docs/TESTING.md) | 测试策略、层级、环境、数据、覆盖率政策与证据 |
 | [`docs/adr/`](docs/adr/) | 约束代码的决策、取舍与后果 |
-| [`STANDARDS.md`](STANDARDS.md) | 生命周期、文档、代码、文本、审阅与质量门规则 |
 
 接口契约以 `protocol/schema/` 与代码路由为准；文档只做索引，不复制字段表。
 
 ## 协作者入口
 
-AI 协作者先读 [`AGENTS.md`](AGENTS.md)，再按其中的阅读顺序进入 `CONTRIBUTING.md`、`STANDARDS.md` 与 `docs/`。人类协作者从 `CONTRIBUTING.md` 开始。
+AI 协作者先读 [`AGENTS.md`](AGENTS.md)，再按其中的阅读顺序进入 `CONTRIBUTING.md` 与 `docs/`。人类协作者从 `CONTRIBUTING.md` 开始。

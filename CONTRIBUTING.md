@@ -1,6 +1,6 @@
 # 贡献指南
 
-本文件规定开发环境、质量门、提交、审阅与发布准备。工程规则的所有者是 [`STANDARDS.md`](STANDARDS.md)；本文件只写步骤与命令。
+本文件规定开发环境、质量门、提交、审阅与发布准备。本文件只写步骤与命令。
 
 ## 适用读者
 
@@ -31,7 +31,7 @@ git config pull.ff only
 git config fetch.prune true
 ```
 
-- `core.hooksPath` 启用 `.githooks/commit-msg`，按 `STANDARDS.md` §4.3 校验提交信息。
+- `core.hooksPath` 启用 `.githooks/commit-msg`，按本文的提交类型校验提交信息。
 - `core.autocrlf input` 让工作区与索引都使用 LF，换行规则仍以 `.gitattributes` 为准。
 - `pull.ff only` 禁止拉取时生成合并提交，历史保持线性。
 - `fetch.prune true` 在拉取时清理远端已删除的分支。
@@ -48,7 +48,7 @@ cp .env.example .env
 .venv/Scripts/uvicorn app.main:app --reload --port 8000
 ```
 
-`server/.env` 只保存本地配置；生产 `.env` 由 systemd 注入，不进入仓库。本地开发库可以删除重建；生产库不得删除重建，数据变更按 `STANDARDS.md` §4.10 执行。
+`server/.env` 只保存本地配置；生产 `.env` 由 systemd 注入，不进入仓库。本地开发库可以删除重建；生产库不得删除重建，数据变更按 `docs/RUNBOOK.md` 的「配置与数据变更」执行。
 
 ## 设备端开发
 
@@ -115,7 +115,18 @@ cd android
 <类型>/<kebab-case-slug>
 ```
 
-类型与提交信息格式见 `STANDARDS.md` §4.3。摘要说明做了什么，正文说明为什么与影响；破坏性变更使用 `BREAKING CHANGE:` 页脚。
+提交信息采用 Conventional Commits 1.0.0：
+
+| 项 | 规则 |
+|---|---|
+| 类型 | `feat`、`fix`、`docs`、`refactor`、`test`、`build`、`ci`、`chore`、`perf`、`style`、`revert` |
+| 范围 | 小写领域名，例如 `server`、`web`、`android`、`protocol`、`deploy`、`docs` |
+| 摘要 | 中文，祈使式，说明“做了什么”，不超过 72 个字符，不以句号结尾 |
+| 正文 | 说明“为什么”和“影响”，不逐行复述代码 |
+| 页脚 | `BREAKING CHANGE:`、`Refs:`、`Reviewed-by:` 等；破坏性变更必须标注 |
+| 禁止 | 表情符号、无意义摘要、混合多个逻辑变更、提交生成物而不提交源 |
+
+摘要说明做了什么，正文说明为什么与影响；破坏性变更使用 `BREAKING CHANGE:` 页脚。
 
 合并请求必须包含：
 
@@ -125,7 +136,7 @@ cd android
 - 回滚点或还原方案。
 - 文档与变更记录更新。
 
-提交前执行自审；合并前完成逐行审阅。审阅范围、严重级别与放行规则见 `STANDARDS.md` §16。作者不得把未解决的 S1 或 S2 标记为已解决。
+提交前执行自审；合并前完成逐行审阅。审阅范围、严重级别与放行规则见本文的「审阅」。作者不得把未解决的 S1 或 S2 标记为已解决。
 
 ## 审阅
 
@@ -246,7 +257,7 @@ cd android
 |---|---|
 | 项目入口与导航 | `README.md` |
 | 开发流程与质量门命令 | `CONTRIBUTING.md` |
-| 工程规则 | `STANDARDS.md` |
+| 工程规则 | `CONTRIBUTING.md` |
 | 系统结构与时间轴定义 | `docs/ARCHITECTURE.md` |
 | 数据模型、字段与接口索引 | `docs/REFERENCE.md` |
 | 部署、回滚、备份与故障处置 | `docs/RUNBOOK.md` |

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-本文件是 AI 协作者的唯一入口。人类协作者从 [README.md](README.md) 开始；工程规则的所有者是 [STANDARDS.md](STANDARDS.md)。
+本文件是 AI 协作者的唯一入口。人类协作者从 [README.md](README.md) 开始；工程规则见 [CONTRIBUTING.md](CONTRIBUTING.md) 与各领域文档。
 
 ## 项目目标
 
@@ -34,7 +34,7 @@
 |---|---|
 | 项目定位、快速开始、目录导览 | [README.md](README.md) |
 | 开发环境、分支、提交、质量门命令 | [CONTRIBUTING.md](CONTRIBUTING.md) |
-| 工程规则：生命周期、代码、文本、审阅 | [STANDARDS.md](STANDARDS.md) |
+| 工程规则：生命周期、代码、文本、审阅 | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | 系统边界、组件、数据流、部署拓扑 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | 数据模型、字段语义、接口索引 | [docs/REFERENCE.md](docs/REFERENCE.md) |
 | 部署、回滚、备份、故障处置 | [docs/RUNBOOK.md](docs/RUNBOOK.md) |
@@ -72,7 +72,7 @@
 - 需要读取、复制或写入密钥、令牌、签名材料与真实个人信息。
 - 需要推送、发布、部署或回滚生产环境。
 - 需要绕过质量门、关闭检查、跳过审阅或隐藏失败。
-- 需求与 STANDARDS.md、所有者文档或现有契约冲突。
+- 需求与 CONTRIBUTING.md、所有者文档或现有契约冲突。
 - 无法核对标准、版本、协议、外部事实或测试结果。
 - 需要删除受版本控制的文件、历史数据、证据记录或发布物。
 - 需要修改权限、CI/CD 配置、密钥保管方式或生产访问控制。
