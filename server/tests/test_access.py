@@ -432,7 +432,7 @@ def test_legacy_x_identity_unknown_value_is_anonymous(client: TestClient) -> Non
 def test_legacy_x_identity_yields_to_bearer_when_both_present(
     client: TestClient, admin_headers: dict[str, str]
 ) -> None:
-    """Bearer 优先于 X-Identity：两者并存时以 Bearer 为准（X-Identity 仅兜底）。"""
+    """Bearer 优先于 X-Identity：两者并存时以 Bearer 为准（X-Identity 仅在无 Bearer 时使用）。"""
     r = client.get(
         "/api/v1/identities",
         headers={**admin_headers, "X-Identity": "irrelevant-value"},

@@ -1002,7 +1002,8 @@ Markdown 语法以 CommonMark 0.31.2 为基线，表格使用 GitHub Flavored Ma
 | `CONTRIBUTING.md` | 操作 | 开发者、审阅者 | 开发环境、分支、提交步骤、审阅步骤、质量门命令、发布准备步骤 |
 | `STANDARDS.md` | 约束 | 全体协作者 | 生命周期、文档、代码、文本、审阅、安全、测试、发布与运行规则 |
 | `CHANGELOG.md` | 记录 | 使用者、运维 | 发布历史与用户可见变更 |
-| `AGENTS.md` | 约束 | AI 协作者 | AI 的阅读顺序、停止条件与操作边界 |
+| `AGENTS.md` | 约束 | AI 协作者 | AI 的唯一入口、硬规则、文档索引、停止条件与操作边界 |
+| `docs/WORKPLAN.md` | 记录 | 全体协作者 | 批次进度、状态、验收与回滚点 |
 | `docs/ARCHITECTURE.md` | 解释 | 开发者、运维 | 系统边界、组件、数据流、部署拓扑、时间轴定义 |
 | `docs/REFERENCE.md` | 参考 | 开发者、消费方 | 数据模型、字段语义、状态迁移、接口索引、取数口径 |
 | `docs/RUNBOOK.md` | 操作 | 运维责任人 | 部署、回滚、备份、恢复、故障处置、日常运维 |
@@ -1027,6 +1028,7 @@ Markdown 语法以 CommonMark 0.31.2 为基线，表格使用 GitHub Flavored Ma
 | 资产清单、数据分级实例、威胁模型实例、控制选择与证据、事件响应记录 | `docs/SECURITY.md` | 链接；运行手册写操作步骤 |
 | 测试策略、层级、环境、数据、覆盖率政策与证据（实例） | `docs/TESTING.md` | 链接；`CONTRIBUTING.md` 写命令 |
 | 决策理由、备选方案、后果 | `docs/DECISIONS.md` | 链接；其他文档不复制理由 |
+| 批次进度、状态、验收与回滚点 | `docs/WORKPLAN.md` | 链接；其他文档不复制进度 |
 | 现场证据、外部系统事实 | 证据记录（原始数据在仓库外） | 代码与文档可引用；不写成要求 |
 | 发布历史与用户可见变更 | `CHANGELOG.md` | 链接；发布说明可摘要 |
 | 协议消息结构 | `protocol/schema/*.json` | `docs/REFERENCE.md` 只做索引；代码实现 |

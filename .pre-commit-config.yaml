@@ -1,0 +1,12 @@
+# pre-commit 框架配置。官方文档：https://pre-commit.com
+# 只调用项目已有的质量门入口，不重复定义命令。
+# 启用：server/.venv/Scripts/pre-commit install
+repos:
+  - repo: local
+    hooks:
+      - id: project-checks
+        name: project checks (ruff / mypy / pytest)
+        entry: sh scripts/check.sh
+        language: system
+        pass_filenames: false
+        always_run: true

@@ -66,7 +66,7 @@ def optional_identity(
     `IdentityRecord`，守卫逻辑不分叉。
 
     兼容期 X-Identity 分支为迁移过渡：旧调用方（网页端、外部脚本）仍发自定
-    `X-Identity` 头，按头值查主体。该头明文可伪造，待网页端登录页与各调用方
+    `X-Identity` 头，按头值查主体。该头明文可伪造，待网页端认证页与各调用方
     切换至 Bearer/会话后移除。
     """
     if account is not None:
