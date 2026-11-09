@@ -10,5 +10,3 @@ pytest==9.1.1
 ruff==0.16.9
 # 本地提交前质量门（.githooks/pre-commit 调用）
 pre-commit==4.7.0
-# 架构边界检查；待共享类型下沉后启用契约
-import-linter==2.16
