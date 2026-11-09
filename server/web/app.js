@@ -13,8 +13,8 @@
  *
  * `mount` 在切入时调用，`unmount` 负责停掉自己起的轮询与监听。
  */
-import { api, login, logout, refreshSession, sessionActive } from './core/api.js'
-import { deviceNowMs, fmtDateTime, fmtDuration, fmtServerTimeNow, fmtSkew, fmtUptime } from './core/clock.js'
+import { api, logout, refreshSession, sessionActive } from './core/api.js'
+import { deviceNowMs, fmtDateTime, fmtServerTimeNow, fmtSkew, fmtUptime } from './core/clock.js'
 import { EVENT_TYPES } from './core/contract.js'
 import { promptClockSet, restartBathApp } from './core/device-actions.js'
 import { $, esc, listen, PLACEHOLDER } from './core/dom.js'
@@ -470,7 +470,7 @@ function connect() {
  */
 function onIdentityButton() {
   if (sessionActive()) {
-    api.logout().finally(() => {
+    logout().finally(() => {
       $('btnIdentity').textContent = '登录'
       toast('已退出登录')
       refreshDevicesSafely()

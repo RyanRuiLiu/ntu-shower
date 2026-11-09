@@ -561,29 +561,27 @@ tr.audit-row:focus-visible {
  * 登录对话框。不复用 .info-panel：那个类自带 display: grid，会盖掉浏览器对
  * 未打开 <dialog> 的 display: none（作者样式优先于 UA 样式），对话框于是常驻
  * 渲染在页面顶层（2026-11-10 生产事故）。dialog 的显隐走标准语义——showModal()
- * 打开、close() 关闭，浏览器自己切换 display；这里只给外观。
+ * 打开、close() 关闭，浏览器自己切换 display；这里只给外观与定位。
+ *
+ * 居中是显式的：全局 reset（base.css 的 * { margin: 0 }）会盖掉浏览器给 dialog
+ * 的 margin: auto，不写回来对话框就钉在左上角（同一事故的第二症状）。表单内部
+ * 复用既有组件：.field（标签在上、输入在下）与 .btn-row（按钮一行），不自造。
  */
 #loginDialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(360px, calc(100vw - 2 * var(--sp-3)));
+  height: fit-content;
   padding: var(--sp-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--elevated);
   box-shadow: var(--shadow-overlay);
-  min-width: 300px;
-}
-
-#loginDialog[open] {
-  display: grid;
-  gap: var(--sp-3);
 }
 
 #loginDialog::backdrop {
   background: var(--overlay-dialog);
-}
-
-#loginDialog label {
-  color: var(--muted);
-  font-size: var(--fs-micro);
 }
 
 /*
