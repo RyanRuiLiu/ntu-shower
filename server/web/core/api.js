@@ -14,22 +14,35 @@
 import { syncClock } from './clock.js'
 
 /**
- * 管理台身份标识。这个页面只给运维者用，标识存 localStorage：
- * 刷新页面不该每次重输。
+ * 管理台会话。口令换签名 Cookie（HttpOnly，浏览器自动携带），前端不保存任何
+ * 凭据；`hasSession` 是本地缓存的登录态，真正的权威是服务端——401 会把它翻回
+ * false 并由调用方引导重新登录。
  */
-const IDENTITY_KEY = 'ntu-shower.identity'
+let hasSession = false
 
-export function getIdentity() {
-  return localStorage.getItem(IDENTITY_KEY) || ''
+export function sessionActive() {
+  return hasSession
 }
 
-export function setIdentity(value) {
-  if (value) localStorage.setItem(IDENTITY_KEY, value)
-  else localStorage.removeItem(IDENTITY_KEY)
+/** 口令登录：成功即签发会话 Cookie。 */
+export async function login(username, password) {
+  await send('/api/v1/auth/login', post({ username, password }))
+  hasSession = true
 }
 
-export function hasIdentity() {
-  return getIdentity() !== ''
+/** 退出登录：服务端撤销会话 Cookie。 */
+export async function logout() {
+  try {
+    await send('/api/v1/auth/logout', { method: 'POST' })
+  } finally {
+    hasSession = false
+  }
+}
+
+/** 用服务端回答校准本地登录态：页面打开时调一次。 */
+export async function refreshSession() {
+  hasSession = (await send('/api/v1/auth/me')) !== null
+  return hasSession
 }
 
 /**
@@ -42,11 +55,11 @@ async function send(path, options = {}) {
   const { raw = false, ...rest } = options
   const headers = { ...(rest.headers || {}) }
   if (!raw) headers['Content-Type'] = 'application/json'
-  if (hasIdentity()) headers['X-Identity'] = getIdentity()
 
-  const res = await fetch(path, { ...rest, headers })
+  const res = await fetch(path, { ...rest, headers, credentials: 'same-origin' })
   syncClock(res)
   if (!res.ok) {
+    if (res.status === 401 && path !== '/api/v1/auth/login') hasSession = false
     const problem = await res.json().catch(() => null)
     const error = new Error(problem?.detail || problem?.title || `服务端返回了无法解析的错误（HTTP ${res.status}），请查看服务端日志后重试。`)
     error.status = res.status
@@ -74,6 +87,11 @@ const API_V1 = '/api/v1'
 const devicePath = (id, suffix = '') => `${API_V1}/devices/${encodeURIComponent(id)}${suffix}`
 
 export const api = {
+  // ── 会话 ──（口令登录换签名 Cookie；me 校准本地登录态）
+  login: (username, password) => send(`${API_V1}/auth/login`, post({ username, password })),
+  logout: () => send(`${API_V1}/auth/logout`, { method: 'POST' }),
+  me: () => send(`${API_V1}/auth/me`),
+
   // ── 喷头 ──（公开；带 device_id 即单设备视图）
   doors: (deviceId) => send(`${API_V1}/doors${query({ device_id: deviceId })}`),
 

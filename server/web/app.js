@@ -13,7 +13,7 @@
  *
  * `mount` 在切入时调用，`unmount` 负责停掉自己起的轮询与监听。
  */
-import { api, getIdentity, hasIdentity, setIdentity } from './core/api.js'
+import { api, login, logout, sessionActive } from './core/api.js'
 import { deviceNowMs, fmtDateTime, fmtDuration, fmtServerTimeNow, fmtSkew, fmtUptime } from './core/clock.js'
 import { EVENT_TYPES } from './core/contract.js'
 import { promptClockSet, restartBathApp } from './core/device-actions.js'
@@ -371,14 +371,17 @@ function bindTopbar() {
     if (event.key === 'Escape') toggleDeviceInfo(false)
   })
 
-  // 管理面接口都要 X-Identity（admin 能力位的身份），没它连清单都读不到——所以
-  // 入口放在顶栏，而不是某个视图里（那是全局凭证，不是某个功能的设置）
-  listen($('btnIdentity'), 'click', askForIdentity)
+  // 管理面接口都要登录会话（口令换签名 Cookie），没它连清单都读不到——所以
+  // 入口放在顶栏，而不是某个视图里。已登录时按钮变「退出」。
+  listen($('btnIdentity'), 'click', onIdentityButton)
+  listen($('loginForm'), 'submit', submitLogin)
+  listen($('loginCancel'), 'click', () => $('loginDialog').close())
 
-  // 顶部显示服务端时间，便于与设备日志对齐
+  // 顶部显示服务端时间，便于与设备日志对齐；顺带刷新登录按钮文案
   setInterval(() => {
     $('clock').textContent = fmtServerTimeNow()
     tickDeviceInfo()
+    $('btnIdentity').textContent = sessionActive() ? '退出' : '登录'
   }, 1000)
 }
 
@@ -458,31 +461,54 @@ function connect() {
 // ── 启动 ───────────────────────────────────────────────────
 
 /**
- * 提示填写身份标识。
+ * 顶栏身份按钮：未登录走口令登录，已登录则退出。
  *
- * 顶栏按钮与"收到 401"两条路径共用它。填完立刻重拉设备与喷头——否则用户填了标识
- * 还得自己再刷一次页面。
+ * 「收到 401」的路径也落到这里（见 handleAuthError）。成功后立刻重拉设备与喷头
+ * ——否则用户登录完还得自己再刷一次页面。
  */
-function askForIdentity() {
-  const input = window.prompt('身份标识（X-Identity，须具备管理能力位）', getIdentity())
-  if (input === null) return
-  setIdentity(input.trim())
-  toast(input.trim() ? '身份标识已保存' : '身份标识已清除')
-  refreshDevicesSafely()
-  refreshRuntimeSafely().then(refreshWaterIfAdmin)
-  refreshDoors()
+function onIdentityButton() {
+  if (sessionActive()) {
+    api.logout().finally(() => {
+      $('btnIdentity').textContent = '登录'
+      toast('已退出登录')
+      refreshDevicesSafely()
+      refreshDoors()
+    })
+    return
+  }
+  askForLogin()
+}
+
+function askForLogin() {
+  $('loginDialog').showModal()
+}
+
+function submitLogin(event) {
+  event.preventDefault()
+  const form = event.target
+  api
+    .login(form.username.value.trim(), form.password.value)
+    .then(() => {
+      $('loginDialog').close()
+      form.reset()
+      toast('已登录')
+      refreshDevicesSafely()
+      refreshRuntimeSafely().then(refreshWaterIfAdmin)
+      refreshDoors()
+    })
+    .catch((error) => toast(problemText(error)))
 }
 
 /**
- * 处理鉴权失败：说明原因并请用户补身份标识。
+ * 处理鉴权失败：说明原因并引导重新登录。
  *
- * 集中处理：401 若按普通失败只留下一个空列表，真正的原因（缺身份）一个字都看不到。
+ * 集中处理：401 若按普通失败只留下一个空列表，真正的原因（未登录）一个字都看不到。
  * 返回 true 表示已处理，调用方不必再自己提示。
  */
 function handleAuthError(error) {
   if (error?.status !== 401) return false
-  toast('身份缺失或未授权，请在顶栏填写身份标识')
-  askForIdentity()
+  toast('未登录或会话已过期，请在顶栏登录')
+  askForLogin()
   return true
 }
 
@@ -497,7 +523,7 @@ function refreshWaterIfAdmin() {
  * 的加载失败不该打断公开视图，也不该一开页就弹输入框。
  */
 async function refreshRuntimeSafely() {
-  if (!hasIdentity()) return
+  if (!sessionActive()) return
   try {
     await refreshRuntime()
   } catch (error) {

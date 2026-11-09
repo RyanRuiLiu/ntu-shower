@@ -10,7 +10,7 @@
  * 与普通操作区分开（危险按钮），并且各自要一次确认——误点的代价是跑一趟现场。
  */
 import { api } from '../core/api.js'
-import { hasIdentity } from '../core/api.js'
+import { sessionActive } from '../core/api.js'
 import { codeCell } from '../core/cells.js'
 import { fmtFullDateTime } from '../core/clock.js'
 import { REBOOT_CONFIRM } from '../core/copy.js'
@@ -21,8 +21,8 @@ import { refreshDevices, refreshRuntime, store, subscribe } from '../core/store.
 import { toast } from '../core/toast.js'
 
 function renderTable() {
-  if (!hasIdentity()) {
-    $('deviceTable').innerHTML = '<div class="empty">运维档案需要管理身份，请在顶栏填写身份标识</div>'
+  if (!sessionActive()) {
+    $('deviceTable').innerHTML = '<div class="empty">运维档案需要登录，请在顶栏登录</div>'
     return
   }
   if (store.runtime.length === 0) {

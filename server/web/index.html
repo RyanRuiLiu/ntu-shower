@@ -57,11 +57,32 @@
 
     <div class="bar-group">
       <span class="badge badge-red" id="streamChip">断开</span>
-      <button type="button" class="btn btn-ghost btn-sm" id="btnIdentity">身份标识</button>
+      <button type="button" class="btn btn-ghost btn-sm" id="btnIdentity">登录</button>
       <span id="clock" class="bar-mono">--:--:--</span>
     </div>
   </div>
 </div>
+
+<!--
+  登录对话框：口令走 <input type="password">（浏览器掩码，不用 prompt——prompt 明文可见）。
+  提交后 POST /api/v1/auth/login，成功由服务端 Set-Cookie 签发会话。
+-->
+<dialog id="loginDialog" class="info-panel">
+  <form id="loginForm" method="dialog">
+    <div class="bar-group">
+      <label for="loginUser">用户名</label>
+      <input type="text" id="loginUser" name="username" autocomplete="username" required />
+    </div>
+    <div class="bar-group">
+      <label for="loginPassword">口令</label>
+      <input type="password" id="loginPassword" name="password" autocomplete="current-password" required />
+    </div>
+    <div class="bar-group">
+      <button type="submit" class="btn btn-sm">登录</button>
+      <button type="button" class="btn btn-ghost btn-sm" id="loginCancel">取消</button>
+    </div>
+  </form>
+</dialog>
 
 <!--
   八个能力域各一个容器，切入时才由对应视图模块填充。

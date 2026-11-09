@@ -7,7 +7,7 @@
  *
  * 页面只经 core/api.js 出网；表单与表格沿用项目 panel / field / table / badge / btn。
  */
-import { api, hasIdentity } from '../core/api.js'
+import { api, sessionActive } from '../core/api.js'
 import { codeCell, deviceCell } from '../core/cells.js'
 import { fmtFullDateTime } from '../core/clock.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
@@ -770,8 +770,8 @@ async function deleteAsset(asset) {
 }
 
 async function reload() {
-  if (!hasIdentity()) {
-    $('voiceStatus').innerHTML = '<div class="empty">语音素材与规则需要管理身份，请在顶栏填写身份标识</div>'
+  if (!sessionActive()) {
+    $('voiceStatus').innerHTML = '<div class="empty">语音素材与规则需要登录，请在顶栏登录</div>'
     $('voiceAssetTable').innerHTML = ''
     $('voiceTable').innerHTML = ''
     $('voiceDeliveryTable').innerHTML = ''
