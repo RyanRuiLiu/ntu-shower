@@ -6,7 +6,6 @@ _reset_process_singletons 与 _isolate_default_db 对每个用例自动生效—
 没声明 fresh_db 的用例也碰不到仓库里的真实库与发布目录。
 """
 
-import logging
 import shutil
 from collections.abc import Iterator
 from pathlib import Path
@@ -16,7 +15,6 @@ from fastapi.testclient import TestClient
 
 from app.core import config as config_module
 from app.core import db as db_module
-from app.core.logging import ROOT_LOGGER_NAME
 
 ADMIN_IDENTITY = "admin-identity-0001"
 OPS_IDENTITY = "test-identity"
@@ -76,21 +74,6 @@ def _reset_process_singletons() -> Iterator[None]:
     clear()
     yield
     clear()
-
-
-@pytest.fixture(autouse=True)
-def _capture_app_logs() -> Iterator[None]:
-    """应用 logger 在生产关闭冒泡（避免与 uvicorn 的 handler 重复输出）。
-
-    pytest 的 caplog 把收记录的 handler 挂在根 logger 上，靠冒泡工作——冒泡一关，
-    用例能不能收到记录就取决于同一个 worker 里之前有没有用例跑过 `client`
-    （它的 lifespan 会调 configure_logging）：先跑过就收不到，纯属顺序偶发。
-    测试里 uvicorn 的 handler 不在场上，冒泡恢复为 True，caplog 才有确定语义。
-    """
-    logger = logging.getLogger(ROOT_LOGGER_NAME)
-    logger.propagate = True
-    yield
-    logger.propagate = False
 
 
 @pytest.fixture(autouse=True)

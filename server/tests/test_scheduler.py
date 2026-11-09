@@ -15,6 +15,7 @@ import uuid
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
+from unittest import TestCase
 
 import pytest
 from fastapi.testclient import TestClient
@@ -465,30 +466,31 @@ def test_settle_stops_when_the_roster_changed_underneath(monkeypatch: pytest.Mon
     asyncio.run(body())
 
 
-def test_domain_rejections_are_split_into_normal_and_noteworthy(
-    caplog: pytest.LogCaptureFixture, fresh_db: str
-) -> None:
+def test_domain_rejections_are_split_into_normal_and_noteworthy(fresh_db: str) -> None:
     """领域层拒了要分清两类：门还被占着/他还有会话/他已经走了是正常，"设备离线"之类不是。
 
     分错的两个方向都坏：把正常当失败会刷满告警，把失败当正常就没人知道这次的维护没做成。
     所以这条**验日志级别**，而不是重述那两个集合——后者会因为错误的原因通过。
+
+    用 stdlib 的 assertLogs 直接观测应用 logger：它把目标 logger 的 handlers 临时换掉、
+    用毕还原，捕获不依赖 pytest 的阶段挂载与全局冒泡状态——应用 logger 生产态
+    propagate=False（见 core/logging.py），caplog 的挂载时点与它耦合，并行下曾偶发丢记录。
     """
     _seed_session(WAITING)  # 审计行的 session_id 是真外键
 
     def problem(code: str) -> ApiProblemError:
         return ApiProblemError(Problem(code, 409, "x"), "细节")
 
+    case = TestCase("assertLogs")
     normal = (problems.DOOR_NOT_FREE.code, problems.DUPLICATE_SESSION.code, problems.NO_OCCUPIED_DOOR.code)
     for code in normal:
-        caplog.clear()
-        with caplog.at_level("INFO"):
+        with case.assertLogs("ntu-shower", "INFO") as watcher:
             scheduler._report_problem(problem(code), _settle_job(FEATURE_AUTO_SETTLE))
-        assert [record.levelname for record in caplog.records] == ["INFO"], code
+        assert [record.levelname for record in watcher.records] == ["INFO"], code
 
-    caplog.clear()
-    with caplog.at_level("INFO"):
+    with case.assertLogs("ntu-shower", "WARNING") as watcher:
         scheduler._report_problem(problem(problems.DEVICE_OFFLINE.code), _settle_job(FEATURE_AUTO_SETTLE))
-    assert [record.levelname for record in caplog.records] == ["WARNING"]
+    assert [record.levelname for record in watcher.records] == ["WARNING"]
 
 
 def test_assign_is_sent_exactly_once(monkeypatch: pytest.MonkeyPatch, fresh_db: str) -> None:
