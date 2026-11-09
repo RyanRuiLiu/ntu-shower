@@ -129,7 +129,6 @@ export const api = {
   clockSet: (id, datetime) => send(devicePath(id, '/clock/set'), post({ datetime })),
   dumpTree: (id) => send(devicePath(id, '/dump'), post()),
   touch: (id, value) => send(devicePath(id, '/touch'), post(value)),
-  scroll: (id, direction) => send(devicePath(id, '/scroll'), post({ direction })),
   key: (id, key) => send(devicePath(id, '/key'), post({ key })),
   // channel 必填："clipboard"（粘贴，支持中文）或 "keys"（按键注入，仅 ASCII）
   input: (id, text, channel) => send(devicePath(id, '/input'), post({ text, channel })),
@@ -150,7 +149,6 @@ export const api = {
   saveGlobalConfig: (config) => send(`${API_V1}/config`, put({ config })),
   deviceConfig: (id) => send(devicePath(id, '/config')),
   saveDeviceConfig: (id, config) => send(devicePath(id, '/config'), put({ config })),
-  clearDeviceConfig: (id) => send(devicePath(id, '/config'), del()),
 
   // ── 语音播报 ──（admin；规则目标 = 设备 × 学号，各自可具体或「全部」）
   voiceSpec: () => send(`${API_V1}/voice/spec`),
