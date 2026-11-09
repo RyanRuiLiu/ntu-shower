@@ -61,12 +61,6 @@ jobs:
       - run: ruff check app tests
       - run: mypy app --strict
       - run: lint-imports
-      - run: semgrep scan --config p/python --config p/security-audit app --error --quiet
-      # 项目自有规则（.semgrep.yml）：代码与配置不得引用已删除的文档或文档章节号。
-      # markdownlint 只检查 .md，这类漂移只能在这里拦。
-      - name: Project rules
-        working-directory: .
-        run: semgrep scan --config .semgrep.yml . --error --quiet
       # 并行度跟随 runner（addopts 里的 -n 6 在这里被 -n auto 覆盖）。
       # 此前的 -n 0 串行是拿配置回避 worker 崩溃；根因是后台任务把 ORM Session
       # 交给线程池跨线程使用（见 app/core/background.py），修复后不再需要。
@@ -74,6 +68,23 @@ jobs:
       - name: Markdown lint
         working-directory: .
         run: npx --yes markdownlint-cli2@0.20.0 "*.md" "docs/*.md" "docs/adr/*.md" "deploy/*.md" --config .markdownlint.json
+
+  # SAST 独立成 job：semgrep 与应用依赖集无法共存（fastapi 0.162.0 硬依赖
+  # opentelemetry-api>=1.44.0，semgrep 1.184.0 钉死 ~=1.37.0），各自在干净环境安装。
+  # 本地对应 pre-commit 的 semgrep-sast / semgrep-project 两个钩子（隔离环境），
+  # 由 scripts/check.sh 调起。
+  semgrep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13"
+      - run: pip install semgrep==1.184.0
+      - run: semgrep scan --config p/python --config p/security-audit server/app --error --quiet
+      # 项目自有规则（.semgrep.yml）：代码与配置不得引用已删除的文档或文档章节号。
+      # markdownlint 只检查 .md，这类漂移只能在这里拦。
+      - run: semgrep scan --config .semgrep.yml . --error --quiet
 
   android:
     runs-on: ubuntu-latest
