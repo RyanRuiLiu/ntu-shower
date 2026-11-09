@@ -6,6 +6,9 @@
  * 顺序播放。规则保存后在线设备会预下载用到的素材。
  *
  * 页面只经 core/api.js 出网；表单与表格沿用项目 panel / field / table / badge / btn。
+ *
+ * 全部边界与词表（音量、停顿毫秒、学号位数、单位词表、示例学号）都从 spec 读——
+ * 服务端是它们的唯一来源，本文件不抄第二份。
  */
 import { api, sessionActive } from '../core/api.js'
 import { codeCell, deviceCell } from '../core/cells.js'
@@ -17,8 +20,6 @@ import { deviceName, refreshDevices, store } from '../core/store.js'
 import { toast } from '../core/toast.js'
 
 const WILDCARD = '*'
-/** 「全部学号」试听时用的示例学号：数字变量需要能念出内容，不能传非数字串。 */
-const SAMPLE_CERT_NO = '2026000003'
 
 let spec = null
 let events = []
@@ -58,7 +59,8 @@ function fmtSize(bytes) {
 }
 
 function sampleCert(certs) {
-  return certs.includes(WILDCARD) ? SAMPLE_CERT_NO : certs[0]
+  // 「全部学号」试听用的示例学号：数字变量需要能念出内容，值由 spec 下发
+  return certs.includes(WILDCARD) ? (spec?.sample_cert_no ?? '') : certs[0]
 }
 
 function segmentsSummary(items) {
@@ -82,7 +84,7 @@ function segmentHint() {
   if (missingDigits.length) return `数字素材缺 ${missingDigits.join('、')}；保存前请先上传。`
   if (hasDoor) {
     const units = new Set(status?.units || [])
-    const missingUnits = ['十', '百', '千', '万'].filter((unit) => !units.has(unit))
+    const missingUnits = (spec?.units || []).filter((unit) => !units.has(unit))
     if (missingUnits.length) return `单位素材缺 ${missingUnits.join('、')}；喷头号按数值念需要这些单位。`
   }
   return '喷头号按数值念；学号逐位念，结尾字母不发音。'
@@ -126,7 +128,7 @@ function renderDigitOptions() {
 function renderUnitOptions() {
   const used = new Set(assets.filter((item) => item.unit).map((item) => item.unit))
   const options = ['<option value="">不作为单位</option>']
-  for (const unit of ['十', '百', '千', '万']) {
+  for (const unit of spec?.units || []) {
     const disabled = used.has(unit) ? ' disabled' : ''
     const note = used.has(unit) ? '（已有）' : ''
     options.push(`<option value="${unit}"${disabled}>${unit}${note}</option>`)
@@ -249,7 +251,8 @@ function renderRules() {
 }
 
 function deliveryBadge(value) {
-  if (value === 'skipped') return '<span class="badge badge-amber">跳过</span>'
+  // 投递只有 pending（进行中）与命令结果四态（ok/failed/rejected/timeout）——
+  // 'skipped' 是后台任务的结果词表，从不落在投递上
   if (value === 'pending') return '<span class="badge badge-amber">进行中</span>'
   return `<span class="badge ${statusBadgeClass(value)}">${esc(statusLabel(value))}</span>`
 }
@@ -321,7 +324,8 @@ function renderSegments() {
         )
         if (segment.source === 'cert_no') {
           controls.push(
-            `<input type="number" min="1" max="10" data-seg-field="length" data-index="${index}"
+            // 分段编辑只在 spec 装载后可用（load 先取 spec 再渲染），直接读不设第二份兜底
+            `<input type="number" min="1" max="${esc(String(spec.max_digits_length))}" data-seg-field="length" data-index="${index}"
               value="${segment.length || ''}" placeholder="全部位数"
               aria-label="第 ${index + 1} 段取学号的位数（留空为全部位数）">`,
           )
@@ -331,7 +335,7 @@ function renderSegments() {
       } else {
         controls.push(`<span class="seg-kind">停顿</span>`)
         controls.push(
-          `<input type="number" min="100" max="5000" step="100" data-seg-field="pause" data-index="${index}"
+          `<input type="number" min="${esc(String(spec.min_pause_ms))}" max="${esc(String(spec.max_pause_ms))}" step="100" data-seg-field="pause" data-index="${index}"
             value="${segment.ms}" aria-label="第 ${index + 1} 段停顿时长（毫秒）">`,
         )
         controls.push('<span class="muted">毫秒</span>')
@@ -352,11 +356,15 @@ function renderSegments() {
 }
 
 function renderSpec() {
-  const volume = spec ? spec.volume : { minimum: 0, maximum: 5, default: 3 }
+  // 音量的边界与默认值只来自 spec；spec 未到之前字段保持空，不抄一份默认值
+  if (!spec) {
+    $('voiceVolumeLabel').textContent = '音量'
+    return
+  }
+  const { volume } = spec
   $('voiceVolumeLabel').textContent = `音量（${volume.minimum}–${volume.maximum}）`
   $('voiceVolume').min = String(volume.minimum)
   $('voiceVolume').max = String(volume.maximum)
-  if (!spec) return
   $('voiceVolume').value = String(volume.default)
 }
 
@@ -916,7 +924,8 @@ export const voiceView = {
             </div>
             <div class="field">
               <label for="voiceVolume" id="voiceVolumeLabel">音量</label>
-              <input id="voiceVolume" type="number" min="0" max="5" step="1" value="3">
+              <!-- 边界与默认值由 renderSpec 按 spec 填，模板不抄一份 -->
+              <input id="voiceVolume" type="number" step="1">
               <div class="muted">0 为静音；播放结束后恢复设备原音量。</div>
             </div>
             <div class="field">

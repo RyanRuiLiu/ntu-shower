@@ -190,6 +190,9 @@ def spec(session: Session) -> schemas.VoiceSpecView:
         max_time_windows=time_rules.MAX_TIME_WINDOWS_PER_RULE,
         max_pause_ms=schemas.MAX_PAUSE_MS,
         min_pause_ms=schemas.MIN_PAUSE_MS,
+        max_digits_length=schemas.MAX_DIGITS_LENGTH,
+        units=list(numbers.unit_chars()),
+        sample_cert_no=SAMPLE_CERT_NO,
     )
 
 

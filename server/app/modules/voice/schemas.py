@@ -307,3 +307,9 @@ class VoiceSpecView(BaseModel):
     max_time_windows: int
     max_pause_ms: int
     min_pause_ms: int
+    #: 学号分段的位数上限；网页表单的 max 从这里读，不自抄一份
+    max_digits_length: int
+    #: 单位词表（数字念法的「十百千万」）：素材齐备检查与上传表单的词表唯一来源
+    units: list[str]
+    #: 「全部学号」试听用的示例学号（数字变量要能念出内容）；网页不自抄一份
+    sample_cert_no: str
