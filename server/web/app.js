@@ -375,7 +375,7 @@ function bindTopbar() {
   // 入口放在顶栏，而不是某个视图里。已登录时按钮变「退出」。
   listen($('btnIdentity'), 'click', onIdentityButton)
   listen($('loginForm'), 'submit', submitLogin)
-  listen($('loginCancel'), 'click', () => $('loginDialog').close())
+  listen($('btnLoginCancel'), 'click', () => $('loginDialog').close())
   // 返回访客可能还持有有效会话 Cookie：开页先向服务端校准登录态
   refreshSession().catch(() => {})
 
