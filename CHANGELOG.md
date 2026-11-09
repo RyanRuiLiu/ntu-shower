@@ -20,7 +20,7 @@
 - Docker 构建资产（`Dockerfile`、`compose.yaml`、`.dockerignore`）入库：此前仅存在于本机工作区，
   `docker.yml` 工作流在远端按可复用流程构建时缺少 Dockerfile。
 - 持续集成新增安全门禁：gitleaks 秘密扫描（全历史）与 pip-audit 依赖漏洞扫描
-  （OSV，高危未修复即红灯），对应工程标准 §17.3 两项"待建立"转"已执行"。
+  （OSV，高危未修复即红灯），对应执行矩阵两项"待建立"转"已执行"。
 
 ### Changed
 
