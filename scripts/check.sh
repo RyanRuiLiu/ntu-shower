@@ -8,5 +8,7 @@ cd "$(dirname "$0")/../server"
 .venv/Scripts/python.exe -m mypy app --strict
 ./.venv/Scripts/lint-imports.exe
 .venv/Scripts/semgrep.exe scan --config p/python --config p/security-audit app --error --quiet
+# 项目自有规则：代码与配置里不得引用已删除的文档或文档章节号（见 .semgrep.yml）
+( cd .. && server/.venv/Scripts/semgrep.exe scan --config .semgrep.yml . --error --quiet )
 .venv/Scripts/python.exe -m pytest -q --cov=app --cov-report=term-missing
-( cd .. && npx --yes markdownlint-cli2@0.20.0 "*.md" "docs/*.md" --config .markdownlint.json )
+( cd .. && npx --yes markdownlint-cli2@0.20.0 "*.md" "docs/*.md" "docs/adr/*.md" "deploy/*.md" --config .markdownlint.json )

@@ -62,12 +62,17 @@ jobs:
       - run: mypy app --strict
       - run: lint-imports
       - run: semgrep scan --config p/python --config p/security-audit app --error --quiet
+      # 项目自有规则（.semgrep.yml）：代码与配置不得引用已删除的文档或文档章节号。
+      # markdownlint 只检查 .md，这类漂移只能在这里拦。
+      - name: Project rules
+        working-directory: .
+        run: semgrep scan --config .semgrep.yml . --error --quiet
       # 本机默认 6 进程并行（见 pyproject addopts）；CI runner 核数少，显式串行
       # 保持原有可复现语义，-n 0 覆盖 addopts 里的 -n 6。
       - run: pytest -q -n 0 --cov=app --cov-report=term-missing
       - name: Markdown lint
         working-directory: .
-        run: npx --yes markdownlint-cli2@0.20.0 "*.md" "docs/*.md" --config .markdownlint.json
+        run: npx --yes markdownlint-cli2@0.20.0 "*.md" "docs/*.md" "docs/adr/*.md" "deploy/*.md" --config .markdownlint.json
 
   android:
     runs-on: ubuntu-latest
