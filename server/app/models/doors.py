@@ -35,10 +35,15 @@ class DoorState(Base):
     cert_no: Mapped[str] = mapped_column(String(32), default="")
     acc_no: Mapped[str] = mapped_column(String(32), default="")
     open_time: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
+    #: 当前这一段的开阀时刻。等待开阀时为空；**暂停后仍有值**——设备在关阀那一刻清空了
+    #: `inTime`，这一段的开阀时刻改由 `usage_segments` 回答。不要拿它判「此刻在不在出水」，
+    #: 那是 `state` 的事。
     in_time: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
     close_time: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
+    #: 设备累计的出水秒数。是时长不是时刻；**不单调**——只在关阀时累加、释放时归零。
     bath_time_s: Mapped[int] = mapped_column(Integer, default=0)
-    #: 设备上报的原始状态整数，保留是为了排障时能对照协议
+    #: 设备上报的原始状态整数，保留是为了排障时能对照协议。**别拿它判状态**：新增状态时
+    #: 直接判整数会静默走错分支，判定一律用派生出的 `state`。
     status_raw: Mapped[int] = mapped_column(Integer, default=0)
     reported_at: Mapped[datetime] = mapped_column(UtcDateTime)
     updated_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow, onupdate=utcnow)

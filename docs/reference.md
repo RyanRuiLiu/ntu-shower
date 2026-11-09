@@ -1,174 +1,21 @@
 # ntu-shower 参考手册
 
-写给接手的人：**每个字段是什么、这个数怎么算出来的、状态怎么变**。
+数据层的**判定规则、口径与不变量**——只写从代码里读不出来的那一层。
 
-分工（别在这份里找它们的内容）：
-
-| 文档 | 管什么 |
+| 想知道 | 看哪里 |
 |---|---|
-| `AGENTS.md` | AI 阅读顺序、停止条件与操作边界 |
-| `docs/architecture.md` | 系统边界、组件、数据流、时间轴定义 |
-| `docs/adr/` | 约束代码的结论与理由 |
-| `docs/runbook.md` | 部署、回滚与故障处置 |
-| `docs/security.md` | 资产、威胁模型、安全控制与事件响应 |
-| `docs/testing.md` | 测试策略、环境、覆盖率政策与证据 |
-| **本文** | **数据模型与接口：字段语义、派生规则、状态变更、取数口径** |
-| [`docs/glossary.md`](glossary.md) | 术语的唯一正名与弃用词（本文用它的词） |
+| 字段、类型、约束、逐字段注释 | `server/app/models/` |
+| HTTP 接口与请求/响应形状 | 运行中的 `/openapi.json`（FastAPI 生成） |
+| 协议消息结构 | `protocol/schema/*.json` |
+| 系统边界、时间轴定义 | [`architecture.md`](architecture.md) 的「时间轴与口径」 |
+| 决策理由与备选方案 | [`adr/`](adr/) |
+| 部署、回滚、故障处置 | [`runbook.md`](runbook.md) |
 
----
+**本文不复制字段表和端点表**：那两份由代码生成或直接可读，复制一份就多一份漂移。
 
-## 全景
+## 喷头状态：七个取值
 
-```text
-浴室 App（com.datalook.bath）
-   │  只读它的 t_doorlist 一张表 + 用无障碍服务操作它的界面
-   ▼
-设备（Android 4.4.4，跑着 NTU Shower）
-   │  WSS /gateway/device —— 设备报帧，服务端下发命令
-   ▼
-服务端（本仓库）
-   │  原始层落库 → 派生层算出会话与段
-   ├─ HTTP /api/v1/*        给管理台与网页端
-   └─ WSS /api/v1/stream    给消费端（网页端与小程序）实时推送
-        ▼
-消费端（网页端、status-panel 小程序）
-```
-
-**表分三层，做功能与统计只用派生层**：
-
-| 层 | 表 | 用途 |
-|---|---|---|
-| **原始层** | `door_snapshots`、`device_link_events`、`command_audits`、`api_calls`、`background_task_runs` | 设备与调用方的原话、本项目做过的事，不改写。**它是重算的退路，不是查询入口** |
-| **派生层** | `door_states`、`door_state_events`、`usage_segments`、`usage_sessions` | 本项目算出来的。**做功能与统计只碰这四张** |
-| **支撑层** | `device`、`app_settings`、`device_configs`、`principals`、`ota_releases`、`ota_release_installs` | 设备档案、配置、身份、发布——**都是"配上去"的东西，删了重建即可** |
-
-> **能不能删，看它是不是"重配得回来"**：支撑层是配置与档案（重配一遍就有）；原始层与派生层
-> 是设备报过的原话与从它算出来的历史（会话、段、状态事件、帧）——**删了就回不来**，统计口径
-> 全靠它攒着。开发阶段重建库（见 `CONTRIBUTING.md` 的「服务端开发」）动的是支撑层与空表；**生产上的历史数据任何
-> 情况下都不删**。
-
-原始层为什么必须在：派生规则一旦发现缺陷、或需要新增先前未预见的指标，没有原始帧就永久无法重算。旧系统只留了原始帧，那 100 天今天才能重放。
-
----
-
-## 时间轴与消费者字段
-
-两条轴的定义、三条换算规则与设备钟偏差的出处由 `docs/architecture.md` 的「时间轴与口径」规定；本节只列消费者字段映射。
-
-设备轴原话只留在原始帧；`door_states`、`usage_segments`、`usage_sessions` 的时刻字段全部在服务端轴上。
-
-**一次会话里的六个时刻**（都在服务端轴上）：
-
-| 正名 | 标识符 | 含义 |
-|---|---|---|
-| **分配时刻** | `usage_sessions.assigned_at` | 喷头被分配给这个人的时刻 |
-| 首次观测时刻 | 同上（`assigned_source = observed` 时） | 拿不到设备原文时退回的观测值，**只是下界，真实更早** |
-| **开阀时刻** | `usage_segments.opened_at` | 这一段开始出水 |
-| **关阀时刻** | `usage_segments.closed_at` | 这一段停止出水；**空 = 尚未关阀** |
-| **释放时刻** | `usage_sessions.ended_at` | 观测到这次占用结束；**空 = 仍在进行** |
-| **最后确认时刻** | `usage_sessions.last_seen_at` | 最后一次确认它还占着；**释放时刻 − 它 = 盲区** |
-
----
-
-## 原始层
-
-### `door_snapshots` —— 一帧
-
-设备报了什么都原样记，不做任何解释。重复投递由 `snapshot_id` 的唯一索引挡掉（设备在收到 ack 前会重发），落库原地不动、派生也随之跳过。
-
-| 字段 | 是什么 |
-|---|---|
-| `device_id` | 哪台设备 |
-| `snapshot_id` | 设备给的帧标识，**唯一索引**——重发的那一帧不会落第二遍 |
-| `seq` | 发件箱自增序号，单调递增。**只在最旧的帧被裁掉时才跳号**，据此看得出中间丢了 N 条 |
-| `source` | 这帧是怎么来的：`db_watch`（浴室 App 写库触发，状态真的变了）／`startup`（重连或开机后推的全貌）／`import`（从旧系统历史重放） |
-| `captured_at` | **采集时刻（服务端轴）**，由设备锚在服务端时间上。它是本帧的权威时刻：会话的起点、终点与淋浴时长都以它为准。设备刚起来还没握上手时为空，此时退回 `received_at` |
-| `device_clock` | 采集那一刻**设备墙钟**的读数，与 `captured_at` 取自同一瞬间。两者相减就是偏差 |
-| `received_at` | 服务端收到它的时刻 |
-| `doors` | 该帧里每个喷头的读数（JSON 数组），字段见协议 `protocol/schema/door.snapshot.json` |
-
-### `device_link_events` —— 上下线
-
-帧是**事件驱动**的（状态变化才上报），空闲时不上报。所以"没消息"有两种来源：没人使用，或设备离线；两者在数据里无法区分。这张表把它分开，同时给出设备利用率的分母。
-
-| 字段 | 是什么 |
-|---|---|
-| `device_id` | 哪台设备 |
-| `occurred_at` | 服务端轴 |
-| `event` | `online` ／ `offline`（`modules/devices/schemas.py` 的 `LINK_ONLINE` / `LINK_OFFLINE`） |
-
-**只记"连接建立/断开"这个事实**：为什么断（网络、重启、被踢）不在其中，那要结合断线前的日志看。
-
-### `command_audits` —— 本项目下发的每条命令
-
-| 字段 | 是什么 |
-|---|---|
-| `command_id` | 这条命令的标识，与设备端痕迹同一份 |
-| `device_id` | 下发给谁 |
-| `action` | 动作名，清单的唯一出处是 `app/core/actions.py` |
-| `params` | 参数原文（JSON） |
-| `created_at` / `finished_at` | 下发时刻 / 拿到结果的时刻；**空 = 还没有结论** |
-| `status` | `ok`（做完了）／`failed`（动手了但没成）／`timeout`（超过时限，没有结论）／`rejected`（前置条件不满足，未产生副作用，重试安全）。取值是跨端契约，见 `app/core/outcomes.py` |
-| `reason_code` | 失败原因码，登记表见 `app/core/reason_codes.py` |
-| `terminal_message` | 给人看的一句话。失败时服务端用 `reason_codes.describe()` 补齐，**保证非空**；成功时设备有值得转达的内容才填（如浴室 App 界面原文）。**分支判定用 `status` 与 `reason_code`，不用它** |
-| `trace_id` | 与 `api_calls` 关联，查两边即得全链路 |
-| `data` | 结构化结果（如截图的 base64、exec 的输出） |
-
-> **`status = ok` 不等于动作做成了。** 设备端把那一轮 UI 流程走完就报 `ok`，而**浴室端
-> 拒绝时它照样报 `ok`**——密码错落在提示页上，那一页在设备端被当作正常终态
-> （`AutomationFlow.awaitTerminal` 的提示页分支，见 `CommandScheduler.execute` 里
-> `error == null` 那条出口），被拒的话只进 `terminal_message`。而 `terminal_message` 是
-> 给人看的中文，`outcomes.py` 明写不拿它做分支。所以判"这次到底成没成"只能看**后续帧**：
-> 喷头有没有变成「等待开阀」、占用者是不是他、那一行有没有被清零。
-
-### `api_calls` —— 每一次 HTTP 调用与每次网关连接
-
-| 字段 | 是什么 |
-|---|---|
-| `kind` | `http`（普通 HTTP 请求）／`gateway`（设备 WS 连接的建立与断开） |
-| `requested_at` | 服务端轴 |
-| `request_id` / `trace_id` | 请求标识 / 链路标识（有合法 `traceparent` 就沿用它的 trace-id，否则生成） |
-| `actor_kind` | `token`（Bearer 凭据，actor 记摘要前 12 位）／`session`／`anonymous`／`device`（网关） |
-| `actor` | 身份原文，**不脱敏**；匿名时为 NULL |
-| `client_ip` / `user_agent` | 来源 IP（经 nginx 反向代理而来，真实地址在 `X-Real-IP`）／UA |
-| `method` / `path` / `query` | 请求行 |
-| `request_body` / `response_body` | JSON 体原文。**全有或全无，绝不截断**：截断了后续就查不回真实内容，超限时占位说明。数据重型且可重取的三个端点（`capture`／`dump`／`photo`）不落响应体 |
-| `status_code` | HTTP 状态码。**`kind = gateway` 时它是一个约定**：0 = 连接，1 = 断开 |
-| `duration_ms` | 耗时；网关那种行为 0 |
-| `device_id` | 相关设备（可为空） |
-| `problem_type` | RFC 9457 的问题类型；登记表见 `app/core/problems.py` |
-| `detail` | 失败响应的中文说明 |
-
-### `background_task_runs` —— 每一次后台任务的终局
-
-一行 = 一次**终局**（动手了，或者判定不该动手）。判据阶段（每帧、每个候选都算一次"到点
-没有"）**不落库**——那等于帧数。
-
-| 字段 | 是什么 |
-|---|---|
-| `occurred_at` | 终局时刻（服务端轴）。与 `command_audits.created_at` 对照即知这次发了哪条命令 |
-| `device_id` / `door_no` | 哪台设备的哪个喷头 |
-| `session_id` / `cert_no` | 这一场会话、替谁 |
-| `feature` | `renew_wait` / `renew_session` / `auto_settle` |
-| `action` | `session.settle` / `session.assign`（与 `command_audits.action` 同一套词）；**空 = 批次级失败，还没到具体动作** |
-| `outcome` | 终局是什么，**与日志事件后缀同名**：`settled` / `assigned` / `skipped` / `no-password` / `not-applicable` / `rejected` / `settle-failed` / `assign-waiting` / `assign-failed` / `assign-expired` / `failed` |
-| `reason` | 没动手时的中文原因（"不在名单里"这类） |
-| `threshold_s` | **当时生效的阈值**——配置没有历史，不存这一列，事后说不清"为什么是这一刻" |
-
-**为什么它单独有一张表**：后台任务在**帧**上动手，没有任何 HTTP 请求在途——按上面那条
-口径（"事件发生时有没有一行 HTTP 审计能兜住它"）它就该自己留一行。而它记的是**决定**，
-与 `command_audits` 记的"发了一条什么命令"不是同一件事：上面那些终局里有五个根本没有命令。
-
-**永久保留**：它是运营历史（谁被自动续期过、第几次）。`core.audit.prune` 只清 `api_calls`
-与 `command_audits` 两条流水，这张表不在其中。
-
----
-
-## 派生层
-
-### 喷头状态：七个取值
-
-由设备报的**四个原始整数**派生（`doors/service.py:derive_state`）。判定顺序即优先级：
+由设备报的**四个原始整数**派生（`app/modules/doors/service.py` 的 `derive_state`）。判定顺序即优先级：
 
 ```text
 status == 1（RAW_STATUS_REPAIR）   → 维修中
@@ -185,134 +32,14 @@ status == 3（RAW_STATUS_DISABLED） → 已禁用
     否则                             → 空闲
 ```
 
-**两个集合**（`doors/schemas.py`）：
+**两个集合**（`app/models/enums.py`）：
 
 - **占用** = {等待开阀, 淋浴中, 已暂停} —— 有人
 - **可分配** = {空闲, 已选中} —— 正着列可分配的状态而不是反着列：新增状态默认落到不可分配一侧
 
-中文名与 `status-panel` 小程序的展示文案一致，不许另起（见 `docs/glossary.md`）。
+中文名的唯一数据源是 `app/modules/doors/schemas.py` 的 `_STATE_LABELS`，与小程序展示文案一致。
 
-### `door_states` —— 这个喷头的当前状况
-
-一行一个喷头（`id` 主键，`(device_id, door_no)` 唯一）。
-
-| 字段 | 是什么 |
-|---|---|
-| `state` | 上面派生出的七个取值之一 |
-| `card_no` / `cert_no` / `acc_no` | 占用者标识。**本机无卡，`card_no` 实测 235270 帧无一非零**——"谁"只能看 `cert_no`（为空时退回 `acc_no`） |
-| `open_time` | **分配时刻（服务端轴）**。空闲时为 NULL |
-| `in_time` | **当前这一段的开阀时刻（服务端轴）**。等待开阀时为 NULL；**暂停后仍有值**——设备在关阀那一刻清空了 `inTime`，这一段的开阀时刻改由段表回答（见 `usage_segments`）。它因此不用来说"此刻在不在出水"，那是 `state` 的事 |
-| `close_time` | **当前这一段的关阀时刻（服务端轴）**。只有已暂停时有值 |
-| `bath_time_s` | 设备累计的出水秒数。**它是时长不是时刻，不在任何一条时间轴上**；且**不单调**——只在关阀那一刻累加、释放时整体归零 |
-| `status_raw` | 设备报的原始 `status` 整数。**别拿它判状态**，用 `state`；新增状态时直接判整数会静默走错分支 |
-| `reported_at` | 这一行是据哪一帧写的（服务端轴） |
-
-三个时间字段存的是**服务端轴**的值，换算在写入前完成——设备那口钟的读数只在原始帧里保真。它们让"这个门的当前状况"一次查询就能渲染；对应的会话与段由 `usage_sessions` / `usage_segments` 回答。
-
-### `door_state_events` —— 每一次状态转换
-
-只在状态**真的变了**时写一行。两种帧不记：**首帧**（没有"从哪来"）与**全貌帧**（`source = startup`，它只刷现态、不派生，见 `SOURCE_STARTUP`）。语音的 `assigned` 不依赖这张表：它是会话生命周期事实，全貌帧/盲区帧只要 `open_time` 可平移也会补发（见 `docs/adr/` 的语音事件一节）。
-
-| 字段 | 是什么 |
-|---|---|
-| `occurred_at` | 转换时刻（服务端轴） |
-| `device_id` / `door_no` | 哪个喷头 |
-| `from_state` / `to_state` | 七个取值中的两个 |
-| `card_no` / `cert_no` | 那一刻的占用者。**提成独立列而不是塞进 JSON**：统计要按人筛，JSON 走不了索引 |
-| `bath_time_s` | 那一刻设备报的出水进度，诊断用 |
-
-它是对账与诊断的主力：**暂停次数**数 `bathing→paused`，`bathing→free` 与 `paused→free` 含义不同。
-
-> **分辨率的下限**：帧是秒级采样的，"两次写库落在同一帧里"就看不出中间态。要精确的逐次统计，看 `usage_segments`（一次出水一行）而不是事件表。
-
-### `usage_segments` —— 一次连续出水
-
-一段 = 一个会话里从开阀到关阀。一个会话含 0 到 n 段（0 段 = 分配了没出水）。
-
-| 字段 | 是什么 |
-|---|---|
-| `session_id` | 属于哪次会话 |
-| `device_id` / `door_no` | 冗余一份门号与设备号，为了按门筛段时免联表（刻意的例外，写明白了） |
-| `opened_at` / `closed_at` | 开阀 / 关阀时刻，**服务端轴**。`closed_at` 为空 = 尚未关阀 |
-| `flow_s` | **这一段的长度**。注意同名列在 `usage_sessions` 上是**另一个量**（那个是段之和） |
-| `opened_raw` / `closed_raw` | 设备写下的两个读数**原文**（与 `open_time` 同格式：设备钟上的 RFC 3339，例如 `2026-10-03T17:54:06.000Z`——服务端轴上它是 `16:54:15`）。段长取"同一口钟两个读数之差"，没有原文就无法复核、也无法事后重算 |
-| `source` | 段长的证据强度，五档，见下 |
-
-**五种来源**（强度不同，统计必须分得清）：
-
-| `source` | 怎么来的 |
-|---|---|
-| `measured` | 设备轴差 `close_time − in_time` 与观测差一致（相差 ≤ `AB_TOLERANCE_S` = 3 秒）→ 采信设备轴差。**同一口钟两个读数相减，不经换算，是最强的一档**。另有一条路径：段起点就是 `in_time` 平移来的时，直接采信设备轴差 |
-| `observed` | 只信观测差（本帧 − 段起点）。**含"本项目看见关阀"的那点延迟**（帧间隔量级，1 秒上下） |
-| `capped` | 观测差越过一次出水的物理上限（`MAX_SEGMENT_S` = 1200）→ 截断成 1200。**截断过的段与"它真的洗了那么久"必须分得开**，否则统计会把"本项目不知道有多长"当成"就那么长" |
-| `derived` | 从设备留下的痕迹推回：上线时门已在暂停态，`in_time` 被清空，但设备留下了关阀时刻与累计出水秒数——从前者往前数那么多秒就是那一段的开阀时刻。**只在这是全场第一次暂停时才成立**（之后 `bath_time_s` 是多段之和，退出来会落在会话起点之前或本帧之后，区间检查会丢掉它） |
-| `unclosed` | 数据到此为止仍在出水，长度不可知。**只有重放历史那条路会写它**（`server/tools/replay_history.py`）；线上在途段的 `source` 是空串、`flow_s` 是 0、`closed_at` 为空 |
-
-两个**最贵的错误**在这条路上（都不报错，只是数字变成 0，还会被标成最强的 `measured`）：
-
-1. `close_time` 缺失时用 `str(None)` 得到字符串 `"None"`——非空，于是"没有关阀时刻"被当成有值，两读数之差算成 0。所以只在它**真的是字符串**时才当读数。
-2. 两个不同读数的差被 `seconds_between` 归零（关阀早于开阀，段内设备钟被往回拨过）。**两个不同的读数不会差 0 秒**，据此把归零值当"没有设备轴差"退回观测差。
-
-### `usage_sessions` —— 一次占用
-
-一行 = 一个喷头从被分配到被释放。
-
-| 字段 | 是什么 |
-|---|---|
-| `assigned_at` | **分配时刻**（服务端轴） |
-| `assigned_source` | **起点来源**：`inferred`（由设备报的 `open_time` 平移而来——那是真实的分配时刻）／`observed`（退回本帧时刻，**真实起点更早，这是下界**）。`inferred` 的跨度可以用，`observed` 的天然偏小 |
-| `observed_span` | **观测连续性**：`continuous` 本项目连续观测／`gap` 中间有超过一次占用上限的空档。**只描述本项目看没看见，不描述发生过什么**；且**单向只增不减**——断开一次之后，后面接上的连续观测补不回失去的那一段 |
-| `last_seen_at` | **最后一次确认它还占着**的那一帧。它才是可信的结束下界——`ended_at` 与它的差就是观测盲区 |
-| `ended_at` | 观测到它不再占用的那一帧。**跨盲区时它不是真实结束时刻**，只是"下次见到它的时刻" |
-| `flow_s` | **段之和**（本项目算的淋浴时长）。能从段表推出来，存一份是为了让统计有个不联表的入口 |
-| `device_flow_s` | **设备累计出水秒数**（`bath_time_s` 的最大值）。它是设备说的话，用来与段之和对照：**两者不等就说明中间有段没进表**（丢帧、离线、设备卡住） |
-| `segments_complete` | 段之和与设备那个值**是否相等**，结束时定稿。**有 `derived` 段时恒为假**——那段的长度就是从设备那个值推出来的，等式必然成立，拿它自证是循环论证 |
-| `card_no` / `cert_no` | 占用者。换人判据用 `cert_no` 而不是 `card_no`（无卡设备上卡号恒 0，拿它比等于没比） |
-
-**起点怎么来的**（`_assigned_at`）：优先把设备报的 `open_time` 加上偏差平移——那是分配那一刻设备写下的，而它在整场会话里不变（暂停与恢复都不改它，只有释放才整体清零），所以无论中间暂停过几次都还是同一个值。
-
-平移值要过**三条自洽检验**，任一不成立就退回观测下界：
-
-1. 起点不晚于本帧——分配不会发生在本项目看见它之后；
-2. 起点不早于**上次看见这个喷头**的时刻——更早的会话本项目已经见过了；
-3. 与同帧 `in_time` 的平移值相差不超过 1200 秒。
-
-第 3 条是**唯一能识破"拨钟时本项目离线"**的：那时第 2 条没有参照（前一帧在几小时前、或不存在）。2026-10-02 实测：断连期间有人分配，重连前设备钟被拨快一小时，算出来的起点比开阀还早一小时。
-
-> **不要**退回同帧的 `in_time`：两个读数出自同一口钟，钟被改过时它们一起偏；而"本帧时刻"来自服务端钟，是这里唯一不依赖设备钟的锚。
-
-**会话怎么开、怎么续、怎么关**（每帧过一遍 `_maintain_session`）：
-
-```text
-gap = 上一帧到本帧的秒数（没有上一帧时 -1）
-
-① 先看盲区：gap > 1200 且存在上一帧
-   → 把该门未结束的会话在「上一帧的时刻」收尾，并标 observed_span = gap
-   （否则库里的陈旧占用会被读成"它还被占着"，那场会话永不结束、起点落在几小时前）
-
-② 本帧状态不在占用集
-   → 若上一帧在占用集，关掉该门未结束的会话
-   → 返回
-   （这一判据让绝大多数帧省掉一次查询；等价性靠"每帧都处理"保证——
-     会话不会在两次观测之间被开出来又没有人结算，开它的那一帧就会把会话写下）
-
-③ 该门有未结束的会话吗
-   没有          → 开会话，起点由 _assigned_at 给出
-   有但换了人     → 先关旧的，再开新的（新账的起点同样能平移）
-   否则          → 用它
-
-④ 维护段（见 4.4 的开/关/推回三条分支）
-
-⑤ 推进会话：flow_s = 段之和 + 在途段到此刻（上界 1200）
-            device_flow_s = MAX(旧值, 本帧 bath_time_s)
-            seen = true，last_seen_at = 本帧
-```
-
-**关会话**（`_close`）：先把在途段收干净 → 累加 `flow_s` → `touch_session(seen=False)` → `close_session(ended_at, segments_complete)`。
-
-两处刻意的设计：**`last_seen_at` 在关会话时不动**（它记的是最后一次确认还占着，而这一帧恰恰证明它不占了；两者之差就是盲区大小）；**不记结束原因**——浴室 App 在"用户主动释放"与四种超时释放下写的是同一套清零语句，数据库层面完全同形，服务端没有依据区分，硬分就是编造。
-
-### 易混字段对照
+## 易混字段对照
 
 | 容易混 | 区别 | 混了会怎样 |
 |---|---|---|
@@ -331,7 +58,7 @@ gap = 上一帧到本帧的秒数（没有上一帧时 -1）
 | `revision` / `version_code` | 配置修订号 / 设备端版本号 | 两个"版本"毫不相干 |
 | `last_used_at` / `last_used_s` / `last_used_cert`（`DoorView` 视图字段，不是表列） | 上次**开阀**时刻 / 那次的出水秒数 / 那次是谁用的 | 只在喷头**没有进行中的会话**时才有展示意义；判据是**有没有过段**——"分配后直接结算"那种从没出水的会话说不出任何一段 |
 
-### 取数口径
+## 取数口径
 
 按指标选数据集，不是一刀切排除异常。**判据都能从列上算出来、不落列**：
 
@@ -357,71 +84,10 @@ gap = 上一帧到本帧的秒数（没有上一帧时 -1）
 **唯「会话数」一榜用全量**：它是唯一把"没出水的会话"也当作一次使用的统计，用来分辨
 "来得勤"与"洗得多"——生产数据里这两者能差到 89 : 30。
 
-**关阀次数数的是段**：一段 = 从开阀到关阀（见 4.4），所以每段结束都关了一次阀。
-只数**有 `closed_at` 的段**——在途那段还没关阀，把它算成一次会凭空多出一次。
+**关阀次数数的是段**：一段 = 从开阀到关阀，所以每段结束都关了一次阀。只数**有 `closed_at`
+的段**——在途那段还没关阀，把它算成一次会凭空多出一次。
 
 **不建汇总表**：明细按年计也就十万行量级，而汇总必然与明细漂移。
-
----
-
-## 支撑层
-
-### `device` —— 设备档案
-
-| 字段 | 是什么 |
-|---|---|
-| `device_id` | 主键 |
-| `name` | 显示名，管理台可改 |
-| `trusted` | 是否已信任。未信任的设备只收 `link.hello`，不下发命令 |
-| `app_version` / `version_code` | 设备端版本。**`version_code` 就是 OTA 的安装确认** |
-| `os_version` | 系统版本 |
-| `capabilities` | 设备声明支持的动作（JSON 数组），由设备在 `link.hello` 里给 |
-| `last_seen_at` / `last_ip` | 最后上线时刻（服务端轴）／来源 IP |
-| `booted_at` | **开机时刻**（RFC 3339）：由设备上报的已运行秒数与服务端收到它的时刻反推。存时刻而不存秒数——秒数一离开采样瞬间就开始过期，开机时刻是不变的事实 |
-| `clock_skew_s` | 偏差（见 `docs/architecture.md`「时间轴与口径」） |
-
-### `app_settings` / `device_configs` —— 配置
-
-`revision`（每次改递增）+ `config`（JSON）。
-
-- `app_settings` 只有一行（`CHECK (id = 1)`）。
-- `device_configs` 一行一台设备，键是 `device_id`。
-- **存的是与默认值的差异，空对象即全部沿用默认**。存完整配置的做法会固化当时的默认值，新增键永远下不下去。
-- 生效值每次现算：`默认 ← 全局 ← 设备`。
-- 键的类型与范围、分组与分区（页签）唯一出处是 `app/modules/config/spec.py`——**页签按"这个键去哪"分**：**服务端业务**（在服务器上跑，不下发设备、也不按设备区分）与**设备下发**（推到设备，支持单台覆盖）。一组里的键必须同属一个 scope，由 `tests/test_config_spec.py` 强制。
-
-### `principals` —— 身份
-
-| 字段 | 是什么 |
-|---|---|
-| `identity` | 主体名，即 `principals.name` |
-| `kind` | `openid`（微信小程序用户，标识即其 openid）／`web`（网页用户，我方签发的不透明串） |
-| `capabilities` | 能力位（能做什么），与 `kind`（这个标识从哪来）分开 |
-| `device_scope` | **设备作用域**：`["*"]`（全部设备）或设备 id 列表，限定该身份的能力能作用于哪些设备。登记是全量写入，不传按 `["*"]` 落库 |
-| `label` | 给人看的备注 |
-| `created_at` | 签发时刻 |
-
-访问控制是**统一身份制**：没有本项目自建的用户体系、没有 JWT、也没有令牌端点。**浴室凭证明文存在后台任务的三份名单里**——每份名单是 `学号=密码` 一行一个（见后台任务名单）。自动结算与自动续期要替学生调用浴室系统，而分配与结算都必须带密码，它没有别的落脚处；**只有被显式写进某份名单的学号才有这一条**，名单外的人不执行任何操作。管理台凭 admin 身份持有的能力位调用同一批路径。
-
-### `ota_releases` / `ota_release_installs`
-
-| `ota_releases` 字段 | 是什么 |
-|---|---|
-| `version` / `version_code` | 版本名 / 版本号（主键是 `version`） |
-| `sha256` | APK 校验和，设备下载后校验 |
-| `mandatory` | 随 `ota.upgrade_available` 一起下发的布尔标记。**设备端当前不读它**（`android/` 里搜不到该字段），是预留位；不要按名称推断 |
-| `force` | 调试发布：无视版本号推送，**但已安装确认过即不再推** |
-| `target` | 发布目标，`all` 或逗号分隔的定向列表 |
-| `created_at` | 发布时刻 |
-
-| `ota_release_installs` 字段 | 是什么 |
-|---|---|
-| `version` + `device_id` | 联合主键 |
-| `applied_at` | 安装确认时刻 |
-
-安装状态在服务端跟踪：设备 `link.hello` 里的 `version_code` 即安装确认。已确认的 `force` 发布不再推；重推同一版本要先调 `POST /api/v1/ota/releases/{version}/rearm/{device_id}`，紧急下架用 `DELETE /api/v1/ota/releases/{version}`（连文件一起删——只删注册行会让 APK 变成无人认领的孤儿文件）。
-
----
 
 ## 不变量
 
@@ -433,266 +99,11 @@ gap = 上一帧到本帧的秒数（没有上一帧时 -1）
 6. **`segments_complete` 在有 `derived` 段时恒为假**。
 7. **对外只出服务端轴**。
 8. **一个喷头同一时刻只有一个占用者**（换人先结旧账再开新账）。
-9. **喷头状态中文名与小程序的展示文案一致**，由 `docs/glossary.md` 强制。
+9. **喷头状态中文名只有一个数据源**：`app/modules/doors/schemas.py` 的 `_STATE_LABELS`。
 
-> 第 1 与第 2 条是**浴室 App 的规则**（`DoorStatusConfirmThread` 每秒轮询、四条超时判定、同一句清零 SQL），不是本项目的算法。它们与 `SESSION_MAX_S` 的关系见 `doors/service.py` 的常量注释。
-
----
-
-## 对外接口
-
-### 通用约定
-
-- 基址 `https://ntu-shower.iseekdream.com`；管理面接口要 Bearer 凭据或管理台会话。
-- 失败响应是 RFC 9457 的问题对象，类型登记在 `app/core/problems.py`。
-- 时间一律 RFC 3339 UTC；任何响应都不携带设备轴原话。
-
-### HTTP 端点
-
-```text
-GET      /healthz                                    进程与版本
-
-GET      /api/v1/doors                               喷头现态（公开）
-GET      /api/v1/devices                             设备精简清单（公开）
-GET      /api/v1/devices/runtime                     设备诊断详情（admin）
-PATCH    /api/v1/devices/{device_id}                 改名等（admin）
-
-POST     /api/v1/devices/{id}/assign                 分配喷头        session
-POST     /api/v1/devices/{id}/settle                 结算            session
-POST     /api/v1/devices/{id}/photo                  摄像拍照        photo
-POST     /api/v1/devices/{id}/capture                全屏截图        admin
-POST     /api/v1/devices/{id}/dump                   界面节点树      admin
-POST     /api/v1/devices/{id}/touch|scroll|key|input 界面操作        admin
-POST     /api/v1/devices/{id}/exec                   在设备上执行命令 admin
-POST     /api/v1/devices/{id}/app/restart            重启本程序      admin
-POST     /api/v1/devices/{id}/bath/restart           重启浴室 App    admin
-POST     /api/v1/devices/{id}/reboot                 重启整机        admin
-POST     /api/v1/devices/{id}/clock/set              修改设备端时间  admin
-POST     /api/v1/devices/{id}/power/schedule         重布 MCU 定时开关机 admin
-GET      /api/v1/devices/{id}/bridge                 调试通道状态    admin
-POST     /api/v1/devices/{id}/bridge/open|close      开关调试通道    admin
-GET,PUT  /api/v1/devices/{id}/freelist               免费名单        admin
-
-GET,PUT  /api/v1/config                              全局配置        admin
-GET      /api/v1/config/spec                          配置键规格      admin
-GET,PUT,DELETE /api/v1/devices/{id}/config           设备级配置覆盖  admin
-
-GET,POST /api/v1/identities                          身份清单/签发   admin
-PUT,DELETE /api/v1/identities/{identity}             改/撤身份       admin
-GET      /api/v1/identities/me                       自己的身份记录
-
-GET      /api/v1/tasks?cert_no=...                   四项后台任务的状态  tasks
-PUT      /api/v1/tasks/{task}                        登记/取消登记        tasks
-GET      /api/v1/background-tasks/status             后台任务当前态（开关/延长中/已排定） admin
-
-GET      /api/v1/stats/devices/{id}?days=&tz_offset_minutes=             一台设备一个窗口的全套统计  stats
-GET      /api/v1/stats/devices/{id}/replay?day=&tz_offset_minutes=       某一天的状态变化序列        stats
-GET      /api/v1/stats/mine?cert_no=&days=&tz_offset_minutes=            个人统计（跨设备）          stats
-
-GET,POST /api/v1/ota/releases                        发布列表/发布   admin
-DELETE   /api/v1/ota/releases/{version}              下架            admin
-GET      /api/v1/ota/releases/{version}/download     下载 APK
-POST     /api/v1/ota/releases/{version}/rearm/{device_id}  重推同一版本 admin
-GET      /ota/manifest                               设备查更新
-
-GET      /api/v1/audit/calls                         HTTP 审计       admin
-GET      /api/v1/audit/commands                      命令审计        admin
-GET      /api/v1/audit/background-task-runs          后台任务审计    admin
-```
-
-### WebSocket 三条
-
-| 路径 | 谁连 | 用途 |
-|---|---|---|
-| `/gateway/device` | 设备 | 设备报帧、服务端下发命令。先 `link.hello` 声明能力，之后 `link.ping`／`link.pong` 保活并更新偏差；服务端另按现态推 `status_line.update`（各楼层空闲喷头数），设备不回执 |
-| `/gateway/bridge` | 服务端隧道 | 把设备的 ADB 端口转发出来，排障用 |
-| `/api/v1/stream` | 消费端 | 实时推送，两类消息见下 |
-
-`/stream` 的消息类型（唯一出处 `app/core/events.py`，`server/web/core/contract.js` 由 `tools/sync_contracts.py` 生成）：
-
-- **`door.update`** —— 该设备的**完整现态行**（与 `GET /doors` 同一路径产出）。WS 单连接有序投递，**数据承载推送**：客户端直接应用、不回拉。无变化的上报也照发，充当状态再同步。
-- **`device.update`** —— 设备精简档案（`device_id`、`name`、`online`、`at`）。**版本、IP、时钟偏差等运维诊断字段不进公开推送**，管理台要详情走 `/devices/runtime`。
-
-队列有界（256），满则丢弃——推送是尽力而为，现态可经 REST 兜取。
-
-### 契约的唯一出处
-
-`protocol/schema/*.json`（含中文 `description`）。Kotlin 与 JavaScript 都不能 import Python，所以另两端拿到的是**生成产物**，由 `server/tools/sync_contracts.py` 生成、`test_contract_sync.py` 断言逐字节相同。**改契约就是改 schema 里的源**，不要手改生成物。
-
----
-
-## 典型流程
-
-### 一次分配（从 HTTP 到水出来）
-
-```text
-管理台/小程序
-  │ POST /api/v1/devices/{id}/assign  {door_no, cert_no, password}
-  ▼
-服务端三道预检
-  ① 设备已信任且在线
-  ② 喷头状态 ∈ 可分配 {空闲, 已选中}        ← 否则 409，附上它当前的状态原文
-  ③ 该学号在这台设备上没有未结束的会话      ← 否则 409
-  ▼
-下发 session.command（action = session.assign）→ 设备
-  ▼
-设备端一轮完整 UI 操作（AutomationFlow）
-  1 回浴室 App 首页            失败 → device.home_unreachable
-  2 显示遮盖层（可配置关闭）
-  3 选中该喷头 → 点「无卡模式」
-  4 等验证页                   失败 → device.verify_page_timeout
-  5 填学号 + 密码并确认         失败 → device.login_input_failed
-  6 等浴室服务器终点：回首页=成功 / 提示页=被拒   失败 → device.bath_server_timeout
-  7 收尾：等回首页 → 撤遮盖 → 清网格选中态
-  ▼
-设备按序回报 session.command_result（status / reason_code / terminal_message）
-  ▼
-浴室 App 写库 → 设备的 db_watch 触发 → 出一帧 → 服务端派生
-  · door_live.state → 等待开阀            （实测：命令完成后 ≤1 秒）
-  · 该门没有未结束的会话 → 开一次 usage_session
-```
-
-**判据顺序值得记住**：`waiting`（等待开阀）就说明"会话已建立、还没出水"；真正的出水要等门变 `bathing`，那一帧才会开出第一段。
-
-### 一次结算
-
-与分配同一条管线，动作换成一个：点浴室 App 的「结算」按钮。预检是"该学号有**占用中**的喷头"（`waiting` / `bathing` / `paused` 都算）。
-
-浴室的答复在 `terminal_message` 里（例如"支付成功…"）。结算成功 → 门那行被清零 → 出一帧 → 服务端关掉会话。**结束原因不记**（见 `usage_sessions`）。
-
-### 配置下发
-
-```text
-PUT /api/v1/config  或  PUT /api/v1/devices/{id}/config
-  ▼  revision 递增
-下发 config.update → 设备
-  ▼
-设备回报 config.ack（服务端等 config_ack_timeout_s = 15 秒）
-```
-
-设备端拿到的是**合并后的生效值**（`默认 ← 全局 ← 设备`），而且**只含设备域消费的键**——服务端
-自己的键不下发（`store.device_effective`）。推送只发给**在线**设备；离线的那些不排队，它们重连时
-由 `link.hello_ack` 带回当前值，所以最终一致。设备回 `config.ack`（15 秒超时），前端据此数"已生效"。
-
-> **两条路给的键集不一样**（既有行为）：`config.update` 用 `device_effective`（只含设备域的键），
-> 而 `link.hello_ack` 用的是 `effective`（**全部键，含服务端自己的**）。实际无害——设备端
-> `RuntimeConfig.apply` 对不认识的键直接跳过，但两处本可以一致。
-
-### OTA 发布
-
-```text
-本机  .\deploy\publish_apk.ps1 -Identity <admin身份标识>
-  · 版本号从 android/app/build.gradle.kts 读，不手填
-  · 跑门禁 → assembleRelease → POST /api/v1/ota/releases（带 APK 文件）
-  ▼
-服务端登记 + 裁掉超过 ota_release_keep 个的最旧发布 + 向在线目标设备推 ota.upgrade_available
-  ▼
-设备下载 → 校验 sha256 → pm install → 覆盖安装由 MY_PACKAGE_REPLACED 广播自启 → 重连
-  ▼
-重连的 link.hello 里 version_code 即安装确认
-```
-
-版本号在**三处**、由 `tests/test_version_consistency.py` 强制一致：`server/app/core/version.py` 的 `APP_VERSION`、`server/pyproject.toml` 的 `version`、`android/app/build.gradle.kts` 的 `versionName`。前两个是 Python 侧（一个供运行时、一个是包元数据），第三个在 Kotlin 构建脚本里——跨语言没有共享一处的办法。`versionCode` 递增是 OTA 覆盖安装的前提。
-
-### 设备重连
-
-```text
-WS /gateway/device 建立 → 记 device_link_event(online) 与 api_call(kind=gateway, status=0)
-  ▼
-link.hello   声明能力、版本、已运行秒数 → 服务端写 device 档案
-  ▼
-link.pong    带上设备墙钟 → 更新偏差        ← 偏差必须先有，之后的平移才有依据
-  ▼
-推一遍全貌帧（source = startup）           ← 与状态是否变化无关
-  ▼
-派生：门现态、事件、会话与段
-```
-
-**重连后的第一帧要小心**：若断开期间门一直被占着、且间隔超过 1200 秒，会话会在"最后看见它的时刻"收尾并另起一场——否则库里的陈旧占用会被读成"它还被占着"。
-
-### 后台任务（替他续期、替他结账、替他延长时段）
-
-前三个都在喷头被占用或已暂停时生效，**名单外的人一概不碰**；第四个问的是整台设备。开关、
-阈值、上限与名单都在配置里，**一个功能一块**（预约续期 / 会话续期 / 自动结算 / 延长服务
-时间），块内是"开关 → 阈值 → 上限 → 名单"，**保存即生效**。
-
-| 功能 | 什么时候动手 | 上限 |
-|---|---|---|
-| **预约续期** | 他分到了喷头却一直没开阀，到 `renew_wait_threshold_s`（默认 270 秒） | 同一串从第一场（他自己那次分配）算起，最多续 `renew_wait_max_duration_s`（默认 1200 秒） |
-| **会话续期** | 他在淋浴中、会话到了 `renew_session_threshold_s`（默认 1140 秒＝19 分钟） | 无上限，可以一直续 |
-| **自动结算** | 他关了阀、到 `auto_settle_pause_threshold_s`（默认 60 秒）还没再开 | 每个会话只做一次 |
-| **延长服务时间** | 设备表盘走到 `extend_hours_at`（默认 23:49）且名单里还有人占着喷头 | 喷头全部空闲且过了午夜后把钟调回 |
-
-**延长服务时间与前三个不是一类。** 前三者的候选是**一个喷头**上的一场会话；它问的是
-**整台设备**上还有没有名单里的人，所以它不进那个按喷头循环的调度器，状态也落在自己的
-`clock_shifts` 表里（前三个的记忆在内存里，丢了只是少续一次；它的丢了设备钟会一直偏着）。
-
-它做四步，**顺序不能变**：
-
-```text
-① 滚动重布（预补偿）  power.schedule  —— 截止推过"拨走的一小时 + 窗口"，拨快才不会当场断电
-② 拨钟                clock.set(+1h)  —— 浴室 App 还在跑，下一轮扫描就清空所有喷头
-③ 重新分配            session.assign  —— 帧与定时任务推动，把名单里的人放回原喷头
-④ 滚动续写            power.schedule  —— 每 2 分钟续写一次，延长期间无人被打断
-```
-
-**①必须在②之前**：拨快会让钟越过旧截止即当场断电（实测），所以截止必须先推走。
-**④替代了旧流程的重启浴室 App**：直写 MCU 之后不需要重启来"重读计划"。
-延长期间 MCU 的断电截止不是写死的计划，而是**滚动窗口**（每 2 分钟续写为"表盘此刻 +
-10 分钟"）——服务端活着就没人会被断电打断；服务端消失则最迟一个窗口后断电（失效安全）。
-
-拨回的条件是**真实时间过了午夜且设备上无未结束会话**——两个条件缺一不可：午夜没过，
-敌对窗口的尾巴还在；有会话在，拨回的钟跳会清掉这些会话。拨回后立即在新框架里重布
-常规计划（当晚 `power_off_at` 断电、次日 `power_on_at` 上电），节奏与未延长的夜晚
-完全一致。
-
-**名单是 `学号=密码` 一行一个**（配置页「服务端业务」页签下，每个功能一块、块内最后一项，是"键=值"编辑器）。
-四份**各自完整、互不依赖**——同一个学号要开两个功能，就在那两份名单里各写一遍。凭证跟着
-名单走，于是"在名单里"与"有密码"是同一件事，**不会出现"名单里有他、却没有密码"那种
-静默不执行**；代价就是那句话：要开两个功能就写两遍。
-
-**名单里的学号必须与浴室 App 报上来的那个一模一样。** 判据只有一次**逐字比较**：学生在浴室
-App 里自己输学号，设备把它带在帧里报上来（`usage_sessions.cert_no`），本项目用它比对名单的键。
-**本机实测学号以 10 位数字为主，部分末尾带字母**（示例 `2026000001X`）——漏掉那个字母就**静默不匹配**：不报错、也不动手。密码形状由浴室系统管理。
-
-**学号与密码都不做格式校验**，这是刻意的：学号允许末尾带字母、密码的形状由浴室系统管，
-在这里加一条只会给出会误报的判据（比如"从没洗过澡的新生"就会被误判成敲错）。代价是敲错了
-不被拒、只静默不匹配。这台设备上"谁"看 `cert_no`，`card_no` 实测恒为 0。
-
-**续期是两步**：先结算，**等门真的空了的那一帧**，再分配回同一个喷头。第二步不能立刻发
-——`perform_assign` 的前置是服务端先看见门空闲（它要去读 `door_states`），所以那一步由**帧**
-推动，不轮询。补分配有 30 秒时限：没有它的话，设备离线几小时再上线会给一个早已走掉的
-学生开一场会话。
-
-**每个会话每个功能只动手一次，失败不重试。** 失败之后重算出的到点还是同一刻，不记一笔
-就会自旋。结算被"没有占用中的喷头"拒掉**不算失败**——那正是"他已经走了、或者他自己已经
-结过账了"。
-
-**一次续期水会断一下**（结算是把会话结束掉），量级 5–10 秒。所以阈值必须留在浴室 App 那
-两条上限以内（`renew_wait_threshold_s` ≤ 300、`renew_session_threshold_s` ≤ 1200）：设到
-上限就等于那条判据永远轮不到本项目动手，浴室端先释放了。
-
-**同一台设备上的续期一条接一条**（设备只能串行）。同时到点的人越多，最后一个动手越晚，
-所以 `renew_session_threshold_s` 那条余量（1200 − 阈值）要盖住"两条命令 ÷ 排队长度"。
-
-**"同一串"由喷头的空档划断**：相邻两场之间「前一场的 `ended_at` → 后一场的 `assigned_at`」
-不超过 300 秒（浴室 App 那条无水释放门槛）就算同一串。本项目的续期间隔是秒级，真人走了
-再回来是分钟级，两者分得开。
-
-**"暂停从哪一刻开始"就是 `door_states.close_time`**（正名「关阀时刻」，与暂停时长的口径同源）。
-它要经钟偏差换算，所以**设备还没有偏差记录时是空的**——真实设备连上后一个往返内就有
-（网关在 `link.hello` 之后立刻主动 ping），而且偏差跨重启持久化，所以线上不会落在那个
-空窗里。测试里要显式建立偏差，否则测的不是线上的样子。
-
-判据在 `app/modules/sessions/decision.py`（纯函数、逐条单测），机制在
-`app/modules/sessions/scheduler.py`。
-
-**每一次终局都留一行**（`background_task_runs`，见 `background_task_runs`）：日志与落表在同一条路上写
-（`scheduler._record`），所以不会出现"记了日志、没落表"。**三个功能的差异只写在
-`decision.py` 的 `FEATURES` 登记表里**（适用状态、起算点、次数上限、是不是两步），实现里
-没有按功能的分叉——加第四个功能是加一条登记，不是再抄一遍判据。
-
----
+> 第 1 与第 2 条是**浴室 App 的规则**（`DoorStatusConfirmThread` 每秒轮询、四条超时判定、
+> 同一句清零 SQL），不是本项目的算法。它们与 `SESSION_MAX_S` 的关系见
+> `app/modules/doors/service.py` 的常量注释。
 
 ## 注意事项
 
@@ -708,17 +119,21 @@ App 里自己输学号，设备把它带在帧里报上来（`usage_sessions.cer
 - **五种段长来源强度不同**，统计必须分开看。
 - **截断过的段（`capped`）不等于"真的洗了那么久"**。
 - **结束原因不可判**，别写"这是超时释放/主动出门"。
-- **`CREATE TABLE IF NOT EXISTS` 意味着已存在的库不会跟着 DDL 变**——改 DDL 要重建库（开发阶段的取向，见 `CONTRIBUTING.md` 的「服务端开发」）。若本地库报"没有某一列"，那是它落后了，删了重建。
+- **`CREATE TABLE IF NOT EXISTS` 意味着已存在的库不会跟着 DDL 变**——改 DDL 要重建库
+  （开发阶段的取向，见 `CONTRIBUTING.md` 的「服务端开发」）。若本地库报"没有某一列"，
+  那是它落后了，删了重建。
 
 ### 接口
 
 - 推送是尽力而为（队列满即丢），**现态以 REST 为准**。
 - 命令是**同步**的：服务端等到设备答复或超时（`assign_timeout_s` / `settle_timeout_s` = 60 秒；`config_ack_timeout_s` = 15 秒）。
-- 设备声明的能力集决定能下发什么：**声明了、但不含这个动作**就拒发，而不是等它回 unknown_action；**空能力集不据此拦截**（那表示还没升级过的老设备，拦了会把在网设备锁死——见 `sessions/service.py` 里那一处的说明）。
+- 设备声明的能力集决定能下发什么：**声明了、但不含这个动作**就拒发，而不是等它回 unknown_action；**空能力集不据此拦截**（那表示还没升级过的老设备，拦了会把在网设备锁死——见 `app/modules/sessions/service.py` 里那一处的说明）。
 - 同通道的命令排队执行，**队满才拒**（那说明积压已多，该换个时间再来），与"设备正忙"不是一回事。
 
----
+### 契约
 
-## 术语
+`protocol/schema/*.json` 是协议的唯一源（含中文 `description`）。Kotlin 与 JavaScript 都不能
+import Python，所以另两端拿到的是**生成产物**，由 `server/tools/sync_contracts.py` 生成、
+`test_contract_sync.py` 断言逐字节相同。**改契约就是改 schema 里的源**，不要手改生成物。
 
-唯一正名与弃用词在 [`docs/glossary.md`](glossary.md)。**本文用它的词，不另立一份**。
+`/stream` 的消息类型唯一出处是 `app/core/events.py`，`server/web/core/contract.js` 由同一脚本生成。

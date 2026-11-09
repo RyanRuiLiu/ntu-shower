@@ -48,7 +48,7 @@ cp .env.example .env
 .venv/Scripts/uvicorn app.main:app --reload --port 8000
 ```
 
-`server/.env` 只保存本地配置；生产 `.env` 由 Compose 的 `env_file` 注入，不进入仓库。本地开发库可以删除重建；生产库不得删除重建，数据变更按 `docs/runbook.md` 的「配置与数据变更」执行。
+`server/.env` 只保存本地配置；生产 `.env` 由 Compose 的 `env_file` 注入，不进入仓库。本地开发库可以删除重建；生产库不得删除重建，数据变更按 `docs/runbook.md` 的「表结构变更的落地」执行。
 
 ## 设备端开发
 
@@ -102,6 +102,8 @@ cd android
 - 覆盖率与测试数量由 CI 输出；文档不写死。
 - Markdown 格式（标题、链接、代码围栏、表格）由 markdownlint 执行，配置见 `.markdownlint.json`。
 - 任何命令超过 10 秒，先判断是否在等待网络、设备或未结束的事件，不得用增加等待时间掩盖。
+
+测试入口：服务端 `server/tests/`（pytest），设备端 `android/app/src/test/`（JUnit）。每个用例自建数据并清理，不依赖其他用例的残留状态；不得用 `sleep` 等待，异步等待使用事件或受控时钟。
 
 ## 分支与提交
 
@@ -178,7 +180,7 @@ cd android
 1. 以新读者身份从 `README.md` 开始，按快速开始执行。
 2. 以开发者身份从 `CONTRIBUTING.md` 开始，完成环境准备、修改、测试与提交。
 3. 以运维责任人身份从 `docs/runbook.md` 开始，完成部署、验证与回滚。
-4. 以消费方身份从 `docs/reference.md` 与 `protocol/schema/` 开始，完成接口对接。
+4. 以消费方身份从 `protocol/schema/` 与 `/openapi.json` 开始，完成接口对接。
 5. 记录每个卡点：缺失步骤、错误命令、失效链接、无法理解的术语。
 
 ### 修复与复验
@@ -198,7 +200,7 @@ cd android
 | S3 | 歧义、风格不一致、缺少示例、文案不清、次要功能错误、可绕过的界面问题 | 术语不统一、段落过长 | 当前变更修复或排期 |
 | S4 | 文字、样式、体验问题或个人偏好，未被标准覆盖 | 同义但等价的命名 | 不阻塞 |
 
-本表同时用于缺陷与审阅发现的严重级别；缺陷处置见 `docs/testing.md` 的「缺陷管理」。
+本表同时用于缺陷与审阅发现的严重级别。处置：S1 停止发布，修复后重新验证；S2 发布前必须修复；S3 当前或下一迭代修复；S4 排期。
 
 ### 放行
 
@@ -254,10 +256,9 @@ cd android
 | 项目入口与导航 | `README.md` |
 | 开发流程与质量门命令 | `CONTRIBUTING.md` |
 | 系统结构与时间轴定义 | `docs/architecture.md` |
-| 数据模型、字段与接口索引 | `docs/reference.md` |
+| 状态派生规则与取数口径 | `docs/reference.md` |
 | 部署、回滚、备份与故障处置 | `docs/runbook.md` |
 | 资产、威胁模型与安全控制 | `docs/security.md` |
-| 测试策略与证据 | `docs/testing.md` |
 | 决策理由与后果 | `docs/adr/` |
 | 发布历史 | `CHANGELOG.md` |
 

@@ -66,10 +66,9 @@ cp gradle.properties.example gradle.properties
 | [`AGENTS.md`](AGENTS.md) | AI 协作者的阅读顺序与停止条件 |
 | [`CHANGELOG.md`](CHANGELOG.md) | 发布历史与用户可见变更 |
 | [`docs/architecture.md`](docs/architecture.md) | 系统边界、组件、数据流、部署拓扑与时间轴定义 |
-| [`docs/reference.md`](docs/reference.md) | 数据模型、字段语义、状态迁移、接口索引与取数口径 |
+| [`docs/reference.md`](docs/reference.md) | 状态派生规则、易混字段对照、取数口径与不变量 |
 | [`docs/runbook.md`](docs/runbook.md) | 部署、回滚、备份、恢复、故障处置与日常运维 |
 | [`docs/security.md`](docs/security.md) | 资产、数据分级、信任边界、安全控制与事件响应 |
-| [`docs/testing.md`](docs/testing.md) | 测试策略、层级、环境、数据、覆盖率政策与证据 |
 | [`docs/adr/`](docs/adr/) | 约束代码的决策、取舍与后果 |
 
 接口契约以 `protocol/schema/` 与代码路由为准；文档只做索引，不复制字段表。

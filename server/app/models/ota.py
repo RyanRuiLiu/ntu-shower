@@ -23,7 +23,10 @@ class OtaRelease(Base):
     version: Mapped[str] = mapped_column(String(32), unique=True)
     version_code: Mapped[int] = mapped_column(Integer)
     sha256: Mapped[str] = mapped_column(String(64))
+    #: 随 `ota.upgrade_available` 一起下发的布尔标记。**设备端当前不读它**（`android/` 里
+    #: 搜不到该字段），是预留位——不要按名称推断行为。
     mandatory: Mapped[bool] = mapped_column(Boolean, default=False)
+    #: 调试发布：无视版本号推送，**但已安装确认过即不再推**。
     force: Mapped[bool] = mapped_column(Boolean, default=False)
     #: 目标选择：`all` 或具体设备白名单
     target: Mapped[str] = mapped_column(String(32), default="all")

@@ -25,6 +25,8 @@ class DeviceConfig(Base):
     #: 设备文本业务键留底：覆盖的历史不因设备除档而失联
     device_key: Mapped[str] = mapped_column(String(64), default="", unique=True)
     revision: Mapped[int] = mapped_column(Integer)
+    #: **存的是与默认值的差异，空对象即全部沿用默认**。存完整配置会固化当时的默认值，
+    #: 新增键永远下不下去。生效值每次现算：默认 ← 全局 ← 设备。
     config: Mapped[dict[str, Any]] = mapped_column(JSON)
     updated_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow, onupdate=utcnow)
 
