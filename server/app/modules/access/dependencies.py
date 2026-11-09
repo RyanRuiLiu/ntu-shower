@@ -60,14 +60,11 @@ def optional_identity(
     session: Session = Depends(get_db),
     account: dict[str, Any] | None = Depends(current_user),
 ) -> IdentityRecord | None:
-    """会话 Cookie 优先，其次 Bearer 凭据，再次兼容期 X-Identity 头；都没有即匿名。
+    """会话 Cookie 优先，其次 Bearer 凭据；都没有即匿名。
 
     Bearer 凭据只比对摘要，明文不落库、不进日志。各通道最终都产出同一个
-    `IdentityRecord`，守卫逻辑不分叉。
-
-    兼容期 X-Identity 分支为迁移过渡：旧调用方（网页端、外部脚本）仍发自定
-    `X-Identity` 头，按头值查主体。该头明文可伪造，待网页端认证页与各调用方
-    切换至 Bearer/会话后移除。
+    `IdentityRecord`，守卫逻辑不分叉。自定 `X-Identity` 头不是认证通道
+    （决策 2026-11-07-2）：兼容期分支已随网页端改走会话登录而移除。
     """
     if account is not None:
         return _from_account(account)
@@ -80,12 +77,6 @@ def optional_identity(
         if caller is None:
             raise ApiProblemError(UNKNOWN_IDENTITY)
         return caller
-    # 兼容期过渡（见 docstring）：头值即主体名，无效则退化为匿名，与历史行为一致。
-    legacy = request.headers.get("x-identity")
-    if legacy:
-        caller = service.resolve_identity(session, legacy.strip())
-        if caller is not None:
-            return caller
     return None
 
 

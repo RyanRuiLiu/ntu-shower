@@ -411,19 +411,13 @@ def test_resolve_unknown_identity_is_none(fresh_db: str) -> None:
     assert _find("nobody") is None
 
 
-def test_legacy_x_identity_header_resolves_to_principal(client: TestClient, admin_headers: dict[str, str]) -> None:
-    """兼容期：旧调用方自发 `X-Identity` 头（值即主体名）应被当作该主体身份。
+def test_x_identity_header_is_ignored(client: TestClient, admin_headers: dict[str, str]) -> None:
+    """自定 `X-Identity` 头不是认证通道（决策 2026-11-07-2）：带头访问管理端点等同匿名 401。
 
-    这是切换过渡分支——网页端与外部脚本在切换到 Bearer/会话前仍用此头。
+    网页管理台已改走会话登录（web/core/api.js 的 login），兼容期分支已随其上生产
+    验证后移除；此测试钉住"头不复活"。
     """
     r = client.get("/api/v1/identities", headers={"X-Identity": ADMIN_IDENTITY})
-
-    assert r.status_code == 200
-
-
-def test_legacy_x_identity_unknown_value_is_anonymous(client: TestClient) -> None:
-    """X-Identity 值不匹配任何主体时退化为匿名：管理端点仍 401。"""
-    r = client.get("/api/v1/identities", headers={"X-Identity": "no-such-identity"})
 
     assert r.status_code == 401
     assert r.json()["type"].endswith("/problems/unauthenticated")
