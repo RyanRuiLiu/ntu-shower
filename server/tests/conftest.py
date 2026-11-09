@@ -6,9 +6,14 @@ _reset_process_singletons 与 _isolate_default_db 对每个用例自动生效—
 没声明 fresh_db 的用例也碰不到仓库里的真实库与发布目录。
 """
 
+import os
 import shutil
 from collections.abc import Iterator
 from pathlib import Path
+
+# SESSION_SECRET 必须在 app 模块（含 config.Settings 实例化）导入之前就位：
+# create_app 在密钥缺失时拒绝启动，这是生产语义，测试环境同样要给出密钥。
+os.environ.setdefault("SESSION_SECRET", "test-session-secret")
 
 import pytest
 from fastapi.testclient import TestClient

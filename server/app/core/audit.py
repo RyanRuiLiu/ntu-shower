@@ -91,13 +91,13 @@ def _actor_of(request: Request) -> tuple[str, str]:
     """判定调用方种类，不记录凭据明文。
 
     凭据明文进审计等于把密钥又抄了一份；这里只记种类与可关联的标识：
-    会话 Cookie 记用户名，Bearer 凭据记摘要前 12 位（足以对账、不足以冒用）。
+    会话记用户名（签名校验在 SessionMiddleware 已完成），Bearer 凭据记摘要
+    前 12 位（足以对账、不足以冒用）。
     """
-    from app.auth import sessions
     from app.auth.tokens import extract_bearer, hash_token
 
-    username = sessions.verify(request.cookies.get(sessions.COOKIE_NAME))
-    if username:
+    username = request.session.get("u")
+    if isinstance(username, str) and username:
         return "session", username
     token = extract_bearer(request.headers.get("authorization"))
     if token:

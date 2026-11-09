@@ -1,21 +1,24 @@
 """认证端点与设备接入令牌。
 
-前者验证签名 Cookie 的完整生命周期，后者验证「开启校验后，不带令牌或令牌绑定设备
-与 hello 自报不一致时，连接在握手阶段就被拒」。
+前者验证签名 Cookie 的完整生命周期（签发、校验、篡改拒绝、过期拒绝、注销），
+后者验证「开启校验后，不带令牌或令牌绑定设备与 hello 自报不一致时，连接在握手
+阶段就被拒」。
 """
 
 from __future__ import annotations
 
+import base64
 import json
+import time
 
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 from tests import frames
 
-from app.auth import sessions
 from app.core.config import settings
 from app.db.session import Database
+from app.main import SESSION_COOKIE_NAME
 from app.persistence import device_credentials, devices, principals
 
 USER = "admin-web"
@@ -43,7 +46,7 @@ def test_login_sets_cookie_and_me_returns_account(client: TestClient, account: N
     resp = client.post("/api/v1/auth/login", json={"username": USER, "password": PASSWORD})
     assert resp.status_code == 200
     assert resp.json()["capabilities"] == ["admin", "session"]
-    assert sessions.COOKIE_NAME in resp.cookies
+    assert SESSION_COOKIE_NAME in resp.cookies
 
     me = client.get("/api/v1/auth/me")
     assert me.status_code == 200
@@ -58,13 +61,30 @@ def test_logout_drops_the_session(client: TestClient, account: None) -> None:
 
 
 def test_tampered_cookie_is_rejected(client: TestClient, account: None) -> None:
-    token = sessions.issue(USER) + "tampered"
-    client.cookies.set(sessions.COOKIE_NAME, token)
+    resp = client.post("/api/v1/auth/login", json={"username": USER, "password": PASSWORD})
+    token = resp.cookies[SESSION_COOKIE_NAME] + "tampered"
+    client.cookies.set(SESSION_COOKIE_NAME, token)
     assert client.get("/api/v1/auth/me").status_code == 401
 
 
-def test_expired_token_is_rejected(client: TestClient, account: None) -> None:
-    client.cookies.set(sessions.COOKIE_NAME, sessions.issue(USER, ttl_seconds=-1))
+def test_expired_token_is_rejected(client: TestClient, account: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """签出一枚真实签名但时间戳早于 max_age 的 Cookie。
+
+    用库里同一把密钥（itsdangerous TimestampSigner，与 SessionMiddleware 同源）签，
+    只把取当前时刻的钟拨回去——签发时刻早于有效期，unsign 时按 max_age 拒收。
+    """
+    from itsdangerous.timed import TimestampSigner
+
+    monkeypatch.setattr(
+        "itsdangerous.timed.TimestampSigner.get_timestamp",
+        lambda _self: int(time.time()) - settings.session_ttl_seconds - 60,
+    )
+    payload = base64.b64encode(json.dumps({"u": USER}).encode("utf-8"))
+    # sign(bytes) 返回 bytes，与 SessionMiddleware 落 Cookie 前的 decode 一致
+    stale = TimestampSigner(settings.session_secret).sign(payload).decode("ascii")
+    monkeypatch.undo()
+
+    client.cookies.set(SESSION_COOKIE_NAME, stale)
     assert client.get("/api/v1/auth/me").status_code == 401
 
 

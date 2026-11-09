@@ -48,9 +48,14 @@ class Settings(BaseSettings):
     config_ack_timeout_s: float = 15.0  # 等待设备 config.ack 的时限
 
     # ── 管理台会话 ──
-    # 会话签名密钥。生产必须由环境变量注入；留空时进程内随机生成，
-    # 后果只是重启后会话失效，不会把默认密钥带进线上。
+    # 会话签名密钥（Starlette SessionMiddleware / itsdangerous 的 secret_key）。
+    # 必须由环境变量注入；留空时 create_app 拒绝启动——签名密钥是会话安全性的全部，
+    # 进程内临时生成一份会随重启作废（多 worker 时各签各的，互相验不过），只会把
+    # 「没配密钥」这个错误从启动时拖到第一次登录之后。这与 Flask（secret_key 未设
+    # 即拒绝会话）、Django（SECRET_KEY 缺失即 ImproperlyConfigured）同一语义。
     session_secret: str = ""
+    # 会话有效期（秒），即 SessionMiddleware 的 max_age：到期由浏览器弃 Cookie，
+    # 签名端在 unsign 时同样拒绝超龄令牌。
     session_ttl_seconds: int = 12 * 60 * 60
     # 设备接入令牌校验默认强制开启。只在测试夹具里显式关闭——生产不留
     # 「不带凭据也能连」的旁路，这是安全默认值而不是长期双轨。

@@ -32,6 +32,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
+from starlette.middleware.sessions import SessionMiddleware
 from typing_extensions import TypedDict
 
 from .auth.routes import router as auth_router
@@ -70,6 +71,22 @@ from .persistence import audit as command_audit_store
 
 #: 要求浏览器每次回来验证的前端资源后缀。
 STATIC_SUFFIXES = (".html", ".js", ".css")
+
+#: 管理台会话 Cookie 名。不取库默认的通用名 "session"：同一域名的其他应用若也用
+#: 通用名（路径同为 /），会互相覆盖对方的 Cookie。
+SESSION_COOKIE_NAME = "ntu_session"
+
+
+def _cookie_secure() -> bool:
+    """配了 https 对外基址才置 Secure；本地与测试走 http，Cookie 仍要能用。"""
+    return settings.public_base_url.startswith("https://")
+
+
+#: SESSION_SECRET 缺失时的启动错误——错误消息只在这里出现一次。
+ERR_SESSION_SECRET = (
+    "SESSION_SECRET 未配置：会话签名密钥不能为空。"
+    '在 .env / 环境变量里注入一枚随机值（如 `python -c "import secrets; print(secrets.token_urlsafe(32))"`）。'
+)
 
 
 class HealthStatus(TypedDict):
@@ -169,6 +186,20 @@ def create_app() -> FastAPI:
         elif request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
         return response
+
+    # 会话走 Starlette SessionMiddleware（签名基于 itsdangerous）：签发、校验、过期与
+    # 注销都是库的职责，端点只读写 request.session。必须最后注册——add_middleware
+    # 越晚加越靠外，审计中间件要读到 request.session 就得在它内侧。
+    if not settings.session_secret:
+        raise RuntimeError(ERR_SESSION_SECRET)
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=settings.session_secret,
+        session_cookie=SESSION_COOKIE_NAME,
+        max_age=settings.session_ttl_seconds,
+        same_site="lax",
+        https_only=_cookie_secure(),
+    )
 
     return app
 
