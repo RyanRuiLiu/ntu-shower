@@ -123,3 +123,15 @@ name = "模型层不依赖业务模块"
 type = "forbidden"
 source_modules = ["app.models"]
 forbidden_modules = ["app.modules"]
+
+[[tool.importlinter.contracts]]
+name = "持久化层不依赖业务模块的 API 契约"
+type = "forbidden"
+source_modules = ["app.persistence"]
+forbidden_modules = [
+    "app.modules.audit.schemas",
+    "app.modules.devices.schemas",
+    "app.modules.doors.schemas",
+    "app.modules.ota.schemas",
+    "app.modules.access.schemas",
+]

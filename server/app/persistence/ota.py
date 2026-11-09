@@ -13,11 +13,11 @@ from sqlalchemy.orm import Session
 
 from app.core.protocol import JsonObject
 
+from ..contracts import ReleaseRecord
 from ..core.clock import format_rfc3339
 from ..db.base import utcnow
 from ..models.identity import Device
 from ..models.ota import OtaRelease, OtaReleaseInstall
-from ..modules.ota.schemas import ReleaseRecord
 
 
 def _device(session: Session, device_id: str) -> Device | None:

@@ -7,17 +7,7 @@
 
 from typing_extensions import TypedDict
 
-
-class ReleaseRecord(TypedDict):
-    """一条已注册的发布。"""
-
-    version: str
-    version_code: int
-    sha256: str
-    mandatory: bool
-    force: bool
-    target: str
-    created_at: str
+from app.contracts import ReleaseRecord as ReleaseRecord
 
 
 class OtaManifest(TypedDict, total=False):

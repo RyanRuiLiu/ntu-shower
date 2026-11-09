@@ -13,6 +13,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..contracts import BackgroundTaskRun, CommandAuditRecord
 from ..core import outcomes, reason_codes
 from ..core.clock import format_rfc3339
 from ..db.base import utcnow
@@ -20,7 +21,6 @@ from ..models.enums import ActorKind, BackgroundOutcome, CommandStatus
 from ..models.identity import Device
 from ..models.ops import ApiCall, CommandAudit
 from ..models.ops import BackgroundTaskRun as BackgroundTaskRunRow
-from ..modules.audit.schemas import BackgroundTaskRun, CommandAuditRecord
 
 
 def _device_pk(session: Session, device_id: str) -> int | None:

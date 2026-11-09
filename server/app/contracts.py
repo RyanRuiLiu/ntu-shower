@@ -1,0 +1,175 @@
+"""共享视图契约：持久化层与业务模块共同消费的数据形状。
+
+这些 TypedDict 只描述"一行记录有哪些字段"，不含业务规则。它们不属于任何单个
+业务模块：持久化层按这个形状返回，业务模块按这个形状消费。放在共享层，两边的
+导入方向都指向这里，避免持久化层反向依赖业务模块的 API 契约。
+"""
+
+from __future__ import annotations
+
+from typing_extensions import TypedDict
+
+from .models.enums import DoorState, IdentityKind
+
+
+class CommandAuditRecord(TypedDict):
+    """一行命令审计：下发、参数与设备回报（与 /audit/calls 以 trace_id 关联）。
+
+    `finished_at`/`status`/`reason_code`/`terminal_message`/`data` 为空（None）
+    表示命令尚未收尾——它还在等设备回报或已等待超时。
+    """
+
+    command_id: str
+    device_id: str
+    action: str
+    params: str | None
+    created_at: str
+    finished_at: str | None
+    status: str | None
+    reason_code: str | None
+    terminal_message: str | None
+    trace_id: str | None
+    data: str | None
+
+
+class BackgroundTaskRun(TypedDict):
+    """一行后台任务记录：配置好的任务自动替谁做了什么、为什么。
+
+    `reason` 是没动手时的中文原因（"不在名单里"这类）；`threshold_s` 是当时生效的
+    阈值——存进这一行，是为了事后不必去找当时的配置就能看懂"为什么是这一刻"。
+    `occurred_at` 是服务端轴：与 `command_audit.created_at` 对照即知这次动作发了哪条命令。
+    """
+
+    id: int
+    occurred_at: str
+    device_id: str
+    door_no: int
+    session_id: int | None
+    cert_no: str
+    feature: str
+    action: str | None
+    outcome: str
+    reason: str | None
+    threshold_s: int | None
+
+
+class DeviceRecord(TypedDict):
+    """一台设备的档案。
+
+    除 online 外各字段对应 repository 的 _DEVICE_COLUMNS；trusted 的 0/1 到布尔的
+    转换在 repository 完成。online 不在档案表里，由 devices.service 从内存连接表
+    填入：只有经过 service 的记录才带正确的值。
+    """
+
+    device_id: str
+    name: str
+    trusted: bool
+    app_version: str
+    version_code: int
+    os_version: str
+    capabilities: list[str]
+    online: bool
+    last_seen_at: str
+    last_ip: str
+    booted_at: str
+    """开机时刻（RFC 3339）：由设备上报的已运行秒数与服务端收到它的时刻反推。
+
+    存时刻而不存秒数：秒数一离开采样瞬间就开始过期，开机时刻是不变的事实；
+    前端用"现在减它"得到已运行时长。
+    """
+
+    clock_skew_s: float
+    """设备钟与服务端的偏差（秒）。由设备回 pong 时带上的墙上时刻算出（见 core/device_clock）。
+
+    它用来把帧里的 `open_time` / `in_time` 平移到服务端时间轴——那两个字段是"这次
+    会话从什么时候开始"的唯一线索。**绝对值不可信不代表它没用**：一次会话压在 20 分钟
+    以内，而 20 分钟里的漂移只有 0.03 秒，窗口内偏差是常量。
+    """
+
+    sort_order: int
+    """展示顺序：设备下拉、管理台设备表、统计接口全部按它排。管理员在设备页调整，
+    新设备排到末尾；同序回落到名字的自然排序（见 repository.list_all）。"""
+
+
+class DoorView(TypedDict):
+    """一个喷头的现态：door_live 全列 + 上次使用。
+
+    只回答**门域**的问题（这扇门什么状态、上次谁用的）；设备域的事实（在不在线、
+    叫什么、能对它做什么）由设备资源回答：GET /devices 与 device.update 推送。
+    同一事实只出现在一个接口里，客户端不用调和两份数据源。
+
+    last_used_* 只在喷头没有进行中的会话时才有展示意义；判据是**有没有过段**——"分配后
+    直接结算"那种从没出过水的会话说不出任何一段。
+
+    **三个时间字段都在服务端轴上**。为什么对外不能出现设备轴，见 `DECISIONS.md`
+    的「两条时间轴」——设备报的原话只留在原始帧里。
+    """
+
+    device_id: str
+    door_no: int
+    state: DoorState
+    card_no: int
+    cert_no: str
+    acc_no: str
+
+    open_time: str
+    """分配时刻（服务端轴）。空闲时为空串。"""
+
+    in_time: str
+    """当前这一段的开阀时刻（服务端轴）。
+
+    **暂停后仍有值**：设备在关阀那一刻就把 `inTime` 清空了，而这一段的开阀时刻由服务端
+    从段表回答（见 `doors/service` 的 `_apply_snapshot`）。它因此不能用来说"此刻在不在
+    出水"，那是 `state` 的事。等待开阀时为空——那时本会话还没有过任何一段。
+    """
+
+    close_time: str
+    """当前这一段的关阀时刻（服务端轴）。只有暂停时有值。"""
+
+    bath_time_s: int
+    """设备累计的出水秒数。它是**时长不是时刻**，不在任何一条时间轴上。"""
+
+    status_raw: int
+    reported_at: str
+
+    last_used_at: str
+    """上次开阀时刻（RFC 3339）。从未被真正使用过时为空串。"""
+
+    last_used_s: int
+    """那次会话的出水秒数；从未被真正使用过时为 0。"""
+
+    last_used_cert: str
+    """那次是谁用的（学号）。从未被真正使用过时为空串。"""
+
+
+class ReleaseRecord(TypedDict):
+    """一条已注册的发布。"""
+
+    version: str
+    version_code: int
+    sha256: str
+    mandatory: bool
+    force: bool
+    target: str
+    created_at: str
+
+
+class IdentityRecord(TypedDict):
+    """一条标识记录，登记、签发、名单、查询自身四处共用同一形状。"""
+
+    identity: str
+    kind: IdentityKind
+    capabilities: list[str]
+    device_scope: list[str]
+    label: str
+    created_at: str
+
+
+__all__: list[str] = [
+    "BackgroundTaskRun",
+    "CommandAuditRecord",
+    "DeviceRecord",
+    "DoorView",
+    "IdentityRecord",
+    "ReleaseRecord",
+]

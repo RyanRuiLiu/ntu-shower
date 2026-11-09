@@ -17,11 +17,11 @@ from datetime import datetime
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from ..contracts import DeviceRecord
 from ..core.clock import format_rfc3339
 from ..models.enums import DeviceLogKind, LinkEvent
 from ..models.identity import Device
 from ..models.ops import DeviceLinkEvent, DeviceLog
-from ..modules.devices.schemas import DeviceRecord
 
 LOG_KEEP = 5
 

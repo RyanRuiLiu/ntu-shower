@@ -8,6 +8,7 @@
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
+from ...contracts import IdentityRecord as IdentityRecord
 from ...models.enums import IdentityKind
 
 
@@ -38,17 +39,6 @@ class IdentityRequest(BaseModel):
         pattern=r"^\S+$",
         description="kind=web 时可选：自创的标识串。留空由服务端生成",
     )
-
-
-class IdentityRecord(TypedDict):
-    """一条标识记录，登记、签发、名单、查询自身四处共用同一形状。"""
-
-    identity: str
-    kind: IdentityKind
-    capabilities: list[str]
-    device_scope: list[str]
-    label: str
-    created_at: str
 
 
 class IdentityIssued(TypedDict):
