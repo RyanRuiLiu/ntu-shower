@@ -67,7 +67,7 @@ jobs:
       - run: pytest -q -n auto --cov=app --cov-report=term-missing
       - name: Markdown lint
         working-directory: .
-        run: npx --yes markdownlint-cli2@0.20.0 "*.md" "docs/*.md" "docs/adr/*.md" "deploy/*.md" --config .markdownlint.json
+        run: npx --yes markdownlint-cli2@0.20.0 "*.md" "docs/*.md" "docs/adr/*.md" "deploy/*.md" ".github/*.md" --config .markdownlint.json
       - name: Stylelint（网页 CSS 令牌纪律，规则在 web/.stylelintrc.json）
         working-directory: .
         run: npx --yes stylelint@16 "server/web/style/*.css" --config server/web/.stylelintrc.json

@@ -51,3 +51,28 @@ rules:
         - "*.json"
         - ".githooks/*"
     pattern-regex: '(STANDARDS\.md|docs/DECISIONS\.md|docs/glossary\.md|docs/testing\.md)'
+
+  - id: silent-except
+    languages: [python]
+    severity: ERROR
+    message: |
+      except 里只放 pass 是「兜底」的主形态：故障被静默吞掉，主通路不完整的事实不再暴露，
+      出问题时查无可查。要么让异常传播，要么捕获后处理（记录、按原因码应答），并为这次
+      捕获给出依据。确属「故意忽略、范围明确」的场景用 contextlib.suppress 显式写——
+      它是 Python 官方语境里的表达。政策出处：AGENTS.md「不兜底」。
+    pattern-either:
+      - pattern: |
+          try:
+              ...
+          except:
+              pass
+      - pattern: |
+          try:
+              ...
+          except $E:
+              pass
+      - pattern: |
+          try:
+              ...
+          except $E as $E2:
+              pass

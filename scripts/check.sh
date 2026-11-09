@@ -18,4 +18,4 @@ cd "$(dirname "$0")/../server"
 # 网页 CSS 的令牌纪律由 stylelint 执行（官方规则 declaration-property-value-disallowed-list，
 # 配置在 web/.stylelintrc.json；tokens.css 经 overrides 豁免）——与 CI 的 stylelint step 一致。
 ( cd .. && npx --yes stylelint@16 "server/web/style/*.css" --config server/web/.stylelintrc.json )
-( cd .. && npx --yes markdownlint-cli2@0.20.0 "*.md" "docs/*.md" "docs/adr/*.md" "deploy/*.md" --config .markdownlint.json )
+( cd .. && npx --yes markdownlint-cli2@0.20.0 "*.md" "docs/*.md" "docs/adr/*.md" "deploy/*.md" ".github/*.md" --config .markdownlint.json )

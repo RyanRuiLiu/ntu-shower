@@ -86,9 +86,9 @@ DATABASE_URL=sqlite:///<空库路径> alembic revision --autogenerate -m "..."
 alembic upgrade head && alembic check
 ```
 
-生产兜底（migrate 失败、业务容器未启动时）：`docker logs ntu-shower-migrate-1` 看失败
+生产排障（migrate 失败、业务容器未启动时）：`docker logs ntu-shower-migrate-1` 看失败
 原因；修复后重新 `NTU_SHOWER_TAG=<tag> docker compose up -d`。回滚 = 换回旧镜像 tag +
-恢复备份库（见「备份与恢复」），迁移本身不做降级脚本——零兼容策略下回滚恢复备份。
+恢复备份库（见「备份与恢复」）；迁移不设旧库兼容脚本——零兼容策略下回滚即恢复备份。
 
 **回滚**（部署后发现问题时，回滚到上一个镜像 tag——一条命令，秒级）：
 
