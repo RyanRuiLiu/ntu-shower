@@ -482,14 +482,14 @@ function onIdentityButton() {
 }
 
 function askForLogin() {
-  report('loginResult', '', 'info')  // 清空上一条错误
+  clearLoginResult()
   $('loginDialog').showModal()
 }
 
 function submitLogin(event) {
   event.preventDefault()
   const form = event.target
-  report('loginResult', '', 'info')  // 清空上一条
+  clearLoginResult()
   api
     .login(form.username.value.trim(), form.password.value)
     .then(() => {
@@ -502,9 +502,20 @@ function submitLogin(event) {
     })
     .catch((error) => {
       // showModal 的对话框在浏览器顶层（top layer），高于一切 z-index——全局
-      // toast 会被它与 backdrop 盖住，错误必须就地显示在对话框里（统一 .result.err）
-      report('loginResult', problemText(error), 'err')
+      // toast 会被它与 backdrop 盖住（灰膜压字）。所以错误只写对话框内的结果区
+      // （统一 .result.err 样式），不再另弹 toast——不重复、不出现被盖住的副本。
+      const box = $('loginResult')
+      box.className = 'result err'
+      box.textContent = problemText(error)
+      box.hidden = false
     })
+}
+
+/** 清空对话框内的错误行（文本与显示一并复位）。 */
+function clearLoginResult() {
+  const box = $('loginResult')
+  box.textContent = ''
+  box.hidden = true
 }
 
 /**
