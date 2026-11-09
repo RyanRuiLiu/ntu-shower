@@ -8,4 +8,4 @@ cd "$(dirname "$0")/../server"
 .venv/Scripts/python.exe -m mypy app --strict
 ./.venv/Scripts/lint-imports.exe
 .venv/Scripts/semgrep.exe scan --config p/python --config p/security-audit app --error --quiet
-.venv/Scripts/python.exe -m pytest -q -n 2 --cov=app --cov-report=term-missing
+.venv/Scripts/python.exe -m pytest -q --cov=app --cov-report=term-missing

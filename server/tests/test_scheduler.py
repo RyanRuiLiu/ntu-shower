@@ -182,13 +182,16 @@ def _prepare(
 
 
 def test_start_and_stop_are_idempotent() -> None:
-    scheduler.start()
-    scheduler.start()
-    assert scheduler._running is True
+    async def body() -> None:
+        scheduler.start()
+        scheduler.start()
+        assert scheduler._running is True
 
-    scheduler.stop()
-    scheduler.stop()
-    assert scheduler._running is False
+        await scheduler.stop()
+        await scheduler.stop()
+        assert scheduler._running is False
+
+    asyncio.run(body())
 
 
 def test_hooks_do_nothing_before_start() -> None:
@@ -697,7 +700,7 @@ def test_stop_cancels_timers_and_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
         assert worker.timers
         assert worker.task is not None
 
-        scheduler.stop()
+        await scheduler.stop()
 
         assert worker.timers == {}
         assert worker.task is None

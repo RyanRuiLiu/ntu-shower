@@ -688,17 +688,21 @@ def start() -> None:
     log_event("INFO", "background-task.started", "后台任务已启动")
 
 
-def stop() -> None:
+async def stop() -> None:
     global _running
     _running = False
+    tasks: list[asyncio.Task[None]] = []
     for worker in _workers.values():
         for planned in worker.timers.values():
             planned.handle.cancel()
         worker.timers.clear()
         if worker.task is not None:
             worker.task.cancel()
+            tasks.append(worker.task)
             worker.task = None
     _workers.clear()
     _pending_assigns.clear()
     _attempted.clear()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
     log_event("INFO", "background-task.stopped", "后台任务已停止")

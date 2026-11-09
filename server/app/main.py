@@ -116,7 +116,7 @@ def create_app() -> FastAPI:
         # 事件驱动型任务保持自己的模型：按设备惰性起 worker，不占统一循环。
         sessions_scheduler.start()
         yield
-        sessions_scheduler.stop()
+        await sessions_scheduler.stop()
         await background.stop()
         _app.state.database.dispose()
 
