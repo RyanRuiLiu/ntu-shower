@@ -29,6 +29,7 @@ from starlette.responses import Response, StreamingResponse
 from typing_extensions import TypedDict
 
 from app.db.base import utcnow
+from app.db.session import session_scope
 
 from .config import settings
 from .logging import log_event, request_id_var, trace_id_var
@@ -228,9 +229,10 @@ def prune(session: Session, retention_days: int) -> int:
     return removed
 
 
-async def prune_once(session: Session) -> None:
+async def prune_once() -> None:
     """清理一轮；生命周期（启动、取消、间隔）由 core/background 统一管理。"""
-    removed = prune(session, settings.audit_retention_days)
+    with session_scope() as session:
+        removed = prune(session, settings.audit_retention_days)
     if removed:
         log_event(
             "INFO",

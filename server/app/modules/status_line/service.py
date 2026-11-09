@@ -34,6 +34,7 @@ from starlette.concurrency import run_in_threadpool
 from app.core import protocol
 from app.core.connections import manager
 from app.core.logging import log_event
+from app.db.session import session_scope
 from app.models.enums import DoorState
 from app.modules.devices import service as devices_service
 from app.modules.doors import service as doors_service
@@ -91,6 +92,17 @@ def _snapshot(session: Session) -> _Snapshot:
     return _Snapshot({"floors": floors}, tuple(recipients))
 
 
+def _snapshot_in_own_session() -> _Snapshot:
+    """线程池里的一轮读库：会话必须在本线程内开、本线程内关。
+
+    ORM Session 不是线程安全的；把事件循环线程上建好的会话交给线程池用
+    （run_in_threadpool(_snapshot, session)）就是两条线程并发使用同一连接，
+    SQLite 直接 access violation。
+    """
+    with session_scope() as session:
+        return _snapshot(session)
+
+
 class _Pusher:
     """一轮推送的全部状态；`tick()` 是「汇总 → 按需推送」的一轮。
 
@@ -104,10 +116,10 @@ class _Pusher:
         self.last_connection: dict[str, int] = {}
         self.last_failure_log = 0.0
 
-    async def tick(self, session: Session) -> None:
+    async def tick(self) -> None:
         loop = asyncio.get_running_loop()
         try:
-            snapshot = await run_in_threadpool(_snapshot, session)
+            snapshot = await run_in_threadpool(_snapshot_in_own_session)
         except Exception as exc:  # noqa: BLE001 —— 一轮读库失败退给统一循环，下一轮重试
             now = loop.time()
             if now - self.last_failure_log >= FAILURE_LOG_INTERVAL_S:
@@ -147,6 +159,6 @@ class _Pusher:
 pusher = _Pusher()
 
 
-async def tick(session: Session) -> None:
-    """统一循环的一轮入口（Background 每轮传入短会话）。"""
-    await pusher.tick(session)
+async def tick() -> None:
+    """统一循环的一轮入口。"""
+    await pusher.tick()

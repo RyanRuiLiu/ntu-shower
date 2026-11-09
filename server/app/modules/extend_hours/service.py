@@ -590,7 +590,7 @@ _reassign_tasks: set[asyncio.Task[None]] = set()
 # ── 入口之二：定时任务 ──────────────────────────────────────────────────────
 
 
-async def tick_once(session: Session) -> None:
+async def tick_once() -> None:
     """扫一遍：该拨的拨，正在延长的续写截止、推分配、看恢复条件。
 
     两类设备分开取：**该拨的**在任何设备上都可能发生（所以遍历全部设备，由 `_maybe_shift`
@@ -598,15 +598,18 @@ async def tick_once(session: Session) -> None:
     离线设备不需要预先筛掉——它上面不会有新会话，"名单里有人占用"自然为假；命令失败时
     也会如实回报。每台延长的设备用**自己的**有效配置推进——时区、拨快幅度、电源计划都是
     设备级的，借用别台的值会把滚动目标拨到另一块表盘上。
+
+    会话在本协程内开、内关（见 core/background 的模块说明）。
     """
-    for record in devices_service.list_devices(session):
-        await _maybe_shift(session, record["device_id"])
-        config = config_store.effective(session, record["device_id"])
-        await _maybe_correct_clock(session, record["device_id"], config)
-    for row in repository.list_shifted(session):
-        shift = _as_shift(row)
-        # 行跟着设备走（外键 CASCADE）：设备除档时这一行随之消失，不会有残行。
-        await _advance(session, shift, config_store.effective(session, shift.device_id))
+    with session_scope() as session:
+        for record in devices_service.list_devices(session):
+            await _maybe_shift(session, record["device_id"])
+            config = config_store.effective(session, record["device_id"])
+            await _maybe_correct_clock(session, record["device_id"], config)
+        for row in repository.list_shifted(session):
+            shift = _as_shift(row)
+            # 行跟着设备走（外键 CASCADE）：设备除档时这一行随之消失，不会有残行。
+            await _advance(session, shift, config_store.effective(session, shift.device_id))
 
 
 async def _advance(session: Session, shift: Shift, config: ConfigValues) -> None:

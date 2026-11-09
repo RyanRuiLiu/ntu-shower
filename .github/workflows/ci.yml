@@ -67,9 +67,10 @@ jobs:
       - name: Project rules
         working-directory: .
         run: semgrep scan --config .semgrep.yml . --error --quiet
-      # 本机默认 6 进程并行（见 pyproject addopts）；CI runner 核数少，显式串行
-      # 保持原有可复现语义，-n 0 覆盖 addopts 里的 -n 6。
-      - run: pytest -q -n 0 --cov=app --cov-report=term-missing
+      # 并行度跟随 runner（addopts 里的 -n 6 在这里被 -n auto 覆盖）。
+      # 此前的 -n 0 串行是拿配置回避 worker 崩溃；根因是后台任务把 ORM Session
+      # 交给线程池跨线程使用（见 app/core/background.py），修复后不再需要。
+      - run: pytest -q -n auto --cov=app --cov-report=term-missing
       - name: Markdown lint
         working-directory: .
         run: npx --yes markdownlint-cli2@0.20.0 "*.md" "docs/*.md" "docs/adr/*.md" "deploy/*.md" --config .markdownlint.json

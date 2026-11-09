@@ -34,6 +34,11 @@
 
 ### Fixed
 
+- 修复后台任务跨线程使用 ORM Session 导致的 SQLite access violation：楼层状态汇总
+  在线程池里读库，但会话建在事件循环线程上，两条线程并发使用同一连接，进程直接
+  段错误——pytest 并行时的「worker crashed」即此。会话边界改归任务自己：会话在
+  哪个线程里生就在哪个线程里关（`app/core/background.py`）；CI 的 pytest 不再用
+  `-n 0` 串行规避。
 - 修复镜像运行时工作目录：`uvicorn app.main:app` 在容器内无法解析 `app` 包
   （systemd 时代的 `WorkingDirectory` 依赖被带进了 Dockerfile），CI 只构建不运行故未暴露；
   同批把 ffmpeg/ffprobe 纳入镜像（语音素材转码依赖，slim 基镜像不带）。

@@ -983,14 +983,8 @@ def test_rolling_rearm_is_throttled_within_the_interval(fresh_db: str, monkeypat
 
 
 def _tick() -> None:
-    """统一循环一轮：后台任务的会话边界在这里显式打开。"""
-    from app.db.session import session_scope
-
-    async def body() -> None:
-        with session_scope() as session:
-            await extend_hours.tick_once(session)
-
-    asyncio.run(body())
+    """统一循环一轮；会话边界已收进 tick_once 本体（与生产一致）。"""
+    asyncio.run(extend_hours.tick_once())
 
 
 def _reassign_with_db(shift: "extend_hours.Shift", students: dict[str, str]) -> None:
