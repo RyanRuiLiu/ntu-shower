@@ -18,7 +18,7 @@
 前端是 `server/web/` 下的零构建静态文件，由本进程挂在根路径
 （`/api/v1`、`/ota`、`/gateway` 与 `/healthz` 的路由注册在前，不会被静态文件抢走）。
 用户面接口无需凭据即可查询状态，操作类需 `Authorization: Bearer` 凭据（或管理台
-签名会话 Cookie；迁移期还兼容旧的 `X-Identity` 头）+ 能力位，见 modules/access 的守卫。
+签名会话 Cookie）+ 能力位，见 modules/access 的守卫。
 
 ## 已定稿的传输层事实（2026-09 真机实测）
 
@@ -193,7 +193,7 @@ bathTime             各段累加，每次关阀时 += |inTime − now|
 离线时长计入并截断到上限，后者完全不计入。
 
 设备在线但两次上报之间隔了较长时间（漏帧、读库失败）与真正的离线是两回事，判据是网关的
-连接事件（`device_link_event`），而不是帧间隔。
+连接事件（`device_link_events` 表），而不是帧间隔。
 
 ### 消费者的契约
 

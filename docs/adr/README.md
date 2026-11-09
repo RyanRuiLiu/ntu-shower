@@ -11,7 +11,7 @@
 | [ADR-0005](0005-architecture.md) | 架构与模块 | Accepted |
 | [ADR-0006](0006-protocol-contract.md) | 协议与契约 | Accepted |
 | [ADR-0007](0007-device.md) | 设备端 | Accepted |
-| [ADR-0008](0008-identity.md) | 身份与能力 | Accepted |
+| [ADR-0008](0008-identity.md) | 身份与能力 | Superseded（被 ADR-0019 取代） |
 | [ADR-0009](0009-remote-config.md) | 远程配置 | Accepted |
 | [ADR-0010](0010-screen-hint.md) | 屏幕提示的控制边界 | Accepted |
 | [ADR-0011](0011-floor-status.md) | 楼层状态行的控制边界 | Accepted |
