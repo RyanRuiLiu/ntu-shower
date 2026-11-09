@@ -31,7 +31,7 @@ curl -s -H "Authorization: Bearer <admin凭据>" "http://127.0.0.1:8110/api/v1/a
 
 # ③ 设备端命令痕迹（与 ② 同一 command_id 呼应）
 #    经 ops 页设备面板的命令执行，或 bridge shell：
-tail -n 50 /sdcard/ntu-shower/audit.log      # JSONL：受理/重复/结果/网关生命周期
+tail -n 50 /sdcard/ntu-shower/device.log     # JSONL：受理/重复/结果/网关生命周期
 tail -n 50 /sdcard/ntu-shower/automation.log # 自动化性能采样
 tail -n 50 /sdcard/ntu-shower/crash.log      # 崩溃现场
 
@@ -39,8 +39,8 @@ tail -n 50 /sdcard/ntu-shower/crash.log      # 崩溃现场
 ssh iseekdream.com 'docker logs ntu-shower --since 1h' | grep '"trace_id":"<trace-id>"'
 ```
 
-保留期：`api_call` 90 天（`audit_retention_days`）每日自动清理；OTA 发布保留
-最近 5 个（`ota_release_keep`）。设备端各落盘文件全部有界，无需人工清理。
+保留期：`api_calls` 表按 `audit_retention_days` 每日自动清理；OTA 发布按
+`ota_release_keep` 裁旧。默认值都见 `server/app/core/config.py`。设备端各落盘文件全部有界，无需人工清理。
 
 ## 部署
 
@@ -175,8 +175,9 @@ ssh iseekdream.com 'curl -sS -H "Authorization: Bearer <admin凭据>" http://127
 
 ### 自动备份（数据库）
 
-`ntu-shower-backup.timer` 每日 00:00 执行 `VACUUM INTO` 在线备份（校验完整性后 gzip 压缩），
-滚动保留 14 份，落在 `/var/backups/ntu-shower/ntu-shower-<时间戳>.db.gz`。
+`ntu-shower-backup.timer` 每日执行 `VACUUM INTO` 在线备份（校验完整性后 gzip 压缩），
+滚动保留 `KEEP` 份（脚本默认 14，见 `deploy/backup/ntu-shower-backup.sh`），落在
+`/var/backups/ntu-shower/ntu-shower-<时间戳>.db.gz`；触发时刻见单元文件的 `OnCalendar`。
 备份文件含学号、凭证与审计原文，目录权限 700；加密经 ADR-0018 记录为暂不执行（例外见 `CONTRIBUTING.md`）。
 
 手动触发与查看：
@@ -234,7 +235,7 @@ PY
 **症状**：日志每数秒一轮 `WebSocket accepted → GET /ota/manifest → GET /api/v1/ota/releases/<版本>/download`，
 设备被反复重装。
 
-**根因**：`force` 发布 + `ota_release_install` 表无该设备的安装确认 →
+**根因**：`force` 发布 + `ota_release_installs` 表无该设备的安装确认 →
 每次握手都判定"未安装"→ 永远推送。
 
 ```bash
@@ -242,8 +243,8 @@ PY
 ssh iseekdream.com 'docker exec ntu-shower python - <<PY
 import sqlite3
 con = sqlite3.connect("/var/lib/ntu-shower/ntu-shower.db")
-print("release:", con.execute("SELECT version, version_code, force, target FROM ota_release").fetchall())
-print("install:", con.execute("SELECT * FROM ota_release_install").fetchall())
+print("release:", con.execute("SELECT version, version_code, force, target FROM ota_releases").fetchall())
+print("install:", con.execute("SELECT * FROM ota_release_installs").fetchall())
 PY'
 
 # 止损：下架该发布（最直接）
@@ -288,7 +289,8 @@ ssh iseekdream.com 'curl -s -H "Authorization: Bearer <admin凭据>" http://127.
    （先设备、后学号维度），同档内设备集合更小者优先、再比学号集合；「全部学号」的规则若把这个学号
    放进了排除名单；规则停用或没有规则就不会下发。看 `/api/v1/voice/deliveries`
    有没有对应记录。
-2. **事件是否过期**：`voice_event_max_age_s` 默认 60 秒，离线积压导致过期会跳过；
+2. **事件是否过期**：超过 `voice_event_max_age_s` 的事件会被跳过（默认值见
+   `app/modules/config/spec.py`），离线积压导致过期会跳过；
    规则保存后的预下载失败只让首次播放现场下载；设备日志看 `audio.prepared` /
    `audio.prefetch-failed`，页面「最近推送」的 `downloaded` 表示本次播放是否走了下载。
 3. **命令是否到达设备**：审计页看 `voice.play` / `voice.prepare` 的 status 与
@@ -304,7 +306,8 @@ ssh iseekdream.com 'curl -s -H "Authorization: Bearer <admin凭据>" http://127.
    60 秒下载预算；等后台预下载完成后重试，或减少单条规则引用的素材。
 7. **和浴室 App 的提示音重叠**：设备播放前会自动检测 `STREAM_MUSIC` 上的浴室提示音，
    等它结束再播，不需要逐条配延迟。看设备日志 `audio.bath-wait` 的 `waited_ms`；
-   出现 `audio.bath-wait-timeout` 说明等待超过 `voice_bath_wait_max_ms`（默认 15 秒），
+   出现 `audio.bath-wait-timeout` 说明等待超过 `voice_bath_wait_max_ms`（默认值见
+   `app/modules/config/spec.py`），
    检查浴室 App 是否卡在循环播放。网页「最近推送」的下发/完成时刻、分段与
    `downloaded` 用于区分链路慢、现场下载还是设备播放慢。
 
@@ -325,8 +328,9 @@ curl -s -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/v1/de
 curl -X POST -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/v1/devices/<id>/bridge/close
 ```
 
-两个上限都可配（`bridge_pair_timeout_s` 默认 30 秒——点开桥后建隧道的最长时间；
-`bridge_max_lifetime_s` 默认 3600 秒）。**隧道本身没有空闲超时**，只靠寿命上限兜着——
+两个上限都可配（`bridge_pair_timeout_s`——点开桥后建隧道的最长时间；
+`bridge_max_lifetime_s`——隧道总寿命。默认值与语义见 `app/modules/config/spec.py`）。
+**隧道本身没有空闲超时**，只靠寿命上限兜着——
 调试通道不该无限期开着。
 
 ## 复盘
@@ -341,7 +345,7 @@ curl -X POST -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/
 ### 发布新 APK
 
 ```powershell
-.\deploy\publish_apk.ps1 -Identity <admin身份标识>
+.\deploy\publish_apk.ps1 -Token <admin 的 API Bearer 凭据>
 ```
 
 脚本自己从 `android/app/build.gradle.kts` 读版本号、跑门禁、构建、上传（带 `-SkipBuild`
@@ -354,7 +358,7 @@ curl -X POST -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/
 
 ### 升级循环（设备反复断开重连、版本不动）
 
-签名：`/ota/manifest` 请求暴增 + 同一台设备反复"接入→断开"、`ota_release_install`
+签名：`/ota/manifest` 请求暴增 + 同一台设备反复"接入→断开"、`ota_release_installs`
 里同一版本出现多条记录。2026-10-24 全线发生过：发布登记 0.4.40、APK 字节里却是
 0.4.39/83，设备 `pm install` Success 而版本不变，永远"有新版"。
 
