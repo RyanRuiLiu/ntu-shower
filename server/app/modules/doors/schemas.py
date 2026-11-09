@@ -13,7 +13,7 @@ from ...models.enums import DoorState
 #: 取值时会 KeyError，而不是在界面上静默显示英文键。管理台的 `views/overview.js`
 #: 已经这么做了（缺文案时启动即失败），服务端没有理由更松。
 #:
-#: `core/terms.py` 的 `CANONICAL` 里也列着这七个名字，但那份是**术语判据**（给人读、
+#: `docs/glossary.md` 的 `CANONICAL` 里也列着这七个名字，但那份是**术语判据**（给人读、
 #: 给扫描器查），不是数据源；两份都要与这里一致。
 _STATE_LABELS: dict[DoorState, str] = {
     DoorState.FREE: "空闲",

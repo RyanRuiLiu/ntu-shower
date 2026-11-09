@@ -52,7 +52,7 @@
 | 延长服务时间、MCU 重布、拨钟 | `server/app/modules/extend_hours/` |
 | 免费名单 | `server/app/modules/freelist/` |
 | 语音规则、素材与播放 | `server/app/modules/voice/` |
-| 术语正名与弃用词 | `server/app/core/terms.py` |
+| 术语正名与弃用词 | [docs/glossary.md](docs/glossary.md) |
 | HTTP 问题类型与命令失败原因 | `server/app/core/problems.py`、`server/app/core/reason_codes.py` |
 | 配置键的类型、范围与归属 | `server/app/modules/config/spec.py` |
 | 协议消息结构 | `protocol/schema/*.json` |

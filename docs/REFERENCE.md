@@ -13,7 +13,7 @@
 | `docs/SECURITY.md` | 资产、威胁模型、安全控制与事件响应 |
 | `docs/TESTING.md` | 测试策略、环境、覆盖率政策与证据 |
 | **本文** | **数据模型与接口：字段语义、派生规则、状态变更、取数口径** |
-| `server/app/core/terms.py` | 术语的唯一正名与弃用词（本文用它的词） |
+| [`docs/glossary.md`](glossary.md) | 术语的唯一正名与弃用词（本文用它的词） |
 
 ---
 
@@ -190,7 +190,7 @@ status == 3（RAW_STATUS_DISABLED） → 已禁用
 - **占用** = {等待开阀, 淋浴中, 已暂停} —— 有人
 - **可分配** = {空闲, 已选中} —— 正着列可分配的状态而不是反着列：新增状态默认落到不可分配一侧
 
-中文名与 `status-panel` 小程序的展示文案一致，不许另起（见 `terms.py`）。
+中文名与 `status-panel` 小程序的展示文案一致，不许另起（见 `docs/glossary.md`）。
 
 ### `door_live` —— 这个喷头的当前状况
 
@@ -433,7 +433,7 @@ gap = 上一帧到本帧的秒数（没有上一帧时 -1）
 6. **`segments_complete` 在有 `derived` 段时恒为假**。
 7. **对外只出服务端轴**。
 8. **一个喷头同一时刻只有一个占用者**（换人先结旧账再开新账）。
-9. **喷头状态中文名与小程序的展示文案一致**，由 `terms.py` 强制。
+9. **喷头状态中文名与小程序的展示文案一致**，由 `docs/glossary.md` 强制。
 
 > 第 1 与第 2 条是**浴室 App 的规则**（`DoorStatusConfirmThread` 每秒轮询、四条超时判定、同一句清零 SQL），不是本项目的算法。它们与 `SESSION_MAX_S` 的关系见 `doors/service.py` 的常量注释。
 
@@ -721,4 +721,4 @@ App 里自己输学号，设备把它带在帧里报上来（`usage_session.cert
 
 ## 术语
 
-唯一正名与弃用词在 `server/app/core/terms.py`（含全仓扫描器）。**本文用它的词，不另立一份**：`python -m app.core.terms` 可随时自查。
+唯一正名与弃用词在 [`docs/glossary.md`](glossary.md)。**本文用它的词，不另立一份**。
