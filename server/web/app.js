@@ -482,12 +482,15 @@ function onIdentityButton() {
 }
 
 function askForLogin() {
+  $('loginError').hidden = true
   $('loginDialog').showModal()
 }
 
 function submitLogin(event) {
   event.preventDefault()
   const form = event.target
+  const errorBox = $('loginError')
+  errorBox.hidden = true
   api
     .login(form.username.value.trim(), form.password.value)
     .then(() => {
@@ -498,7 +501,12 @@ function submitLogin(event) {
       refreshRuntimeSafely().then(refreshWaterIfAdmin)
       refreshDoors()
     })
-    .catch((error) => toast(problemText(error)))
+    .catch((error) => {
+      // showModal 的对话框在浏览器顶层（top layer），高于一切 z-index——全局
+      // toast 会被它与 backdrop 盖住，错误必须就地显示在对话框里
+      errorBox.textContent = problemText(error)
+      errorBox.hidden = false
+    })
 }
 
 /**

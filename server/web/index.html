@@ -77,6 +77,8 @@
       <label for="loginPassword">口令</label>
       <input id="loginPassword" type="password" name="password" autocomplete="current-password" required />
     </div>
+    <!-- 错误就地显示在对话框里：showModal 的对话框在浏览器顶层，全局 toast 会被它盖住 -->
+    <p class="form-error" id="loginError" role="alert" hidden></p>
     <div class="btn-row">
       <button type="submit" class="btn">登录</button>
       <button type="button" class="btn btn-ghost" id="loginCancel">取消</button>

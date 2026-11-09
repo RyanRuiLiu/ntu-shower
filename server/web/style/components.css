@@ -584,6 +584,17 @@ tr.audit-row:focus-visible {
   background: var(--overlay-dialog);
 }
 
+/* 表单就地错误（role=alert）：顶层对话框盖住全局 toast，错误只能显示在对话框内 */
+#loginDialog .form-error {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--red);
+  border-radius: var(--radius-sm);
+  background: var(--red-bg);
+  color: var(--red);
+  font-size: var(--fs-small);
+}
+
 /*
  * 面板里的值允许换行。设备 ID 与 IP 是定长串，用省略号截掉它们，这个面板就没有
  * 存在的意义了——那些字符正是要拿去搜日志的东西。
