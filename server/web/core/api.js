@@ -39,9 +39,15 @@ export async function logout() {
   }
 }
 
-/** 用服务端回答校准本地登录态：页面打开时调一次。 */
+/** 用服务端回答校准本地登录态：页面打开时调一次。未登录（401）也是有效回答。 */
 export async function refreshSession() {
-  hasSession = (await send('/api/v1/auth/me')) !== null
+  try {
+    await send('/api/v1/auth/me')
+    hasSession = true
+  } catch (error) {
+    hasSession = false
+    if (error?.status !== 401) throw error
+  }
   return hasSession
 }
 

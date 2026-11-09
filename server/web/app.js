@@ -13,7 +13,7 @@
  *
  * `mount` 在切入时调用，`unmount` 负责停掉自己起的轮询与监听。
  */
-import { api, login, logout, sessionActive } from './core/api.js'
+import { api, login, logout, refreshSession, sessionActive } from './core/api.js'
 import { deviceNowMs, fmtDateTime, fmtDuration, fmtServerTimeNow, fmtSkew, fmtUptime } from './core/clock.js'
 import { EVENT_TYPES } from './core/contract.js'
 import { promptClockSet, restartBathApp } from './core/device-actions.js'
@@ -376,6 +376,8 @@ function bindTopbar() {
   listen($('btnIdentity'), 'click', onIdentityButton)
   listen($('loginForm'), 'submit', submitLogin)
   listen($('loginCancel'), 'click', () => $('loginDialog').close())
+  // 返回访客可能还持有有效会话 Cookie：开页先向服务端校准登录态
+  refreshSession().catch(() => {})
 
   // 顶部显示服务端时间，便于与设备日志对齐；顺带刷新登录按钮文案
   setInterval(() => {
