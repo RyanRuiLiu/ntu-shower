@@ -6,7 +6,7 @@
 
 | 文件 | 服务器位置 | 生效方式 |
 |---|---|---|
-| 根目录 `compose.yaml` | `/opt/ntu-shower/compose.yaml` | `NTU_SHOWER_TAG=<tag> docker compose -f /opt/ntu-shower/compose.yaml up -d`（见 `docs/RUNBOOK.md`「部署」） |
+| 根目录 `compose.yaml` | `/opt/ntu-shower/compose.yaml` | `NTU_SHOWER_TAG=<tag> docker compose -f /opt/ntu-shower/compose.yaml up -d`（见 `docs/runbook.md`「部署」） |
 | `nginx/ntu-shower.conf` | `/etc/nginx/sites-enabled/ntu-shower.iseekdream.com.conf`（**独立文件，非软链**：sites-available 与 enabled 是两份拷贝，只写 enabled 才生效——2026-11-09 发布 0.6.6 时 413 排查确认） | `nginx -t && systemctl reload nginx` |
 | `systemd/ntu-shower.service` | `/etc/systemd/system/ntu-shower.service` | **2026-11-06 起停用**（服务由 Compose 承载）；单元与 `/opt/ntu-shower/server` 的 venv 冻结保留，仅作应急回滚 |
 | `scripts/deploy.sh` | **不上服务器常驻**（Docker 形态下不再使用，保留于仓库存档） | — |
@@ -14,7 +14,7 @@
 | `backup/ntu-shower-backup.{service,timer}` | `/etc/systemd/system/` | `systemctl daemon-reload && systemctl enable --now ntu-shower-backup.timer` |
 | `publish_apk.ps1` | **不上服务器**：本地工具 | `.\deploy\publish_apk.ps1 -Identity <admin>` |
 
-代码替换、回滚与部署后验证的步骤见 `docs/RUNBOOK.md`；这里只放配置资产本身与同步命令。
+代码替换、回滚与部署后验证的步骤见 `docs/runbook.md`；这里只放配置资产本身与同步命令。
 
 ## 同步命令
 

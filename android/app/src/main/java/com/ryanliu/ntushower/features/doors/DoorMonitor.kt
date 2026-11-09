@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * 1 秒防抖——sqlite3 事务期间会产生多条事件，合并为一次读取。
  *
  * 掩码必须含 MODIFY：浴室 App 长持数据库 fd，事务写入只触发 MODIFY 不触发
- * CLOSE_WRITE（真机实测漏报教训，见 docs/ARCHITECTURE.md）。
+ * CLOSE_WRITE（真机实测漏报教训，见 docs/architecture.md）。
  *
  * ## 采集期间来的事件不能丢
  *

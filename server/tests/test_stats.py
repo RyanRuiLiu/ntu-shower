@@ -569,7 +569,7 @@ def test_histogram_views_carry_their_note(client: TestClient, seeded: dict[str, 
 def test_one_open_and_one_close_counts_as_one_close(client: TestClient, stats_headers: dict[str, str]) -> None:
     """开一次阀、关一次，就是**关阀 1 次**——不是 0 次。
 
-    一段就是"从开阀到关阀"（`REFERENCE.md` 4.4），所以每段结束都关了一次阀。原先算的是
+    一段就是"从开阀到关阀"（`reference.md` 4.4），所以每段结束都关了一次阀。原先算的是
     "段数减 1"，于是"分配 → 开阀 → 暂停 → 结算"这种正常流程被记成**关 0 次**，而那一档
     看起来只是"有人一次都没停过"。
     """

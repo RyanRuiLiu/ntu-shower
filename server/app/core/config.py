@@ -18,7 +18,7 @@ class Settings(BaseSettings):
 
     # ── 日志 ──
     # 应用日志级别（DEBUG/INFO/WARNING/ERROR）；uvicorn 的访问日志级别另由
-    # systemd 单元决定（见 deploy/nginx 与 docs/RUNBOOK.md）
+    # systemd 单元决定（见 deploy/nginx 与 docs/runbook.md）
     log_level: str = "INFO"
 
     # ── 审计保留（NIST SP 800-92：按运维需要定保留期并执行）──

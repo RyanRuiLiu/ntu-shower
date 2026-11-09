@@ -7,11 +7,11 @@
 | 文档 | 管什么 |
 |---|---|
 | `AGENTS.md` | AI 阅读顺序、停止条件与操作边界 |
-| `docs/ARCHITECTURE.md` | 系统边界、组件、数据流、时间轴定义 |
+| `docs/architecture.md` | 系统边界、组件、数据流、时间轴定义 |
 | `docs/adr/` | 约束代码的结论与理由 |
-| `docs/RUNBOOK.md` | 部署、回滚与故障处置 |
-| `docs/SECURITY.md` | 资产、威胁模型、安全控制与事件响应 |
-| `docs/TESTING.md` | 测试策略、环境、覆盖率政策与证据 |
+| `docs/runbook.md` | 部署、回滚与故障处置 |
+| `docs/security.md` | 资产、威胁模型、安全控制与事件响应 |
+| `docs/testing.md` | 测试策略、环境、覆盖率政策与证据 |
 | **本文** | **数据模型与接口：字段语义、派生规则、状态变更、取数口径** |
 | [`docs/glossary.md`](glossary.md) | 术语的唯一正名与弃用词（本文用它的词） |
 
@@ -53,7 +53,7 @@
 
 ## 时间轴与消费者字段
 
-两条轴的定义、三条换算规则与设备钟偏差的出处由 `docs/ARCHITECTURE.md` 的「时间轴与口径」规定；本节只列消费者字段映射。
+两条轴的定义、三条换算规则与设备钟偏差的出处由 `docs/architecture.md` 的「时间轴与口径」规定；本节只列消费者字段映射。
 
 设备轴原话只留在原始帧；`door_live`、`usage_segment`、`usage_session` 的时刻字段全部在服务端轴上。
 
@@ -378,7 +378,7 @@ gap = 上一帧到本帧的秒数（没有上一帧时 -1）
 | `capabilities` | 设备声明支持的动作（JSON 数组），由设备在 `link.hello` 里给 |
 | `last_seen_at` / `last_ip` | 最后上线时刻（服务端轴）／来源 IP |
 | `booted_at` | **开机时刻**（RFC 3339）：由设备上报的已运行秒数与服务端收到它的时刻反推。存时刻而不存秒数——秒数一离开采样瞬间就开始过期，开机时刻是不变的事实 |
-| `clock_skew_s` | 偏差（见 `docs/ARCHITECTURE.md`「时间轴与口径」） |
+| `clock_skew_s` | 偏差（见 `docs/architecture.md`「时间轴与口径」） |
 
 ### `global_config` / `device_config` —— 配置
 

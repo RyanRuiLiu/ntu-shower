@@ -12,7 +12,7 @@ WATER = REPO / "server/web/core/water.js"
 OVERVIEW = REPO / "server/web/views/overview.js"
 APP = REPO / "server/web/app.js"
 HANDLER = REPO / "android/app/src/main/java/com/ryanliu/ntushower/features/water/WaterHandler.kt"
-WATER_EVIDENCE = REPO / "docs/evidence/2026-10-30-water-board-2f.md"
+WATER_EVIDENCE = REPO / "docs/adr/0015-water-board-evidence.md"
 
 
 def read(path: Path) -> str:

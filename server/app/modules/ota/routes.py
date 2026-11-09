@@ -37,7 +37,7 @@ from app.persistence import ota as repository
 
 router = APIRouter(prefix="/api/v1/ota", tags=["ota"])
 
-# 设备硬编码契约：manifest 的路径不随版本前缀走（冻结，见 docs/ARCHITECTURE.md）
+# 设备硬编码契约：manifest 的路径不随版本前缀走（冻结，见 docs/architecture.md）
 device_router = APIRouter(tags=["ota"])
 
 # 路径/表单中的发布版本号：格式不合规由 FastAPI 返回 422

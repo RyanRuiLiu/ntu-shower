@@ -48,7 +48,7 @@ cp .env.example .env
 .venv/Scripts/uvicorn app.main:app --reload --port 8000
 ```
 
-`server/.env` 只保存本地配置；生产 `.env` 由 systemd 注入，不进入仓库。本地开发库可以删除重建；生产库不得删除重建，数据变更按 `docs/RUNBOOK.md` 的「配置与数据变更」执行。
+`server/.env` 只保存本地配置；生产 `.env` 由 systemd 注入，不进入仓库。本地开发库可以删除重建；生产库不得删除重建，数据变更按 `docs/runbook.md` 的「配置与数据变更」执行。
 
 ## 设备端开发
 
@@ -181,8 +181,8 @@ cd android
 
 1. 以新读者身份从 `README.md` 开始，按快速开始执行。
 2. 以开发者身份从 `CONTRIBUTING.md` 开始，完成环境准备、修改、测试与提交。
-3. 以运维责任人身份从 `docs/RUNBOOK.md` 开始，完成部署、验证与回滚。
-4. 以消费方身份从 `docs/REFERENCE.md` 与 `protocol/schema/` 开始，完成接口对接。
+3. 以运维责任人身份从 `docs/runbook.md` 开始，完成部署、验证与回滚。
+4. 以消费方身份从 `docs/reference.md` 与 `protocol/schema/` 开始，完成接口对接。
 5. 记录每个卡点：缺失步骤、错误命令、失效链接、无法理解的术语。
 
 ### 修复与复验
@@ -202,7 +202,7 @@ cd android
 | S3 | 歧义、风格不一致、缺少示例、文案不清、次要功能错误、可绕过的界面问题 | 术语不统一、段落过长 | 当前变更修复或排期 |
 | S4 | 文字、样式、体验问题或个人偏好，未被标准覆盖 | 同义但等价的命名 | 不阻塞 |
 
-本表同时用于缺陷与审阅发现的严重级别；缺陷处置见 `docs/TESTING.md` 的「缺陷管理」。
+本表同时用于缺陷与审阅发现的严重级别；缺陷处置见 `docs/testing.md` 的「缺陷管理」。
 
 ### 放行
 
@@ -238,16 +238,16 @@ cd android
 
 ## 发布准备
 
-发布准备在本地完成，生产部署由 `docs/RUNBOOK.md` 规定的步骤执行。
+发布准备在本地完成，生产部署由 `docs/runbook.md` 规定的步骤执行。
 
 1. 更新版本号；三处版本号的一致性由测试强制。
 2. 更新 `CHANGELOG.md`；破坏性变更单列并给出升级步骤。
 3. 运行全量质量门。
 4. 构建发布物并校验校验和与签名。
-5. 按 `docs/RUNBOOK.md` 执行部署、部署后验证与回滚准备。
+5. 按 `docs/runbook.md` 执行部署、部署后验证与回滚准备。
 6. 创建带注释的 `v<版本>` 标签并推送；用 `CHANGELOG.md` 对应章节创建 GitHub Release。
 
-发布准备步骤属于本文件；生产部署与回滚步骤属于 `docs/RUNBOOK.md`。两者不得互相复制命令。
+发布准备步骤属于本文件；生产部署与回滚步骤属于 `docs/runbook.md`。两者不得互相复制命令。
 
 ## 文档
 
@@ -258,11 +258,11 @@ cd android
 | 项目入口与导航 | `README.md` |
 | 开发流程与质量门命令 | `CONTRIBUTING.md` |
 | 工程规则 | `CONTRIBUTING.md` |
-| 系统结构与时间轴定义 | `docs/ARCHITECTURE.md` |
-| 数据模型、字段与接口索引 | `docs/REFERENCE.md` |
-| 部署、回滚、备份与故障处置 | `docs/RUNBOOK.md` |
-| 资产、威胁模型与安全控制 | `docs/SECURITY.md` |
-| 测试策略与证据 | `docs/TESTING.md` |
+| 系统结构与时间轴定义 | `docs/architecture.md` |
+| 数据模型、字段与接口索引 | `docs/reference.md` |
+| 部署、回滚、备份与故障处置 | `docs/runbook.md` |
+| 资产、威胁模型与安全控制 | `docs/security.md` |
+| 测试策略与证据 | `docs/testing.md` |
 | 决策理由与后果 | `docs/adr/` |
 | 发布历史 | `CHANGELOG.md` |
 
@@ -270,4 +270,4 @@ cd android
 
 ## 问题与故障
 
-开发环境问题先查看 `server/.env`、依赖版本与数据库路径。生产故障按 `docs/RUNBOOK.md` 处置；生产机只读，不在生产机上进行测试、演练、重算或临时脚本。
+开发环境问题先查看 `server/.env`、依赖版本与数据库路径。生产故障按 `docs/runbook.md` 处置；生产机只读，不在生产机上进行测试、演练、重算或临时脚本。

@@ -15,7 +15,7 @@ import { emit, store, subscribe } from './store.js'
 /**
  * 水控板状态与文案的唯一出处。
  *
- * 位义以现场实测为准（见 `docs/evidence/2026-10-30-water-board-2f.md`）：
+ * 位义以现场实测为准（见 `docs/adr/0015-water-board-evidence.md`）：
  * `0x01` 授权位、`0x02` 按钮位、`0x04` 出水位。
  * 正常状态只有 `0x00/0x01/0x02/0x03/0x07`；`0x04–0x06` 现场未出现，
  * `0x08–0x80` 未定义。页面不把位名拼成状态，也不把水控板状态解释成会话状态。

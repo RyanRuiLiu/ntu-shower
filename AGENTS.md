@@ -10,7 +10,7 @@
 
 - 生产形态：容器运行，nginx 反代回环端口；设备网关与网页管理台同源。
 - 版本：以 `server/app/core/version.py` 的常量为唯一来源，本文件不写死。
-- 生产细节与回滚资产：见 [docs/RUNBOOK.md](docs/RUNBOOK.md)。
+- 生产细节与回滚资产：见 [docs/runbook.md](docs/runbook.md)。
 
 ## 必读顺序
 
@@ -35,11 +35,11 @@
 | 项目定位、快速开始、目录导览 | [README.md](README.md) |
 | 开发环境、分支、提交、质量门命令 | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | 工程规则：生命周期、代码、文本、审阅 | [CONTRIBUTING.md](CONTRIBUTING.md) |
-| 系统边界、组件、数据流、部署拓扑 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
-| 数据模型、字段语义、接口索引 | [docs/REFERENCE.md](docs/REFERENCE.md) |
-| 部署、回滚、备份、故障处置 | [docs/RUNBOOK.md](docs/RUNBOOK.md) |
-| 资产清单、数据分级、威胁模型 | [docs/SECURITY.md](docs/SECURITY.md) |
-| 测试策略、层级、覆盖率政策 | [docs/TESTING.md](docs/TESTING.md) |
+| 系统边界、组件、数据流、部署拓扑 | [docs/architecture.md](docs/architecture.md) |
+| 数据模型、字段语义、接口索引 | [docs/reference.md](docs/reference.md) |
+| 部署、回滚、备份、故障处置 | [docs/runbook.md](docs/runbook.md) |
+| 资产清单、数据分级、威胁模型 | [docs/security.md](docs/security.md) |
+| 测试策略、层级、覆盖率政策 | [docs/testing.md](docs/testing.md) |
 | 决策背景、备选方案、后果 | [docs/adr/](docs/adr/) |
 | 发布历史与用户可见变更 | [CHANGELOG.md](CHANGELOG.md) |
 

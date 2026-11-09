@@ -64,7 +64,7 @@
 
 - 新增 `STANDARDS.md`：覆盖生命周期、文档、代码、文本、审阅、发布、运行、安全与 AI 协作的工程标准。
 - 新增 `CONTRIBUTING.md`：开发环境、质量门、分支、提交、审阅与发布准备步骤。
-- 新增 `docs/SECURITY.md` 与 `docs/TESTING.md`：安全控制与测试策略的所有者文档。
+- 新增 `docs/security.md` 与 `docs/testing.md`：安全控制与测试策略的所有者文档。
 
 ### Changed
 

@@ -3,7 +3,7 @@
 #  ntu-shower 服务器端部署
 #
 #  前置（本地完成）：代码包已上传到 /tmp/server_deploy.tar.gz。
-#  打包命令在 `docs/RUNBOOK.md` §3——整条发布流程写在那里，此处不复述，避免两处命令分叉。
+#  打包命令在 `docs/runbook.md` §3——整条发布流程写在那里，此处不复述，避免两处命令分叉。
 #
 #  用法：sudo NT_TARBALL=/tmp/server_deploy.tar.gz bash /tmp/deploy.sh
 #
