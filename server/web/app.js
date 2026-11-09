@@ -482,7 +482,7 @@ function onIdentityButton() {
 }
 
 function askForLogin() {
-  $('loginError').hidden = true
+  report('loginResult', '', 'info')  // 清空上一条错误
   $('loginDialog').showModal()
 }
 
