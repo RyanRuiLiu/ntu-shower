@@ -168,7 +168,7 @@ cd android
 | 部署、回滚、备份与故障处置 | `docs/RUNBOOK.md` |
 | 资产、威胁模型与安全控制 | `docs/SECURITY.md` |
 | 测试策略与证据 | `docs/TESTING.md` |
-| 决策理由与后果 | `docs/DECISIONS.md` |
+| 决策理由与后果 | `docs/adr/` |
 | 发布历史 | `CHANGELOG.md` |
 
 文档中的命令必须能执行；代码块必须有语言标记；示例必须标注示例；Markdown 格式由 markdownlint 检查。

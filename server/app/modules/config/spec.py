@@ -348,7 +348,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
     ),
     # ── 屏幕提示 ──
     # 配置面在服务端，显隐判定在设备端：服务端只下发文字/样式/条件，设备用服务端
-    # 时间轴与本地 t_doorlist 判断此刻是否显示。边界与理由见 docs/DECISIONS.md。
+    # 时间轴与本地 t_doorlist 判断此刻是否显示。边界与理由见 docs/adr/。
     ConfigSpec(
         "notice_enabled",
         BOOL,

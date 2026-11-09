@@ -247,7 +247,7 @@
 │   ├── RUNBOOK.md
 │   ├── SECURITY.md
 │   ├── TESTING.md
-│   ├── DECISIONS.md
+│   ├── adr/
 │   └── evidence/
 │       └── YYYY-MM-DD-<topic>.md
 ├── protocol/

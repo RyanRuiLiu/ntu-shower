@@ -1,7 +1,7 @@
 """接口调用审计：谁、何时、对什么、结果如何，一行一个调用。
 
 按 OWASP Logging Cheat Sheet 的事件清单与 NIST SP 800-92 的保留框架设计，
-标准依据见 docs/DECISIONS.md「可观测性」。覆盖 /api/v1 与 /ota/manifest 的全部请求
+标准依据见 docs/adr/「可观测性」。覆盖 /api/v1 与 /ota/manifest 的全部请求
 （认证、授权、参数与服务端错误天然落表）与设备网关生命周期；静态资源与
 /healthz 不审计。
 

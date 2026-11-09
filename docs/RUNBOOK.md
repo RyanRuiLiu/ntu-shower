@@ -19,7 +19,7 @@
 
 ## 痕迹取回（出问题时按设备 + 时间段还原现场）
 
-三层痕迹，以 `command_id` 与 `trace_id` 贯通（标准见 docs/DECISIONS.md「可观测性」）：
+三层痕迹，以 `command_id` 与 `trace_id` 贯通（标准见 docs/adr/「可观测性」）：
 
 ```bash
 # ① HTTP/网关审计（谁、何时、调了什么、结果）：本机直连后端。
@@ -99,7 +99,7 @@ ssh iseekdream.com 'cd /opt/ntu-shower && NTU_SHOWER_TAG=<上一个tag> docker c
 
 这台机器由 nginx 反代 8110（顶层单服务 `compose.yaml`），切换不动 nginx。`deploy/stack/` 的 Caddy 全栈属另一台机器。v2 数据层已是唯一通路：
 
-- 凭据校验在 `accept()` 之后，无效凭据以 RFC 6455 1008 关闭帧拒绝；设备端收到 1008 清凭据后走 claim 自注册换真凭据（决策见 `docs/DECISIONS.md`）
+- 凭据校验在 `accept()` 之后，无效凭据以 RFC 6455 1008 关闭帧拒绝；设备端收到 1008 清凭据后走 claim 自注册换真凭据（决策见 `docs/adr/`）
 - `DEVICE_ENROLL_TOKEN` 在 `/etc/ntu-shower/ntu-shower.env`，值与 APK 构建期的 `deviceEnrollToken` 一致；留空即注册通道关闭，装了 APK 的设备会收到 401
 - 管理台以账号口令认证（`POST /api/v1/auth/login` 下发签名会话 Cookie）或 Bearer 凭据访问 API；凭据由运维签发、服务端只存哈希，明文不入库不入档
 - OTA 只保留稳定回滚点与当前版本；带缺陷的过渡版按 `DELETE /api/v1/ota/releases/{version}` 下架，发布记录与 APK 文件一起删
@@ -246,7 +246,7 @@ ssh iseekdream.com 'docker ps -a --filter name=ntu-shower --format "{{.Status}}"
 
 ### 设备能力集（capabilities）
 
-规则（设备怎么声明、服务端怎么比对、空数组为什么放行）见 `docs/DECISIONS.md`「协议与契约」。
+规则（设备怎么声明、服务端怎么比对、空数组为什么放行）见 `docs/adr/`「协议与契约」。
 **排查**：若某命令被拒且 `reason_code=device.unsupported_action`，先看设备声明里有没有它：
 
 ```bash
@@ -327,7 +327,7 @@ curl -X POST -H "X-Identity: <admin身份标识>" http://127.0.0.1:8110/api/v1/d
 脚本自己从 `android/app/build.gradle.kts` 读版本号、跑门禁、构建、上传（带 `-SkipBuild`
 可用已构建的 APK）。**版本号不手填**：手填等于把手里的值复制一次，而 OTA 覆盖安装要求新旧
 版本可比，填错的表现是设备不升级或反复升级，偏静默。版本号在哪几处、为什么合并不了，
-见 `docs/DECISIONS.md`「OTA 与版本」。
+见 `docs/adr/`「OTA 与版本」。
 
 响应里的 `notified_devices` 非空即表示在线设备已收到通知。设备会自行下载安装并重连，
 无需人工介入——实测约 10 秒完成。

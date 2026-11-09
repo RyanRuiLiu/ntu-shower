@@ -71,7 +71,7 @@ cp gradle.properties.example gradle.properties
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | 部署、回滚、备份、恢复、故障处置与日常运维 |
 | [`docs/SECURITY.md`](docs/SECURITY.md) | 资产、数据分级、信任边界、安全控制与事件响应 |
 | [`docs/TESTING.md`](docs/TESTING.md) | 测试策略、层级、环境、数据、覆盖率政策与证据 |
-| [`docs/DECISIONS.md`](docs/DECISIONS.md) | 约束代码的决策、取舍与后果 |
+| [`docs/adr/`](docs/adr/) | 约束代码的决策、取舍与后果 |
 | [`STANDARDS.md`](STANDARDS.md) | 生命周期、文档、代码、文本、审阅与质量门规则 |
 
 接口契约以 `protocol/schema/` 与代码路由为准；文档只做索引，不复制字段表。

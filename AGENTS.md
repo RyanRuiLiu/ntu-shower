@@ -40,7 +40,7 @@
 | 部署、回滚、备份、故障处置 | [docs/RUNBOOK.md](docs/RUNBOOK.md) |
 | 资产清单、数据分级、威胁模型 | [docs/SECURITY.md](docs/SECURITY.md) |
 | 测试策略、层级、覆盖率政策 | [docs/TESTING.md](docs/TESTING.md) |
-| 决策背景、备选方案、后果 | [docs/DECISIONS.md](docs/DECISIONS.md) |
+| 决策背景、备选方案、后果 | [docs/adr/](docs/adr/) |
 | 发布历史与用户可见变更 | [CHANGELOG.md](CHANGELOG.md) |
 
 ## 代码入口

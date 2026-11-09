@@ -8,7 +8,7 @@
 |---|---|
 | `AGENTS.md` | AI 阅读顺序、停止条件与操作边界 |
 | `docs/ARCHITECTURE.md` | 系统边界、组件、数据流、时间轴定义 |
-| `docs/DECISIONS.md` | 约束代码的结论与理由 |
+| `docs/adr/` | 约束代码的结论与理由 |
 | `docs/RUNBOOK.md` | 部署、回滚与故障处置 |
 | `docs/SECURITY.md` | 资产、威胁模型、安全控制与事件响应 |
 | `docs/TESTING.md` | 测试策略、环境、覆盖率政策与证据 |
@@ -211,7 +211,7 @@ status == 3（RAW_STATUS_DISABLED） → 已禁用
 
 ### `door_state_event` —— 每一次状态转换
 
-只在状态**真的变了**时写一行。两种帧不记：**首帧**（没有"从哪来"）与**全貌帧**（`source = startup`，它只刷现态、不派生，见 `SOURCE_STARTUP`）。语音的 `assigned` 不依赖这张表：它是会话生命周期事实，全貌帧/盲区帧只要 `open_time` 可平移也会补发（见 `docs/DECISIONS.md` 的语音事件一节）。
+只在状态**真的变了**时写一行。两种帧不记：**首帧**（没有"从哪来"）与**全貌帧**（`source = startup`，它只刷现态、不派生，见 `SOURCE_STARTUP`）。语音的 `assigned` 不依赖这张表：它是会话生命周期事实，全貌帧/盲区帧只要 `open_time` 可平移也会补发（见 `docs/adr/` 的语音事件一节）。
 
 | 字段 | 是什么 |
 |---|---|
