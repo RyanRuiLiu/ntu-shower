@@ -68,6 +68,9 @@ jobs:
       - name: Markdown lint
         working-directory: .
         run: npx --yes markdownlint-cli2@0.20.0 "*.md" "docs/*.md" "docs/adr/*.md" "deploy/*.md" --config .markdownlint.json
+      - name: Stylelint（网页 CSS 令牌纪律，规则在 web/.stylelintrc.json）
+        working-directory: .
+        run: npx --yes stylelint@16 "server/web/style/*.css" --config server/web/.stylelintrc.json
 
   # SAST 独立成 job：semgrep 与应用依赖集无法共存（fastapi 0.162.0 硬依赖
   # opentelemetry-api>=1.44.0，semgrep 1.184.0 钉死 ~=1.37.0），各自在干净环境安装。
