@@ -173,15 +173,6 @@ def resolve_token(session: Session, token: str) -> str | None:
     return row.name
 
 
-def revoke_token(session: Session, name: str) -> bool:
-    row = session.scalars(select(Principal).where(Principal.name == name)).one_or_none()
-    if row is None or row.token_hash is None:
-        return False
-    row.token_hash = None
-    session.commit()
-    return True
-
-
 __all__: list[str] = [
     "DEFAULT_SCOPE",
     "authenticate",
@@ -193,7 +184,6 @@ __all__: list[str] = [
     "list_all",
     "put",
     "resolve_token",
-    "revoke_token",
     "set_disabled",
     "set_password",
 ]
