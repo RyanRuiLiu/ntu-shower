@@ -9,7 +9,7 @@
 | 设备端 | Kotlin APK，运行在 Android 4.4.4 中控设备上；采集喷头状态、执行分配与结算、维持自身存活 |
 | 服务端 | FastAPI 模块化单体；设备网关、领域模块、网页端静态文件与运维接口 |
 | 协议 | WSS 上的 JSON 信封；消息结构与校验规则在 `protocol/schema/` |
-| 部署 | nginx、systemd、备份脚本与发布脚本；唯一事实来源在 `deploy/` |
+| 部署 | nginx、Docker Compose、备份脚本与发布脚本；唯一事实来源在 `deploy/` 与顶层 `compose.yaml` |
 
 ## 项目结构
 
