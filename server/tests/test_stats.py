@@ -17,8 +17,8 @@ from tests.identity import register as register_identity
 
 from app.core.clock import now_rfc3339, parse_rfc3339, rfc3339_ago, shift_rfc3339, to_local
 from app.db.base import utcnow
-from app.modules.access.identity import IdentityKind
-from app.modules.doors.schemas import DoorState, state_label
+from app.models.enums import DoorState, IdentityKind
+from app.modules.doors.schemas import state_label
 from app.modules.doors.service import SESSION_MAX_S
 from app.modules.stats import service, spec
 

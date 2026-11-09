@@ -14,7 +14,7 @@ from sqlalchemy import JSON, ForeignKey, Index, Integer, String, UniqueConstrain
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db.base import Base, UtcDateTime, enum_column, utcnow
-from ..modules.doors.schemas import DoorState as DoorStateEnum
+from .enums import DoorState as DoorStateEnum
 
 
 class DoorState(Base):

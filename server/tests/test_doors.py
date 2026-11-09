@@ -10,8 +10,8 @@ from tests import device_link, door_link, frames
 
 from app.core import device_clock
 from app.core.clock import rfc3339_after
+from app.models.enums import DoorState
 from app.modules.doors import service
-from app.modules.doors.schemas import DoorState
 
 
 def _door(door_no: int, **overrides: object) -> dict[str, Any]:
@@ -630,3 +630,15 @@ def test_raw_insert_failure_propagates_for_the_gateway_to_withhold_the_ack(
 
     with pytest.raises(RuntimeError, match="disk full"):
         door_link.feed("dev-raw-fail", _snapshot([_door(1)]))
+
+
+def test_every_door_state_has_a_label() -> None:
+    """每个状态都必须有界面文案。
+
+    枚举与文案现在分居 models 与 doors.schemas 两处，这条测试守住原来的
+    "加状态不忘文案"：漏一个，state_label 会 KeyError。
+    """
+    from app.modules.doors.schemas import state_label
+
+    for state in DoorState:
+        assert state_label(state)

@@ -107,9 +107,9 @@ from app.core import device_clock, events
 from app.core.clock import now_rfc3339, parse_rfc3339, seconds_between, shift_rfc3339
 from app.core.logging import exc_info_text, log_event
 from app.core.protocol import JsonObject, as_int, text_of
-from app.models.enums import SegmentSource
+from app.models.enums import ASSIGNABLE_STATES, OCCUPIED_STATES, DoorState, SegmentSource
 from app.modules.doors.events import DoorEvent, DoorEventKind, SnapshotResult
-from app.modules.doors.schemas import ASSIGNABLE_STATES, OCCUPIED_STATES, DoorState, DoorView
+from app.modules.doors.schemas import DoorView
 from app.persistence import doors as repository
 
 # t_doorlist.status 的原始值（设备上报的 int，仅作辅助判据）

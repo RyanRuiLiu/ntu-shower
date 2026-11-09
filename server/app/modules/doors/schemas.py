@@ -4,48 +4,9 @@
 同一套字段，前端只写一套渲染。
 """
 
-from enum import StrEnum
-
 from typing_extensions import TypedDict
 
-
-class DoorState(StrEnum):
-    """喷头的派生状态，由服务端从 4 个原始整数派生（规则见 service.derive_state）。
-
-    定义成枚举让 OpenAPI 生成 enum，客户端据此生成联合类型，不必手抄状态清单。
-    """
-
-    FREE = "free"
-    """空闲：可用。"""
-
-    WAITING = "waiting"
-    """等待开阀：喷头已分配给这个人，但还没开阀出水。"""
-
-    BATHING = "bathing"
-    """淋浴中：正在出水。"""
-
-    PAUSED = "paused"
-    """已暂停：出水后暂停，未结束会话。"""
-
-    SELECTED = "selected"
-    """选中：被界面选中但未开始使用。"""
-
-    REPAIR = "repair"
-    """报修：设备标记为待维修。"""
-
-    DISABLED = "disabled"
-    """禁用：设备标记为停用。"""
-
-
-#: 占用中的状态（有人），用于后台任务与自动结算判断。
-OCCUPIED_STATES = frozenset({DoorState.WAITING, DoorState.BATHING, DoorState.PAUSED})
-
-#: 可以被分配的状态。
-#:
-#: 允许 SELECTED：它表示有人在浴室 App 上选中了这个喷头，但没有人占用，且该状态
-#: 会自行消失。拒绝 REPAIR 与 DISABLED：维修中与被停用的喷头不应能被分配。
-#: 正着列可分配的状态而不是反着列：将来新增状态默认落到不可分配一侧。
-ASSIGNABLE_STATES = frozenset({DoorState.FREE, DoorState.SELECTED})
+from ...models.enums import DoorState
 
 #: 状态取值 → 界面中文名。**这是机器可读的那一份，与枚举同处一文件。**
 #:

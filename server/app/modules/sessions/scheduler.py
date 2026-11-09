@@ -63,10 +63,9 @@ from app.core.problems import ApiProblemError
 from app.core.protocol import as_int
 from app.db.base import utcnow
 from app.db.session import session_scope
-from app.models.enums import BackgroundOutcome
+from app.models.enums import BackgroundOutcome, DoorState
 from app.modules.config import store as config_store
 from app.modules.doors import service as doors_service
-from app.modules.doors.schemas import DoorState
 
 from . import routes as sessions_routes
 from .decision import (

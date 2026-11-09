@@ -12,7 +12,7 @@ from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db.base import Base, UtcDateTime, enum_column, utcnow
-from ..modules.access.identity import IdentityKind
+from ..models.enums import IdentityKind
 
 
 class Device(Base):

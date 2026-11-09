@@ -9,7 +9,7 @@ from pathlib import Path
 
 from app.core.config import settings
 from app.db.session import Database
-from app.modules.access.identity import IdentityKind
+from app.models.enums import IdentityKind
 from app.persistence import principals as principals_store
 
 

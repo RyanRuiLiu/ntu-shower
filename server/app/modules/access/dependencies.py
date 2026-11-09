@@ -35,9 +35,9 @@ from app.core.problems import CAPABILITY_DENIED, UNAUTHENTICATED, UNKNOWN_IDENTI
 from app.db.deps import get_db
 from app.persistence import principals as principals_store
 
+from ...models.enums import IdentityKind
 from . import service
 from .capabilities import DEVICE_SCOPED, Capability
-from .identity import IdentityKind
 from .schemas import IdentityRecord
 
 

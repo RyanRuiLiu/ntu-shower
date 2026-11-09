@@ -20,7 +20,7 @@ def _put_identity(device_id: str, identity: str, capabilities: list[str], scope:
     from tests.identity import bearer
     from tests.identity import register as register_identity
 
-    from app.modules.access.identity import IdentityKind
+    from app.models.enums import IdentityKind
 
     token = register_identity(identity, IdentityKind.WEB, capabilities, "测试", device_scope=scope)
     return bearer(token)

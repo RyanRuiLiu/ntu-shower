@@ -11,8 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import Database
 from app.models import Base
-from app.models.enums import SegmentSource, SnapshotSource
-from app.modules.doors.schemas import DoorState
+from app.models.enums import DoorState, SegmentSource, SnapshotSource
 from app.persistence import devices, doors
 
 T0 = datetime(2026, 11, 7, 12, 0, 0, tzinfo=UTC)

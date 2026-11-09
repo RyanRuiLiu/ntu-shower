@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from tests import device_link, door_link, frames
 from tests.identity import bearer
 
-from app.modules.doors.schemas import ASSIGNABLE_STATES, DoorState
+from app.models.enums import ASSIGNABLE_STATES, DoorState
 
 TRUSTED = "dev-test-0001"
 ASSIGN_PAYLOAD = {"door_no": 1, "cert_no": "C", "password": "P"}

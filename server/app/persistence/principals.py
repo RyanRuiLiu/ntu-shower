@@ -16,8 +16,8 @@ from ..auth.passwords import hash_password, needs_rehash, verify_password
 from ..auth.tokens import generate_token, hash_token
 from ..core.clock import format_rfc3339
 from ..db.base import utcnow
+from ..models.enums import IdentityKind
 from ..models.identity import Principal
-from ..modules.access.identity import IdentityKind
 from ..modules.access.schemas import IdentityRecord
 
 DEFAULT_SCOPE: list[str] = ["*"]

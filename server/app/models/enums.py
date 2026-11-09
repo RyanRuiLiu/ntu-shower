@@ -7,6 +7,39 @@
 from enum import StrEnum
 
 
+class IdentityKind(StrEnum):
+    """标识来源。
+
+    与 capability 分开：能力回答"能做什么"，标识类型回答"这个标识从哪来"。
+    放在 models 层，让 ORM 模型与持久化层不必反向依赖业务模块。
+    """
+
+    OPENID = "openid"
+    """微信小程序用户：标识即其 openid。"""
+
+    WEB = "web"
+    """网页用户：标识是我方签发的不透明串。"""
+
+
+class DoorState(StrEnum):
+    """喷头的派生状态，由服务端从 4 个原始整数派生（规则见 doors.service.derive_state）。"""
+
+    FREE = "free"
+    WAITING = "waiting"
+    BATHING = "bathing"
+    PAUSED = "paused"
+    SELECTED = "selected"
+    REPAIR = "repair"
+    DISABLED = "disabled"
+
+
+#: 占用中的状态（有人），用于后台任务与自动结算判断。
+OCCUPIED_STATES = frozenset({DoorState.WAITING, DoorState.BATHING, DoorState.PAUSED})
+
+#: 可以被分配的状态。允许 SELECTED：选中但无人占用，且会自行消失。
+ASSIGNABLE_STATES = frozenset({DoorState.FREE, DoorState.SELECTED})
+
+
 class ActorKind(StrEnum):
     """调用方类型，与 api_calls.actor_kind 对应。
 
@@ -101,11 +134,15 @@ class CommandStatus(StrEnum):
 
 
 __all__: list[str] = [
+    "ASSIGNABLE_STATES",
+    "OCCUPIED_STATES",
     "ActorKind",
     "AssignedSource",
     "BackgroundOutcome",
     "CommandStatus",
     "DeviceLogKind",
+    "DoorState",
+    "IdentityKind",
     "LinkEvent",
     "ObservedSpan",
     "SegmentSource",

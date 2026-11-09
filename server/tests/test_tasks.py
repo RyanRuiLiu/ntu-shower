@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.db.session import session_scope
-from app.modules.access.identity import IdentityKind
+from app.models.enums import IdentityKind
 from app.modules.config import store as config_store
 from app.modules.config.spec import SPECS_BY_KEY, ConfigKind, ConfigScope
 from app.modules.sessions import scheduler as sessions_scheduler

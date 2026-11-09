@@ -18,7 +18,7 @@ from tests import device_link, door_link
 from app.core import device_clock, outcomes
 from app.core.clock import now_rfc3339, seconds_between
 from app.db.session import session_scope
-from app.modules.doors.schemas import DoorState
+from app.models.enums import DoorState
 from app.modules.sessions import scheduler
 from app.modules.sessions import service as sessions_service
 from app.modules.sessions.decision import (

@@ -112,3 +112,14 @@ exclude_lines = [
     "@overload",
     "if __name__ == .__main__.:",
 ]
+
+# 架构边界：import-linter 官方 forbidden 契约
+# https://import-linter.readthedocs.io/en/stable/contract_types.html
+[tool.importlinter]
+root_package = "app"
+
+[[tool.importlinter.contracts]]
+name = "模型层不依赖业务模块"
+type = "forbidden"
+source_modules = ["app.models"]
+forbidden_modules = ["app.modules"]

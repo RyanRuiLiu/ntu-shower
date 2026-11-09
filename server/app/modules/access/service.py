@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.core.logging import log_event
 from app.persistence import principals as principals_store
 
-from .identity import IdentityKind
+from ...models.enums import IdentityKind
 from .schemas import IdentityRecord
 
 #: 网页标识的随机字节数。32 字节 = 256 位，不可枚举。

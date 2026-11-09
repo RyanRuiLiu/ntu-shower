@@ -150,7 +150,7 @@ def fresh_db(
 def admin_headers(fresh_db: str) -> dict[str, str]:
     """管理台调用方：admin 之外还持 session/photo——管理台要代操作用户动作。"""
     from app.db.session import Database
-    from app.modules.access.identity import IdentityKind
+    from app.models.enums import IdentityKind
     from app.persistence import principals as principals_store
 
     database = Database(f"sqlite:///{Path(fresh_db).as_posix()}")
@@ -180,7 +180,7 @@ def ops_headers(fresh_db: str) -> dict[str, str]:
     """
     from app.db.base import utcnow
     from app.db.session import Database
-    from app.modules.access.identity import IdentityKind
+    from app.models.enums import IdentityKind
     from app.persistence import devices as devices_store
     from app.persistence import principals as principals_store
 

@@ -16,9 +16,9 @@ from tests.conftest import ADMIN_IDENTITY
 from tests.identity import bearer
 
 from app.core.problems import CAPABILITY_DENIED, ApiProblemError
+from app.models.enums import IdentityKind
 from app.modules.access.capabilities import ALL_CAPABILITIES, DEVICE_SCOPED, Capability, user_actions
 from app.modules.access.dependencies import require_capability
-from app.modules.access.identity import IdentityKind
 from app.modules.access.schemas import IdentityRecord
 from app.persistence import principals as principals_store
 
@@ -160,7 +160,7 @@ def test_user_actions_follow_capability_matrix() -> None:
 
 def test_assign_requires_session_capability(client: TestClient, fresh_db: str) -> None:
     """只有 photo 能力位的身份对分配被拒（capability-denied，先于设备存在性检查）。"""
-    from app.modules.access.identity import IdentityKind
+    from app.models.enums import IdentityKind
 
     token = _register("photo-only-0001", IdentityKind.WEB, ["photo"], "只拍照", device_scope=["*"])
 
@@ -176,7 +176,7 @@ def test_assign_requires_session_capability(client: TestClient, fresh_db: str) -
 
 def test_photo_requires_photo_capability(client: TestClient, fresh_db: str) -> None:
     """只有 session 能力位的身份对拍照被拒。"""
-    from app.modules.access.identity import IdentityKind
+    from app.models.enums import IdentityKind
 
     token = _register("session-only-001", IdentityKind.WEB, ["session"], "只分配", device_scope=["*"])
 
@@ -196,7 +196,7 @@ def test_wildcard_scope_passes_guard_for_any_device(
 
     device_link.register_trusted_device("dev-any-0001")
     monkeypatch.setattr(manager, "_connections", {"dev-any-0001": object()})
-    from app.modules.access.identity import IdentityKind
+    from app.models.enums import IdentityKind
 
     token = _register("wildcard-000001", IdentityKind.WEB, ["session"], "通配", device_scope=["*"])
 
@@ -212,7 +212,7 @@ def test_wildcard_scope_passes_guard_for_any_device(
 
 def test_list_scope_blocks_device_outside_list(client: TestClient, fresh_db: str) -> None:
     """作用域限定具体设备后，对列表外设备的操作被拒。"""
-    from app.modules.access.identity import IdentityKind
+    from app.models.enums import IdentityKind
 
     token = _register("scoped-0000001", IdentityKind.WEB, ["session"], "限定设备", device_scope=["dev-allow-0001"])
 

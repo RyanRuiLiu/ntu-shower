@@ -61,8 +61,9 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.clock import format_rfc3339, now_rfc3339, parse_rfc3339, rfc3339_ago, seconds_between, to_local
+from app.models.enums import DoorState
 from app.modules.devices.schemas import LINK_OFFLINE
-from app.modules.doors.schemas import DoorState, state_label
+from app.modules.doors.schemas import state_label
 from app.modules.doors.service import SESSION_MAX_S
 from app.persistence import devices as devices_store
 from app.persistence import doors as doors_store

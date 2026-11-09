@@ -24,7 +24,7 @@ from typing import Literal
 
 from app.core.clock import seconds_between
 from app.core.protocol import JsonObject, as_int
-from app.modules.doors.schemas import DoorState
+from app.models.enums import DoorState
 
 FEATURE_RENEW_WAIT = "renew_wait"
 FEATURE_RENEW_SESSION = "renew_session"

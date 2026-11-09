@@ -6,4 +6,5 @@ cd "$(dirname "$0")/../server"
 .venv/Scripts/python.exe -m ruff format --check app tests
 .venv/Scripts/python.exe -m ruff check app tests
 .venv/Scripts/python.exe -m mypy app --strict
-.venv/Scripts/python.exe -m pytest -q --cov=app --cov-report=term-missing
+./.venv/Scripts/lint-imports.exe
+.venv/Scripts/python.exe -m pytest -q -n 2 --cov=app --cov-report=term-missing

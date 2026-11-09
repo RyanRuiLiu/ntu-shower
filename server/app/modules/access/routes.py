@@ -23,10 +23,10 @@ from app.core.problems import UNKNOWN_CAPABILITY, VALIDATION_FAILED, ApiProblemE
 from app.db.deps import get_db
 from app.persistence import principals as principals_store
 
+from ...models.enums import IdentityKind
 from . import service
 from .capabilities import ALL_CAPABILITIES, Capability, cap_label
 from .dependencies import require_admin, require_identity
-from .identity import IdentityKind
 from .schemas import IdentityCatalog, IdentityIssued, IdentityRecord, IdentityRequest
 
 #: 身份域里"我自己"那一面。要排在那条带 require_admin 的 router 之前注册（见 app/main.py）。

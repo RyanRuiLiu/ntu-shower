@@ -34,9 +34,9 @@ from starlette.concurrency import run_in_threadpool
 from app.core import protocol
 from app.core.connections import manager
 from app.core.logging import log_event
+from app.models.enums import DoorState
 from app.modules.devices import service as devices_service
 from app.modules.doors import service as doors_service
-from app.modules.doors.schemas import DoorState
 
 #: 汇总间隔。门的迁移本身是秒级事件，一轮一秒足够新；更密只会重复算同一份现态。
 PUSH_INTERVAL_S = 1.0

@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import Database
 from app.models import Base
-from app.modules.access.identity import IdentityKind
+from app.models.enums import IdentityKind
 from app.persistence import principals as access
 
 

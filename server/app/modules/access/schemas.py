@@ -8,7 +8,7 @@
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
-from .identity import IdentityKind
+from ...models.enums import IdentityKind
 
 
 class IdentityRequest(BaseModel):
