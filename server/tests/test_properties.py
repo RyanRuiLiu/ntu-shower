@@ -9,6 +9,10 @@
 - `app/core/clock.py` 的规范化往返与非负时长——出处：模块注释（"统一时间：服务端
   对外输出的时间一律为 UTC RFC 3339 毫秒精度"；"结果恒为非负"）。
 
+deadline=None：pytest-timeout 单测上限 5 秒（线程法超时会硬杀 worker），而 deadline
+默认 200ms/例在 CI 的 coverage 追踪下会抖动——这是 hypothesis 文档记载的 CI 噪声源。
+正确性不因此放宽：失败照样收缩出反例，只是不再按单例耗时误报。
+
 若试点证明价值，再扩到其他纯函数；若只添噪声，删这一个文件即可整体回退。
 """
 
@@ -16,7 +20,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta, timezone
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from app.core import clock
@@ -38,16 +42,22 @@ DOORS = st.fixed_dictionaries(
     }
 )
 
-#: 带时区的时刻：UTC 与任意整分钟偏移（与 to_local 的用法域一致）。
-AWARE_DATETIMES = st.datetimes(timezones=st.integers(-14 * 60, 14 * 60).map(lambda m: timezone(timedelta(minutes=m))))
+#: 带时区的时刻：naive 时刻 + 整分钟偏移在测试体内合成。不走 st.datetimes(timezones=…)：
+#  那条路径要对 datetime 边界反复过滤重试，是文档标注的昂贵策略，在 CI 的追踪下会
+#  拖垮单测 5 秒上限（2026-11-10 实测：gw1 被硬杀）。
+AWARE_DATETIMES = st.tuples(st.datetimes(), st.integers(-14 * 60, 14 * 60)).map(
+    lambda pair: pair[0].replace(tzinfo=timezone(timedelta(minutes=pair[1])))
+)
 
 
+@settings(deadline=None)
 @given(DOORS)
 def test_derive_state_is_total(door: dict) -> None:
     """满射：任何一帧都落在七态之内，不存在算不出状态的门读数。"""
     assert derive_state(door) in set(DoorState)
 
 
+@settings(deadline=None)
 @given(DOORS)
 def test_repair_and_disabled_take_priority(door: dict) -> None:
     """报修/停用排在占用判定之前：status 命中 1/3 即返回，不看占用字段。
@@ -60,6 +70,7 @@ def test_repair_and_disabled_take_priority(door: dict) -> None:
     assert derive_state(door) is DoorState.DISABLED
 
 
+@settings(deadline=None)
 @given(STATUS_SCALARS)
 def test_as_int_accepts_scalars_and_never_raises(value: object) -> None:
     """as_int 的吸收性：三类 JSON 标量进来要么得 int 要么取默认，绝不抛异常。"""
@@ -69,6 +80,7 @@ def test_as_int_accepts_scalars_and_never_raises(value: object) -> None:
         assert result == value
 
 
+@settings(deadline=None)
 @given(AWARE_DATETIMES)
 def test_rfc3339_format_is_a_fixed_point_of_parse(moment: datetime) -> None:
     """规范化往返：format 的输出再 parse 再 format 得到同一字符串（毫秒精度即规范形）。
@@ -80,6 +92,7 @@ def test_rfc3339_format_is_a_fixed_point_of_parse(moment: datetime) -> None:
     assert clock.format_rfc3339(clock.parse_rfc3339(text)) == text
 
 
+@settings(deadline=None)
 @given(st.text(max_size=64))
 def test_shift_by_zero_canonicalizes(text: str) -> None:
     """shift(text, 0) == format(parse(text))：平移零秒就是规范化本身。"""
@@ -91,6 +104,7 @@ def test_shift_by_zero_canonicalizes(text: str) -> None:
         assert shifted == clock.format_rfc3339(parsed)
 
 
+@settings(deadline=None)
 @given(AWARE_DATETIMES, AWARE_DATETIMES)
 def test_seconds_between_is_never_negative(start: datetime, end: datetime) -> None:
     """时长恒为非负（clock.py：调用方不该为负值单独写分支）。"""
@@ -100,6 +114,7 @@ def test_seconds_between_is_never_negative(start: datetime, end: datetime) -> No
     assert clock.seconds_between(second, first) >= 0
 
 
+@settings(deadline=None)
 @given(AWARE_DATETIMES, st.integers(-(10**6), 10**6))
 def test_shift_moves_the_moment_by_exactly_seconds(moment: datetime, seconds: int) -> None:
     """平移基准是被给时刻而非此刻：shift(text, s) == format(解析值 + s 秒)。
