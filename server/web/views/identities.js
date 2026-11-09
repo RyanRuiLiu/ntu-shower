@@ -28,6 +28,7 @@
  * 旧凭据立即失效。标识本身入表可随时查看，不需要一次明文展示。
  */
 import { api } from '../core/api.js'
+import { copyText } from '../core/clipboard.js'
 import { codeCell } from '../core/cells.js'
 import { problemText, report } from '../core/outcome.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
@@ -272,15 +273,8 @@ function showIssuedSecret(token, message) {
   report('identityResult', message, 'ok')
 }
 
-async function copyIssued() {
-  const input = $('issuedValue')
-  try {
-    await navigator.clipboard.writeText(input.value)
-    toast('已复制')
-  } catch {
-    input.select()
-    toast('已选中，按 Ctrl+C 复制')
-  }
+function copyIssued() {
+  copyText($('issuedValue').value, { fallbackInputId: 'issuedValue' })
 }
 
 let dispose = disposer()

@@ -6,11 +6,13 @@
  *
  * ## 危险操作要能被认出来
  *
- * 重启与卸载会停掉设备端的程序，卸载还会摘掉它在服务端的连接。它们在界面上
- * 与普通操作区分开（危险按钮），并且各自要一次确认——误点的代价是跑一趟现场。
+ * 三个重启动作都会中断设备端的进程，重启整机还会让设备离线一段时间（重连后由全貌帧
+ * 重建现态）。它们各自要一次确认——误点的代价是跑一趟现场；重启整机在界面上进一步
+ * 用危险按钮（btn-danger）与另两个（btn-ghost）区分开。
  */
 import { api } from '../core/api.js'
 import { sessionActive } from '../core/api.js'
+import { copyText } from '../core/clipboard.js'
 import { codeCell } from '../core/cells.js'
 import { fmtFullDateTime } from '../core/clock.js'
 import { REBOOT_CONFIRM } from '../core/copy.js'
@@ -392,20 +394,10 @@ async function bridgeClose() {
 }
 
 /**
- * 复制一个只读输入框里的内容。
- *
- * navigator.clipboard 在非安全上下文或未授权时失败，退到"选中让手动复制"；
- * 直接失败且无提示才让人困惑。
+ * 复制一个只读输入框里的内容：退路（选中让手动复制）由核心的 clipboard 统一。
  */
-async function copyFrom(id) {
-  const input = $(id)
-  try {
-    await navigator.clipboard.writeText(input.value)
-    toast('已复制')
-  } catch {
-    input.select()
-    toast('已选中，按 Ctrl+C 复制')
-  }
+function copyFrom(id) {
+  copyText($(id).value, { fallbackInputId: id })
 }
 
 let dispose = disposer()
@@ -542,7 +534,7 @@ export const devicesView = {
         refreshDevices().catch((error) => toast(problemText(error)))
         refreshRuntime()
           .then((ok) => {
-            if (!ok) report('maintResult', '需要管理身份，请在顶栏填写身份标识', 'err')
+            if (!ok) report('maintResult', '未登录或会话已过期，请在顶栏登录', 'err')
           })
           .catch((error) => toast(problemText(error)))
       }),

@@ -7,7 +7,7 @@
  * 两份设备状态各司其职：
  * - `devices`：精简档案（公开端点），设备下拉与用户面渲染用；
  * - `runtime`：运维档案（admin 端点），设备页诊断表与顶栏详情用；
- *   未填管理身份时为空，各处对缺失字段给占位符。
+ *   未登录会话时为空，各处对缺失字段给占位符。
  *
  * 这里的 `subscribe`/`emit` 是应用事件，与 `core/dom.js` 的 `listen`
  * （DOM 事件）是两回事，命名上刻意分开。
@@ -95,8 +95,8 @@ export async function refreshDevices() {
 }
 
 /**
- * 刷新设备运维档案（admin）。无身份或 401 时清空并静默返回 false：
- * 管理身份是用户主动填写的，加载流程不因它的缺失而打断。
+ * 刷新设备运维档案（admin）。未登录或 401/403 时清空并静默返回 false：
+ * 登录是用户在顶栏主动做的，加载流程不因它的缺失而打断。
  */
 export async function refreshRuntime() {
   try {

@@ -109,6 +109,27 @@ export function canCut(status) {
   return (status & 0x05) !== 0
 }
 
+/**
+ * 授权/断水操作完成后，按设备回的状态挑结果文案。
+ *
+ * 位义判断只在这一份实现里——概览卡片曾把这套掩码抄过去一份，两边迟早分叉。
+ * 状态读不出（未读取/未定义位）时按"操作已受理"给基础文案：成功与否以命令结果为准，
+ * 这里只负责把"按钮还差一步"这类状态差别说出来。
+ */
+export function waterActionResult(action, status) {
+  if (!Number.isInteger(status) || (status & ~0x07) !== 0) {
+    return action === 'open' ? WATER_COPY.authorizeDone : WATER_COPY.cutDone
+  }
+  const low = status & 0x07
+  if (action === 'open') {
+    if (low === 0x01) return WATER_COPY.authorizeWaitButton
+    if (low === 0x03) return WATER_COPY.authorizeWaitReset
+    return WATER_COPY.authorizeDone
+  }
+  if (low === 0x02) return WATER_COPY.cutButtonOn
+  return WATER_COPY.cutDone
+}
+
 /** 最近一次刷新结果；`at` 为空表示还没成功刷新过。 */
 export const water = { deviceId: '', at: '', boards: [], error: '', loading: false }
 

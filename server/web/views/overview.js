@@ -21,6 +21,7 @@ import {
   canCut,
   refreshWater,
   subscribeWater,
+  waterActionResult,
   WATER_COPY,
   WATER_STATE,
   waterDoor,
@@ -500,20 +501,6 @@ function stopTaskBoard() {
 }
 
 /** 卡片上的授权出水/断水：admin 才能看到按钮，服务端仍会再校验。 */
-function waterActionToast(action, status) {
-  if (!Number.isInteger(status) || (status & ~0x07) !== 0) {
-    return action === 'open' ? WATER_COPY.authorizeDone : WATER_COPY.cutDone
-  }
-  const low = status & 0x07
-  if (action === 'open') {
-    if (low === 0x01) return WATER_COPY.authorizeWaitButton
-    if (low === 0x03) return WATER_COPY.authorizeWaitReset
-    return WATER_COPY.authorizeDone
-  }
-  if (low === 0x02) return WATER_COPY.cutButtonOn
-  return WATER_COPY.cutDone
-}
-
 async function onWaterButton(event) {
   const button = event.target.closest('[data-water]')
   if (!button || button.disabled) return
@@ -536,7 +523,7 @@ async function onWaterButton(event) {
     // 先刷新再提示：结果文案按板上实际状态选，避免“已出水”与“待按电磁阀”说反。
     await refreshWater(store.deviceId)
     const found = waterDoor(doorNo)
-    toast(waterActionToast(action, found ? found.door.status : null))
+    toast(waterActionResult(action, found ? found.door.status : null))
   } catch (error) {
     toast(problemText(error))
   } finally {
