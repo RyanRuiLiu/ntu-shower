@@ -44,6 +44,17 @@
 - 运维手册拓扑表与部署说明对齐 FHS 迁移后的实际路径（配置 `/etc/ntu-shower`、
   数据 `/var/lib/ntu-shower`）；实时推送路径在架构与参考文档中更正为 `/api/v1/stream`。
 
+### Removed
+
+- 删除 `docs/glossary.md`：源自已删除的自创术语扫描器，无执行机制，且代码仍引用其已不存在的 `CANONICAL`。
+- 删除 `docs/testing.md`：通用条款与自创的 R0-R3 变更分级，与 `CONTRIBUTING.md` 的质量门重复。
+- `docs/runbook.md` 删除「发布与部署规则」「运行与维护规则」两章：已删除的自创工程标准残页，
+  其中「备份必须加密」与 ADR-0018 直接冲突。
+- `docs/reference.md` 的字段表、端点表与典型流程移出：可从 `server/app/models/`、
+  `/openapi.json` 与代码读出；字段的特殊语义改写入模型字段注释。
+- 清理代码与配置中指向已删除文档的引用（`STANDARDS.md`、`docs/DECISIONS.md`、
+  `docs/runbook.md` 的章节号）。
+
 ## [0.6.5] - 2026-11-04
 
 ### Changed

@@ -75,10 +75,10 @@ android {
     lint {
         // 设备 ROM 冻结在 Android 4.4 且不进 Google Play：targetSdk 19 是有意决策
         disable += "ExpiredTargetSdkVersion"
-        // /sdcard/ 硬编码：AppConfig 是目标设备的环境锚点（实测路径，见 docs/DECISIONS.md），
+        // /sdcard/ 硬编码：AppConfig 是目标设备的环境锚点（实测路径，见 docs/adr/0007-device.md），
         // Environment.getExternalStorageDirectory() 已废弃且返回同一位置
         disable += "SdCardPath"
-        // ANDROID_ID 即设备身份：设计决策（docs/DECISIONS.md），多设备注册表的唯一键
+        // ANDROID_ID 即设备身份：设计决策（docs/adr/0008-identity.md），多设备注册表的唯一键
         disable += "HardwareIds"
         // okhttp 钉在 3.12.13：4.x 起要求 API 21，设备冻结 4.4（见 docs/ARCHITECTURE.md）
         disable += "NewerVersionAvailable"

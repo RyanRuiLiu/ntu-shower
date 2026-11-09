@@ -89,9 +89,9 @@ jobs:
       - run: ./gradlew detekt :app:lintDebug :app:testDebugUnitTest :app:jacocoUnitTestCoverageVerification
       - run: ./gradlew assembleDebug
 
-  # 秘密扫描与依赖漏洞扫描（从「待建立」转「已执行」）：
+  # 秘密扫描与依赖漏洞扫描：
   # gitleaks 对全历史扫已入库的秘密；pip-audit 对锁定的依赖版本查 OSV 漏洞，
-  # 高危与严重漏洞未修复时门禁红灯（§13.6.3 修复前不得发布）。
+  # 高危与严重漏洞未修复时门禁红灯（修复前不得发布）。
   # pull-requests: read 是 gitleaks-action 在 PR 事件下列出提交所需（GET /pulls/*/commits）；
   # 门禁不授予任何写权限，泄漏以退出码报告。
   security:

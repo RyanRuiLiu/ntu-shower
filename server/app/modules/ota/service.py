@@ -1,7 +1,7 @@
 """OTA 领域服务：APK 存储与发布通知。
 
 发布通知：release 注册后向在线的目标设备即时推送 ota.upgrade_available；
-离线设备不补推——其下次轮询 manifest 时自然获取（协议 §6）。
+离线设备不补推——其下次轮询 `GET /ota/manifest` 时自然获取。
 """
 
 import hashlib

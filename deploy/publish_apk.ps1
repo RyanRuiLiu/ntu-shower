@@ -17,7 +17,7 @@ param(
     [string]$BaseUrl = "https://ntu-shower.iseekdream.com"
 )
 
-# 严格模式（STANDARDS.md §7.8.2）：未定义变量与拼错成员名当场终止，而不是静默走 $null。
+# 严格模式：未定义变量与拼错成员名当场终止，而不是静默走 $null。
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
