@@ -38,9 +38,9 @@
 
 | 层 | 表 | 用途 |
 |---|---|---|
-| **原始层** | `door_snapshot`、`device_link_event`、`command_audit`、`api_call`、`background_task_run` | 设备与调用方的原话、本项目做过的事，不改写。**它是重算的退路，不是查询入口** |
-| **派生层** | `door_live`、`door_state_event`、`usage_segment`、`usage_session` | 本项目算出来的。**做功能与统计只碰这四张** |
-| **支撑层** | `device`、`global_config`、`device_config`、`access_identity`、`ota_release`、`ota_release_install` | 设备档案、配置、身份、发布——**都是"配上去"的东西，删了重建即可** |
+| **原始层** | `door_snapshots`、`device_link_events`、`command_audits`、`api_calls`、`background_task_runs` | 设备与调用方的原话、本项目做过的事，不改写。**它是重算的退路，不是查询入口** |
+| **派生层** | `door_states`、`door_state_events`、`usage_segments`、`usage_sessions` | 本项目算出来的。**做功能与统计只碰这四张** |
+| **支撑层** | `device`、`app_settings`、`device_configs`、`principals`、`ota_releases`、`ota_release_installs` | 设备档案、配置、身份、发布——**都是"配上去"的东西，删了重建即可** |
 
 > **能不能删，看它是不是"重配得回来"**：支撑层是配置与档案（重配一遍就有）；原始层与派生层
 > 是设备报过的原话与从它算出来的历史（会话、段、状态事件、帧）——**删了就回不来**，统计口径
@@ -55,24 +55,24 @@
 
 两条轴的定义、三条换算规则与设备钟偏差的出处由 `docs/architecture.md` 的「时间轴与口径」规定；本节只列消费者字段映射。
 
-设备轴原话只留在原始帧；`door_live`、`usage_segment`、`usage_session` 的时刻字段全部在服务端轴上。
+设备轴原话只留在原始帧；`door_states`、`usage_segments`、`usage_sessions` 的时刻字段全部在服务端轴上。
 
 **一次会话里的六个时刻**（都在服务端轴上）：
 
 | 正名 | 标识符 | 含义 |
 |---|---|---|
-| **分配时刻** | `usage_session.assigned_at` | 喷头被分配给这个人的时刻 |
+| **分配时刻** | `usage_sessions.assigned_at` | 喷头被分配给这个人的时刻 |
 | 首次观测时刻 | 同上（`assigned_source = observed` 时） | 拿不到设备原文时退回的观测值，**只是下界，真实更早** |
-| **开阀时刻** | `usage_segment.opened_at` | 这一段开始出水 |
-| **关阀时刻** | `usage_segment.closed_at` | 这一段停止出水；**空 = 尚未关阀** |
-| **释放时刻** | `usage_session.ended_at` | 观测到这次占用结束；**空 = 仍在进行** |
-| **最后确认时刻** | `usage_session.last_seen_at` | 最后一次确认它还占着；**释放时刻 − 它 = 盲区** |
+| **开阀时刻** | `usage_segments.opened_at` | 这一段开始出水 |
+| **关阀时刻** | `usage_segments.closed_at` | 这一段停止出水；**空 = 尚未关阀** |
+| **释放时刻** | `usage_sessions.ended_at` | 观测到这次占用结束；**空 = 仍在进行** |
+| **最后确认时刻** | `usage_sessions.last_seen_at` | 最后一次确认它还占着；**释放时刻 − 它 = 盲区** |
 
 ---
 
 ## 原始层
 
-### `door_snapshot` —— 一帧
+### `door_snapshots` —— 一帧
 
 设备报了什么都原样记，不做任何解释。重复投递由 `snapshot_id` 的唯一索引挡掉（设备在收到 ack 前会重发），落库原地不动、派生也随之跳过。
 
@@ -87,7 +87,7 @@
 | `received_at` | 服务端收到它的时刻 |
 | `doors` | 该帧里每个喷头的读数（JSON 数组），字段见协议 `protocol/schema/door.snapshot.json` |
 
-### `device_link_event` —— 上下线
+### `device_link_events` —— 上下线
 
 帧是**事件驱动**的（状态变化才上报），空闲时不上报。所以"没消息"有两种来源：没人使用，或设备离线；两者在数据里无法区分。这张表把它分开，同时给出设备利用率的分母。
 
@@ -99,7 +99,7 @@
 
 **只记"连接建立/断开"这个事实**：为什么断（网络、重启、被踢）不在其中，那要结合断线前的日志看。
 
-### `command_audit` —— 本项目下发的每条命令
+### `command_audits` —— 本项目下发的每条命令
 
 | 字段 | 是什么 |
 |---|---|
@@ -111,7 +111,7 @@
 | `status` | `ok`（做完了）／`failed`（动手了但没成）／`timeout`（超过时限，没有结论）／`rejected`（前置条件不满足，未产生副作用，重试安全）。取值是跨端契约，见 `app/core/outcomes.py` |
 | `reason_code` | 失败原因码，登记表见 `app/core/reason_codes.py` |
 | `terminal_message` | 给人看的一句话。失败时服务端用 `reason_codes.describe()` 补齐，**保证非空**；成功时设备有值得转达的内容才填（如浴室 App 界面原文）。**分支判定用 `status` 与 `reason_code`，不用它** |
-| `trace_id` | 与 `api_call` 关联，查两边即得全链路 |
+| `trace_id` | 与 `api_calls` 关联，查两边即得全链路 |
 | `data` | 结构化结果（如截图的 base64、exec 的输出） |
 
 > **`status = ok` 不等于动作做成了。** 设备端把那一轮 UI 流程走完就报 `ok`，而**浴室端
@@ -121,7 +121,7 @@
 > 给人看的中文，`outcomes.py` 明写不拿它做分支。所以判"这次到底成没成"只能看**后续帧**：
 > 喷头有没有变成「等待开阀」、占用者是不是他、那一行有没有被清零。
 
-### `api_call` —— 每一次 HTTP 调用与每次网关连接
+### `api_calls` —— 每一次 HTTP 调用与每次网关连接
 
 | 字段 | 是什么 |
 |---|---|
@@ -129,7 +129,7 @@
 | `requested_at` | 服务端轴 |
 | `request_id` / `trace_id` | 请求标识 / 链路标识（有合法 `traceparent` 就沿用它的 trace-id，否则生成） |
 | `actor_kind` | `token`（Bearer 凭据，actor 记摘要前 12 位）／`session`／`anonymous`／`device`（网关） |
-| `actor` | 身份原文，**不脱敏**；匿名时为空串 |
+| `actor` | 身份原文，**不脱敏**；匿名时为 NULL |
 | `client_ip` / `user_agent` | 来源 IP（经 nginx 反向代理而来，真实地址在 `X-Real-IP`）／UA |
 | `method` / `path` / `query` | 请求行 |
 | `request_body` / `response_body` | JSON 体原文。**全有或全无，绝不截断**：截断了后续就查不回真实内容，超限时占位说明。数据重型且可重取的三个端点（`capture`／`dump`／`photo`）不落响应体 |
@@ -139,28 +139,28 @@
 | `problem_type` | RFC 9457 的问题类型；登记表见 `app/core/problems.py` |
 | `detail` | 失败响应的中文说明 |
 
-### `background_task_run` —— 每一次后台任务的终局
+### `background_task_runs` —— 每一次后台任务的终局
 
 一行 = 一次**终局**（动手了，或者判定不该动手）。判据阶段（每帧、每个候选都算一次"到点
 没有"）**不落库**——那等于帧数。
 
 | 字段 | 是什么 |
 |---|---|
-| `occurred_at` | 终局时刻（服务端轴）。与 `command_audit.created_at` 对照即知这次发了哪条命令 |
+| `occurred_at` | 终局时刻（服务端轴）。与 `command_audits.created_at` 对照即知这次发了哪条命令 |
 | `device_id` / `door_no` | 哪台设备的哪个喷头 |
 | `session_id` / `cert_no` | 这一场会话、替谁 |
 | `feature` | `renew_wait` / `renew_session` / `auto_settle` |
-| `action` | `session.settle` / `session.assign`（与 `command_audit.action` 同一套词）；**空 = 批次级失败，还没到具体动作** |
+| `action` | `session.settle` / `session.assign`（与 `command_audits.action` 同一套词）；**空 = 批次级失败，还没到具体动作** |
 | `outcome` | 终局是什么，**与日志事件后缀同名**：`settled` / `assigned` / `skipped` / `no-password` / `not-applicable` / `rejected` / `settle-failed` / `assign-waiting` / `assign-failed` / `assign-expired` / `failed` |
 | `reason` | 没动手时的中文原因（"不在名单里"这类） |
 | `threshold_s` | **当时生效的阈值**——配置没有历史，不存这一列，事后说不清"为什么是这一刻" |
 
 **为什么它单独有一张表**：后台任务在**帧**上动手，没有任何 HTTP 请求在途——按上面那条
 口径（"事件发生时有没有一行 HTTP 审计能兜住它"）它就该自己留一行。而它记的是**决定**，
-与 `command_audit` 记的"发了一条什么命令"不是同一件事：上面那些终局里有五个根本没有命令。
+与 `command_audits` 记的"发了一条什么命令"不是同一件事：上面那些终局里有五个根本没有命令。
 
-**永久保留**：它是运营历史（谁被自动续期过、第几次）。`core.audit.prune` 只清 `api_call`
-与 `command_audit` 两条流水，这张表不在其中。
+**永久保留**：它是运营历史（谁被自动续期过、第几次）。`core.audit.prune` 只清 `api_calls`
+与 `command_audits` 两条流水，这张表不在其中。
 
 ---
 
@@ -192,24 +192,24 @@ status == 3（RAW_STATUS_DISABLED） → 已禁用
 
 中文名与 `status-panel` 小程序的展示文案一致，不许另起（见 `docs/glossary.md`）。
 
-### `door_live` —— 这个喷头的当前状况
+### `door_states` —— 这个喷头的当前状况
 
-一行一个喷头（`PRIMARY KEY (device_id, door_no)`）。
+一行一个喷头（`id` 主键，`(device_id, door_no)` 唯一）。
 
 | 字段 | 是什么 |
 |---|---|
 | `state` | 上面派生出的七个取值之一 |
 | `card_no` / `cert_no` / `acc_no` | 占用者标识。**本机无卡，`card_no` 实测 235270 帧无一非零**——"谁"只能看 `cert_no`（为空时退回 `acc_no`） |
-| `open_time` | **分配时刻（服务端轴）**。空闲时为空串 |
-| `in_time` | **当前这一段的开阀时刻（服务端轴）**。等待开阀时为空；**暂停后仍有值**——设备在关阀那一刻清空了 `inTime`，这一段的开阀时刻改由段表回答（见 `usage_segment`）。它因此不用来说"此刻在不在出水"，那是 `state` 的事 |
+| `open_time` | **分配时刻（服务端轴）**。空闲时为 NULL |
+| `in_time` | **当前这一段的开阀时刻（服务端轴）**。等待开阀时为 NULL；**暂停后仍有值**——设备在关阀那一刻清空了 `inTime`，这一段的开阀时刻改由段表回答（见 `usage_segments`）。它因此不用来说"此刻在不在出水"，那是 `state` 的事 |
 | `close_time` | **当前这一段的关阀时刻（服务端轴）**。只有已暂停时有值 |
 | `bath_time_s` | 设备累计的出水秒数。**它是时长不是时刻，不在任何一条时间轴上**；且**不单调**——只在关阀那一刻累加、释放时整体归零 |
 | `status_raw` | 设备报的原始 `status` 整数。**别拿它判状态**，用 `state`；新增状态时直接判整数会静默走错分支 |
 | `reported_at` | 这一行是据哪一帧写的（服务端轴） |
 
-三个时间字段存的是**服务端轴**的值，换算在写入前完成——设备那口钟的读数只在原始帧里保真。它们让"这个门的当前状况"一次查询就能渲染；对应的会话与段由 `usage_session` / `usage_segment` 回答。
+三个时间字段存的是**服务端轴**的值，换算在写入前完成——设备那口钟的读数只在原始帧里保真。它们让"这个门的当前状况"一次查询就能渲染；对应的会话与段由 `usage_sessions` / `usage_segments` 回答。
 
-### `door_state_event` —— 每一次状态转换
+### `door_state_events` —— 每一次状态转换
 
 只在状态**真的变了**时写一行。两种帧不记：**首帧**（没有"从哪来"）与**全貌帧**（`source = startup`，它只刷现态、不派生，见 `SOURCE_STARTUP`）。语音的 `assigned` 不依赖这张表：它是会话生命周期事实，全貌帧/盲区帧只要 `open_time` 可平移也会补发（见 `docs/adr/` 的语音事件一节）。
 
@@ -223,9 +223,9 @@ status == 3（RAW_STATUS_DISABLED） → 已禁用
 
 它是对账与诊断的主力：**暂停次数**数 `bathing→paused`，`bathing→free` 与 `paused→free` 含义不同。
 
-> **分辨率的下限**：帧是秒级采样的，"两次写库落在同一帧里"就看不出中间态。要精确的逐次统计，看 `usage_segment`（一次出水一行）而不是事件表。
+> **分辨率的下限**：帧是秒级采样的，"两次写库落在同一帧里"就看不出中间态。要精确的逐次统计，看 `usage_segments`（一次出水一行）而不是事件表。
 
-### `usage_segment` —— 一次连续出水
+### `usage_segments` —— 一次连续出水
 
 一段 = 一个会话里从开阀到关阀。一个会话含 0 到 n 段（0 段 = 分配了没出水）。
 
@@ -234,7 +234,7 @@ status == 3（RAW_STATUS_DISABLED） → 已禁用
 | `session_id` | 属于哪次会话 |
 | `device_id` / `door_no` | 冗余一份门号与设备号，为了按门筛段时免联表（刻意的例外，写明白了） |
 | `opened_at` / `closed_at` | 开阀 / 关阀时刻，**服务端轴**。`closed_at` 为空 = 尚未关阀 |
-| `flow_s` | **这一段的长度**。注意同名列在 `usage_session` 上是**另一个量**（那个是段之和） |
+| `flow_s` | **这一段的长度**。注意同名列在 `usage_sessions` 上是**另一个量**（那个是段之和） |
 | `opened_raw` / `closed_raw` | 设备写下的两个读数**原文**（与 `open_time` 同格式：设备钟上的 RFC 3339，例如 `2026-10-03T17:54:06.000Z`——服务端轴上它是 `16:54:15`）。段长取"同一口钟两个读数之差"，没有原文就无法复核、也无法事后重算 |
 | `source` | 段长的证据强度，五档，见下 |
 
@@ -253,7 +253,7 @@ status == 3（RAW_STATUS_DISABLED） → 已禁用
 1. `close_time` 缺失时用 `str(None)` 得到字符串 `"None"`——非空，于是"没有关阀时刻"被当成有值，两读数之差算成 0。所以只在它**真的是字符串**时才当读数。
 2. 两个不同读数的差被 `seconds_between` 归零（关阀早于开阀，段内设备钟被往回拨过）。**两个不同的读数不会差 0 秒**，据此把归零值当"没有设备轴差"退回观测差。
 
-### `usage_session` —— 一次占用
+### `usage_sessions` —— 一次占用
 
 一行 = 一个喷头从被分配到被释放。
 
@@ -321,13 +321,13 @@ gap = 上一帧到本帧的秒数（没有上一帧时 -1）
 | `assigned_at` / `opened_at` | **会话**起点 / **段**起点 | 统计占用时用了段，零出水的会话全丢 |
 | `last_seen_at` / `ended_at` | 最后确认占用 / 观测到结束 | 前者才是可信下界；后者跨盲区时不是真实时刻 |
 | `assigned_source` / `observed_span` / `source` / `segments_complete` | 四个**不同维度**的可信度：起点怎么来的 / 本项目看没看见 / 段长证据强度 / 段记全没有 | 当一件事用，会把"下界"和"盲区"和"截断"混成一个"不可信" |
-| `usage_session.flow_s` / `usage_segment.flow_s` | 段之和 / 那一段的长度 | 同名列不同层级 |
+| `usage_sessions.flow_s` / `usage_segments.flow_s` | 段之和 / 那一段的长度 | 同名列不同层级 |
 | `flow_s` / `device_flow_s` | 本项目算的 / 设备报的 | 两者不等 = 有段没进表；拿二者相等当"完整"是循环论证 |
 | `bath_time_s` / `device_flow_s` | 现态里的瞬时值 / 会话上的最大值 | `bath_time_s` 不单调，不能拿去减 |
 | `opened_at` / `opened_raw` | 服务端轴 / 设备轴 | 对外只能出服务端轴；原文只用于复核 |
 | `status_raw` / `state` | 设备报的原始整数 / 本项目派生的七个取值 | 直接判整数，新增状态时静默走错分支 |
 | `card_no` / `cert_no` | 卡 / 人 | 本机无卡，卡号恒 0；拿它当人等于没判 |
-| `device.clock_skew_s` / `door_snapshot.device_clock` | 持久化的偏差 / 那一刻的墙钟读数 | 偏差随时间变，只能从后者算出来 |
+| `device.clock_skew_s` / `door_snapshots.device_clock` | 持久化的偏差 / 那一刻的墙钟读数 | 偏差随时间变，只能从后者算出来 |
 | `revision` / `version_code` | 配置修订号 / 设备端版本号 | 两个"版本"毫不相干 |
 | `last_used_at` / `last_used_s` / `last_used_cert`（`DoorView` 视图字段，不是表列） | 上次**开阀**时刻 / 那次的出水秒数 / 那次是谁用的 | 只在喷头**没有进行中的会话**时才有展示意义；判据是**有没有过段**——"分配后直接结算"那种从没出水的会话说不出任何一段 |
 
@@ -380,17 +380,17 @@ gap = 上一帧到本帧的秒数（没有上一帧时 -1）
 | `booted_at` | **开机时刻**（RFC 3339）：由设备上报的已运行秒数与服务端收到它的时刻反推。存时刻而不存秒数——秒数一离开采样瞬间就开始过期，开机时刻是不变的事实 |
 | `clock_skew_s` | 偏差（见 `docs/architecture.md`「时间轴与口径」） |
 
-### `global_config` / `device_config` —— 配置
+### `app_settings` / `device_configs` —— 配置
 
 `revision`（每次改递增）+ `config`（JSON）。
 
-- `global_config` 只有一行（`CHECK (id = 1)`）。
-- `device_config` 一行一台设备，键是 `device_id`。
+- `app_settings` 只有一行（`CHECK (id = 1)`）。
+- `device_configs` 一行一台设备，键是 `device_id`。
 - **存的是与默认值的差异，空对象即全部沿用默认**。存完整配置的做法会固化当时的默认值，新增键永远下不下去。
 - 生效值每次现算：`默认 ← 全局 ← 设备`。
 - 键的类型与范围、分组与分区（页签）唯一出处是 `app/modules/config/spec.py`——**页签按"这个键去哪"分**：**服务端业务**（在服务器上跑，不下发设备、也不按设备区分）与**设备下发**（推到设备，支持单台覆盖）。一组里的键必须同属一个 scope，由 `tests/test_config_spec.py` 强制。
 
-### `access_identity` —— 身份
+### `principals` —— 身份
 
 | 字段 | 是什么 |
 |---|---|
@@ -403,9 +403,9 @@ gap = 上一帧到本帧的秒数（没有上一帧时 -1）
 
 访问控制是**统一身份制**：没有本项目自建的用户体系、没有 JWT、也没有令牌端点。**浴室凭证明文存在后台任务的三份名单里**——每份名单是 `学号=密码` 一行一个（见后台任务名单）。自动结算与自动续期要替学生调用浴室系统，而分配与结算都必须带密码，它没有别的落脚处；**只有被显式写进某份名单的学号才有这一条**，名单外的人不执行任何操作。管理台凭 admin 身份持有的能力位调用同一批路径。
 
-### `ota_release` / `ota_release_install`
+### `ota_releases` / `ota_release_installs`
 
-| `ota_release` 字段 | 是什么 |
+| `ota_releases` 字段 | 是什么 |
 |---|---|
 | `version` / `version_code` | 版本名 / 版本号（主键是 `version`） |
 | `sha256` | APK 校验和，设备下载后校验 |
@@ -414,7 +414,7 @@ gap = 上一帧到本帧的秒数（没有上一帧时 -1）
 | `target` | 发布目标，`all` 或逗号分隔的定向列表 |
 | `created_at` | 发布时刻 |
 
-| `ota_release_install` 字段 | 是什么 |
+| `ota_release_installs` 字段 | 是什么 |
 |---|---|
 | `version` + `device_id` | 联合主键 |
 | `applied_at` | 安装确认时刻 |
@@ -558,7 +558,7 @@ GET      /api/v1/audit/background-task-runs          后台任务审计    admin
 
 与分配同一条管线，动作换成一个：点浴室 App 的「结算」按钮。预检是"该学号有**占用中**的喷头"（`waiting` / `bathing` / `paused` 都算）。
 
-浴室的答复在 `terminal_message` 里（例如"支付成功…"）。结算成功 → 门那行被清零 → 出一帧 → 服务端关掉会话。**结束原因不记**（见 `usage_session`）。
+浴室的答复在 `terminal_message` 里（例如"支付成功…"）。结算成功 → 门那行被清零 → 出一帧 → 服务端关掉会话。**结束原因不记**（见 `usage_sessions`）。
 
 ### 配置下发
 
@@ -625,7 +625,7 @@ link.pong    带上设备墙钟 → 更新偏差        ← 偏差必须先有�
 
 **延长服务时间与前三个不是一类。** 前三者的候选是**一个喷头**上的一场会话；它问的是
 **整台设备**上还有没有名单里的人，所以它不进那个按喷头循环的调度器，状态也落在自己的
-`clock_shift` 表里（前三个的记忆在内存里，丢了只是少续一次；它的丢了设备钟会一直偏着）。
+`clock_shifts` 表里（前三个的记忆在内存里，丢了只是少续一次；它的丢了设备钟会一直偏着）。
 
 它做四步，**顺序不能变**：
 
@@ -652,7 +652,7 @@ link.pong    带上设备墙钟 → 更新偏差        ← 偏差必须先有�
 静默不执行**；代价就是那句话：要开两个功能就写两遍。
 
 **名单里的学号必须与浴室 App 报上来的那个一模一样。** 判据只有一次**逐字比较**：学生在浴室
-App 里自己输学号，设备把它带在帧里报上来（`usage_session.cert_no`），本项目用它比对名单的键。
+App 里自己输学号，设备把它带在帧里报上来（`usage_sessions.cert_no`），本项目用它比对名单的键。
 **本机实测学号以 10 位数字为主，部分末尾带字母**（示例 `2026000001X`）——漏掉那个字母就**静默不匹配**：不报错、也不动手。密码形状由浴室系统管理。
 
 **学号与密码都不做格式校验**，这是刻意的：学号允许末尾带字母、密码的形状由浴室系统管，
@@ -660,7 +660,7 @@ App 里自己输学号，设备把它带在帧里报上来（`usage_session.cert
 不被拒、只静默不匹配。这台设备上"谁"看 `cert_no`，`card_no` 实测恒为 0。
 
 **续期是两步**：先结算，**等门真的空了的那一帧**，再分配回同一个喷头。第二步不能立刻发
-——`perform_assign` 的前置是服务端先看见门空闲（它要去读 `door_live`），所以那一步由**帧**
+——`perform_assign` 的前置是服务端先看见门空闲（它要去读 `door_states`），所以那一步由**帧**
 推动，不轮询。补分配有 30 秒时限：没有它的话，设备离线几小时再上线会给一个早已走掉的
 学生开一场会话。
 
@@ -679,7 +679,7 @@ App 里自己输学号，设备把它带在帧里报上来（`usage_session.cert
 不超过 300 秒（浴室 App 那条无水释放门槛）就算同一串。本项目的续期间隔是秒级，真人走了
 再回来是分钟级，两者分得开。
 
-**"暂停从哪一刻开始"就是 `door_live.close_time`**（正名「关阀时刻」，与暂停时长的口径同源）。
+**"暂停从哪一刻开始"就是 `door_states.close_time`**（正名「关阀时刻」，与暂停时长的口径同源）。
 它要经钟偏差换算，所以**设备还没有偏差记录时是空的**——真实设备连上后一个往返内就有
 （网关在 `link.hello` 之后立刻主动 ping），而且偏差跨重启持久化，所以线上不会落在那个
 空窗里。测试里要显式建立偏差，否则测的不是线上的样子。
@@ -687,7 +687,7 @@ App 里自己输学号，设备把它带在帧里报上来（`usage_session.cert
 判据在 `app/modules/sessions/decision.py`（纯函数、逐条单测），机制在
 `app/modules/sessions/scheduler.py`。
 
-**每一次终局都留一行**（`background_task_run`，见 `background_task_run`）：日志与落表在同一条路上写
+**每一次终局都留一行**（`background_task_runs`，见 `background_task_runs`）：日志与落表在同一条路上写
 （`scheduler._record`），所以不会出现"记了日志、没落表"。**三个功能的差异只写在
 `decision.py` 的 `FEATURES` 登记表里**（适用状态、起算点、次数上限、是不是两步），实现里
 没有按功能的分叉——加第四个功能是加一条登记，不是再抄一遍判据。
