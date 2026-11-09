@@ -67,8 +67,28 @@ ssh iseekdream.com 'cd /opt/ntu-shower && NTU_SHOWER_TAG=<tag> docker compose up
 #    次日 10:55 上电后自行回连，以日志出现 accepted 为准补一次部署后验证。
 ssh iseekdream.com 'curl -fsS http://127.0.0.1:8110/healthz; echo; docker ps --filter name=ntu-shower --format "{{.Status}}"'
 ssh iseekdream.com 'docker logs ntu-shower 2>&1 | tail -20'
-
 ```
+
+## 数据库迁移
+
+迁移由编排内置：compose 里的 `migrate` 服务在业务容器启动**之前**跑
+`alembic upgrade head`（`depends_on: service_completed_successfully`——迁移失败业务容器
+不会拉起，日志在 `ntu-shower-migrate-1` 容器里单独可查）。日常部署不需要任何手动迁移
+步骤；库已是 head 时 migrate 为 no-op（Exited 0）。
+
+模型变更后的迁移生成（开发侧，见 server/migrations/）：
+
+```bash
+# 删除旧基线，对空库重新 autogenerate（alembic 拒绝在已有表的库上生成）
+rm server/migrations/versions/*.py
+DATABASE_URL=sqlite:///<空库路径> alembic revision --autogenerate -m "..."
+# 验证：upgrade head 后 check 无差异
+alembic upgrade head && alembic check
+```
+
+生产兜底（migrate 失败、业务容器未启动时）：`docker logs ntu-shower-migrate-1` 看失败
+原因；修复后重新 `NTU_SHOWER_TAG=<tag> docker compose up -d`。回滚 = 换回旧镜像 tag +
+恢复备份库（见「备份与恢复」），迁移本身不做降级脚本——零兼容策略下回滚恢复备份。
 
 **回滚**（部署后发现问题时，回滚到上一个镜像 tag——一条命令，秒级）：
 
