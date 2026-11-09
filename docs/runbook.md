@@ -115,23 +115,24 @@ ssh iseekdream.com 'cd /opt/ntu-shower && NTU_SHOWER_TAG=<上一个tag> docker c
 
 ### 表结构变更的落地
 
-改 `server/app/core/db.py` 的 DDL 后，已存在的库不会跟着变，按下列顺序落地
-（2026-10-04 在生产备份副本上演练：36168 帧 → 会话 5625 / 段 9676，越界检查全 0，
-帧数一帧不少）：
+表结构的唯一事实来源是 Alembic 迁移（`server/migrations/`），不是模型定义本身：
+模型改了而迁移没生成，`tests/test_migrations.py` 当场红（`alembic check` 检测模型与
+迁移库的差异）。生产库不再手工改，也没有 DDL 直改这一步：
 
-- **原始层只加列**：`ALTER TABLE door_snapshot ADD COLUMN device_clock TEXT`——老帧就该留空，
-  它们确实没有这一列，那不是"缺数据"；
-- **派生层连表结构一起重建**：`python -m tools.rebuild_derived --db /var/lib/ntu-shower/ntu-shower.db` 会 `DROP` 那四张表再建、再由原始层
-  重算。只 `ALTER` 原始层**不够**——`CREATE TABLE IF NOT EXISTS` 不会去改一张已存在的表，
-  旧结构会让重算在第一帧就撞上"没有这一列"；
-- **核对**：`python -m tools.audit_timeline --db /var/lib/ntu-shower/ntu-shower.db`，**帧数必须与变更前一致**。
+- **流程**：改 `server/app/models/*` → 生成迁移（`.venv/Scripts/alembic revision
+  --autogenerate -m "<主题>"`，须在已升到 head 的库上跑，diff 才有意义）→ 人工核对
+  生成的 op（autogenerate 对索引与约束的增删有盲区）→ 全量门禁 → 合并进 main。
+- **应用**：部署时 compose 的 `migrate` 服务先于业务容器执行 `alembic upgrade head`，
+  失败则业务容器根本不拉起；不在服务器上手动执行迁移。
+- **演练**：结构变更先在备份副本上演练（`DATABASE_URL=sqlite:///<副本>` 后
+  `alembic upgrade head`），再用 `tools/audit_timeline.py` 核对时间轴与派生结果。
+  2026-10-04 在生产备份副本上的演练记录：36168 帧 → 会话 5625 / 段 9676，越界检查
+  全 0，帧数一帧不少。
+- **历史重算**：原始帧保留 30 天；更早的历史在 backups 的旧系统原始库里，需要按新
+  规则重算时用 `tools/replay_history.py` 重放——派生层不复用既有结论。
 
-以上命令经容器执行（镜像内即生产运行时）：
-
-```bash
-ssh iseekdream.com 'docker exec ntu-shower python -m tools.rebuild_derived --db /var/lib/ntu-shower/ntu-shower.db'
-ssh iseekdream.com 'docker exec ntu-shower python -m tools.audit_timeline --db /var/lib/ntu-shower/ntu-shower.db'
-```
+（2026-11-09 实测：空库 `alembic upgrade head` 建出全部表，`alembic check` 无差异，
+两条由 `test_migrations.py` 常驻看守。）
 
 ### 语音播报前置（voice，启用时一次性）
 

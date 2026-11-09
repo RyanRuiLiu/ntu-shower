@@ -21,6 +21,9 @@
   `docker.yml` 工作流在远端按可复用流程构建时缺少 Dockerfile。
 - 持续集成新增安全门禁：gitleaks 秘密扫描（全历史）与 pip-audit 依赖漏洞扫描
   （OSV，高危未修复即红灯），对应执行矩阵两项"待建立"转"已执行"。
+- compose 增加 `migrate` 一次性服务：业务容器启动前先 `alembic upgrade head`，迁移
+  失败业务容器不拉起；新增 `tests/test_migrations.py` 看守模型与迁移的一致性
+  （`alembic check` 无差异），改模型忘生成迁移在门禁里当场红。
 
 ### Changed
 
@@ -34,6 +37,13 @@
 
 ### Fixed
 
+- 修复 CI 依赖解析失败：`jsonschema==4.26.0` 与 `semgrep==1.184.0`（要求 `~=4.25.1`）
+  冲突，Linux 上 pip 无法安装 server 依赖集；版本降至 4.25.1。
+- 修复测试对 caplog 的顺序偶发：应用 logger 生产态关闭冒泡（避免与 uvicorn 重复输出），
+  caplog 靠冒泡收记录——同一 worker 里是否先跑过 `client` 决定记录是否可见。
+  测试夹具统一恢复冒泡，用例语义不再依赖执行顺序。
+- 运维手册「表结构变更的落地」重写为 Alembic 流程：原步骤引用已删除的
+  `tools/rebuild_derived` 与不存在的 `db.py` DDL，是 v1 残留。
 - 修复后台任务跨线程使用 ORM Session 导致的 SQLite access violation：楼层状态汇总
   在线程池里读库，但会话建在事件循环线程上，两条线程并发使用同一连接，进程直接
   段错误——pytest 并行时的「worker crashed」即此。会话边界改归任务自己：会话在

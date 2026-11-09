@@ -3,10 +3,34 @@
 # 本地构建调试用 `docker build -t ntu-shower:dev .`。tag 由 NTU_SHOWER_TAG 注入（CI 按
 # `sha-<短哈希>` 与版本 tag 双轨发布，见 .github/workflows/docker.yml）。
 services:
+  # 迁移作为独立的一次性服务：`alembic upgrade head` 成功业务容器才会启动，
+  # 失败时业务容器根本不拉起，日志也分开。与 deploy/stack/compose.yaml 同一模式。
+  migrate:
+    image: crpi-5rhaq5x8z5ec9tig.cn-hangzhou.personal.cr.aliyuncs.com/ryanruiliu/ntu-shower:${NTU_SHOWER_TAG:?NTU_SHOWER_TAG must be set}
+    restart: "no"
+    user: "997:997"
+    env_file:
+      - /etc/ntu-shower/ntu-shower.env
+    environment:
+      DB_PATH: /var/lib/ntu-shower/ntu-shower.db
+    volumes:
+      - /var/lib/ntu-shower:/var/lib/ntu-shower
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    command: ["alembic", "upgrade", "head"]
+
   ntu-shower:
     # 依据：Docker 官方 best practices（固定不可变 tag，禁止 latest）
     image: crpi-5rhaq5x8z5ec9tig.cn-hangzhou.personal.cr.aliyuncs.com/ryanruiliu/ntu-shower:${NTU_SHOWER_TAG:?NTU_SHOWER_TAG must be set}
     container_name: ntu-shower
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     # 依据：Docker 官方 restart policy 文档
     restart: unless-stopped
     # 依据：CIS Docker Benchmark 5.12（非 root）；与数据目录属主 UID/GID 997 一致
