@@ -13,7 +13,7 @@
  *
  * `mount` 在切入时调用，`unmount` 负责停掉自己起的轮询与监听。
  */
-import { api, logout, refreshSession, sessionActive } from './core/api.js'
+import { api, login, logout, refreshSession, sessionActive } from './core/api.js'
 import { deviceNowMs, fmtDateTime, fmtServerTimeNow, fmtSkew, fmtUptime } from './core/clock.js'
 import { EVENT_TYPES } from './core/contract.js'
 import { promptClockSet, restartBathApp } from './core/device-actions.js'
@@ -490,8 +490,7 @@ function submitLogin(event) {
   event.preventDefault()
   const form = event.target
   clearLoginResult()
-  api
-    .login(form.username.value.trim(), form.password.value)
+  login(form.username.value.trim(), form.password.value)
     .then(() => {
       $('loginDialog').close()
       form.reset()

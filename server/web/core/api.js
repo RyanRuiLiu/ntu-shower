@@ -93,11 +93,6 @@ const API_V1 = '/api/v1'
 const devicePath = (id, suffix = '') => `${API_V1}/devices/${encodeURIComponent(id)}${suffix}`
 
 export const api = {
-  // ── 会话 ──（口令登录换签名 Cookie；me 校准本地登录态）
-  login: (username, password) => send(`${API_V1}/auth/login`, post({ username, password })),
-  logout: () => send(`${API_V1}/auth/logout`, { method: 'POST' }),
-  me: () => send(`${API_V1}/auth/me`),
-
   // ── 喷头 ──（公开；带 device_id 即单设备视图）
   doors: (deviceId) => send(`${API_V1}/doors${query({ device_id: deviceId })}`),
 
