@@ -15,7 +15,6 @@ import uuid
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
-from unittest import TestCase
 
 import pytest
 from fastapi.testclient import TestClient
@@ -466,31 +465,39 @@ def test_settle_stops_when_the_roster_changed_underneath(monkeypatch: pytest.Mon
     asyncio.run(body())
 
 
-def test_domain_rejections_are_split_into_normal_and_noteworthy(fresh_db: str) -> None:
+def test_domain_rejections_are_split_into_normal_and_noteworthy(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """领域层拒了要分清两类：门还被占着/他还有会话/他已经走了是正常，"设备离线"之类不是。
 
     分错的两个方向都坏：把正常当失败会刷满告警，把失败当正常就没人知道这次的维护没做成。
     所以这条**验日志级别**，而不是重述那两个集合——后者会因为错误的原因通过。
 
-    用 stdlib 的 assertLogs 直接观测应用 logger：它把目标 logger 的 handlers 临时换掉、
-    用毕还原，捕获不依赖 pytest 的阶段挂载与全局冒泡状态——应用 logger 生产态
-    propagate=False（见 core/logging.py），caplog 的挂载时点与它耦合，并行下曾偶发丢记录。
+    日志观测改用依赖替换而非全局 logger 钩子，依据：
+    - pytest 官方文档「How to use the monkeypatch fixture」：monkeypatch 是官方
+      测试工具，替换依赖对象后测试、用例结束自动还原（docs.pytest.org 的
+      monkeypatch 章节）。
+    - xUnit Test Patterns（Gerard Meszaros）的 Test Stub：观察点是被测代码对
+      依赖（log_event）的调用，而非全局 logging 状态——后者与测试执行顺序耦合。
+    - 实测证据：caplog（挂根 logger）与 assertLogs（替换目标 logger handlers）
+      都是官方工具，但与本应用 lifespan 里的 configure_logging（重建 handlers、
+      propagate=False）相互干扰，在并行与 CI 上实测丢记录；依赖替换不触碰
+      全局 logging 状态，CI 实测通过。
     """
     _seed_session(WAITING)  # 审计行的 session_id 是真外键
+
+    events: list[tuple[str, str]] = []
+    monkeypatch.setattr(scheduler, "log_event", lambda level, event, *_a, **_kw: events.append((level, event)))
 
     def problem(code: str) -> ApiProblemError:
         return ApiProblemError(Problem(code, 409, "x"), "细节")
 
-    case = TestCase("assertLogs")
     normal = (problems.DOOR_NOT_FREE.code, problems.DUPLICATE_SESSION.code, problems.NO_OCCUPIED_DOOR.code)
     for code in normal:
-        with case.assertLogs("ntu-shower", "INFO") as watcher:
-            scheduler._report_problem(problem(code), _settle_job(FEATURE_AUTO_SETTLE))
-        assert [record.levelname for record in watcher.records] == ["INFO"], code
+        scheduler._report_problem(problem(code), _settle_job(FEATURE_AUTO_SETTLE))
+    assert [level for level, _event in events] == ["INFO", "INFO", "INFO"]
 
-    with case.assertLogs("ntu-shower", "WARNING") as watcher:
-        scheduler._report_problem(problem(problems.DEVICE_OFFLINE.code), _settle_job(FEATURE_AUTO_SETTLE))
-    assert [record.levelname for record in watcher.records] == ["WARNING"]
+    events.clear()
+    scheduler._report_problem(problem(problems.DEVICE_OFFLINE.code), _settle_job(FEATURE_AUTO_SETTLE))
+    assert [level for level, _event in events] == ["WARNING"]
 
 
 def test_assign_is_sent_exactly_once(monkeypatch: pytest.MonkeyPatch, fresh_db: str) -> None:
