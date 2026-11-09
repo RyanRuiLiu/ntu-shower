@@ -12,3 +12,5 @@ ruff==0.16.9
 pre-commit==4.7.0
 # 架构边界：模型层不依赖业务模块（pyproject [tool.importlinter]）
 import-linter==2.16
+# SAST：官方 p/python + p/security-audit 规则集
+semgrep==1.184.0
