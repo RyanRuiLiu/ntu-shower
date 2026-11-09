@@ -26,7 +26,7 @@
 | `protocol/schema/` | 协议消息的 JSON Schema |
 | `docs/` | 架构、参考、运行手册、安全、测试与决策记录 |
 | `deploy/` | 部署资产唯一事实来源 |
-| `tools/` | 仓库级工具与时间轴参考模型 |
+| `server/tools/` | 仓库级工具：契约生成、历史重放与排查脚本 |
 | `backups/` | 本机数据备份与校验和；备份不入库 |
 | `config/keystore/` | APK 签名密钥目录；内容不入库 |
 
