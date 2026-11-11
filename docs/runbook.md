@@ -190,12 +190,12 @@ keystore 是**全系统唯一长期绑定物件**：丢失意味着所有在网�
 
 ```bash
 # 备份到服务器（异地于开发机）
-scp android/ntu-shower.keystore iseekdream.com:/var/backups/ntu-shower/
-ssh iseekdream.com 'chmod 600 /var/backups/ntu-shower/ntu-shower.keystore'
+scp android/ntu-shower.keystore iseekdream.com:/var/backups/manual/ntu-shower/
+ssh iseekdream.com 'chmod 600 /var/backups/manual/ntu-shower/ntu-shower.keystore'
 
 # 校验两侧一致（指纹必须相同）
 Get-FileHash android/ntu-shower.keystore -Algorithm SHA256    # 本地
-ssh iseekdream.com 'sha256sum /var/backups/ntu-shower/ntu-shower.keystore'
+ssh iseekdream.com 'sha256sum /var/backups/manual/ntu-shower/ntu-shower.keystore'
 ```
 
 keystore 的可用性验证：从备份副本执行 `gradlew assembleRelease` 能签名成功
