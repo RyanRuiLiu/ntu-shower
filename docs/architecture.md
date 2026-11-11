@@ -212,7 +212,7 @@ bathTime             各段累加，每次关阀时 += |inTime − now|
 
 ## 签名
 
-`config/keystore/ntu-shower.keystore`（RSA 2048，有效期至 2056；别名与口令由密钥保管方提供）。
+`config/../ntu-shower.keystore（本机路径见 android/keystore.properties 的 storeFile）`（RSA 2048，有效期至 2056；别名与口令由密钥保管方提供）。
 **为什么必须一步到位用正式证书、以及它丢了会怎样，见 [ADR-0013](adr/0013-ota.md)。**
 
 证书指纹（SHA-256，OTA 时设备端校验用）：`72ac1447302225b16a621be9461c6202c4796f787acc780b376b75c2572b7fb5`

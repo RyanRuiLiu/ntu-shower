@@ -190,11 +190,11 @@ keystore 是**全系统唯一长期绑定物件**：丢失意味着所有在网�
 
 ```bash
 # 备份到服务器（异地于开发机）
-scp config/keystore/ntu-shower.keystore iseekdream.com:/var/backups/ntu-shower/
+scp config/../ntu-shower.keystore（本机路径见 android/keystore.properties 的 storeFile） iseekdream.com:/var/backups/ntu-shower/
 ssh iseekdream.com 'chmod 600 /var/backups/ntu-shower/ntu-shower.keystore'
 
 # 校验两侧一致（指纹必须相同）
-Get-FileHash config/keystore/ntu-shower.keystore -Algorithm SHA256    # 本地
+Get-FileHash config/../ntu-shower.keystore（本机路径见 android/keystore.properties 的 storeFile） -Algorithm SHA256    # 本地
 ssh iseekdream.com 'sha256sum /var/backups/ntu-shower/ntu-shower.keystore'
 ```
 

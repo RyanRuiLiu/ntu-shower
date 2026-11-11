@@ -28,7 +28,7 @@
 | `deploy/` | 部署资产唯一事实来源 |
 | `server/tools/` | 仓库级工具：契约生成与排查脚本 |
 | `backups/` | 本机数据备份与校验和；备份不入库 |
-| `config/keystore/` | APK 签名密钥目录；内容不入库 |
+| `android/keystore.properties` | APK 签名配置（gitignore）；密钥本体在仓库树外（路径见该文件 `storeFile`） |
 
 ## 快速开始
 

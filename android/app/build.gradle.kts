@@ -1,3 +1,6 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -49,12 +52,17 @@ android {
         buildConfigField("int", "VERSION_CODE", "$versionCode")
     }
 
+    val keystoreProperties = Properties()
+    val keystorePropertiesFile = rootProject.file("keystore.properties")
+    if (keystorePropertiesFile.exists()) {
+        keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+    }
     signingConfigs {
         create("release") {
-            storeFile = rootProject.file("../config/keystore/ntu-shower.keystore")
-            storePassword = providers.gradleProperty("keystorePassword").get()
-            keyAlias = providers.gradleProperty("keystoreAlias").get()
-            keyPassword = providers.gradleProperty("keystorePassword").get()
+            storeFile = keystoreProperties["storeFile"]?.let { rootProject.file(it) }
+            storePassword = keystoreProperties["storePassword"] as String?
+            keyAlias = keystoreProperties["keyAlias"] as String?
+            keyPassword = keystoreProperties["keyPassword"] as String?
         }
     }
 
