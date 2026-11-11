@@ -289,7 +289,7 @@ async def schedule_power(
 ) -> CommandOutcome:
     """重布设备定时开关机（off_at 断电、on_at 上电，设备表盘 HH:MM）。
 
-    现场依据见 docs/evidence/device-poweroff.md。
+    现场依据见 docs/device-poweroff.md。
     """
     return await device_action(
         session,
