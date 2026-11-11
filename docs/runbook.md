@@ -121,7 +121,7 @@ ssh iseekdream.com 'cd /opt/ntu-shower && NTU_SHOWER_TAG=<上一个tag> docker c
 
 ### 应急回滚到 v1（切换窗口留存的资产）
 
-资产齐备：v1 镜像 tag、v1 库一致性备份（`/var/backups/ntu-shower/cutover-*/`）、切换前的 `.env` 副本（`ntu-shower.env.pre-cutover`）。回滚顺序：
+资产齐备：v1 镜像 tag `sha-c023aeb`（切换前最后构建，2026-11-09 02:09）、v1 库一致性备份（`/var/backups/manual/ntu-shower/cutover-*/`）、切换前的 `.env` 副本（`/var/backups/manual/ntu-shower/ntu-shower.env.pre-cutover`）。回滚顺序：
 
 1. `NTU_SHOWER_TAG=<v1-tag> docker compose down`
 2. 用 v1 库备份覆盖 `/var/lib/ntu-shower/ntu-shower.db`，清掉 `-wal` / `-shm` 残留
