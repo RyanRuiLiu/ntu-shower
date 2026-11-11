@@ -11,7 +11,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: RyanRuiLiu/.github/.github/workflows/docker.yml@3ab9093eb84a1aac7c942a25a473761fde8deec5
+    uses: RyanRuiLiu/.github/.github/workflows/docker.yml@7f44f019d93c63f83d2c775f1efab803df206d15
     with:
       acr_registry: crpi-5rhaq5x8z5ec9tig.cn-hangzhou.personal.cr.aliyuncs.com
       acr_namespace: ryanruiliu
