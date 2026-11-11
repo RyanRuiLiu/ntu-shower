@@ -96,7 +96,7 @@ power.schedule 直写 MCU，不再依赖重启来重读计划。"""
 CLOCK_SET = "clock.set"
 """设置设备系统时钟。params.datetime 为设备本地墙钟时间（YYYY-MM-DD HH:MM:SS）；
 params.rearm（默认 true）控制写钟后是否按电源计划重布 MCU——写钟与重布必须成对，
-钟一动 MCU 里的截止就在真实时间里跟着漂（见 docs/adr/0007-device-poweroff-evidence.md），只有
+钟一动 MCU 里的截止就在真实时间里跟着漂（见 docs/evidence/device-poweroff.md），只有
 延长服务流程传 false（它自己管理滚动重布）。
 
 触发者有三个：网页端手动（设备页「校正时间」）、服务端自动校时（`time_sync_enabled`）、
@@ -104,7 +104,7 @@ params.rearm（默认 true）控制写钟后是否按电源计划重布 MCU—�
 """
 
 POWER_SCHEDULE = "power.schedule"
-"""重布设备定时开关机（/dev/McuCom，ioctl 0xA1，见 docs/adr/0007-device-poweroff-evidence.md）。
+"""重布设备定时开关机（/dev/McuCom，ioctl 0xA1，见 docs/evidence/device-poweroff.md）。
 
 params.off_at 与 params.on_at 是设备**表盘上**的目标时刻（HH:MM）：off_at 是断电
 时刻，on_at 是断电之后到上电的时刻；设备端用自己的钟换算成相对延时（分钟粒度）
