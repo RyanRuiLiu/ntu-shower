@@ -1,10 +1,4 @@
-# 依据：Compose Specification（不写已废弃的 version 字段）
-# 部署形态（2026-11-06 起）：服务器从 ACR 拉取 CI 构建的镜像运行，本文件不携带 build 段；
-# 本地构建调试用 `docker build -t ntu-shower:dev .`。tag 由 NTU_SHOWER_TAG 注入（CI 按
-# `sha-<短哈希>` 与版本 tag 双轨发布，见 .github/workflows/docker.yml）。
 services:
-  # 迁移作为独立的一次性服务：`alembic upgrade head` 成功业务容器才会启动，
-  # 失败时业务容器根本不拉起，日志也分开。与 deploy/stack/compose.yaml 同一模式。
   migrate:
     image: crpi-5rhaq5x8z5ec9tig.cn-hangzhou.personal.cr.aliyuncs.com/ryanruiliu/ntu-shower:${NTU_SHOWER_TAG:?NTU_SHOWER_TAG must be set}
     restart: "no"
@@ -25,55 +19,61 @@ services:
     command: ["alembic", "upgrade", "head"]
 
   ntu-shower:
-    # 依据：Docker 官方 best practices（固定不可变 tag，禁止 latest）
     image: crpi-5rhaq5x8z5ec9tig.cn-hangzhou.personal.cr.aliyuncs.com/ryanruiliu/ntu-shower:${NTU_SHOWER_TAG:?NTU_SHOWER_TAG must be set}
     container_name: ntu-shower
     depends_on:
       migrate:
         condition: service_completed_successfully
-    # 依据：Docker 官方 restart policy 文档
     restart: unless-stopped
-    # 依据：CIS Docker Benchmark 5.12（非 root）；与数据目录属主 UID/GID 997 一致
     user: "997:997"
     env_file:
-      # 依据：12-Factor III（Config）；由 Docker 读取并注入环境变量
       - /etc/ntu-shower/ntu-shower.env
     environment:
-      # 数据与产物路径与 compose 卷挂载一一对应：宿主 /var/lib/ntu-shower 挂到容器同路径，
-      # 这里显式钉死，使应用不依赖 env 文件里的相对路径——根文件系统只读，任何落到
-      # 容器层的写入（mkdir ota_releases 之类）都会当场失败。
       DB_PATH: /var/lib/ntu-shower/ntu-shower.db
       OTA_DIR: /var/lib/ntu-shower/ota_releases
       VOICE_DIR: /var/lib/ntu-shower/voice
     ports:
-      # 12-Factor VII（Port binding）；仅回环，由反向代理对外
       - "127.0.0.1:8110:8110"
-      # ADB 调试桥：桥接监听在容器内回环（bridge_base_port 起，每台开桥设备顺延一个端口），
-      # 运维的 SSH 隧道落在宿主机回环——没有这段映射隧道就够不着桥。上限 10 台设备同时开桥。
       - "127.0.0.1:15655-15664:15655-15664"
     volumes:
-      # 依据：FHS 3.0 /var/lib（可变状态）；12-Factor VI（状态外置）
       - /var/lib/ntu-shower:/var/lib/ntu-shower
-    # 依据：CIS Docker Benchmark 5.5（只读根文件系统）
     read_only: true
-    # 依据：CIS Docker Benchmark 5.5 配套；uvicorn 需要临时目录
     tmpfs:
       - /tmp
-    # 依据：CIS Docker Benchmark 5.3（丢弃全部 capabilities；非 root 无需绑定特权端口）
     cap_drop:
       - ALL
-    # 依据：Docker 官方 security 文档（no-new-privileges）
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      # 与 Dockerfile HEALTHCHECK 一致；Dockerfile reference 默认值
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8110/healthz', timeout=2)"]
       interval: 30s
       timeout: 30s
       start_period: 0s
       retries: 3
     logging:
-      # 依据：Docker 官方 logging driver 文档示例
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  litestream:
+    image: litestream/litestream:0.3
+    container_name: ntu-shower-litestream
+    restart: unless-stopped
+    user: "997:997"
+    command: ["replicate", "-config", "/etc/ntu-shower/litestream.yml"]
+    volumes:
+      - /var/lib/ntu-shower:/var/lib/ntu-shower
+      - /var/backups/ntu-shower/litestream:/var/backups/ntu-shower/litestream
+      - /etc/ntu-shower/litestream.yml:/etc/ntu-shower/litestream.yml:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
       driver: "json-file"
       options:
         max-size: "10m"

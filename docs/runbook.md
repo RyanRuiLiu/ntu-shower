@@ -13,9 +13,7 @@
 | 镜像 | `crpi-5rhaq5x8z5ec9tig.cn-hangzhou.personal.cr.aliyuncs.com/ryanruiliu/ntu-shower:<tag>`（`docker.yml` 双推 GHCR/ACR；tag 双轨 `sha-<短哈希>` 与版本号） |
 | 配置 | `/etc/ntu-shower/ntu-shower.env`（容器经 `env_file` 注入，不入库） |
 | 数据目录 | `/var/lib/ntu-shower`（`ntu-shower.db`、`voice/`、`ota_releases/`；bind mount 进容器同路径，属主 `ntu-shower`=UID 997） |
-| 备份目录 | `/var/backups/ntu-shower`（脚本 `/opt/ntu-shower/scripts/ntu-shower-backup.sh`）|
-| 旧应用目录 | `/opt/ntu-shower/server`（venv 形态，2026-11-06 起退役冻结，仅应急回滚用，见「应急回滚」） |
-| 备份单元 | `ntu-shower-backup.timer`（每日 00:00，`Persistent=true`；宿主机执行，读 `/var/lib`，与容器无关） |
+| 备份目录 | `/var/backups/ntu-shower/litestream`（LiteStream WAL 实时副本，见「备份与恢复」） |
 
 ## 痕迹取回（出问题时按设备 + 时间段还原现场）
 
@@ -98,10 +96,9 @@ ssh iseekdream.com 'cd /opt/ntu-shower && NTU_SHOWER_TAG=<上一个tag> docker c
 
 ### 应急回滚（venv+systemd 旧形态）
 
-`ntu-shower.service` 单元保留在服务器但已 disable；`/opt/ntu-shower/server` 的旧 venv 与
-代码随之冻结在切换前的版本。只在镜像路径整体不可用（ACR 与 GHCR 同时不可达）时走它：
-先 `docker compose down` 释放 8110 端口，再 `systemctl enable --now ntu-shower`。
-走这条路等于接受旧版本行为，恢复容器后应尽快切回。
+该形态已退役（2026-11-12）：`ntu-shower.service` 单元与 `/opt/ntu-shower/server` 旧 venv
+已删除，回滚只有「指回上一个 sha tag」一条路（见上节）。若 ACR 与 GHCR 同时不可达，
+等待镜像源恢复，不再保留本地旧形态后路。
 
 ### 注意事项
 
@@ -111,11 +108,11 @@ ssh iseekdream.com 'cd /opt/ntu-shower && NTU_SHOWER_TAG=<上一个tag> docker c
 - 打包与依赖安装不再存在：依赖变更走 requirements.txt → CI 镜像 → pull。
 - 配置（nginx / compose / backup）的唯一事实来源是 `deploy/` 与顶层 `compose.yaml`，
   **不要在服务器上直接改**；改法与同步命令见 `deploy/README.md`。
-- 数据库备份在宿主机 timer 上执行、读 `/var/lib/ntu-shower`，与容器无关（加密取舍见 ADR-0018）。
+- 数据库备份由 compose 的 `litestream` sidecar 实时复制 WAL（读 `/var/lib/ntu-shower`，与业务容器同宿主路径）。
 
 ### v2 切换后的运行形态（已落地）
 
-这台机器由 nginx 反代 8110（顶层单服务 `compose.yaml`），切换不动 nginx。`deploy/stack/` 的 Caddy 全栈属另一台机器。v2 数据层已是唯一通路：
+这台机器由 nginx 反代 8110（顶层单服务 `compose.yaml`），切换不动 nginx。v2 数据层已是唯一通路：
 
 - 凭据校验在 `accept()` 之后，无效凭据以 RFC 6455 1008 关闭帧拒绝；设备端收到 1008 清凭据后走 claim 自注册换真凭据（决策见 `docs/adr/`）
 - `DEVICE_ENROLL_TOKEN` 在 `/etc/ntu-shower/ntu-shower.env`，值与 APK 构建期的 `deviceEnrollToken` 一致；留空即注册通道关闭，装了 APK 的设备会收到 401
@@ -173,17 +170,17 @@ ssh iseekdream.com 'curl -sS -H "Authorization: Bearer <admin凭据>" http://127
 
 ## 备份与恢复
 
-### 自动备份（数据库）
+### 数据库备份（LiteStream）
 
-`ntu-shower-backup.timer` 每日执行 `VACUUM INTO` 在线备份（校验完整性后 gzip 压缩），
-滚动保留 `KEEP` 份（脚本默认 14，见 `deploy/backup/ntu-shower-backup.sh`），落在
-`/var/backups/ntu-shower/ntu-shower-<时间戳>.db.gz`；触发时刻见单元文件的 `OnCalendar`。
-备份文件含学号、凭证与审计原文，目录权限 700；加密经 ADR-0018 记录为暂不执行（例外见 `CONTRIBUTING.md`）。
+compose 的 `litestream` sidecar 实时复制 WAL 到 `/var/backups/ntu-shower/litestream`
+（配置 `deploy/litestream.yml`），持续提供可恢复副本。副本文件含学号、凭证与审计原文，
+目录权限 700；加密取舍见 ADR-0018。
 
-手动触发与查看：
+查看与恢复：
 
 ```bash
-ssh iseekdream.com 'systemctl start ntu-shower-backup.service && journalctl -u ntu-shower-backup -n 5'
+ssh iseekdream.com "docker exec ntu-shower-litestream litestream replicas -config /etc/ntu-shower/litestream.yml"
+ssh iseekdream.com "docker run --rm -v /var/lib/ntu-shower:/var/lib/ntu-shower -v /var/backups/ntu-shower/litestream:/var/backups/ntu-shower/litestream litestream/litestream:0.3 restore -o /var/lib/ntu-shower/ntu-shower.db file:///var/backups/ntu-shower/litestream"
 ```
 
 ### keystore（不做自动滚动）
@@ -206,27 +203,21 @@ keystore 的可用性验证：从备份副本执行 `gradlew assembleRelease` �
 
 ### 恢复演练
 
-数据库备份在临时位置实际还原过一次，验证脚本与结果如下（不碰生产）：
+脚本时代（VACUUM INTO + gzip）演练记录：2026-09-30 执行，`integrity_check` 返回 `ok`。
+
+LiteStream 副本演练（恢复到临时位置，不碰生产）：
 
 ```bash
-ssh iseekdream.com 'BAK=$(ls -1t /var/backups/ntu-shower/ntu-shower-*.db.gz | head -1)
-  rm -rf /tmp/restore_test && mkdir -p /tmp/restore_test
-  gunzip -c "$BAK" > /tmp/restore_test/restored.db
-  /opt/ntu-shower/server/.venv/bin/python - <<PY
-import sqlite3
-con = sqlite3.connect("/tmp/restore_test/restored.db")
-print("integrity:", con.execute("PRAGMA integrity_check").fetchone()[0])
-for t, in con.execute("SELECT name FROM sqlite_master WHERE type=? ORDER BY name", ("table",)).fetchall():
-    print(f"  {t:24} {con.execute(f\"SELECT COUNT(*) FROM {t}\").fetchone()[0]} 行")
-PY
-  rm -rf /tmp/restore_test'
+ssh iseekdream.com 'rm -f /tmp/restore_test.db
+  docker run --rm -v /var/backups/ntu-shower/litestream:/replica -v /tmp:/out \
+    litestream/litestream:0.3 restore -o /out/restore_test.db file:///replica
+  docker run --rm -v /tmp/restore_test.db:/restore_test.db python:3.13-slim \
+    python -c "import sqlite3; print(sqlite3.connect(\"/restore_test.db\").execute(\"PRAGMA integrity_check\").fetchone()[0])"
+  rm -f /tmp/restore_test.db'
 ```
 
-**验证记录**：2026-09-30 执行，`integrity_check` 返回 `ok`，全部表可读、
-行数与备份时一致。**该步骤此后按季度重复**；任一次失败都说明备份链路已坏，
-须在下一轮之前修好。2026-11-06 切换容器形态后，脚本中的 python 段改经容器执行
-（`ssh iseekdream.com 'gunzip -c "$BAK" | docker exec -i ntu-shower python ...'` 形态、
-数据库路径 `/var/lib/ntu-shower/ntu-shower.db`）；下一次季度演练按新形态执行并更新本节。
+**验证记录**：2026-11-12 执行，恢复出 25 张表，`integrity_check` 返回 `ok`。
+**该步骤此后按季度重复**；任一次失败都说明备份链路已坏，须在下一轮之前修好。
 
 ## 故障处置
 

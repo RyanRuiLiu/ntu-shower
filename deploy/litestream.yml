@@ -1,0 +1,5 @@
+dbs:
+  - path: /var/lib/ntu-shower/ntu-shower.db
+    replicas:
+      - type: file
+        path: /var/backups/ntu-shower/litestream
