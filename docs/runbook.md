@@ -158,7 +158,7 @@ ssh iseekdream.com 'cd /opt/ntu-shower && NTU_SHOWER_TAG=<上一个tag> docker c
 ffmpeg 统一转成 MP3，因此只需系统有 `ffmpeg` 与 `ffprobe`（需带 libmp3lame）：
 
 ```bash
-# ffmpeg / ffprobe（MP3 编码）已内置于镜像（Dockerfile apt 层），无需宿主机安装；
+# ffmpeg / ffprobe（MP3 编码）已内置于镜像（Dockerfile 静态二进制层，钉 digest），无需宿主机安装；
 # 就绪状态与数字素材齐备性走接口看
 ssh iseekdream.com 'curl -sS -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/v1/voice/status'
 ```
