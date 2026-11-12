@@ -10,9 +10,12 @@ on: pull_request
 permissions:
   contents: write
   pull-requests: write
-  # gh pr checks 读取 statusCheckRollup 需要；缺它报
-  # "Resource not accessible by integration"
+  # gh pr checks 的 GraphQL 查询穿透到 checkSuite.workflowRun 与 commit
+  # status，需 actions:read 与 statuses:read；缺任一报
+  # "Resource not accessible by integration"（community#67181 / cli#6274）
   checks: read
+  actions: read
+  statuses: read
 
 concurrency:
   group: dependabot-auto-merge-${{ github.event.pull_request.number }}
