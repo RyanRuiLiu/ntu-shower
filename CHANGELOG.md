@@ -8,7 +8,29 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-13
+
 ### Added
+
+- 服务端切换为 Docker Compose 部署：镜像由 CI 构建并双推 GHCR/ACR，服务器 `docker pull` +
+  `compose up -d`；容器以非 root（UID 997）运行，根文件系统只读、能力全丢弃、端口仅绑回环。
+  旧 systemd 单元与 venv 冻结保留作应急回滚；数据库备份仍在宿主机 timer 上执行。
+- compose 为 ADB 调试桥补回环端口段映射（15655-15664）：桥接监听随服务进入容器后，
+  运维的 SSH 隧道需要这段映射才能到达。
+
+- 根目录 `LICENSE`：此前许可证缺位（按默认版权处理），现以专有声明显式登记。
+- Docker 构建资产（`Dockerfile`、`compose.yaml`、`.dockerignore`）入库：此前仅存在于本机工作区，
+  `docker.yml` 工作流在远端按可复用流程构建时缺少 Dockerfile。
+- 持续集成新增安全门禁：gitleaks 秘密扫描（全历史）与 pip-audit 依赖漏洞扫描
+  （OSV，高危未修复即红灯），对应执行矩阵两项"待建立"转"已执行"。
+- compose 增加 `migrate` 一次性服务：业务容器启动前先 `alembic upgrade head`，迁移
+  失败业务容器不拉起；新增 `tests/test_migrations.py` 看守模型与迁移的一致性
+  （`alembic check` 无差异），改模型忘生成迁移在门禁里当场红。
+- Dependabot 依赖更新（pip / gradle / github-actions，每周）：patch 与 minor 升级在
+  CI 全绿后自动 squash 合并，major 与非 semver 升级留人工审阅；设备 ROM 冻结
+  Android 4.4（API 19），okhttp 与 conscrypt-android 的升级上限以 ignore 规则钉死。
+
+### Changed
 
 - 服务端切换为 Docker Compose 部署：镜像由 CI 构建并双推 GHCR/ACR，服务器 `docker pull` +
   `compose up -d`；容器以非 root（UID 997）运行，根文件系统只读、能力全丢弃、端口仅绑回环。
@@ -34,6 +56,9 @@
   分支，设备的每帧进度都会收到 `proto.unknown_type` 错误帧。
 - 服务端代码完成 ruff 0.16.9 修复与 `StrEnum` 迁移；`main` 上的质量门恢复全绿
   （本地曾三处红灯：lint 27 项、禁词 2 处、覆盖率 95.91%）。
+- ffmpeg/ffprobe 改为静态二进制内置（wader/static-ffmpeg，按 manifest digest 钉版，
+  含 libmp3lame），替代 apt 全量编解码库：镜像 222.0MB → 166.5MB，最大层 164.1MB →
+  108.5MB，跨境推送冷启动时长显著下降；构建时以生产同参数实转音频作冒烟门禁。
 
 ### Fixed
 
@@ -58,6 +83,9 @@
   `Documentation=`），以及 detekt 配置与构建脚本中两处不存在的小节编号。
 - 运维手册拓扑表与部署说明对齐 FHS 迁移后的实际路径（配置 `/etc/ntu-shower`、
   数据 `/var/lib/ntu-shower`）；实时推送路径在架构与参考文档中更正为 `/api/v1/stream`。
+- 修复桥接测试的并行帧串位：xdist 多 worker 共用固定桥端口，A worker 的 TCP 客户端
+  会连进 B worker 的桥，表现为 nonce 随机错乱——端口按 worker 分段后，
+  `pytest -n auto` 在两个 pytest 版本下各 5 轮全绿（此前 9.1.1 与 9.2.0 均随机失败）。
 
 ### Removed
 
