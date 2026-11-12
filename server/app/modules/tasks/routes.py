@@ -16,8 +16,10 @@
 """
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
 
 from app.core.problems import TASK_NOT_FOUND, ApiProblemError
+from app.db.deps import get_db
 from app.modules.access.capabilities import Capability
 from app.modules.access.dependencies import require_admin, require_capability, require_identity
 from app.modules.access.schemas import IdentityRecord
@@ -41,13 +43,13 @@ admin_router = APIRouter(
 
 
 @admin_router.get("/status", response_model=schemas.BackgroundTasksStatus)
-def background_tasks_status() -> schemas.BackgroundTasksStatus:
+def background_tasks_status(session: Session = Depends(get_db)) -> schemas.BackgroundTasksStatus:
     """后台任务的当前态：开关与名单、延长中的设备、调度器的即时计划。
 
     纯只读的组合：三处（全局配置、extend_hours 的落库状态、调度器内存里的定时器）
     各自公开自己的只读读数，这里不做任何判断——判据只有一个出处，看板只报告状态。
     """
-    config = config_store.global_effective()
+    config = config_store.global_effective(session)
     tasks = []
     for spec in TASKS:
         roster = config[spec.students_key]
@@ -61,8 +63,8 @@ def background_tasks_status() -> schemas.BackgroundTasksStatus:
         )
     return schemas.BackgroundTasksStatus(
         tasks=tasks,
-        extending=[schemas.ExtendingDevice.model_validate(row) for row in extend_hours_service.current_shifts()],
-        scheduled=[schemas.ScheduledAction.model_validate(row) for row in sessions_scheduler.snapshot()],
+        extending=[schemas.ExtendingDevice.model_validate(row) for row in extend_hours_service.current_shifts(session)],
+        scheduled=[schemas.ScheduledAction.model_validate(row) for row in sessions_scheduler.snapshot(session)],
     )
 
 
@@ -70,13 +72,14 @@ def background_tasks_status() -> schemas.BackgroundTasksStatus:
 def list_tasks(
     cert_no: str = Query(min_length=1, description="要查的学号"),
     caller: IdentityRecord = Depends(require_identity),
+    session: Session = Depends(get_db),
 ) -> list[TaskView]:
     """四项后台任务的状态；`joined` 按传入的学号回答。
 
     `enabled` 是管理员设的全局开关，**只读**——它关着的时候登记照样成立，只是不生效。
     """
     require_capability(caller, Capability.TASKS)
-    return service.list_tasks(cert_no)
+    return service.list_tasks(session, cert_no)
 
 
 @router.put("/{task}")
@@ -84,6 +87,7 @@ async def set_membership(
     task: str,
     req: TaskMembershipRequest,
     caller: IdentityRecord = Depends(require_identity),
+    session: Session = Depends(get_db),
 ) -> TaskView:
     """登记（`joined=true`）或取消登记（`joined=false`）这个学号。
 
@@ -93,6 +97,6 @@ async def set_membership(
     require_capability(caller, Capability.TASKS)
     if task not in TASKS_BY_KEY:
         raise ApiProblemError(TASK_NOT_FOUND, f"后台任务 {task}")
-    view = service.set_membership(task, req.cert_no, req.password, req.joined)
+    view = service.set_membership(session, task, req.cert_no, req.password, req.joined)
     sessions_scheduler.reload()
     return view

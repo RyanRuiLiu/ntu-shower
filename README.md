@@ -9,7 +9,7 @@
 | 设备端 | Kotlin APK，运行在 Android 4.4.4 中控设备上；采集喷头状态、执行分配与结算、维持自身存活 |
 | 服务端 | FastAPI 模块化单体；设备网关、领域模块、网页端静态文件与运维接口 |
 | 协议 | WSS 上的 JSON 信封；消息结构与校验规则在 `protocol/schema/` |
-| 部署 | nginx、systemd、备份脚本与发布脚本；唯一事实来源在 `deploy/` |
+| 部署 | nginx、Docker Compose、LiteStream 备份与发布脚本；唯一事实来源在 `deploy/` 与顶层 `compose.yaml` |
 
 ## 项目结构
 
@@ -17,7 +17,6 @@
 |---|---|
 | `README.md` | 项目入口、快速开始与文档导航 |
 | `CONTRIBUTING.md` | 开发环境、质量门、提交、审阅与发布准备 |
-| `STANDARDS.md` | 全生命周期工程标准 |
 | `CHANGELOG.md` | 发布历史与用户可见变更 |
 | `AGENTS.md` | AI 协作者的阅读顺序与停止条件 |
 | `.github/workflows/` | 持续集成 |
@@ -25,11 +24,11 @@
 | `android/` | 设备端 APK |
 | `server/` | 服务端、测试、工具与网页端 |
 | `protocol/schema/` | 协议消息的 JSON Schema |
-| `docs/` | 架构、参考、运行手册、安全、测试与决策记录 |
+| `docs/` | 架构、参考、运行手册、安全与决策记录 |
 | `deploy/` | 部署资产唯一事实来源 |
-| `tools/` | 仓库级工具与时间轴参考模型 |
+| `server/tools/` | 仓库级工具：契约生成与排查脚本 |
 | `backups/` | 本机数据备份与校验和；备份不入库 |
-| `config/keystore/` | APK 签名密钥目录；内容不入库 |
+| `android/keystore.properties` | APK 签名配置（gitignore）；密钥本体在仓库树外（路径见该文件 `storeFile`） |
 
 ## 快速开始
 
@@ -66,16 +65,14 @@ cp gradle.properties.example gradle.properties
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 开发环境、质量门、提交、审阅与发布准备 |
 | [`AGENTS.md`](AGENTS.md) | AI 协作者的阅读顺序与停止条件 |
 | [`CHANGELOG.md`](CHANGELOG.md) | 发布历史与用户可见变更 |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 系统边界、组件、数据流、部署拓扑与时间轴定义 |
-| [`docs/REFERENCE.md`](docs/REFERENCE.md) | 数据模型、字段语义、状态迁移、接口索引与取数口径 |
-| [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | 部署、回滚、备份、恢复、故障处置与日常运维 |
-| [`docs/SECURITY.md`](docs/SECURITY.md) | 资产、数据分级、信任边界、安全控制与事件响应 |
-| [`docs/TESTING.md`](docs/TESTING.md) | 测试策略、层级、环境、数据、覆盖率政策与证据 |
-| [`docs/DECISIONS.md`](docs/DECISIONS.md) | 约束代码的决策、取舍与后果 |
-| [`STANDARDS.md`](STANDARDS.md) | 生命周期、文档、代码、文本、审阅与质量门规则 |
+| [`docs/architecture.md`](docs/architecture.md) | 系统边界、组件、数据流、部署拓扑与时间轴定义 |
+| [`docs/reference.md`](docs/reference.md) | 状态派生规则、易混字段对照、取数口径与不变量 |
+| [`docs/runbook.md`](docs/runbook.md) | 部署、回滚、备份、恢复、故障处置与日常运维 |
+| [`docs/security.md`](docs/security.md) | 资产、数据分级、信任边界、安全控制与事件响应 |
+| [`docs/adr/`](docs/adr/) | 约束代码的决策、取舍与后果 |
 
 接口契约以 `protocol/schema/` 与代码路由为准；文档只做索引，不复制字段表。
 
 ## 协作者入口
 
-AI 协作者先读 [`AGENTS.md`](AGENTS.md)，再按其中的阅读顺序进入 `CONTRIBUTING.md`、`STANDARDS.md` 与 `docs/`。人类协作者从 `CONTRIBUTING.md` 开始。
+AI 协作者先读 [`AGENTS.md`](AGENTS.md)，再按其中的阅读顺序进入 `CONTRIBUTING.md` 与 `docs/`。人类协作者从 `CONTRIBUTING.md` 开始。

@@ -3,7 +3,7 @@
 ## 模型
 
 - 身份（identity）：一个不透明的字符串标识。它怎么来的（微信 openid、我方签发）
-  与本项目无关：调用方在 `X-Identity` 头里带上它，服务端查身份库得能力位与设备作用域。
+  与本项目无关：调用方通过 Bearer 凭据表明身份，服务端查主体表得能力位与设备作用域。
 - 能力位（capability）：`session` / `photo` / `admin` / `tasks` / `stats`。
 - 设备作用域（device_scope）：`["*"]` 或设备 id 列表，限定该身份的能力能作用于
   哪些设备。
@@ -36,7 +36,7 @@
 ## 与 status-panel 的分工
 
 微信相关事宜（code 换 openid、小程序界面可见性）都在 status-panel；本项目不含
-任何微信内容，只认 `X-Identity` 字符串。
+任何微信内容，只按 Bearer 凭据对应的主体判定。
 """
 
 from enum import StrEnum

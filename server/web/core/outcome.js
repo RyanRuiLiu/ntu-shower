@@ -9,7 +9,8 @@
  * 拿它当提示会把 `device.a11y_unavailable` 这种字符串摊在用户面前。人看的是
  * `terminal_message`，服务端已保证它非空（见 `sessions/service.py` 的 `_with_message`）。
  *
- * 唯一的例外是审计页——那是开发者页面，读它的人正需要拿着 code 去日志里搜。
+ * 例外是两个开发者页面——审计与设备巡检（inspector）：读它们的人正需要拿着 code
+ * 去日志里搜。
  */
 
 import { OUTCOME_LABELS } from './contract.js'

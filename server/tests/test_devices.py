@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from tests import device_link, frames
+from tests.identity import bearer
 
 from app.core import actions, db
 from app.core.clock import now_rfc3339
@@ -16,11 +17,13 @@ DEVICE_ID = "dev-debug-1"
 
 def _put_identity(device_id: str, identity: str, capabilities: list[str], scope: list[str]) -> dict[str, str]:
     """登记一个身份并返回其请求头。"""
-    from app.modules.access import repository
-    from app.modules.access.identity import IdentityKind
+    from tests.identity import bearer
+    from tests.identity import register as register_identity
 
-    repository.put_identity(identity, IdentityKind.WEB, capabilities, "测试", device_scope=scope)
-    return {"X-Identity": identity}
+    from app.models.enums import IdentityKind
+
+    token = register_identity(identity, IdentityKind.WEB, capabilities, "测试", device_scope=scope)
+    return bearer(token)
 
 
 def test_device_list_is_public_and_anonymous_actions_are_empty(client: TestClient, fresh_db: str) -> None:
@@ -60,7 +63,7 @@ def test_device_list_actions_empty_outside_scope(client: TestClient, fresh_db: s
 
 def test_device_list_unknown_identity_is_rejected(client: TestClient) -> None:
     """公开端点带了不在名单的标识同样 401：视图按调用方裁剪，先要认识调用方。"""
-    r = client.get("/api/v1/devices", headers={"X-Identity": "no-such-identity"})
+    r = client.get("/api/v1/devices", headers=bearer("not-a-valid-token"))
 
     assert r.status_code == 401
     assert r.json()["type"].endswith("/problems/unknown-identity")
@@ -180,27 +183,30 @@ def test_patch_publishes_trimmed_device_update(
 
 
 def test_set_name_unknown_device_returns_false(fresh_db: str) -> None:
-    from app.modules.devices import repository as devices_repository
+    from app.persistence import devices as devices_store
 
-    assert devices_repository.set_name("ghost", "n") is False
+    with device_link.db() as session:
+        assert devices_store.set_name(session, "ghost", "n") is False
 
 
 def test_corrupt_capabilities_are_read_as_empty(fresh_db: str) -> None:
-    """capabilities 列被写入非法 JSON 或非数组时读为空列表（未声明态）。"""
-    from app.core.db import get_conn
-    from app.modules.devices import repository as devices_repository
+    """capabilities 列被写成非数组形状时读为空列表（未声明态）。
 
-    devices_repository.register(DEVICE_ID, "0.4.13", 57, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
-    devices_repository.register(
-        "dev-bad-cap", "0.4.13", 57, "4.4.4", {"not": "a list"}, "x", "2026-06-01T08:00:00.000Z"
-    )
+    旧表的 TEXT 列可能出现损坏 JSON；新表的 JSON 类型由 ORM 保证，只有「外部写成
+    非数组」这一种畸形在 as_record 里按未声明态处理。
+    """
+    from sqlalchemy import text
 
-    conn = get_conn()
-    conn.execute("UPDATE device SET capabilities = '{broken' WHERE device_id = ?", (DEVICE_ID,))
-    conn.commit()
+    from app.persistence import devices as devices_store
 
-    assert devices_repository.get(DEVICE_ID)["capabilities"] == []
-    assert devices_repository.get("dev-bad-cap")["capabilities"] == []
+    device_link.register_device_raw(DEVICE_ID)
+    device_link.register_device_raw("dev-bad-cap", capabilities={"not": "a list"}, ip="x")
+
+    with device_link.db() as session:
+        session.execute(text("UPDATE devices SET capabilities = '[\"x\"]' WHERE device_id = :d"), {"d": DEVICE_ID})
+        session.commit()
+        assert devices_store.get(session, DEVICE_ID)["capabilities"] == ["x"]
+        assert devices_store.get(session, "dev-bad-cap")["capabilities"] == []
 
 
 # ── 远程动作（admin）：守卫链与动作分发 ──
@@ -218,7 +224,9 @@ def ready(
 
     captured: dict[str, Any] = {}
 
-    async def fake_send(device_id: str, action: str, params: dict[str, Any], timeout_s: float = 0.0) -> dict[str, Any]:
+    async def fake_send(
+        _session: object, device_id: str, action: str, params: dict[str, Any], timeout_s: float = 0.0
+    ) -> dict[str, Any]:
         captured.update(device_id=device_id, action=action, params=params, timeout_s=timeout_s)
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": {"image_base64": "ZGF0YQ=="}}
 
@@ -228,20 +236,21 @@ def ready(
 
 def test_device_action_endpoints_reject_unusable_devices(client: TestClient, admin_headers: dict[str, str]) -> None:
     """设备不存在 404、未信任 403、离线 409：守卫先于命令下发。"""
-    from app.modules.devices import repository as devices_repository
+    from app.persistence import devices as devices_store
 
     assert (
         client.post("/api/v1/devices/dev-ghost-1/exec", headers=admin_headers, json={"command": "id"}).status_code
         == 404
     )
 
-    devices_repository.register(DEVICE_ID, "0.4.13", 57, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
+    device_link.register_device_raw(DEVICE_ID)
     assert (
         client.post(f"/api/v1/devices/{DEVICE_ID}/exec", headers=admin_headers, json={"command": "id"}).status_code
         == 403
     )
 
-    devices_repository.set_trusted(DEVICE_ID, True)
+    with device_link.db() as session:
+        devices_store.set_trusted(session, DEVICE_ID, True)
     assert (
         client.post(f"/api/v1/devices/{DEVICE_ID}/exec", headers=admin_headers, json={"command": "id"}).status_code
         == 409
@@ -291,7 +300,9 @@ def test_live_log_reads_from_device(
     monkeypatch.setattr(manager, "_connections", {DEVICE_ID: object()})
     captured: dict[str, Any] = {}
 
-    async def fake_send(device_id: str, action: str, params: dict[str, Any], timeout_s: float = 0.0) -> dict[str, Any]:
+    async def fake_send(
+        _session: object, device_id: str, action: str, params: dict[str, Any], timeout_s: float = 0.0
+    ) -> dict[str, Any]:
         captured.update(device_id=device_id, action=action, params=params)
         return {
             "status": "ok",
@@ -330,7 +341,9 @@ def test_live_log_absent_file_is_not_an_error(
     device_link.register_trusted_device(DEVICE_ID)
     monkeypatch.setattr(manager, "_connections", {DEVICE_ID: object()})
 
-    async def fake_send(device_id: str, action: str, params: dict[str, Any], timeout_s: float = 0.0) -> dict[str, Any]:
+    async def fake_send(
+        _session: object, device_id: str, action: str, params: dict[str, Any], timeout_s: float = 0.0
+    ) -> dict[str, Any]:
         return {
             "status": "ok",
             "reason_code": "",
@@ -367,7 +380,9 @@ def test_live_log_maps_device_failure_to_problem(
     device_link.register_trusted_device(DEVICE_ID)
     monkeypatch.setattr(manager, "_connections", {DEVICE_ID: object()})
 
-    async def fake_send(device_id: str, action: str, params: dict[str, Any], timeout_s: float = 0.0) -> dict[str, Any]:
+    async def fake_send(
+        _session: object, device_id: str, action: str, params: dict[str, Any], timeout_s: float = 0.0
+    ) -> dict[str, Any]:
         return {
             "status": "failed",
             "reason_code": "device.internal_error",
@@ -391,7 +406,9 @@ def test_live_log_rejects_empty_result_data(
     device_link.register_trusted_device(DEVICE_ID)
     monkeypatch.setattr(manager, "_connections", {DEVICE_ID: object()})
 
-    async def fake_send(device_id: str, action: str, params: dict[str, Any], timeout_s: float = 0.0) -> dict[str, Any]:
+    async def fake_send(
+        _session: object, device_id: str, action: str, params: dict[str, Any], timeout_s: float = 0.0
+    ) -> dict[str, Any]:
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
 
     monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
@@ -572,15 +589,18 @@ def test_devices_fall_back_to_natural_name_order_when_sort_orders_tie(
     存量库升级后所有行的 sort_order 都是 0——那一刻的顺序就是名字自然序，与心跳无关
     （按 last_seen 排会让设备在下拉里随心跳跳动，按字面排会让 10F 排到 2F 前面）。
     """
-    from app.core.db import write
+    from sqlalchemy import text
+
+    from app.persistence import devices as devices_store
 
     for name in ("10F浴室", "2F浴室", "1F浴室"):
         device_id = f"dev-{name}"
         device_link.register_trusted_device(device_id)
-        from app.modules.devices import repository as devices_repository
-
-        devices_repository.set_name(device_id, name)
-        write("UPDATE device SET sort_order = 0 WHERE device_id = ?", (device_id,))
+        with device_link.db() as session:
+            assert devices_store.set_name(session, device_id, name)
+            # 全部设备同序 → 落回自然序（新表）
+            session.execute(text("UPDATE devices SET sort_order = 0 WHERE device_id = :d"), {"d": device_id})
+            session.commit()
 
     body = client.get("/api/v1/devices", headers=admin_headers).json()
 
@@ -609,12 +629,13 @@ def test_device_order_is_manual_and_covers_every_listing(
     同 sort_order 回落到名字的自然排序（新设备都在 0 时就是字母序），调整后以
     管理员的顺序为准。
     """
+    from app.persistence import devices as devices_store
+
     for name in ("1F浴室", "2F浴室", "3F浴室"):
         device_id = f"dev-{name}"
         device_link.register_trusted_device(device_id)
-        from app.modules.devices import repository as devices_repository
-
-        devices_repository.set_name(device_id, name)
+        with device_link.db() as session:
+            devices_store.set_name(session, device_id, name)
 
     # 未调整时回落自然序
     body = client.get("/api/v1/devices", headers=admin_headers).json()
@@ -652,7 +673,11 @@ def test_link_events_record_the_reasons(client: TestClient, admin_headers: dict[
         # 只看最后一条 online
         rows = (
             db.get_conn()
-            .execute("SELECT event, reason FROM device_link_event WHERE device_id = ? ORDER BY id", (device_id,))
+            .execute(
+                "SELECT event, reason FROM device_link_events"
+                " WHERE device_id = (SELECT id FROM devices WHERE device_id = ?) ORDER BY id",
+                (device_id,),
+            )
             .fetchall()
         )
         assert rows is not None
@@ -667,7 +692,11 @@ def test_link_events_record_the_reasons(client: TestClient, admin_headers: dict[
 
         rows = (
             db.get_conn()
-            .execute("SELECT event, reason FROM device_link_event WHERE device_id = ? ORDER BY id", (device_id,))
+            .execute(
+                "SELECT event, reason FROM device_link_events"
+                " WHERE device_id = (SELECT id FROM devices WHERE device_id = ?) ORDER BY id",
+                (device_id,),
+            )
             .fetchall()
         )
         assert rows is not None

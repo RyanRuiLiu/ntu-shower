@@ -5,19 +5,20 @@
 # RUNBOOK 里原先那条 curl 就是手填的，这个脚本取代它。
 #
 # 用法：
-#   .\deploy\publish_apk.ps1 -Identity <admin身份标识>
-#   .\deploy\publish_apk.ps1 -Identity <admin身份标识> -SkipBuild   # 用已构建的 APK
+#   .\deploy\publish_apk.ps1 -Token <admin 的 API Bearer 凭据>
+#   .\deploy\publish_apk.ps1 -Token <admin 的 API Bearer 凭据> -SkipBuild   # 用已构建的 APK
 #
 # 前提：`android/gradle.properties` 里有 serverDomain 与签名口令（见该文件的 example）。
+# 认证走标准 Authorization: Bearer（ADR-0019）：X-Identity 头已删除。
 
 param(
-    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$Identity,
+    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$Token,
     [switch]$SkipBuild,
     [string]$Target = "all",
     [string]$BaseUrl = "https://<public-domain>"
 )
 
-# 严格模式（STANDARDS.md §7.8.2）：未定义变量与拼错成员名当场终止，而不是静默走 $null。
+# 严格模式：未定义变量与拼错成员名当场终止，而不是静默走 $null。
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
@@ -54,7 +55,7 @@ if (-not (Test-Path $ApkPath)) { throw "找不到 $ApkPath（去掉 -SkipBuild �
 # ---- 发布 ----
 Write-Host "上传到 $BaseUrl ..." -ForegroundColor Green
 $response = curl.exe -s -X POST "$BaseUrl/api/v1/ota/releases" `
-    -H "X-Identity: $Identity" `
+    -H "Authorization: Bearer $Token" `
     -F "version=$versionName" `
     -F "version_code=$versionCode" `
     -F "target=$Target" `

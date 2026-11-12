@@ -24,7 +24,7 @@ from typing import Literal
 
 from app.core.clock import seconds_between
 from app.core.protocol import JsonObject, as_int
-from app.modules.doors.schemas import DoorState
+from app.models.enums import DoorState
 
 FEATURE_RENEW_WAIT = "renew_wait"
 FEATURE_RENEW_SESSION = "renew_session"
@@ -108,7 +108,7 @@ class Candidate:
     paused_at: str
     """当前这一段的**关阀时刻**；只有已暂停时有值。自动结算从它起算。
 
-    取自 `door_live.close_time`（正名就是「关阀时刻」，与 `REFERENCE.md` 的暂停时长口径
+    取自 `door_live.close_time`（正名就是「关阀时刻」，与 `reference.md` 的暂停时长口径
     同一个量）。它要经钟偏差换算，所以**设备还没有偏差记录时是空的**——真实设备连上后
     一个往返内就有（网关在 `link.hello` 之后立刻主动 ping），而且偏差跨重启持久化
     （`device_clock.load`），所以线上不会落在这个空窗里。测试里要显式建立它，否则测的

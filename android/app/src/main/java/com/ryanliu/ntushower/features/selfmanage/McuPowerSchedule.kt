@@ -9,7 +9,7 @@ import java.io.File
 import java.util.Calendar
 
 /**
- * 重布设备定时开关机（/dev/McuCom，ioctl 0xA1，见 docs/evidence/2026-10-04-device-poweroff.md §11）。
+ * 重布设备定时开关机（/dev/McuCom，ioctl 0xA1，见 docs/adr/0007-device-poweroff-evidence.md）。
  *
  * 断电/上电目标是设备表盘上的 HH:MM，这里用本机钟换算成相对延时（分钟）写给 MCU：
  * 关机延时从命令落地起算，开机延时从断电时刻起算；目标时刻已过就落到次日（"下一个"）。

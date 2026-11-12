@@ -54,15 +54,18 @@ import time
 from dataclasses import dataclass
 from typing import Protocol
 
+from sqlalchemy.orm import Session
+
 from app.core import actions, outcomes, problems
 from app.core.clock import now_rfc3339, shift_rfc3339
 from app.core.logging import log_event
 from app.core.problems import ApiProblemError
 from app.core.protocol import as_int
-from app.modules.audit import repository as audit_repository
+from app.db.base import utcnow
+from app.db.session import session_scope
+from app.models.enums import BackgroundOutcome, DoorState
 from app.modules.config import store as config_store
 from app.modules.doors import service as doors_service
-from app.modules.doors.schemas import DoorState
 
 from . import routes as sessions_routes
 from .decision import (
@@ -257,17 +260,23 @@ def _record(
         feature=subject.feature,
         **extra,
     )
-    audit_repository.insert_background_task_run(
-        device_id=subject.device_id,
-        door_no=subject.door_no,
-        cert_no=subject.cert_no,
-        feature=subject.feature,
-        outcome=outcome,
-        action=subject.action,
-        session_id=subject.session_id,
-        reason=reason,
-        threshold_s=subject.threshold_s,
-    )
+    from app.db.session import session_scope
+    from app.persistence import audit as audit_store
+
+    with session_scope() as session:
+        audit_store.insert_background_task_run(
+            session,
+            occurred_at=utcnow(),
+            device_id=subject.device_id,
+            door_no=subject.door_no,
+            cert_no=subject.cert_no,
+            feature=subject.feature,
+            outcome=BackgroundOutcome(outcome),
+            action=subject.action,
+            session_id=subject.session_id,
+            reason=reason,
+            threshold_s=subject.threshold_s,
+        )
 
 
 def _worker(device_id: str) -> _DeviceWorker:
@@ -285,7 +294,7 @@ def _now_s() -> float:
 # ── 取数：只读派生层 ──────────────────────────────────────────────────────
 
 
-def _snapshots(device_id: str) -> list[Candidate]:
+def _snapshots(session: Session, device_id: str) -> list[Candidate]:
     """这台设备上此刻所有未结束的会话，连同判据要用的现态。
 
     取数一律经 `doors` 域公开的功能，不读它的表：会话、现态、串的划断规则都是它的
@@ -294,33 +303,35 @@ def _snapshots(device_id: str) -> list[Candidate]:
     现态的关阀时刻已经过钟偏差换算，所以**设备还没有偏差记录时它是空的**（测试里要
     显式建立，否则测的不是线上的样子；线上连上后一个往返内就有，且跨重启持久化）。
     """
-    live = doors_service.live_doors(device_id)
+    live = doors_service.live_doors(session, device_id)
     found: list[Candidate] = []
-    for session in doors_service.open_sessions(device_id):
-        row = live.get(session.door_no)
+    for door_session in doors_service.open_sessions(session, device_id):
+        row = live.get(door_session.door_no)
         if row is None:
             continue  # 会话还在、门的现态却没了：不判，等下一帧
         found.append(
             Candidate(
-                session_id=session.session_id,
+                session_id=door_session.session_id,
                 device_id=device_id,
-                door_no=session.door_no,
-                cert_no=session.cert_no,
+                door_no=door_session.door_no,
+                cert_no=door_session.cert_no,
                 state=DoorState(row.state) if row.state in _STATES else DoorState.FREE,
-                assigned_at=session.assigned_at,
+                assigned_at=door_session.assigned_at,
                 paused_at=row.close_time,
-                run_started_at=doors_service.run_started_at(device_id, session.door_no, session.cert_no),
+                run_started_at=doors_service.run_started_at(
+                    session, device_id, door_session.door_no, door_session.cert_no
+                ),
             )
         )
     return found
 
 
-def _plan(device_id: str) -> dict[int, tuple[float, Candidate, Trigger]]:
+def _plan(session: Session, device_id: str) -> dict[int, tuple[float, Candidate, Trigger]]:
     """该设备每个喷头下一个到点：`door_no → (到点时刻, 候选, 触发)`。"""
-    config = config_store.effective(device_id)
+    config = config_store.effective(session, device_id)
     now = now_rfc3339()
     planned: dict[int, tuple[float, Candidate, Trigger]] = {}
-    for candidate in _snapshots(device_id):
+    for candidate in _snapshots(session, device_id):
         trigger = decide(candidate, config, now)
         if trigger is None:
             continue
@@ -343,7 +354,8 @@ def on_frame(device_id: str) -> None:
     """
     if not _running:
         return
-    _forget_closed_sessions(device_id)
+    with session_scope() as session:
+        _forget_closed_sessions(session, device_id)
     reschedule(device_id)
     _flush_pending_assign(device_id)
 
@@ -366,7 +378,8 @@ def reschedule(device_id: str) -> None:
         return
     worker = _worker(device_id)
     loop = asyncio.get_running_loop()
-    planned = _plan(device_id)
+    with session_scope() as session:
+        planned = _plan(session, device_id)
 
     for door_no, existing in list(worker.timers.items()):
         if door_no not in planned:
@@ -385,18 +398,18 @@ def reschedule(device_id: str) -> None:
         )
 
 
-def _forget_closed_sessions(device_id: str) -> None:
+def _forget_closed_sessions(session: Session, device_id: str) -> None:
     """会话结束时把它在 `_attempted` 里的记录清掉。
 
     留着只会让集合一直长；清掉是安全的——那一场不会再触发（它已经结束），重新开的那一场
     有自己的 `session_id`。
     """
-    open_ids = {session.session_id for session in doors_service.open_sessions(device_id)}
+    open_ids = {item.session_id for item in doors_service.open_sessions(session, device_id)}
     for key in [item for item in _attempted if item[0] == device_id and item[1] not in open_ids]:
         _attempted.discard(key)
 
 
-def snapshot() -> list[dict[str, object]]:
+def snapshot(session: Session) -> list[dict[str, object]]:
     """调度器此刻的即时计划：每个已排定的到点，连同"为什么是这一刻"的细节。
 
     给运维可见性用（概览页的后台任务卡）：**只读**——计划由 `reschedule` 维护，这里只
@@ -417,7 +430,7 @@ def snapshot() -> list[dict[str, object]]:
         started = candidate.assigned_at if spec.start == "assigned_at" else candidate.paused_at
         # 本轮链的用量上限随功能而定（预约续期有、其余没有）；连同起算时刻一起给，
         # 面板才能回答"这一轮什么时候到头"。
-        config = config_store.effective(device_id)
+        config = config_store.effective(session, device_id)
         max_duration = as_int(config[spec.max_duration_key]) if spec.max_duration_key is not None else None
         rows.append(
             {
@@ -443,8 +456,9 @@ def snapshot() -> list[dict[str, object]]:
 def _fire(device_id: str, candidate: Candidate, trigger: Trigger) -> None:
     """到点：复查 → 入队。只做这两件事，重活交给 worker，免得占着事件循环。"""
     _worker(device_id).timers.pop(candidate.door_no, None)
-    config = config_store.effective(device_id)
-    fresh = {item.session_id: item for item in _snapshots(device_id)}.get(candidate.session_id)
+    with session_scope() as session:
+        config = config_store.effective(session, device_id)
+        fresh = {item.session_id: item for item in _snapshots(session, device_id)}.get(candidate.session_id)
 
     reason = recheck(fresh, expected=candidate, trigger=trigger, config=config, now=now_rfc3339())
     if reason is not None:
@@ -518,7 +532,8 @@ async def _perform_settle(job: _SettleJob) -> None:
     feature = job.feature
     _attempted.add((candidate.device_id, candidate.session_id, feature))
 
-    config = config_store.effective(candidate.device_id)
+    with session_scope() as session:
+        config = config_store.effective(session, candidate.device_id)
     still = still_allowed(candidate.cert_no, feature, config)
     if still is not None:
         _record("skipped", "下单前复查未通过，放弃这一次", job, reason=still)
@@ -531,9 +546,10 @@ async def _perform_settle(job: _SettleJob) -> None:
         return
 
     try:
-        result = await sessions_routes.perform_settle(
-            candidate.device_id, SettleRequest(cert_no=candidate.cert_no, password=password)
-        )
+        with session_scope() as session:
+            result = await sessions_routes.perform_settle(
+                session, candidate.device_id, SettleRequest(cert_no=candidate.cert_no, password=password)
+            )
     except ApiProblemError as error:
         _report_problem(error, job)
         return
@@ -568,9 +584,10 @@ async def _perform_assign(job: _AssignJob) -> None:
     """补上那一次分配。**只下一次**，不重试——它是否真成了，下一帧看得出来。"""
     key = (job.device_id, job.door_no)
     try:
-        result = await sessions_routes.perform_assign(
-            job.device_id, AssignRequest(door_no=job.door_no, cert_no=job.cert_no, password=job.password)
-        )
+        with session_scope() as session:
+            result = await sessions_routes.perform_assign(
+                session, job.device_id, AssignRequest(door_no=job.door_no, cert_no=job.cert_no, password=job.password)
+            )
     except ApiProblemError as error:
         if error.problem.code in _WAIT_PROBLEMS:
             # 门还没空、或他名下还有未结束的会话：命令**根本没下发**，所以留着待办等下一帧
@@ -671,17 +688,21 @@ def start() -> None:
     log_event("INFO", "background-task.started", "后台任务已启动")
 
 
-def stop() -> None:
+async def stop() -> None:
     global _running
     _running = False
+    tasks: list[asyncio.Task[None]] = []
     for worker in _workers.values():
         for planned in worker.timers.values():
             planned.handle.cancel()
         worker.timers.clear()
         if worker.task is not None:
             worker.task.cancel()
+            tasks.append(worker.task)
             worker.task = None
     _workers.clear()
     _pending_assigns.clear()
     _attempted.clear()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
     log_event("INFO", "background-task.stopped", "后台任务已停止")

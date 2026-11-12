@@ -9,6 +9,7 @@ import com.ryanliu.ntushower.core.clock.Clock
 import com.ryanliu.ntushower.core.clock.ServerClock
 import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.RuntimeConfig
+import com.ryanliu.ntushower.core.identity.DeviceCredential
 import com.ryanliu.ntushower.core.identity.DeviceIdentity
 import com.ryanliu.ntushower.core.net.HttpClientFactory
 import com.ryanliu.ntushower.core.net.ReconnectBackoff
@@ -32,6 +33,14 @@ import org.json.JSONObject
  *
  * [connected] 与 [authenticated] 是两件事：前者是链路连上，后者是服务端已认下这台设备。
  *
+ * ## 接入凭据与自注册
+ *
+ * 握手必须带设备自己的接入凭据（`Authorization: Bearer`）。本地没有凭据、或服务端以
+ * [Enrollment.WS_CLOSE_POLICY_VIOLATION]（RFC 6455 1008）拒绝时，先经 [EnrollClient] 用
+ * APK 内置的 claim 令牌注册一枚新凭据再连接——重装 APK、清数据都能自助恢复，不需要逐台
+ * 预置。判断收敛在 [Enrollment.shouldReEnroll]。注册只回答「这是我们的程序」，信任位照旧
+ * 由服务端档案回答。
+ *
  * ## 一条连接，几类消息：字段该走哪一条
  *
  * 判定依据是**那个字段多久变一次**，以及接收方**需要它多新**——而不是塞进碰巧已有的那一条。
@@ -53,7 +62,7 @@ import org.json.JSONObject
  * `uptime_s` 反推出的开机时刻同属"设备健康"这一组。真要加的时候，间隔也做成配置项，
  * 默认值与范围登记在服务端的 `modules/config/spec.py`。
  */
-class GatewayClient(context: Context, private val callback: Callback) {
+class GatewayClient(private val context: Context, private val callback: Callback) {
 
     interface Callback {
         fun onConnected(trusted: Boolean, config: JSONObject, upgrade: JSONObject?, serverTime: String)
@@ -91,6 +100,29 @@ class GatewayClient(context: Context, private val callback: Callback) {
 
     private var reconnectAttempt = 0
     private var reconnectScheduled = false
+
+    /** 注册去重：注册已在途时不再叠加，避免每帧失败都开一个注册请求。 */
+    private var enrollScheduled = false
+
+    private val enrollClient =
+        EnrollClient(
+            context,
+            object : EnrollClient.Callback {
+                override fun onEnrolled() {
+                    enrollScheduled = false
+                    Log.i(TAG, "credential enrolled, retrying connect")
+                    connect()
+                }
+
+                override fun onEnrollFailed(reason: String) {
+                    enrollScheduled = false
+                    lastOfflineReason = "enroll:$reason"
+                    lastOfflineAt = ServerClock.nowRfc3339() ?: Clock.wallClockRfc3339()
+                    handler.post { callback.onDisconnected("enroll failed: $reason") }
+                    scheduleReconnect()
+                }
+            },
+        )
 
     /**
      * 显式停用标志：[disconnect] 之后不再自动重连，直到下一次 [connect]。
@@ -131,8 +163,12 @@ class GatewayClient(context: Context, private val callback: Callback) {
         if (connected) return
         val url = "wss://${BuildConfig.SERVER_DOMAIN}/gateway/device"
         Log.i(TAG, "connecting $url (device_id=$deviceId)")
-        val request = Request.Builder().url(url).build()
-        webSocket = client.newWebSocket(request, listener)
+        val builder = Request.Builder().url(url)
+        // 先试后注册：本地有凭据就带上；没有也照常发起连接。注册只由服务端的
+        // 1008 拒绝触发（见 onClosed）——「没有凭据就不连接」会让设备在无需凭据
+        // 的服务端形态下（如切换前的旧服务）永远进不了连接。
+        DeviceCredential.read(context)?.let { builder.header("Authorization", "Bearer $it") }
+        webSocket = client.newWebSocket(builder.build(), listener)
     }
 
     fun disconnect() {
@@ -248,6 +284,20 @@ class GatewayClient(context: Context, private val callback: Callback) {
             authenticated = false
             lastOfflineReason = "closed:$code"
             lastOfflineAt = ServerClock.nowRfc3339() ?: Clock.wallClockRfc3339()
+            if (Enrollment.shouldReEnroll(code)) {
+                // 1008 = RFC 6455 Policy Violation：服务端按凭据策略拒绝。本地这份
+                // 凭据（可能压根没有——首次安装）已不被接受，清掉并走 claim 自注册
+                // 领一枚新的；注册成功后由 onEnrolled 回调重新发起连接。
+                // 这是 fleet provisioning by claim 的标准流程，不另设兼容分支。
+                DeviceCredential.clear(context)
+                Log.w(TAG, "credential rejected (1008), re-enrolling")
+                handler.post { callback.onDisconnected("credential rejected") }
+                if (!enrollScheduled) {
+                    enrollScheduled = true
+                    enrollClient.enroll(context)
+                }
+                return
+            }
             handler.post { callback.onDisconnected("closed: $reason") }
             scheduleReconnect()
         }

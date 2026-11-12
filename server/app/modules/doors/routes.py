@@ -12,9 +12,11 @@ import asyncio
 import contextlib
 import json
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from sqlalchemy.orm import Session
 
 from app.core import events
+from app.db.deps import get_db
 from app.modules.doors import service
 
 from .schemas import DoorView
@@ -23,9 +25,9 @@ router = APIRouter(prefix="/api/v1", tags=["doors"])
 
 
 @router.get("/doors")
-def list_doors(device_id: str | None = None) -> list[DoorView]:
+def list_doors(device_id: str | None = None, session: Session = Depends(get_db)) -> list[DoorView]:
     """喷头现态列表；带 device_id 即该设备的喷头，不带列全部设备。"""
-    return service.list_doors(device_id)
+    return service.list_doors(session, device_id)
 
 
 @router.websocket("/stream")

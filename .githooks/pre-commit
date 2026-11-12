@@ -1,0 +1,5 @@
+#!/bin/sh
+# 本地提交前的质量门。core.hooksPath=.githooks，所以 hook 放在这里。
+# 实际检查由 pre-commit 框架调度（.pre-commit-config.yaml），命令只有一份。
+set -eu
+exec "$(dirname "$0")/../server/.venv/Scripts/pre-commit.exe" run --hook-stage pre-commit

@@ -1,3 +1,6 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -38,19 +41,28 @@ android {
         applicationId = "com.ryanliu.ntushower"
         minSdk = 19          // 设备 ROM 固定 Android 4.4，运行时下限不可动
         targetSdk = 19       // 目标设备冻结在 4.4，无升级路径
-        versionCode = 116
-        versionName = "0.6.5"
+        versionCode = 119
+        versionName = "0.6.8"
         buildConfigField("String", "SERVER_DOMAIN", "\"${providers.gradleProperty("serverDomain").get()}\"")
+        // 设备自注册的 claim 令牌（fleet provisioning by claim）：全队共享一枚，构建期
+        // 注入、不入库。缺省空串 = 注册通道关闭（与服务端 fail closed 对齐）。泄露时
+        // 换一枚重新构建即可，库内已签发的设备凭据不受影响。
+        buildConfigField("String", "DEVICE_ENROLL_TOKEN", "\"${providers.gradleProperty("deviceEnrollToken").getOrElse("")}\"")
         buildConfigField("String", "APP_VERSION", "\"$versionName\"")
         buildConfigField("int", "VERSION_CODE", "$versionCode")
     }
 
+    val keystoreProperties = Properties()
+    val keystorePropertiesFile = rootProject.file("keystore.properties")
+    if (keystorePropertiesFile.exists()) {
+        keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+    }
     signingConfigs {
         create("release") {
-            storeFile = rootProject.file("../config/keystore/ntu-shower.keystore")
-            storePassword = providers.gradleProperty("keystorePassword").get()
-            keyAlias = providers.gradleProperty("keystoreAlias").get()
-            keyPassword = providers.gradleProperty("keystorePassword").get()
+            storeFile = keystoreProperties["storeFile"]?.let { rootProject.file(it) }
+            storePassword = keystoreProperties["storePassword"] as String?
+            keyAlias = keystoreProperties["keyAlias"] as String?
+            keyPassword = keystoreProperties["keyPassword"] as String?
         }
     }
 
@@ -71,12 +83,12 @@ android {
     lint {
         // 设备 ROM 冻结在 Android 4.4 且不进 Google Play：targetSdk 19 是有意决策
         disable += "ExpiredTargetSdkVersion"
-        // /sdcard/ 硬编码：AppConfig 是目标设备的环境锚点（实测路径，见 docs/DECISIONS.md），
+        // /sdcard/ 硬编码：AppConfig 是目标设备的环境锚点（实测路径，见 docs/adr/0007-device.md），
         // Environment.getExternalStorageDirectory() 已废弃且返回同一位置
         disable += "SdCardPath"
-        // ANDROID_ID 即设备身份：设计决策（docs/DECISIONS.md），多设备注册表的唯一键
+        // ANDROID_ID 即设备身份：设计决策（docs/adr/0008-identity.md），多设备注册表的唯一键
         disable += "HardwareIds"
-        // okhttp 钉在 3.12.13：4.x 起要求 API 21，设备冻结 4.4（见 docs/ARCHITECTURE.md）
+        // okhttp 钉在 3.12.13：4.x 起要求 API 21，设备冻结 4.4（见 docs/architecture.md）
         disable += "NewerVersionAvailable"
     }
 
@@ -108,6 +120,9 @@ val frameworkBoundClasses = listOf(
     "**/core/threading/**",
     // 网络栈：依赖真实 TLS/DNS 套接字（纯逻辑部分已抽为 ReconnectBackoff/DnsResolver 报文层）
     "**/transport/GatewayClient*",
+    // 自注册客户端：OkHttp 实际网络调用 + 主线程投递，JVM 测不出；请求组装与
+    // 响应解析已抽成 Enrollment 纯逻辑并有测试
+    "**/transport/EnrollClient*",
     "**/core/net/HttpClientFactory*",
     "**/core/tls/**",
     "**/core/identity/**",
@@ -239,7 +254,7 @@ tasks.register<JacocoReport>("jacocoUnitTestReport") {
 }
 
 dependencies {
-    // API 19 上可用的最新 WebSocket 客户端（4.x 起要求 API 21，见 docs/ARCHITECTURE.md）
+    // API 19 上可用的最新 WebSocket 客户端（4.x 起要求 API 21，见 docs/architecture.md）
     implementation("com.squareup.okhttp3:okhttp:3.12.13")
     // 系统 TLS 栈（API 19）没有 AEAD；Conscrypt 自带 BoringSSL，提供 TLS1.2 GCM/CHACHA20。
     implementation("org.conscrypt:conscrypt-android:2.5.2")
