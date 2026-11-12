@@ -138,7 +138,16 @@ def fresh_db(
     db_module.close_all_connections()
     path = str(tmp_path / "test.db")
     monkeypatch.setattr(config_module.settings, "db_path", path)
-    monkeypatch.setattr(config_module.settings, "bridge_base_port", 25655)
+    # 桥端口按 xdist worker 分段：多 worker 并行时共用同一固定端口，A worker 的
+    # TCP 客户端会连进 B worker 的桥，帧串位表现为 nonce 错乱（xdist 官方约定
+    # worker 编号在 PYTEST_XDIST_WORKER，形如 gw3）。每段 10 个端口，当前
+    # bridge 测试的独特设备数 ≤3，余量充分；无 xdist 时回到 gw0 即原端口。
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "gw0")
+    monkeypatch.setattr(
+        config_module.settings,
+        "bridge_base_port",
+        25655 + int(worker.removeprefix("gw")) * 10,
+    )
     monkeypatch.setattr(config_module.settings, "ota_dir", str(tmp_path / "ota_releases"))
     monkeypatch.setattr(config_module.settings, "voice_dir", str(tmp_path / "voice"))
     monkeypatch.setattr(config_module.settings, "assign_timeout_s", 0.3)
