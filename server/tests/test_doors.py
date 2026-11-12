@@ -6,12 +6,12 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from tests import device_link, frames
+from tests import device_link, door_link, frames
 
-from app.core import db, device_clock
+from app.core import device_clock
 from app.core.clock import rfc3339_after
-from app.modules.doors import repository, service
-from app.modules.doors.schemas import DoorState
+from app.models.enums import DoorState
+from app.modules.doors import service
 
 
 def _door(door_no: int, **overrides: object) -> dict[str, Any]:
@@ -81,8 +81,8 @@ def test_derive_state_covers_all_states(raw: dict[str, Any], expected: DoorState
 def test_snapshot_updates_live_state_and_records_events(fresh_db: str) -> None:
     """帧链路：状态落库、状态迁移记事件、会话随占用开合。"""
     device_id = "test-device-0002"
-    service.process_snapshot(device_id, _snapshot([_door(1), _door(2)]))
-    live = repository.get_all_live(device_id)
+    door_link.feed(device_id, _snapshot([_door(1), _door(2)]))
+    live = door_link.get_all_live(device_id)
     assert len(live) == 2
     assert live[1]["state"] == DoorState.FREE.value
 
@@ -93,41 +93,37 @@ def test_snapshot_updates_live_state_and_records_events(fresh_db: str) -> None:
     t2 = "2026-09-30T12:02:00.000Z"
     opened = "2026-09-30T12:00:30.000Z"
 
-    service.process_snapshot(device_id, _snapshot([_door(1, card_no=2001, cert_no="C1"), _door(2)], t0))
-    live = repository.get_all_live(device_id)
+    door_link.feed(device_id, _snapshot([_door(1, card_no=2001, cert_no="C1"), _door(2)], t0))
+    live = door_link.get_all_live(device_id)
     assert live[1]["state"] == DoorState.WAITING.value
     assert live[1]["card_no"] == 2001
     assert live[1]["reported_at"] == t0
 
-    service.process_snapshot(device_id, _snapshot([_door(1, card_no=2001, cert_no="C1", in_time=opened)], t1))
-    assert repository.get_all_live(device_id)[1]["state"] == DoorState.BATHING.value
-    assert repository.get_open_session(device_id, 1) is not None
+    door_link.feed(device_id, _snapshot([_door(1, card_no=2001, cert_no="C1", in_time=opened)], t1))
+    assert door_link.get_all_live(device_id)[1]["state"] == DoorState.BATHING.value
+    assert door_link.get_open_session(device_id, 1) is not None
 
-    service.process_snapshot(device_id, _snapshot([_door(1), _door(2)], t2))
-    assert repository.get_open_session(device_id, 1) is None
+    door_link.feed(device_id, _snapshot([_door(1), _door(2)], t2))
+    assert door_link.get_open_session(device_id, 1) is None
 
-    conn = db.get_conn()
-    events = conn.execute(
-        "SELECT from_state, to_state FROM door_state_event WHERE device_id=? AND door_no=1 ORDER BY id",
-        (device_id,),
-    ).fetchall()
+    events = door_link.list_events(device_id, door_no=1)
     assert [(e["from_state"], e["to_state"]) for e in events] == [
         (DoorState.FREE.value, DoorState.WAITING.value),
         (DoorState.WAITING.value, DoorState.BATHING.value),
         (DoorState.BATHING.value, DoorState.FREE.value),
     ]
-    sessions = conn.execute("SELECT * FROM usage_session WHERE device_id=?", (device_id,)).fetchall()
+    sessions = door_link.list_sessions(device_id)
     assert len(sessions) == 1
     session = sessions[0]
     assert session["card_no"] == 2001
-    assert session["ended_at"] is not None
+    assert session["ended_at"] != ""
     assert session["flow_s"] == 60  # t1 到 t2 那一段：上一帧还在出水，计入
     assert session["assigned_at"] == t0  # 这台设备没回过 pong、无偏差可平移，起点落在本帧
     # 设备从没报过 bath_time_s，我们却观测到 60 秒出水——两边对不上，完整性为假。
     # 它表达的正是这件事：我们的段之和与设备的累计值不一致。
-    assert session["segments_complete"] == 0
+    assert session["segments_complete"] is False
 
-    segments = conn.execute("SELECT * FROM usage_segment WHERE session_id=?", (session["id"],)).fetchall()
+    segments = door_link.list_segments_of(session["id"])
     assert len(segments) == 1
     assert segments[0]["opened_at"] == t1  # 无偏差可平移，开阀时刻退回首次观测到出水的那一帧
     assert segments[0]["flow_s"] == session["flow_s"]  # 会话时长就是段之和
@@ -142,13 +138,13 @@ def test_live_time_fields_are_on_the_server_axis(fresh_db: str) -> None:
     device_id = "dev-rawtime-01"
     opened = "2026-09-30T12:00:00.000Z"
 
-    service.process_snapshot(device_id, _snapshot([_door(1, card_no=1, cert_no="C", in_time=opened)]))
+    door_link.feed(device_id, _snapshot([_door(1, card_no=1, cert_no="C", in_time=opened)]))
 
-    live = repository.get_all_live(device_id)
+    live = door_link.get_all_live(device_id)
     assert live[1]["in_time"] == ""
     # 原话仍然完整地留在原始层里：现态是解释过的视图，原始帧才是设备说过什么。
-    raw = db.get_conn().execute("SELECT doors FROM door_snapshot WHERE device_id = ?", (device_id,)).fetchone()
-    assert opened in raw["doors"]
+    raw = door_link.list_snapshots(device_id)
+    assert opened in json.dumps(raw[0]["doors"], ensure_ascii=False)
 
 
 def test_session_owner_change_closes_old_and_opens_new(fresh_db: str) -> None:
@@ -156,15 +152,15 @@ def test_session_owner_change_closes_old_and_opens_new(fresh_db: str) -> None:
     device_id = "dev-swap-00001"
     device_link.register_trusted_device(device_id)
     doors = [_door(1, card_no=100, cert_no="A", open_time=rfc3339_after(-30), in_time=rfc3339_after(-25))]
-    service.process_snapshot(device_id, _snapshot(doors))
-    first = repository.get_open_session(device_id, 1)
+    door_link.feed(device_id, _snapshot(doors))
+    first = door_link.get_open_session(device_id, 1)
 
     doors[0]["card_no"] = 200
     doors[0]["cert_no"] = "B"
-    service.process_snapshot(device_id, _snapshot(doors))
+    door_link.feed(device_id, _snapshot(doors))
 
     assert first is not None
-    current = repository.get_open_session(device_id, 1)
+    current = door_link.get_open_session(device_id, 1)
     assert current is not None
     assert current["id"] != first["id"]
     assert current["cert_no"] == "B"
@@ -177,24 +173,24 @@ def test_snapshot_records_missing_doors_and_skips_nonpositive_door_no(fresh_db: 
     留下它，派生跳过。回错误会让设备端不删发件箱那一行，把队列堵死。
     """
     device_id = "dev-bad-snap-1"
-    empty = service.process_snapshot(device_id, {"snapshot_id": "s"})
+    empty = door_link.feed(device_id, {"snapshot_id": "s", "source": "db_watch"})
     assert empty.processed == 0
     assert empty.events == ()
-    recorded = db.get_conn().execute("SELECT doors FROM door_snapshot WHERE snapshot_id = ?", ("s",)).fetchall()
-    assert [row["doors"] for row in recorded] == ["[]"]
+    recorded = door_link.list_snapshots(device_id)
+    assert recorded[0]["doors"] == []
 
     device_link.register_trusted_device(device_id)
-    result = service.process_snapshot(device_id, _snapshot([_door(0), _door(1)]))
+    result = door_link.feed(device_id, _snapshot([_door(0), _door(1)]))
     assert result.processed == 1
 
 
 def test_last_used_ignores_sessions_that_never_opened(fresh_db: str) -> None:
     """「上次使用」只认开过阀的会话：分配后直接结算那种不算。"""
     device_id = "dev-last-used-1"
-    service.process_snapshot(device_id, _snapshot([_door(1, card_no=1, cert_no="A", open_time=rfc3339_after(-600))]))
-    service.process_snapshot(device_id, _snapshot([_door(1)]))
+    door_link.feed(device_id, _snapshot([_door(1, card_no=1, cert_no="A", open_time=rfc3339_after(-600))]))
+    door_link.feed(device_id, _snapshot([_door(1)]))
 
-    assert (device_id, 1) not in repository.latest_usage_by_door()
+    assert (device_id, 1) not in door_link.latest_usage_by_door()
 
 
 def test_last_used_keeps_zero_length_bath(fresh_db: str) -> None:
@@ -202,12 +198,10 @@ def test_last_used_keeps_zero_length_bath(fresh_db: str) -> None:
     不是时长。统计层的"算不算用过"另有判据（`flow_s > 0`），两者不要混。"""
     device_id = "dev-last-used-2"
     t0 = "2026-09-30T12:00:00.000Z"
-    service.process_snapshot(
-        device_id, _snapshot([_door(1, card_no=2, cert_no="B", in_time="2026-09-30T12:00:00.000Z")], t0)
-    )
-    service.process_snapshot(device_id, _snapshot([_door(1)], "2026-09-30T12:00:00.500Z"))
+    door_link.feed(device_id, _snapshot([_door(1, card_no=2, cert_no="B", in_time="2026-09-30T12:00:00.000Z")], t0))
+    door_link.feed(device_id, _snapshot([_door(1)], "2026-09-30T12:00:00.500Z"))
 
-    row = repository.latest_usage_by_door()[(device_id, 1)]
+    row = door_link.latest_usage_by_door()[(device_id, 1)]
     assert row["cert_no"] == "B"
     assert row["opened_at"] == t0  # 无偏差可平移，开阀时刻退回本帧
     assert row["flow_s"] == 0  # 不足一秒，没有可计入的出水
@@ -217,7 +211,7 @@ def test_last_used_returns_the_most_recent(fresh_db: str) -> None:
     """同一喷头用过多次时返回开阀时刻最晚的那次。"""
     device_id = "dev-last-used-3"
     for minutes, cert in ((-60, "OLD"), (-10, "NEW")):
-        service.process_snapshot(
+        door_link.feed(
             device_id,
             _snapshot(
                 [
@@ -227,9 +221,9 @@ def test_last_used_returns_the_most_recent(fresh_db: str) -> None:
                 ]
             ),
         )
-        service.process_snapshot(device_id, _snapshot([_door(1)]))
+        door_link.feed(device_id, _snapshot([_door(1)]))
 
-    row = repository.latest_usage_by_door()[(device_id, 1)]
+    row = door_link.latest_usage_by_door()[(device_id, 1)]
     assert row["cert_no"] == "NEW"
 
 
@@ -240,7 +234,7 @@ def test_doors_api_exposes_last_used(fresh_db: str) -> None:
 
     t0 = "2026-09-30T12:00:00.000Z"
     t1 = "2026-09-30T12:01:00.000Z"
-    service.process_snapshot(
+    door_link.feed(
         device_id,
         _snapshot(
             [
@@ -250,9 +244,9 @@ def test_doors_api_exposes_last_used(fresh_db: str) -> None:
             t0,
         ),
     )
-    service.process_snapshot(device_id, _snapshot([_door(1), _door(2)], t1))  # 两门先后释放
+    door_link.feed(device_id, _snapshot([_door(1), _door(2)], t1))  # 两门先后释放
 
-    doors = {d["door_no"]: d for d in repository.list_doors(device_id)}
+    doors = {d["door_no"]: d for d in door_link.list_doors(device_id)}
     # last_used_at 是开阀时刻，无偏差可平移时退回首次观测到出水的那一帧
     assert doors[1]["last_used_at"] == t0
     assert doors[1]["last_used_cert"] == "C"
@@ -280,31 +274,23 @@ def test_paused_keeps_this_segments_open_time(fresh_db: str) -> None:
     t3 = "2026-09-30T12:07:30.000Z"  # 第二段关阀；bath_time_s 已累到 240
     device_clock.load(device_id, 0.0)
 
-    service.process_snapshot(device_id, _snapshot([_door(1, acc_no="A001", open_time=t0, in_time=t0)], t0))
-    service.process_snapshot(
-        device_id, _snapshot([_door(1, acc_no="A001", open_time=t0, close_time=t1, bath_time_s=90)], t1)
-    )
-    live = repository.get_door_live(device_id, 1)
+    door_link.feed(device_id, _snapshot([_door(1, acc_no="A001", open_time=t0, in_time=t0)], t0))
+    door_link.feed(device_id, _snapshot([_door(1, acc_no="A001", open_time=t0, close_time=t1, bath_time_s=90)], t1))
+    live = door_link.get_door_live(device_id, 1)
     assert live["state"] == "paused"
     assert live["in_time"] == t0, "第一段：这一段的开阀时刻"
 
     # 暂停会一直持续到结算，关阀之后每一帧都还要答得出（真机上这一段是几分钟到几十分钟）。
     # 只验关阀那一帧的话，"答案只活一帧"这种错法看不出来——而那正是运维实际看到的帧。
-    service.process_snapshot(
-        device_id, _snapshot([_door(1, acc_no="A001", open_time=t0, close_time=t1, bath_time_s=90)], t1b)
-    )
-    assert repository.get_door_live(device_id, 1)["in_time"] == t0, "同一段暂停的后续帧，答案不变"
+    door_link.feed(device_id, _snapshot([_door(1, acc_no="A001", open_time=t0, close_time=t1, bath_time_s=90)], t1b))
+    assert door_link.get_door_live(device_id, 1)["in_time"] == t0, "同一段暂停的后续帧，答案不变"
 
-    service.process_snapshot(
-        device_id, _snapshot([_door(1, acc_no="A001", open_time=t0, in_time=t2, bath_time_s=90)], t2)
-    )
-    service.process_snapshot(
-        device_id, _snapshot([_door(1, acc_no="A001", open_time=t0, close_time=t3, bath_time_s=240)], t3)
-    )
-    live = repository.get_door_live(device_id, 1)
+    door_link.feed(device_id, _snapshot([_door(1, acc_no="A001", open_time=t0, in_time=t2, bath_time_s=90)], t2))
+    door_link.feed(device_id, _snapshot([_door(1, acc_no="A001", open_time=t0, close_time=t3, bath_time_s=240)], t3))
+    live = door_link.get_door_live(device_id, 1)
     assert live["state"] == "paused"
     assert live["in_time"] == t2, "第二段：本段的开阀时刻，不是第一段的，也不是反推出来的"
-    assert repository.list_doors(device_id)[0]["in_time"] == t2, "接口上给的是同一个值"
+    assert door_link.list_doors(device_id)[0]["in_time"] == t2, "接口上给的是同一个值"
 
 
 def test_waiting_still_has_no_open_time(fresh_db: str) -> None:
@@ -319,17 +305,17 @@ def test_waiting_still_has_no_open_time(fresh_db: str) -> None:
     device_clock.load(device_id, 0.0)
 
     # 先完整用一场：开阀 → 释放
-    service.process_snapshot(device_id, _snapshot([_door(1, acc_no="A001", open_time=t0, in_time=t0)], t0))
-    service.process_snapshot(device_id, _snapshot([_door(1, acc_no="A001", open_time=t0, in_time=t0)], t1))
-    service.process_snapshot(device_id, _snapshot([_door(1)], "2026-09-30T12:03:00.000Z"))
-    assert repository.list_doors(device_id)[0]["state"] == "free"
+    door_link.feed(device_id, _snapshot([_door(1, acc_no="A001", open_time=t0, in_time=t0)], t0))
+    door_link.feed(device_id, _snapshot([_door(1, acc_no="A001", open_time=t0, in_time=t0)], t1))
+    door_link.feed(device_id, _snapshot([_door(1)], "2026-09-30T12:03:00.000Z"))
+    assert door_link.list_doors(device_id)[0]["state"] == "free"
 
     # 再分配：新的一场，还没开阀
-    service.process_snapshot(
+    door_link.feed(
         device_id,
         _snapshot([_door(1, acc_no="B002", open_time="2026-09-30T12:10:00.000Z")], "2026-09-30T12:10:00.000Z"),
     )
-    view = repository.list_doors(device_id)[0]
+    view = door_link.list_doors(device_id)[0]
     assert view["state"] == "waiting"
     assert view["in_time"] == "", "上一场开过阀，与本场无关"
 
@@ -340,7 +326,7 @@ def test_doors_api_is_public_empty_and_filtered(client: TestClient, fresh_db: st
 
     device_id = "dev-doors-1"
     device_link.register_trusted_device(device_id)
-    service.process_snapshot(device_id, _snapshot([_door(2)]))
+    door_link.feed(device_id, _snapshot([_door(2)]))
 
     doors = client.get("/api/v1/doors", params={"device_id": device_id}).json()
     assert len(doors) == 1
@@ -360,7 +346,7 @@ def test_stream_door_update_carries_full_state_matching_rest(client: TestClient,
     """door.update 载荷是该设备完整现态行，与 GET /doors 逐字节同构（单一来源证明）。"""
     device_id = "dev-stream-door"
     with client.websocket_connect("/api/v1/stream") as ws:
-        service.process_snapshot(device_id, _snapshot([_door(1, card_no=1001, cert_no="2026000001")]))
+        door_link.feed(device_id, _snapshot([_door(1, card_no=1001, cert_no="2026000001")]))
         message = json.loads(ws.receive_text())
 
     assert message["type"] == "door.update"
@@ -391,12 +377,12 @@ def test_stream_with_device_filter_only_pushes_that_device(client: TestClient, f
     target = "dev-stream-target"
     other = "dev-stream-other"
     with client.websocket_connect(f"/api/v1/stream?device_id={target}") as ws:
-        service.process_snapshot(target, _snapshot([_door(1)]))  # 先推一条同步订阅状态
+        door_link.feed(target, _snapshot([_door(1)]))  # 先推一条同步订阅状态
         first = json.loads(ws.receive_text())
         assert first["payload"]["device_id"] == target
 
-        service.process_snapshot(other, _snapshot([_door(1)]))
-        service.process_snapshot(target, _snapshot([_door(2)]))
+        door_link.feed(other, _snapshot([_door(1)]))
+        door_link.feed(target, _snapshot([_door(2)]))
         second = json.loads(ws.receive_text())
 
     assert second["type"] == "door.update"
@@ -407,7 +393,7 @@ def test_stream_with_device_filter_only_pushes_that_device(client: TestClient, f
 def test_stream_client_close_ends_session_cleanly(client: TestClient, fresh_db: str) -> None:
     """客户端主动关闭：服务端探测到帧即退出推送循环，收尾不残留。"""
     with client.websocket_connect("/api/v1/stream") as ws:
-        service.process_snapshot("dev-stream-close", _snapshot([_door(1)]))
+        door_link.feed("dev-stream-close", _snapshot([_door(1)]))
         json.loads(ws.receive_text())  # 确认推送通道活着
         ws.close()
 
@@ -423,10 +409,10 @@ def test_startup_snapshot_keeps_events_out_but_still_runs_the_session(fresh_db: 
     device_id = "dev-startup-1"
     device_clock.load(device_id, 0.0)
     # 起始是空闲：这一帧走 db_watch，且它不涉及占用
-    service.process_snapshot(device_id, _snapshot([_door(1)], "2026-09-30T12:00:00.000Z"))
+    door_link.feed(device_id, _snapshot([_door(1)], "2026-09-30T12:00:00.000Z"))
 
     # 全貌帧里喷头显示被占着、正在出水。它是"当前是什么样"，不是"刚刚有人分配进来"
-    service.process_snapshot(
+    door_link.feed(
         device_id,
         _snapshot(
             [
@@ -443,14 +429,14 @@ def test_startup_snapshot_keeps_events_out_but_still_runs_the_session(fresh_db: 
         ),
     )
 
-    assert repository.get_all_live(device_id)[1]["state"] == DoorState.BATHING.value  # 现态确实刷新了
-    assert db.get_conn().execute("SELECT COUNT(*) FROM door_state_event").fetchone()[0] == 0  # 但没有迁移
-    session = repository.get_open_session(device_id, 1)
+    assert door_link.get_all_live(device_id)[1]["state"] == DoorState.BATHING.value  # 现态确实刷新了
+    assert door_link.list_events(device_id) == []  # 但没有迁移
+    session = door_link.get_open_session(device_id, 1)
     assert session is not None, "会话照常开出来"
     assert session["assigned_at"] == "2026-09-30T12:01:00.000Z"  # 起点由 open_time 平移
-    segment = db.get_conn().execute("SELECT * FROM usage_segment WHERE session_id = ?", (session["id"],)).fetchone()
-    assert segment is not None, "全貌帧同样要开段——它挡住的只是事件流水"
-    assert segment["opened_at"] == "2026-09-30T12:04:00.000Z"  # 开阀时刻由 in_time 平移
+    segment = door_link.list_segments_of(session["id"])
+    assert segment, "全貌帧同样要开段——它挡住的只是事件流水"
+    assert segment[0]["opened_at"] == "2026-09-30T12:04:00.000Z"  # 开阀时刻由 in_time 平移
 
 
 def test_startup_snapshot_closes_the_session_it_finds_abandoned(fresh_db: str) -> None:
@@ -464,15 +450,15 @@ def test_startup_snapshot_closes_the_session_it_finds_abandoned(fresh_db: str) -
     而且那种偏晚是系统性的——离线越久偏得越多。
     """
     device_id = "dev-startup-2"
-    service.process_snapshot(device_id, _snapshot([_door(1, card_no=1, cert_no="A")], "2026-09-30T12:00:00.000Z"))
+    door_link.feed(device_id, _snapshot([_door(1, card_no=1, cert_no="A")], "2026-09-30T12:00:00.000Z"))
 
-    service.process_snapshot(
+    door_link.feed(
         device_id,
         _snapshot([_door(1)], "2026-09-30T12:30:00.000Z", service.SOURCE_STARTUP),
     )
 
-    assert repository.get_open_session(device_id, 1) is None
-    row = db.get_conn().execute("SELECT * FROM usage_session WHERE device_id = ?", (device_id,)).fetchone()
+    assert door_link.get_open_session(device_id, 1) is None
+    row = door_link.list_sessions(device_id)[0]
     assert row["ended_at"] == "2026-09-30T12:00:00.000Z"
     assert row["observed_span"] == "gap"  # 中间那半小时我们没看见
 
@@ -487,11 +473,11 @@ def test_last_seen_stops_at_the_last_occupied_frame(fresh_db: str) -> None:
     t1 = "2026-09-30T12:01:00.000Z"
     t2 = "2026-09-30T12:02:00.000Z"
 
-    service.process_snapshot(device_id, _snapshot([_door(1, card_no=1, cert_no="A")], t0))
-    service.process_snapshot(device_id, _snapshot([_door(1, card_no=1, cert_no="A", in_time=t0)], t1))
-    service.process_snapshot(device_id, _snapshot([_door(1)], t2))
+    door_link.feed(device_id, _snapshot([_door(1, card_no=1, cert_no="A")], t0))
+    door_link.feed(device_id, _snapshot([_door(1, card_no=1, cert_no="A", in_time=t0)], t1))
+    door_link.feed(device_id, _snapshot([_door(1)], t2))
 
-    row = db.get_conn().execute("SELECT * FROM usage_session WHERE device_id = ?", (device_id,)).fetchone()
+    row = door_link.list_sessions(device_id)[0]
     assert row["assigned_at"] == t0
     assert row["ended_at"] == t2
     assert row["last_seen_at"] == t1  # 不是 t2——结束那一帧恰恰证明它已经不占了
@@ -507,10 +493,10 @@ def test_gap_beyond_session_limit_is_not_counted(fresh_db: str) -> None:
     t0 = "2026-09-30T12:00:00.000Z"
     far = "2026-09-30T12:30:00.000Z"  # 与 t0 相隔 1800 秒 > SESSION_MAX_S
 
-    service.process_snapshot(device_id, _snapshot([_door(1, card_no=1, cert_no="A", in_time=t0)], t0))
-    service.process_snapshot(device_id, _snapshot([_door(1, card_no=1, cert_no="A", in_time=t0)], far))
+    door_link.feed(device_id, _snapshot([_door(1, card_no=1, cert_no="A", in_time=t0)], t0))
+    door_link.feed(device_id, _snapshot([_door(1, card_no=1, cert_no="A", in_time=t0)], far))
 
-    row = db.get_conn().execute("SELECT flow_s FROM usage_session WHERE device_id = ?", (device_id,)).fetchone()
+    row = door_link.list_sessions(device_id)[0]
     assert row["flow_s"] == 0
 
 
@@ -527,15 +513,14 @@ def test_session_survives_process_restart(fresh_db: str) -> None:
     t0 = "2026-09-30T12:00:00.000Z"
     t1 = "2026-09-30T12:01:00.000Z"
 
-    service.process_snapshot(device_id, _snapshot([_door(1, card_no=1, cert_no="A", in_time=t0)], t0))
+    door_link.feed(device_id, _snapshot([_door(1, card_no=1, cert_no="A", in_time=t0)], t0))
 
     # 模拟重启：清掉进程内的一切。库不动——这正是状态所在之处。
     service._device_locks.clear()
 
-    service.process_snapshot(device_id, _snapshot([_door(1, card_no=1, cert_no="A", in_time=t0)], t1))
+    door_link.feed(device_id, _snapshot([_door(1, card_no=1, cert_no="A", in_time=t0)], t1))
 
-    conn = db.get_conn()
-    rows = conn.execute("SELECT * FROM usage_session WHERE device_id = ?", (device_id,)).fetchall()
+    rows = door_link.list_sessions(device_id)
     assert len(rows) == 1, "重启不该把同一次占用重开成两条会话"
     assert rows[0]["assigned_at"] == t0, "起点仍是原来那一帧"
     assert rows[0]["flow_s"] == 60, "上一帧在出水的证据跨重启仍然有效"
@@ -548,12 +533,12 @@ def test_door_no_must_be_a_strict_in_range_integer(fresh_db: str) -> None:
     脏账记到别人头上——其余数值字段可以宽容，这一个不行。
     """
     device_id = "dev-door-no"
-    result = service.process_snapshot(
+    result = door_link.feed(
         device_id,
         _snapshot([_door(1), _door("2"), _door(3.0), _door(3.7), _door(0), _door(49), _door("abc")]),
     )
     assert result.processed == 3  # 只有 1、"2"、3.0 合法
-    assert sorted(repository.get_all_live(device_id)) == [1, 2, 3]
+    assert sorted(door_link.get_all_live(device_id)) == [1, 2, 3]
 
 
 def test_duplicate_door_no_in_one_frame_keeps_the_last(fresh_db: str) -> None:
@@ -564,17 +549,15 @@ def test_duplicate_door_no_in_one_frame_keeps_the_last(fresh_db: str) -> None:
     人和一条账。
     """
     device_id = "dev-dup-door"
-    service.process_snapshot(device_id, _snapshot([_door(1)]))
-    service.process_snapshot(
-        device_id, _snapshot([_door(1, card_no=1, cert_no="甲"), _door(1, card_no=2, cert_no="乙")])
-    )
+    door_link.feed(device_id, _snapshot([_door(1)]))
+    door_link.feed(device_id, _snapshot([_door(1, card_no=1, cert_no="甲"), _door(1, card_no=2, cert_no="乙")]))
 
-    live = repository.get_all_live(device_id)
+    live = door_link.get_all_live(device_id)
     assert live[1]["cert_no"] == "乙"
 
     # 去重之后只开一条会话。不去重的话"甲"会先开一条、"乙"再触发换人结旧开新——同一帧
     # 里凭空多出一个人和一条账。
-    sessions = db.get_conn().execute("SELECT cert_no FROM usage_session WHERE device_id = ?", (device_id,)).fetchall()
+    sessions = door_link.list_sessions(device_id)
     assert [row["cert_no"] for row in sessions] == ["乙"]
 
 
@@ -585,11 +568,11 @@ def test_numeric_fields_are_clamped_not_trusted(fresh_db: str) -> None:
     可能是脏数据。夹到一天而不是设备上限——那个上限由配置下发、随时可能变大。
     """
     device_id = "dev-clamp"
-    service.process_snapshot(device_id, _snapshot([_door(1, card_no=-5, cert_no="A", bath_time_s=-1)]))
-    assert repository.get_all_live(device_id)[1]["state"] == DoorState.FREE.value
+    door_link.feed(device_id, _snapshot([_door(1, card_no=-5, cert_no="A", bath_time_s=-1)]))
+    assert door_link.get_all_live(device_id)[1]["state"] == DoorState.FREE.value
 
-    service.process_snapshot(device_id, _snapshot([_door(1, card_no=1, cert_no="A", bath_time_s=99_999_999)]))
-    assert repository.get_all_live(device_id)[1]["bath_time_s"] == 86400
+    door_link.feed(device_id, _snapshot([_door(1, card_no=1, cert_no="A", bath_time_s=99_999_999)]))
+    assert door_link.get_all_live(device_id)[1]["bath_time_s"] == 86400
 
 
 def test_occupant_falls_back_to_acc_no_when_cert_no_is_blank(fresh_db: str) -> None:
@@ -599,9 +582,9 @@ def test_occupant_falls_back_to_acc_no_when_cert_no_is_blank(fresh_db: str) -> N
     当成"无人认领"，按人统计时凭空多出一个空身份。
     """
     device_id = "dev-occupant"
-    service.process_snapshot(device_id, _snapshot([_door(1, card_no=0, cert_no="", acc_no="7000000001")]))
+    door_link.feed(device_id, _snapshot([_door(1, card_no=0, cert_no="", acc_no="7000000001")]))
 
-    session = repository.get_open_session(device_id, 1)
+    session = door_link.get_open_session(device_id, 1)
     assert session is not None
     assert session["cert_no"] == "7000000001"
 
@@ -620,11 +603,11 @@ def test_derivation_failure_returns_ok_and_keeps_the_raw_frame(fresh_db: str, mo
 
     monkeypatch.setattr(service, "derive_state", boom)
 
-    result = service.process_snapshot("dev-derive-fail", _snapshot([_door(1)]))
+    result = door_link.feed("dev-derive-fail", _snapshot([_door(1)]))
 
     assert result.processed == 0
     assert result.events == ()
-    row = db.read_one("SELECT COUNT(*) AS n FROM door_snapshot WHERE device_id = ?", ("dev-derive-fail",))
+    row = {"n": len(door_link.list_snapshots("dev-derive-fail"))}
     assert row is not None
     assert row["n"] == 1
 
@@ -643,7 +626,19 @@ def test_raw_insert_failure_propagates_for_the_gateway_to_withhold_the_ack(
     def boom(*_args: object, **_kwargs: object) -> object:
         raise failure
 
-    monkeypatch.setattr(repository, "insert_snapshot", boom)
+    monkeypatch.setattr("app.persistence.doors.insert_snapshot", boom)
 
     with pytest.raises(RuntimeError, match="disk full"):
-        service.process_snapshot("dev-raw-fail", _snapshot([_door(1)]))
+        door_link.feed("dev-raw-fail", _snapshot([_door(1)]))
+
+
+def test_every_door_state_has_a_label() -> None:
+    """每个状态都必须有界面文案。
+
+    枚举与文案现在分居 models 与 doors.schemas 两处，这条测试守住原来的
+    "加状态不忘文案"：漏一个，state_label 会 KeyError。
+    """
+    from app.modules.doors.schemas import state_label
+
+    for state in DoorState:
+        assert state_label(state)

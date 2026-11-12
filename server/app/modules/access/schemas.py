@@ -8,7 +8,8 @@
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
-from .identity import IdentityKind
+from ...contracts import IdentityRecord as IdentityRecord
+from ...models.enums import IdentityKind
 
 
 class IdentityRequest(BaseModel):
@@ -40,8 +41,11 @@ class IdentityRequest(BaseModel):
     )
 
 
-class IdentityRecord(TypedDict):
-    """一条标识记录，登记、签发、名单、查询自身四处共用同一形状。"""
+class IdentityIssued(TypedDict):
+    """登记/编辑的响应：记录 + 一次性返回的 Bearer 凭据明文。
+
+    凭据明文只在这一次响应里出现，库里只留摘要；再次编辑会轮换，旧凭据立即失效。
+    """
 
     identity: str
     kind: IdentityKind
@@ -49,6 +53,7 @@ class IdentityRecord(TypedDict):
     device_scope: list[str]
     label: str
     created_at: str
+    token: str
 
 
 class CapabilityOption(TypedDict):

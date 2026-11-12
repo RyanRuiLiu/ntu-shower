@@ -1,9 +1,0 @@
-[Unit]
-Description=Run NTU Shower daily backup at 00:00
-
-[Timer]
-OnCalendar=daily
-Persistent=true
-
-[Install]
-WantedBy=timers.target

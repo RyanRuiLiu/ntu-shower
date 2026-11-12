@@ -9,11 +9,13 @@ modules/audit.repository。这里只暴露查询，查询本身也照常被审�
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
 
 from app.core.audit import ApiCallRecord, list_calls
+from app.db.deps import get_db
 from app.modules.access.dependencies import require_admin
-from app.modules.audit import repository as command_audit
 from app.modules.audit.schemas import BackgroundTaskRun, CommandAuditRecord
+from app.persistence import audit as command_audit
 
 admin_router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_admin)], tags=["audit"])
 
@@ -33,15 +35,17 @@ def list_calls_endpoint(
 def list_commands_endpoint(
     device_id: Annotated[str | None, Query(description="按设备过滤")] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
+    session: Session = Depends(get_db),
 ) -> list[CommandAuditRecord]:
     """命令级审计：参数、结果与设备回报（与 calls 以 trace_id 关联）。"""
-    return command_audit.list_commands(device_id=device_id, limit=limit)
+    return command_audit.list_commands(session, device_id=device_id, limit=limit)
 
 
 @admin_router.get("/audit/background-task-runs")
 def list_background_task_runs_endpoint(
     device_id: Annotated[str | None, Query(description="按设备过滤")] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
+    session: Session = Depends(get_db),
 ) -> list[BackgroundTaskRun]:
     """后台任务审计：配置好的任务自动替谁做了什么、为什么（与 commands 按时间对照）。"""
-    return command_audit.list_background_task_runs(device_id=device_id, limit=limit)
+    return command_audit.list_background_task_runs(session, device_id=device_id, limit=limit)

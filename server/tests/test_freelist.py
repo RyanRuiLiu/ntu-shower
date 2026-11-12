@@ -28,7 +28,9 @@ def _stub_action(
 ) -> None:
     """把设备动作换成桩：记下下发的内容，返回给定的结果。"""
 
-    async def fake(_device_id: str, action: str, params: dict[str, str], _timeout_s: float, **_kw: object) -> object:
+    async def fake(
+        _session: object, _device_id: str, action: str, params: dict[str, str], _timeout_s: float, **_kw: object
+    ) -> object:
         if sent is not None:
             sent.append((action, params))
         return OK_RESULT if result is None else result

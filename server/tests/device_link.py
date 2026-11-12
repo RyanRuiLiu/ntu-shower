@@ -7,18 +7,30 @@ from contextlib import contextmanager
 from typing import Any
 
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 from starlette.testclient import WebSocketTestSession
 from tests.frames import hello_frame, recv_until
 
 
 def register_trusted_device(device_id: str, capabilities: list[str] | None = None) -> None:
     """在设备档案里登记并信任一台设备（默认无能力声明，即未声明态）。"""
-    from app.modules.devices import repository as devices_repository
+    from app.db.base import utcnow
+    from app.db.session import session_scope
+    from app.persistence import devices as devices_store
 
-    devices_repository.register(
-        device_id, "0.4.13", 57, "4.4.4", capabilities or [], "127.0.0.1", "2026-06-01T08:00:00.000Z"
-    )
-    devices_repository.set_trusted(device_id, True)
+    with session_scope() as session:
+        devices_store.register(
+            session,
+            device_id=device_id,
+            app_version="0.4.13",
+            version_code=57,
+            os_version="4.4.4",
+            capabilities=capabilities or [],
+            ip="127.0.0.1",
+            booted_at=utcnow(),
+            seen_at=utcnow(),
+        )
+        devices_store.set_trusted(session, device_id, True)
 
 
 @contextmanager
@@ -74,3 +86,44 @@ class DeadGatewayWS:
     async def send_text(self, data: str) -> bool:
         message = "connection gone"
         raise RuntimeError(message)
+
+
+@contextmanager
+def db() -> Iterator[Any]:
+    """测试里直接操作设备档案（新层）的短会话。"""
+    from app.db.session import session_scope
+
+    with session_scope() as session:
+        yield session
+
+
+def register_device_raw(
+    device_id: str,
+    capabilities: list[str] | dict[str, str] | None = None,
+    ip: str = "127.0.0.1",
+) -> None:
+    """按旧测试的参数形状登记设备（capabilities 允许传非法形状，读取按未声明态处理）。"""
+    from app.db.base import utcnow
+    from app.persistence import devices as devices_store
+
+    with db() as session:
+        devices_store.register(
+            session,
+            device_id=device_id,
+            app_version="0.4.13",
+            version_code=57,
+            os_version="4.4.4",
+            capabilities=capabilities if isinstance(capabilities, list) else [],
+            ip=ip,
+            booted_at=utcnow(),
+            seen_at=utcnow(),
+        )
+        if isinstance(capabilities, dict):
+            # 异常形状用例：把 capabilities 列改写成非数组形状（SQLite JSON 列存 TEXT）
+            import json as _json
+
+            session.execute(
+                text("UPDATE devices SET capabilities = :caps WHERE device_id = :did"),
+                {"caps": _json.dumps(capabilities), "did": device_id},
+            )
+            session.commit()

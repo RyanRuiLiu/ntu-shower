@@ -6,6 +6,8 @@ type 取自 core.problems 登记表，客户端据此分支不解析文案；tit
 正式域名前缀，未配置时输出相对引用；任何情况下不硬编码域名。
 """
 
+import traceback
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -49,6 +51,25 @@ def install_error_handlers(app: FastAPI) -> None:
     async def validation_exception(_request: Request, exc: RequestValidationError) -> JSONResponse:
         detail = "; ".join(f"{'.'.join(str(loc) for loc in error['loc'])}: {error['msg']}" for error in exc.errors())
         return _problem(VALIDATION_FAILED, detail)
+
+    @app.exception_handler(Exception)
+    async def unhandled(_request: Request, exc: Exception) -> JSONResponse:
+        """未登记异常的最后防线：一律 500，并留完整栈。
+
+        没有这一层时，未捕获异常走框架默认 500（{"detail": ...}），栈只在服务器
+        标准输出里闪一次——排障时无从关联到请求。类型统一为 internal，栈进日志。
+        """
+        from .logging import log_event
+
+        log_event(
+            "ERROR",
+            "http.unhandled",
+            "请求处理出现未登记异常",
+            error=repr(exc),
+            path=_request.url.path,
+            trace=traceback.format_exc(),
+        )
+        return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
 
 
 def _unregistered(status: int) -> Problem:

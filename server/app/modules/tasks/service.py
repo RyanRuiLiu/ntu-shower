@@ -14,6 +14,8 @@
 `Capability.TASKS`——授予它等于允许持有者增删任意学号的登记，理由见 capabilities 的注释。
 """
 
+from sqlalchemy.orm import Session
+
 from app.core.protocol import JsonObject
 from app.modules.config import store as config_store
 from app.modules.config.schemas import ConfigValues
@@ -23,13 +25,13 @@ from .schemas import TaskView
 from .spec import TASKS, TASKS_BY_KEY, TaskSpec
 
 
-def list_tasks(cert_no: str) -> list[TaskView]:
+def list_tasks(session: Session, cert_no: str) -> list[TaskView]:
     """四项的状态。`joined` 按**传入的学号**回答——服务端不知道这个学号是谁的。"""
-    config = config_store.global_effective()
+    config = config_store.global_effective(session)
     return [_view(spec, cert_no.strip(), config) for spec in TASKS]
 
 
-def set_membership(task: str, cert_no: str, password: str, joined: bool) -> TaskView:
+def set_membership(session: Session, task: str, cert_no: str, password: str, joined: bool) -> TaskView:
     """登记或取消登记这个学号，返回这一步之后它在该任务上的状态。
 
     `augment` 必须回传**完整的全局有效配置**，理由写在 [config_store.update_global]：
@@ -47,8 +49,8 @@ def set_membership(task: str, cert_no: str, password: str, joined: bool) -> Task
             students.pop(cert, None)
         return {**config, spec.students_key: students}
 
-    config_store.update_global(augment)
-    return _view(spec, cert, config_store.global_effective())
+    config_store.update_global(session, augment)
+    return _view(spec, cert, config_store.global_effective(session))
 
 
 def describe(spec: TaskSpec, config: JsonObject) -> str:

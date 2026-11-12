@@ -3,7 +3,7 @@
  *
  * 视图模块不得直接 `fetch`：路径、鉴权头、错误解包各写一份，改一处就会漏三处。
  *
- * 服务端是单一资源树（路径即资源，权限由能力位守卫决定，见 docs/ARCHITECTURE.md），
+ * 服务端是单一资源树（路径即资源，权限由能力位守卫决定，见 docs/architecture.md），
  * 这里按域分组封装；管理台身份需持有 admin 与它代操作所需的 session/photo 能力位。
  *
  * ## 错误
@@ -14,22 +14,41 @@
 import { syncClock } from './clock.js'
 
 /**
- * 管理台身份标识。这个页面只给运维者用，标识存 localStorage：
- * 刷新页面不该每次重输。
+ * 管理台会话。口令换签名 Cookie（HttpOnly，浏览器自动携带），前端不保存任何
+ * 凭据；`hasSession` 是本地缓存的登录态，真正的权威是服务端——401 会把它翻回
+ * false 并由调用方引导重新登录。
  */
-const IDENTITY_KEY = 'ntu-shower.identity'
+let hasSession = false
 
-export function getIdentity() {
-  return localStorage.getItem(IDENTITY_KEY) || ''
+export function sessionActive() {
+  return hasSession
 }
 
-export function setIdentity(value) {
-  if (value) localStorage.setItem(IDENTITY_KEY, value)
-  else localStorage.removeItem(IDENTITY_KEY)
+/** 口令登录：成功即签发会话 Cookie。 */
+export async function login(username, password) {
+  await send('/api/v1/auth/login', post({ username, password }))
+  hasSession = true
 }
 
-export function hasIdentity() {
-  return getIdentity() !== ''
+/** 退出登录：服务端撤销会话 Cookie。 */
+export async function logout() {
+  try {
+    await send('/api/v1/auth/logout', { method: 'POST' })
+  } finally {
+    hasSession = false
+  }
+}
+
+/** 用服务端回答校准本地登录态：页面打开时调一次。未登录（401）也是有效回答。 */
+export async function refreshSession() {
+  try {
+    await send('/api/v1/auth/me')
+    hasSession = true
+  } catch (error) {
+    hasSession = false
+    if (error?.status !== 401) throw error
+  }
+  return hasSession
 }
 
 /**
@@ -42,11 +61,11 @@ async function send(path, options = {}) {
   const { raw = false, ...rest } = options
   const headers = { ...(rest.headers || {}) }
   if (!raw) headers['Content-Type'] = 'application/json'
-  if (hasIdentity()) headers['X-Identity'] = getIdentity()
 
-  const res = await fetch(path, { ...rest, headers })
+  const res = await fetch(path, { ...rest, headers, credentials: 'same-origin' })
   syncClock(res)
   if (!res.ok) {
+    if (res.status === 401 && path !== '/api/v1/auth/login') hasSession = false
     const problem = await res.json().catch(() => null)
     const error = new Error(problem?.detail || problem?.title || `服务端返回了无法解析的错误（HTTP ${res.status}），请查看服务端日志后重试。`)
     error.status = res.status
@@ -110,7 +129,6 @@ export const api = {
   clockSet: (id, datetime) => send(devicePath(id, '/clock/set'), post({ datetime })),
   dumpTree: (id) => send(devicePath(id, '/dump'), post()),
   touch: (id, value) => send(devicePath(id, '/touch'), post(value)),
-  scroll: (id, direction) => send(devicePath(id, '/scroll'), post({ direction })),
   key: (id, key) => send(devicePath(id, '/key'), post({ key })),
   // channel 必填："clipboard"（粘贴，支持中文）或 "keys"（按键注入，仅 ASCII）
   input: (id, text, channel) => send(devicePath(id, '/input'), post({ text, channel })),
@@ -131,7 +149,6 @@ export const api = {
   saveGlobalConfig: (config) => send(`${API_V1}/config`, put({ config })),
   deviceConfig: (id) => send(devicePath(id, '/config')),
   saveDeviceConfig: (id, config) => send(devicePath(id, '/config'), put({ config })),
-  clearDeviceConfig: (id) => send(devicePath(id, '/config'), del()),
 
   // ── 语音播报 ──（admin；规则目标 = 设备 × 学号，各自可具体或「全部」）
   voiceSpec: () => send(`${API_V1}/voice/spec`),

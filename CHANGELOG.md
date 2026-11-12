@@ -4,7 +4,7 @@
 
 > 版本核对（2026-11-05）：`0.6.4` 从未存在于任何源码树或安装包中——版本号由
 > 0.6.3 直接升到 0.6.5（提交 d9e29d2），该节原为一次记档性条目。其内容已并入
-> 下方 0.6.5 的 Fixed；不保留一个没有对应版本状态的版本号（§4.4）。
+> 下方 0.6.5 的 Fixed；不保留一个没有对应版本状态的版本号。
 
 ## [Unreleased]
 
@@ -20,7 +20,10 @@
 - Docker 构建资产（`Dockerfile`、`compose.yaml`、`.dockerignore`）入库：此前仅存在于本机工作区，
   `docker.yml` 工作流在远端按可复用流程构建时缺少 Dockerfile。
 - 持续集成新增安全门禁：gitleaks 秘密扫描（全历史）与 pip-audit 依赖漏洞扫描
-  （OSV，高危未修复即红灯），对应工程标准 §17.3 两项"待建立"转"已执行"。
+  （OSV，高危未修复即红灯），对应执行矩阵两项"待建立"转"已执行"。
+- compose 增加 `migrate` 一次性服务：业务容器启动前先 `alembic upgrade head`，迁移
+  失败业务容器不拉起；新增 `tests/test_migrations.py` 看守模型与迁移的一致性
+  （`alembic check` 无差异），改模型忘生成迁移在门禁里当场红。
 
 ### Changed
 
@@ -34,6 +37,18 @@
 
 ### Fixed
 
+- 修复 CI 依赖解析失败：`jsonschema==4.26.0` 与 `semgrep==1.184.0`（要求 `~=4.25.1`）
+  冲突，Linux 上 pip 无法安装 server 依赖集；版本降至 4.25.1。
+- 修复测试对 caplog 的顺序偶发：应用 logger 生产态关闭冒泡（避免与 uvicorn 重复输出），
+  caplog 靠冒泡收记录——同一 worker 里是否先跑过 `client` 决定记录是否可见。
+  测试夹具统一恢复冒泡，用例语义不再依赖执行顺序。
+- 运维手册「表结构变更的落地」重写为 Alembic 流程：原步骤引用已删除的
+  `tools/rebuild_derived` 与不存在的 `db.py` DDL，是 v1 残留。
+- 修复后台任务跨线程使用 ORM Session 导致的 SQLite access violation：楼层状态汇总
+  在线程池里读库，但会话建在事件循环线程上，两条线程并发使用同一连接，进程直接
+  段错误——pytest 并行时的「worker crashed」即此。会话边界改归任务自己：会话在
+  哪个线程里生就在哪个线程里关（`app/core/background.py`）；CI 的 pytest 不再用
+  `-n 0` 串行规避。
 - 修复镜像运行时工作目录：`uvicorn app.main:app` 在容器内无法解析 `app` 包
   （systemd 时代的 `WorkingDirectory` 依赖被带进了 Dockerfile），CI 只构建不运行故未暴露；
   同批把 ffmpeg/ffprobe 纳入镜像（语音素材转码依赖，slim 基镜像不带）。
@@ -43,6 +58,17 @@
   `Documentation=`），以及 detekt 配置与构建脚本中两处不存在的小节编号。
 - 运维手册拓扑表与部署说明对齐 FHS 迁移后的实际路径（配置 `/etc/ntu-shower`、
   数据 `/var/lib/ntu-shower`）；实时推送路径在架构与参考文档中更正为 `/api/v1/stream`。
+
+### Removed
+
+- 删除 `docs/glossary.md`：源自已删除的自创术语扫描器，无执行机制，且代码仍引用其已不存在的 `CANONICAL`。
+- 删除 `docs/testing.md`：通用条款与自创的 R0-R3 变更分级，与 `CONTRIBUTING.md` 的质量门重复。
+- `docs/runbook.md` 删除「发布与部署规则」「运行与维护规则」两章：已删除的自创工程标准残页，
+  其中「备份必须加密」与 ADR-0018 直接冲突。
+- `docs/reference.md` 的字段表、端点表与典型流程移出：可从 `server/app/models/`、
+  `/openapi.json` 与代码读出；字段的特殊语义改写入模型字段注释。
+- 清理代码与配置中指向已删除文档的引用（`STANDARDS.md`、`docs/DECISIONS.md`、
+  `docs/runbook.md` 的章节号）。
 
 ## [0.6.5] - 2026-11-04
 
@@ -64,7 +90,7 @@
 
 - 新增 `STANDARDS.md`：覆盖生命周期、文档、代码、文本、审阅、发布、运行、安全与 AI 协作的工程标准。
 - 新增 `CONTRIBUTING.md`：开发环境、质量门、分支、提交、审阅与发布准备步骤。
-- 新增 `docs/SECURITY.md` 与 `docs/TESTING.md`：安全控制与测试策略的所有者文档。
+- 新增 `docs/security.md` 与 `docs/testing.md`：安全控制与测试策略的所有者文档。
 
 ### Changed
 

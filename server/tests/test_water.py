@@ -20,6 +20,7 @@ def _stub_action(
     sent: list[tuple[str, str, dict[str, int], float]],
 ) -> None:
     async def fake(
+        _session: object,
         device_id: str,
         action: str,
         params: dict[str, int],

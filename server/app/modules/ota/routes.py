@@ -12,6 +12,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Path, UploadFile
 from fastapi.responses import FileResponse
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.logging import log_event
@@ -21,8 +22,9 @@ from app.core.problems import (
     RELEASE_TOO_LARGE,
     ApiProblemError,
 )
+from app.db.deps import get_db
 from app.modules.access.dependencies import require_admin
-from app.modules.ota import apk_manifest, repository, service
+from app.modules.ota import apk_manifest, service
 from app.modules.ota.schemas import (
     OtaManifest,
     ReleasePublished,
@@ -31,10 +33,11 @@ from app.modules.ota.schemas import (
     ReleaseRemoved,
 )
 from app.modules.ota.service import VERSION_PATTERN
+from app.persistence import ota as repository
 
 router = APIRouter(prefix="/api/v1/ota", tags=["ota"])
 
-# 设备硬编码契约：manifest 的路径不随版本前缀走（冻结，见 docs/ARCHITECTURE.md）
+# 设备硬编码契约：manifest 的路径不随版本前缀走（冻结，见 docs/architecture.md）
 device_router = APIRouter(tags=["ota"])
 
 # 路径/表单中的发布版本号：格式不合规由 FastAPI 返回 422
@@ -43,14 +46,14 @@ ReleaseVersionForm = Annotated[str, Form(pattern=VERSION_PATTERN)]
 
 
 @router.get("/releases")
-def list_releases() -> list[ReleaseRecord]:
-    return repository.list_releases()
+def list_releases(session: Session = Depends(get_db)) -> list[ReleaseRecord]:
+    return repository.list_releases(session)
 
 
 @device_router.get("/ota/manifest")
-def manifest(device_id: str, version_code: int) -> OtaManifest:
+def manifest(device_id: str, version_code: int, session: Session = Depends(get_db)) -> OtaManifest:
     """设备定期轮询：返回是否有可用更新及其元数据。路径为设备硬编码契约，冻结。"""
-    rel = repository.latest_for(device_id, version_code)
+    rel = repository.latest_for(session, device_id, version_code)
     if rel is None:
         return {"up_to_date": True}
     path = service.release_path(rel["version"])
@@ -87,15 +90,15 @@ def download(version: ReleaseVersion) -> FileResponse:
 
 
 @router.post("/releases/{version}/rearm/{device_id}", dependencies=[Depends(require_admin)])
-def rearm_release(version: str, device_id: str) -> ReleaseRearmed:
+def rearm_release(version: str, device_id: str, session: Session = Depends(get_db)) -> ReleaseRearmed:
     """清除安装确认：force 发布对该设备重新生效（调试重推）。"""
-    return {"version": version, "device_id": device_id, "rearmed": repository.rearm(device_id, version)}
+    return {"version": version, "device_id": device_id, "rearmed": repository.rearm(session, device_id, version)}
 
 
 @router.delete("/releases/{version}", dependencies=[Depends(require_admin)])
-def delete_release(version: str) -> ReleaseRemoved:
+def delete_release(version: str, session: Session = Depends(get_db)) -> ReleaseRemoved:
     """下架发布（紧急止损，如终止 OTA 循环）。注册行与 APK 文件一起删。"""
-    deleted = repository.delete_release(version)
+    deleted = repository.delete_release(session, version)
     file_removed = service.remove_release_file(version)
     if deleted or file_removed:
         log_event("INFO", "ota.release-deleted", "发布已下架", version=version, file_removed=file_removed)
@@ -110,6 +113,7 @@ async def upload_release(
     mandatory: Annotated[bool, Form()] = False,
     force: Annotated[bool, Form()] = False,
     target: Annotated[str, Form()] = "all",
+    session: Session = Depends(get_db),
 ) -> ReleasePublished:
     """上传新版本 APK 并注册发布（target='all' 或逗号分隔的 device_id 列表）。
 
@@ -145,9 +149,9 @@ async def upload_release(
         )
         raise ApiProblemError(OTA_APK_MISMATCH, detail)
     sha256 = service.store_release(version, data)
-    repository.insert_release(version, version_code, sha256, mandatory, force, target)
+    repository.insert_release(session, version, version_code, sha256, mandatory, force, target)
     notified = await service.notify_target_devices(version, version_code, mandatory, target)
-    pruned = service.prune_releases(settings.ota_release_keep)
+    pruned = service.prune_releases(session, settings.ota_release_keep)
     if pruned:
         log_event(
             "INFO",

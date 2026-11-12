@@ -10,6 +10,8 @@ from typing import Literal
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
+from app.contracts import DeviceRecord as DeviceRecord
+
 #: 链路事件的两种取值。
 #:
 #: 记的是"连接建立 / 断开"这个事实，不是"设备能不能用"——后者要结合心跳看：连接在
@@ -39,44 +41,6 @@ class DeviceListItem(DeviceSummary):
     """
 
     actions: list[str]
-
-
-class DeviceRecord(TypedDict):
-    """一台设备的档案。
-
-    除 online 外各字段对应 repository 的 _DEVICE_COLUMNS；trusted 的 0/1 到布尔的
-    转换在 repository 完成。online 不在档案表里，由 devices.service 从内存连接表
-    填入：只有经过 service 的记录才带正确的值。
-    """
-
-    device_id: str
-    name: str
-    trusted: bool
-    app_version: str
-    version_code: int
-    os_version: str
-    capabilities: list[str]
-    online: bool
-    last_seen_at: str
-    last_ip: str
-    booted_at: str
-    """开机时刻（RFC 3339）：由设备上报的已运行秒数与服务端收到它的时刻反推。
-
-    存时刻而不存秒数：秒数一离开采样瞬间就开始过期，开机时刻是不变的事实；
-    前端用"现在减它"得到已运行时长。
-    """
-
-    clock_skew_s: float
-    """设备钟与服务端的偏差（秒）。由设备回 pong 时带上的墙上时刻算出（见 core/device_clock）。
-
-    它用来把帧里的 `open_time` / `in_time` 平移到服务端时间轴——那两个字段是"这次
-    会话从什么时候开始"的唯一线索。**绝对值不可信不代表它没用**：一次会话压在 20 分钟
-    以内，而 20 分钟里的漂移只有 0.03 秒，窗口内偏差是常量。
-    """
-
-    sort_order: int
-    """展示顺序：设备下拉、管理台设备表、统计接口全部按它排。管理员在设备页调整，
-    新设备排到末尾；同序回落到名字的自然排序（见 repository.list_all）。"""
 
 
 class DeviceOrderRequest(BaseModel):
@@ -196,3 +160,25 @@ class DeviceUiTextRequest(BaseModel):
     channel: Literal["clipboard", "keys"] = Field(
         description="注入通路：clipboard 粘贴（支持中文）；keys 按键注入（仅 ASCII）。必填，调用方必须显式选择",
     )
+
+
+class DeviceEnrollRequest(BaseModel):
+    """设备自注册请求：设备首次连接凭 claim 令牌换自己的接入凭据。
+
+    设备自报档案元数据（版本、能力）——新设备的档案行在这里建立，之后每次
+    上线由 `link.hello` 刷新。`device_id` 是设备自报的 ANDROID_ID：伪造需要
+    物理接触目标设备（决策 ADR-0007 的既有边界，注册不改变它）。
+    """
+
+    device_id: str = Field(min_length=1, max_length=64, description="设备标识（ANDROID_ID）")
+    app_version: str = Field(max_length=32, default="")
+    version_code: int = Field(ge=0, le=2_000_000_000, default=0)
+    os_version: str = Field(max_length=32, default="")
+    capabilities: list[str] = Field(max_length=64, default=[])
+
+
+class DeviceEnrollResult(BaseModel):
+    """注册结果：接入凭据明文只出现在这一响应里，服务端只留摘要。"""
+
+    device_id: str
+    token: str

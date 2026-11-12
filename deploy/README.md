@@ -6,37 +6,30 @@
 
 | 文件 | 服务器位置 | 生效方式 |
 |---|---|---|
-| 根目录 `compose.yaml` | `/opt/ntu-shower/compose.yaml` | `NTU_SHOWER_TAG=<tag> docker compose -f /opt/ntu-shower/compose.yaml up -d`（见 `docs/RUNBOOK.md`「部署」） |
-| `nginx/ntu-shower.conf` | `/etc/nginx/sites-available/ntu-shower.conf`（软链到 sites-enabled） | `nginx -t && systemctl reload nginx` |
-| `systemd/ntu-shower.service` | `/etc/systemd/system/ntu-shower.service` | **2026-11-06 起停用**（服务由 Compose 承载）；单元与 `/opt/ntu-shower/server` 的 venv 冻结保留，仅作应急回滚 |
-| `scripts/deploy.sh` | **不上服务器常驻**（Docker 形态下不再使用，保留于仓库存档） | — |
-| `backup/ntu-shower-backup.sh` | `/opt/ntu-shower/scripts/ntu-shower-backup.sh` | 由单元调用（宿主机执行，与容器无关） |
-| `backup/ntu-shower-backup.{service,timer}` | `/etc/systemd/system/` | `systemctl daemon-reload && systemctl enable --now ntu-shower-backup.timer` |
-| `publish_apk.ps1` | **不上服务器**：本地工具 | `.\deploy\publish_apk.ps1 -Identity <admin>` |
+| 根目录 `compose.yaml` | `/opt/ntu-shower/compose.yaml` | `NTU_SHOWER_TAG=<tag> docker compose -f /opt/ntu-shower/compose.yaml up -d` |
+| `litestream.yml` | `/etc/ntu-shower/litestream.yml` | `docker compose restart litestream` |
+| `nginx/ntu-shower.conf` | `/etc/nginx/sites-enabled/ntu-shower.iseekdream.com.conf`（**独立文件，非软链**：sites-available 与 enabled 是两份拷贝，只写 enabled 才生效） | `nginx -t && systemctl reload nginx` |
+| `publish_apk.ps1` | **不上服务器**：本地工具 | `.\deploy\publish_apk.ps1 -Token <admin 的 API Bearer 凭据>` |
 
-代码替换、回滚与部署后验证的步骤见 `docs/RUNBOOK.md`；这里只放配置资产本身与同步命令。
-
-## 同步命令
+## 部署（标准 compose 命令，无自建脚本）
 
 ```bash
 scp compose.yaml root@iseekdream.com:/opt/ntu-shower/compose.yaml
+scp deploy/litestream.yml root@iseekdream.com:/etc/ntu-shower/litestream.yml
+ssh root@iseekdream.com "cd /opt/ntu-shower && NTU_SHOWER_TAG=sha-<短哈希> docker compose up -d"
+ssh root@iseekdream.com "curl -s http://127.0.0.1:8110/healthz"
+```
 
-scp deploy/nginx/ntu-shower.conf root@iseekdream.com:/etc/nginx/sites-available/ntu-shower.conf
-ssh root@iseekdream.com "nginx -t && systemctl reload nginx"
+## 备份与恢复（LiteStream，litestream.io v0.3）
 
-scp deploy/backup/ntu-shower-backup.sh root@iseekdream.com:/opt/ntu-shower/scripts/ntu-shower-backup.sh
-scp deploy/backup/ntu-shower-backup.service deploy/backup/ntu-shower-backup.timer root@iseekdream.com:/etc/systemd/system/
-ssh root@iseekdream.com "chmod 700 /opt/ntu-shower/scripts/ntu-shower-backup.sh && systemctl daemon-reload && systemctl enable --now ntu-shower-backup.timer"
+```bash
+ssh root@iseekdream.com "docker exec ntu-shower-litestream litestream replicas -config /etc/ntu-shower/litestream.yml"
+ssh root@iseekdream.com "docker run --rm -v /var/lib/ntu-shower:/var/lib/ntu-shower -v /var/backups/ntu-shower/litestream:/var/backups/ntu-shower/litestream litestream/litestream:0.3 restore -o /var/lib/ntu-shower/ntu-shower.db file:///var/backups/ntu-shower/litestream"
 ```
 
 ## 要点（改配置前先读）
 
-- `location /` 与 `location /gateway/` 都必须带 WebSocket 升级头
-  （`Upgrade` + `Connection "upgrade"` + `proxy_http_version 1.1`）：
-  前者服务用户页 `/api/v1/stream`，后者服务设备网关 `/gateway/device`。
-- `proxy_read_timeout 3600s`：设备网关与实时推送都是长连接，默认 60s 会被 nginx 掐断。
-- TLS 策略（纯 AEAD，无 CBC）现在就在 `nginx/ntu-shower.conf` 的 server 块内声明：
-  证书是单张 ECDSA 通配符，`ssl_ciphers` 只列三个 AEAD ECDSA 套件（TLS 1.3 的套件
-  由 OpenSSL 默认提供，不经该指令）。不要再依赖全局 `/etc/nginx/nginx.conf` 承载
-  TLS 策略——那会让仓库失去对安全关键配置的唯一事实源。
-- `.env`（数据库路径等生产配置）只在服务器上（`/etc/ntu-shower/ntu-shower.env`），不入仓库。
+- 镜像 tag 由 `NTU_SHOWER_TAG` 注入，**禁止写死 latest**；回滚 = 重新 `up -d` 指向上一个 sha tag。
+- `location /` 与 `location /gateway/` 都必须带 WebSocket 升级头；`proxy_read_timeout 3600s`——设备网关与实时推送是长连接。
+- `limit_req_zone` 的 zone 名 `api` 与其它站点共用 http 上下文，不得与其它站点重名。
+- `.env`（生产配置）只在服务器上（`/etc/ntu-shower/ntu-shower.env`，600），不入仓库。

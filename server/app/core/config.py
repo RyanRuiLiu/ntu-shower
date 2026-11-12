@@ -1,5 +1,7 @@
 """配置：全部来自环境变量（.env），不在代码里硬编码任何环境值。"""
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -7,13 +9,16 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     db_path: str = "data/ntu-shower.db"
+    #: 显式的数据库连接串（环境变量 DATABASE_URL）。留空时由 db_path 推导。
+    #: 迁移工具与数据转换脚本用同一份来源，避免「迁移打的库和应用连的库」分叉。
+    database_url: str = ""
     max_ota_bytes: int = 50 * 1024 * 1024  # OTA 上传/存储的单文件上限
     ota_dir: str = "ota_releases"  # APK 发布文件目录（相对 server 工作目录）
     voice_dir: str = "data/voice"  # 固定音频素材目录（assets/，随 data/ 保留）
 
     # ── 日志 ──
     # 应用日志级别（DEBUG/INFO/WARNING/ERROR）；uvicorn 的访问日志级别另由
-    # systemd 单元决定（见 deploy/nginx 与 docs/RUNBOOK.md）
+    # systemd 单元决定（见 deploy/nginx 与 docs/runbook.md）
     log_level: str = "INFO"
 
     # ── 审计保留（NIST SP 800-92：按运维需要定保留期并执行）──
@@ -41,6 +46,34 @@ class Settings(BaseSettings):
 
     # ── 命令确认等待 ──
     config_ack_timeout_s: float = 15.0  # 等待设备 config.ack 的时限
+
+    # ── 管理台会话 ──
+    # 会话签名密钥（Starlette SessionMiddleware / itsdangerous 的 secret_key）。
+    # 必须由环境变量注入；留空时 create_app 拒绝启动——签名密钥是会话安全性的全部，
+    # 进程内临时生成一份会随重启作废（多 worker 时各签各的，互相验不过），只会把
+    # 「没配密钥」这个错误从启动时拖到第一次登录之后。这与 Flask（secret_key 未设
+    # 即拒绝会话）、Django（SECRET_KEY 缺失即 ImproperlyConfigured）同一语义。
+    session_secret: str = ""
+    # 会话有效期（秒），即 SessionMiddleware 的 max_age：到期由浏览器弃 Cookie，
+    # 签名端在 unsign 时同样拒绝超龄令牌。
+    session_ttl_seconds: int = 12 * 60 * 60
+    # 设备接入令牌校验默认强制开启。只在测试夹具里显式关闭——生产不留
+    # 「不带凭据也能连」的旁路，这是安全默认值而不是长期双轨。
+    require_device_token: bool = True
+    # 设备自注册的 claim 令牌（AWS IoT fleet provisioning by claim 同型）：APK 构建期
+    # 内置一枚全队共享的注册令牌，设备首次连接凭它换每台自己的接入凭据；信任位照旧
+    # 由管理员在档案上点——注册只回答「这是我们的程序」，不等于信任。留空即注册
+    # 通道关闭（fail closed）。泄露时轮换：换一枚重新构建 APK，库里凭据不受影响。
+    device_enroll_token: str = ""
+
+    @property
+    def effective_database_url(self) -> str:
+        """应用与迁移共用的连接串：显式值优先，否则由 db_path 推导。
+
+        `as_posix()`：Windows 下的反斜杠路径放进 `sqlite:///` 会被当成 URL 的一部分，
+        与 `Path` 解析出的文件不是同一个；统一成正斜杠，两端才指向同一份库。
+        """
+        return self.database_url or f"sqlite:///{Path(self.db_path).as_posix()}"
 
 
 settings = Settings()

@@ -6,10 +6,10 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from tests import device_link, frames
+from tests import device_link, door_link, frames
+from tests.identity import bearer
 
-from app.modules.doors import service as doors_service
-from app.modules.doors.schemas import ASSIGNABLE_STATES, DoorState
+from app.models.enums import ASSIGNABLE_STATES, DoorState
 
 TRUSTED = "dev-test-0001"
 ASSIGN_PAYLOAD = {"door_no": 1, "cert_no": "C", "password": "P"}
@@ -30,7 +30,7 @@ def _seed_door(device_id: str, door_no: int, **fields: object) -> None:
             "status_raw": fields.get("status_raw", 0),
         }
     ]
-    doors_service.process_snapshot(device_id, {"snapshot_id": str(uuid.uuid4()), "source": "db_watch", "doors": doors})
+    door_link.feed(device_id, {"snapshot_id": str(uuid.uuid4()), "source": "db_watch", "doors": doors})
 
 
 def test_assign_without_identity_is_unauthenticated(client: TestClient) -> None:
@@ -42,7 +42,7 @@ def test_assign_without_identity_is_unauthenticated(client: TestClient) -> None:
 
 
 def test_assign_with_unknown_identity_is_unauthorized(client: TestClient) -> None:
-    r = client.post(f"/api/v1/devices/{TRUSTED}/assign", json=ASSIGN_PAYLOAD, headers={"X-Identity": "not-in-any-list"})
+    r = client.post(f"/api/v1/devices/{TRUSTED}/assign", json=ASSIGN_PAYLOAD, headers=bearer("not-a-valid-token"))
 
     assert r.status_code == 401
     assert r.json()["type"].endswith("/problems/unknown-identity")

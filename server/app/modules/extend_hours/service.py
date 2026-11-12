@@ -3,11 +3,11 @@
 ## 它做的事
 
 浴室 App 每天按 `autoCloseTime`（实测 23:58）关机，并在关机前五分钟放掉所有喷头
-（`ARCHITECTURE.md` 那四个释放条件里的"关机前 5 分钟"）。对名单里的人来说那一下是
+（`architecture.md` 那四个释放条件里的"关机前 5 分钟"）。对名单里的人来说那一下是
 提前收场。这里在更早的某一刻（`extend_hours_at`，默认 23:49）：
 
 - 拨钟之前先重布一次 MCU（滚动重布的第一次，预补偿拨走的一小时）：钟被拨到越过
-  旧布防的截止即当场断电（`docs/evidence/2026-10-04-device-poweroff.md` §11），截止必须先推走；
+  旧布防的截止即当场断电（`docs/device-poweroff.md` §11），截止必须先推走；
 - 把设备钟往后拨一小时，浴室 App 的释放条件全用绝对值（`|openTime − now|`），钟一跳
   它们统统越界——**设备上所有喷头被清空**，不只是名单里的那几个；
 - 拨完之后等门清空，再替名单里的人把喷头分配回去。
@@ -70,13 +70,17 @@ MCU 的断电截止是**钟面时刻**——钟被拨动，截止就在真实时
 import asyncio
 import time
 from dataclasses import dataclass
-from sqlite3 import Row
+from typing import Any
+
+from sqlalchemy.orm import Session
 
 from app.core import actions, device_clock, outcomes
 from app.core.clock import now_rfc3339, parse_rfc3339, shift_rfc3339, to_local, wall_clock_text
-from app.core.logging import exc_info_text, log_event
+from app.core.logging import log_event
 from app.core.problems import ApiProblemError
 from app.core.protocol import as_int
+from app.db.base import utcnow
+from app.db.session import session_scope
 from app.modules.config import store as config_store
 from app.modules.config.schemas import ConfigValues
 from app.modules.devices import service as devices_service
@@ -85,8 +89,7 @@ from app.modules.sessions import routes as sessions_routes
 from app.modules.sessions import service as sessions_service
 from app.modules.sessions.decision import roster
 from app.modules.sessions.schemas import AssignRequest
-
-from . import repository
+from app.persistence import extend_hours as repository
 
 
 #: 拨钟拨走的时长按 `extend_shift_minutes` 现算（秒）：落点必须跨过午夜，才能一次
@@ -109,7 +112,6 @@ ROLL_REARM_INTERVAL_S = 120.0
 #: 续写间隔（120 秒）与命令延迟（p50 0.6 秒），10 分钟即"连续丢 5 次续写才到点"。
 ROLL_WINDOW_MIN = 10
 
-_task: asyncio.Task[None] | None = None
 
 #: 设备 → 最近一次成功滚动续写的时刻（单调钟）与断电目标（表盘 HH:MM）。前者做
 #: 限频（武装未满间隔不重复下发），后者给看板显示"MCU 里此刻武装的截止"；进程
@@ -171,29 +173,28 @@ def _local_now(device_id: str, zone_offset_minutes: int) -> str | None:
     return shift_rfc3339(device_now, zone_offset_minutes * 60)
 
 
-def _present(device_id: str, students: dict[str, str]) -> list[tuple[int, str]]:
+def _present(session: Session, device_id: str, students: dict[str, str]) -> list[tuple[int, str]]:
     """这台设备上此刻还占着喷头的名单里的人：(喷头号, 学号)。
 
     用**未结束的会话**当"占用"，而不是读喷头现态：占着的正是会话，而"重新分配"要的
     也是会话的主人。两者在正常路径上一致，而会话是更贴切的那个。
     """
     return [
-        (session.door_no, session.cert_no)
-        for session in doors_service.open_sessions(device_id)
-        if session.cert_no in students
+        (item.door_no, item.cert_no)
+        for item in doors_service.open_sessions(session, device_id)
+        if item.cert_no in students
     ]
 
 
-def _as_shift(row: Row) -> Shift:
-    assignments = tuple(
-        (as_int(item.get("door_no")), str(item.get("cert_no", "")))
-        for item in repository.parse_assignments(row)
-        if isinstance(item, dict)
-    )
+def _as_shift(row: dict[str, Any]) -> Shift:
     return Shift(
         device_id=str(row["device_id"]),
         shifted_at=str(row["shifted_at"]),
-        assignments=assignments,
+        assignments=tuple(
+            (as_int(item.get("door_no")), str(item.get("cert_no", "")))
+            for item in row["assignments"]
+            if isinstance(item, dict)
+        ),
     )
 
 
@@ -205,7 +206,7 @@ def _hhmm_minutes(text: str) -> int | None:
     return moment.hour * 60 + moment.minute
 
 
-def current_shifts() -> list[dict[str, object]]:
+def current_shifts(session: Session) -> list[dict[str, object]]:
     """正在延长中的设备：拨快幅度、拨快时刻、MCU 里武装的截止、恢复条件与放回进度。
 
     只读的运维可见性（概览页的后台任务卡）：表里一行就是"这台设备钟是拨快着的"。
@@ -214,14 +215,14 @@ def current_shifts() -> list[dict[str, object]]:
     尚未放回的人：浴室端收回谁，谁就是走了，不再重新预约。
     """
     rows: list[dict[str, object]] = []
-    for row in repository.list_shifted():
+    for row in repository.list_shifted(session):
         shift = _as_shift(row)
-        config = config_store.effective(shift.device_id)
+        config = config_store.effective(session, shift.device_id)
         zone = as_int(config["extend_hours_zone_offset_minutes"])
         shift_local = to_local(shift.shifted_at, zone)
         now_local = to_local(now_rfc3339(), zone)
         past_midnight = shift_local is not None and now_local is not None and now_local.date() > shift_local.date()
-        idle = not doors_service.open_sessions(shift.device_id)
+        idle = not doors_service.open_sessions(session, shift.device_id)
         pending = [
             {"door_no": door_no, "cert_no": cert_no}
             for door_no, cert_no in shift.assignments
@@ -247,7 +248,7 @@ def current_shifts() -> list[dict[str, object]]:
 # ── 动作 ──────────────────────────────────────────────────────────────────
 
 
-async def _set_clock(device_id: str, seconds: float, zone_offset_minutes: int) -> bool:
+async def _set_clock(session: Session, device_id: str, seconds: float, zone_offset_minutes: int) -> bool:
     """把设备钟平移 seconds 秒；返回是否成功。
 
     目标时刻要**先加时区偏移**再交给 `wall_clock_text`：设备端按自己的默认时区解析那个
@@ -266,7 +267,7 @@ async def _set_clock(device_id: str, seconds: float, zone_offset_minutes: int) -
 
     # rearm=false：延长流程自己管理 MCU 的滚动重布，拨快/拨回不触发设备端的配对重布
     written = await sessions_service.send_command_and_wait(
-        device_id, actions.CLOCK_SET, {"datetime": text, "rearm": False}
+        session, device_id, actions.CLOCK_SET, {"datetime": text, "rearm": False}
     )
     if written["status"] != outcomes.OK.value:
         log_event(
@@ -284,18 +285,18 @@ async def _set_clock(device_id: str, seconds: float, zone_offset_minutes: int) -
     )
     # 钟是我们拨的，偏差记录当场跟上：等服务端自发发现要等下一次 pong，那 30 秒里按
     # 表盘换算的目标（同轮的滚动续写）都带着过时的偏差。
-    devices_service.shift_clock_skew(device_id, seconds)
+    devices_service.shift_clock_skew(session, device_id, seconds)
     return True
 
 
-async def _schedule_power(device_id: str, off_at: str, on_at: str) -> bool:
+async def _schedule_power(session: Session, device_id: str, off_at: str, on_at: str) -> bool:
     """把一对断电/上电目标（设备表盘 HH:MM）写给 MCU；返回是否成功。
 
     设备端用自己的钟换算相对延时：断电延时从命令落地起算，开机延时从断电时刻起算，
     目标已过就落到次日（"下一个"）。见 [McuPowerSchedule]。
     """
     result = await sessions_service.send_command_and_wait(
-        device_id, actions.POWER_SCHEDULE, {"off_at": off_at, "on_at": on_at}
+        session, device_id, actions.POWER_SCHEDULE, {"off_at": off_at, "on_at": on_at}
     )
     if result["status"] != outcomes.OK.value:
         log_event(
@@ -336,7 +337,7 @@ def _roll_target(device_id: str, config: ConfigValues, pre_shift: bool) -> tuple
     return off_wall[11:16], str(config["power_on_at"])
 
 
-async def _roll_power(device_id: str, config: ConfigValues, pre_shift: bool) -> bool:
+async def _roll_power(session: Session, device_id: str, config: ConfigValues, pre_shift: bool) -> bool:
     """滚动重布一次；返回是否成功。
 
     设备离线时命令失败如实回报——最迟一个窗口后按最后一次布防断电，上电目标仍是次日
@@ -348,14 +349,14 @@ async def _roll_power(device_id: str, config: ConfigValues, pre_shift: bool) -> 
         log_event("WARNING", "extend-hours.no-skew", "还没有这台设备的钟偏差记录，不动它", device_id=device_id)
         return False
     off_at, on_at = targets
-    if await _schedule_power(device_id, off_at, on_at):
+    if await _schedule_power(session, device_id, off_at, on_at):
         _last_roll[device_id] = off_at
         _last_roll_at[device_id] = time.monotonic()
         return True
     return False
 
 
-async def _maybe_correct_clock(device_id: str, config: ConfigValues) -> None:
+async def _maybe_correct_clock(session: Session, device_id: str, config: ConfigValues) -> None:
     """自动校时（`time_sync_enabled`）：偏差超过阈值就把设备钟写准。
 
     设备没有 NTP，整夜不重启（延长服务就是这种场景）钟也会漂，手工拨动更会留下大偏差。
@@ -366,11 +367,11 @@ async def _maybe_correct_clock(device_id: str, config: ConfigValues) -> None:
     """
     if not config["time_sync_enabled"]:
         return
-    if repository.get(device_id) is not None:
+    if repository.get(session, device_id) is not None:
         return  # 延长中：偏差是故意的
     if not device_clock.has(device_id):
         return  # 还没有偏差记录（首次 pong 之前），无从判
-    if doors_service.open_sessions(device_id):
+    if doors_service.open_sessions(session, device_id):
         return  # 有人占用：校钟的跳变会清掉会话，等人走再校
     skew = device_clock.get(device_id)  # 服务端 − 设备（秒）
     threshold = as_int(config["time_sync_threshold_s"])
@@ -381,7 +382,7 @@ async def _maybe_correct_clock(device_id: str, config: ConfigValues) -> None:
     if text is None:
         return
     result = await sessions_service.send_command_and_wait(
-        device_id, actions.CLOCK_SET, {"datetime": text, "rearm": True}
+        session, device_id, actions.CLOCK_SET, {"datetime": text, "rearm": True}
     )
     if result["status"] != outcomes.OK.value:
         log_event(
@@ -402,17 +403,17 @@ async def _maybe_correct_clock(device_id: str, config: ConfigValues) -> None:
     )
 
 
-async def _maybe_shift(device_id: str) -> None:
+async def _maybe_shift(session: Session, device_id: str) -> None:
     """到点且名单里还有人占着，就拨一次。
 
     拨钟之前先做**预补偿的滚动重布**：截止推过"拨走的一小时 + 窗口"，拨快才不会当场
     断电（实测）。这一行同时是"这台设备正在延长中"的锁——没有它，下一轮扫描会再拨
     一次；命令失败时清掉它，于是下一轮照常重试。
     """
-    config = config_store.effective(device_id)
+    config = config_store.effective(session, device_id)
     if not config["extend_hours_enabled"]:
         return
-    if repository.get(device_id) is not None:
+    if repository.get(session, device_id) is not None:
         return  # 已经在延长中
     students = roster(config, "extend_hours_students")
     if not students:
@@ -421,7 +422,7 @@ async def _maybe_shift(device_id: str) -> None:
         _local_now(device_id, as_int(config["extend_hours_zone_offset_minutes"])), str(config["extend_hours_at"])
     ):
         return
-    present = _present(device_id, students)
+    present = _present(session, device_id, students)
     if not present:
         return  # 没人在用，不必拨
 
@@ -448,17 +449,17 @@ async def _maybe_shift(device_id: str) -> None:
             landing=landing,
         )
         return
-    repository.record(device_id, now_rfc3339(), assignments)
-    if not await _roll_power(device_id, config, pre_shift=True):
-        repository.clear(device_id)
+    repository.record(session, device_id, utcnow(), assignments)
+    if not await _roll_power(session, device_id, config, pre_shift=True):
+        repository.clear(session, device_id)
         log_event("WARNING", "extend-hours.shift-failed", "保护性重布没成功，下一轮再试", device_id=device_id)
         return
-    if not await _set_clock(device_id, shift_s, zone):
-        repository.clear(device_id)
+    if not await _set_clock(session, device_id, shift_s, zone):
+        repository.clear(session, device_id)
         log_event("WARNING", "extend-hours.shift-failed", "拨钟没成功，下一轮再试", device_id=device_id)
         return
     # shifted_at 以**拨成功那一刻**为准：恢复条件（被跳过的断电时刻已过）从它起算。
-    repository.record(device_id, now_rfc3339(), assignments)
+    repository.record(session, device_id, utcnow(), assignments)
     log_event("INFO", "extend-hours.shifted", "已延长服务时间", device_id=device_id, students=len(present))
 
 
@@ -476,24 +477,33 @@ def on_frame(device_id: str) -> None:
     还有一种：**已经有一轮在跑**——帧与定时任务都会推这一步，两边同时动手会给同一个人
     下发两条命令。
     """
-    row = repository.get(device_id)
-    if row is None:
-        return
-    shift = _as_shift(row)
-    if not shift.assignments:
-        return
-    if _reassign_tasks:
-        return
-    students = roster(config_store.effective(device_id), "extend_hours_students")
+    with session_scope() as session:
+        row = repository.get(session, device_id)
+        if row is None:
+            return
+        shift = _as_shift(row)
+        if not shift.assignments:
+            return
+        if _reassign_tasks:
+            return
+        students = roster(config_store.effective(session, device_id), "extend_hours_students")
     if not students:
         return
-    task = asyncio.create_task(_reassign(shift, students))
+    task = asyncio.create_task(_reassign_task(shift, students))
     # 持有引用是必须的：asyncio 只保留弱引用，一个被丢弃的 Task 可能在跑完之前就被回收
     _reassign_tasks.add(task)
     task.add_done_callback(_reassign_tasks.discard)
 
 
-async def _reassign(shift: Shift, students: dict[str, str]) -> None:
+async def _reassign_task(shift: Shift, students: dict[str, str]) -> None:
+    """asyncio 任务入口：自己开短会话（帧处理路径没有请求上下文）。"""
+    from app.db.session import session_scope
+
+    with session_scope() as session:
+        await _reassign(session, shift, students)
+
+
+async def _reassign(session: Session, shift: Shift, students: dict[str, str]) -> None:
     """把名单里的人分配回他们原来那个喷头——**每人一次**。
 
     五种情形分得开，这是这一层唯一要紧的判断：
@@ -517,7 +527,7 @@ async def _reassign(shift: Shift, students: dict[str, str]) -> None:
     """
     device_id = shift.device_id
     # 按学号索引现占：判"已成立"要看会话的**建立时刻**，而 `open_session_door` 只给门号。
-    occupying = {session.cert_no: session for session in doors_service.open_sessions(device_id)}
+    occupying = {item.cert_no: item for item in doors_service.open_sessions(session, device_id)}
     for door_no, cert_no in shift.assignments:
         password = students.get(cert_no)
         if password is None:
@@ -525,16 +535,17 @@ async def _reassign(shift: Shift, students: dict[str, str]) -> None:
             continue
         if (device_id, cert_no) in _reassigned or (device_id, cert_no) in _reassign_failed:
             continue
-        session = occupying.get(cert_no)
-        if session is not None and session.assigned_at >= shift.shifted_at:
+        door_session = occupying.get(cert_no)
+        if door_session is not None and door_session.assigned_at >= shift.shifted_at:
             # 拨钟之后才建立的会话：他自己重新开了（或我们已经放过），放回已成立
             _reassigned.add((device_id, cert_no))
             continue
-        if session is not None:
+        if door_session is not None:
             # 拨钟之前就有的会话还没被清场（拨钟刚完成的那一瞬间）：等，不标记
             continue
         try:
             result = await sessions_routes.perform_assign(
+                session,
                 device_id,
                 AssignRequest(door_no=door_no, cert_no=cert_no, password=password),
             )
@@ -587,28 +598,21 @@ async def tick_once() -> None:
     离线设备不需要预先筛掉——它上面不会有新会话，"名单里有人占用"自然为假；命令失败时
     也会如实回报。每台延长的设备用**自己的**有效配置推进——时区、拨快幅度、电源计划都是
     设备级的，借用别台的值会把滚动目标拨到另一块表盘上。
+
+    会话在本协程内开、内关（见 core/background 的模块说明）。
     """
-    for record in devices_service.list_devices():
-        await _maybe_shift(record["device_id"])
-        config = config_store.effective(record["device_id"])
-        await _maybe_correct_clock(record["device_id"], config)
-    for row in repository.list_shifted():
-        shift = _as_shift(row)
-        # 不在册的设备（已从设备表除名）：它不会再上电，残行只会让每轮 tick 白发一条
-        # 命令、记一条 WARNING，永无尽头。清掉，日志留一句，这一环到此为止。
-        if devices_service.get_device(shift.device_id) is None:
-            repository.clear(shift.device_id)
-            log_event(
-                "WARNING",
-                "extend-hours.device-gone",
-                "设备已不在册，延长记录清除",
-                device_id=shift.device_id,
-            )
-            continue
-        await _advance(shift, config_store.effective(shift.device_id))
+    with session_scope() as session:
+        for record in devices_service.list_devices(session):
+            await _maybe_shift(session, record["device_id"])
+            config = config_store.effective(session, record["device_id"])
+            await _maybe_correct_clock(session, record["device_id"], config)
+        for row in repository.list_shifted(session):
+            shift = _as_shift(row)
+            # 行跟着设备走（外键 CASCADE）：设备除档时这一行随之消失，不会有残行。
+            await _advance(session, shift, config_store.effective(session, shift.device_id))
 
 
-async def _advance(shift: Shift, config: ConfigValues) -> None:
+async def _advance(session: Session, shift: Shift, config: ConfigValues) -> None:
     """推进一台正在延长的设备：滚动续写截止、推重新分配、检查恢复条件。
 
     三个动作每轮都做、顺序固定：滚动续写最要紧（它是"谁都不会被打断"的保证）；
@@ -618,15 +622,15 @@ async def _advance(shift: Shift, config: ConfigValues) -> None:
     """
     last = _last_roll_at.get(shift.device_id)
     if last is None or time.monotonic() - last >= ROLL_REARM_INTERVAL_S:
-        await _roll_power(shift.device_id, config, pre_shift=False)
+        await _roll_power(session, shift.device_id, config, pre_shift=False)
     students = roster(config, "extend_hours_students")
     if students:
-        await _reassign(shift, students)
-    if _restore_due(shift, config):
-        await _restore(shift, config)
+        await _reassign(session, shift, students)
+    if _restore_due(session, shift, config):
+        await _restore(session, shift, config)
 
 
-def _restore_due(shift: Shift, config: ConfigValues) -> bool:
+def _restore_due(session: Session, shift: Shift, config: ConfigValues) -> bool:
     """可不可以拨回了：被跳过的断电时刻已过，且设备上无未结束会话。
 
     两个条件缺一不可——时刻没到，延长还在服务窗口里；有会话在（预约未开阀的、
@@ -639,10 +643,10 @@ def _restore_due(shift: Shift, config: ConfigValues) -> bool:
         return False
     if now_local.date() <= shift_local.date():
         return False  # 午夜未过：敌对窗口的尾巴还在
-    return not doors_service.open_sessions(shift.device_id)
+    return not doors_service.open_sessions(session, shift.device_id)
 
 
-async def _restore(shift: Shift, config: ConfigValues) -> bool:
+async def _restore(session: Session, shift: Shift, config: ConfigValues) -> bool:
     """拨回设备钟，并在恢复后的框架里重布常规计划；返回是否完全成功。
 
     先拨回再重布：重布目标（`power_off_at` / `power_on_at`）要按**拨回之后**的钟面换算。
@@ -652,16 +656,17 @@ async def _restore(shift: Shift, config: ConfigValues) -> bool:
     的旧值，下一轮滚动会续写、本函数也会重试重布，直到成功。
     """
     zone_offset_minutes = as_int(config["extend_hours_zone_offset_minutes"])
-    if not await _set_clock(shift.device_id, -_shift_s(config), zone_offset_minutes):
+    if not await _set_clock(session, shift.device_id, -_shift_s(config), zone_offset_minutes):
         log_event("WARNING", "extend-hours.restore-failed", "调回没成功，下一轮再试", device_id=shift.device_id)
         return False
     rearmed = await _schedule_power(
+        session,
         shift.device_id,
         str(config["power_off_at"]),
         str(config["power_on_at"]),
     )
     if rearmed:
-        repository.clear(shift.device_id)
+        repository.clear(session, shift.device_id)
         _forget_failures(shift.device_id)
         log_event("INFO", "extend-hours.restored", "设备钟已调回，节奏已恢复", device_id=shift.device_id)
     else:
@@ -706,32 +711,4 @@ def _today_at(local_now: str, at: str) -> str:
     return f"{local_now[:10]}T{at}:00.000Z"
 
 
-# ── 生命周期 ──────────────────────────────────────────────────────────────
-
-
-async def _tick_loop() -> None:
-    while True:
-        try:
-            await tick_once()
-        except asyncio.CancelledError:
-            raise
-        except Exception:  # noqa: BLE001 一轮失败不能带垮服务，下一轮重试
-            log_event(
-                "ERROR", "extend-hours.tick-failed", "延长服务时间的定时任务失败，等下一轮重试", error=exc_info_text()
-            )
-        await asyncio.sleep(TICK_INTERVAL_S)
-
-
-def start() -> None:
-    global _task
-    if _task is None or _task.done():
-        _task = asyncio.create_task(_tick_loop())
-        log_event("INFO", "extend-hours.started", "延长服务时间已启动")
-
-
-def stop() -> None:
-    global _task
-    if _task is not None:
-        _task.cancel()
-        _task = None
-        log_event("INFO", "extend-hours.stopped", "延长服务时间已停止")
+# 一轮的逻辑见 [tick_once]；启动、取消、间隔由 core/background 统一管理。

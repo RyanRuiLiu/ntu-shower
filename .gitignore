@@ -1,5 +1,6 @@
 # ── 密钥与本地配置（绝不入库）──────────────────────────────
 *.keystore
+android/keystore.properties
 *.jks
 *.p12
 *.pfx

@@ -8,12 +8,13 @@
 间隔为 0 会导致心跳风暴），在此拒绝而非下发。
 """
 
-import json
 import threading
 from collections.abc import Callable
 from typing import NoReturn
 
-from app.core.db import get_conn, write
+from sqlalchemy.orm import Session
+
+from app.persistence import config as config_store_persistence
 
 from .schemas import ConfigSpecView, ConfigValues
 from .spec import (
@@ -46,27 +47,6 @@ class InvalidConfigError(ValueError):
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
         self.reason = reason
-
-
-def init_tables() -> None:
-    get_conn().executescript(
-        """
-        CREATE TABLE IF NOT EXISTS global_config (
-            id       INTEGER PRIMARY KEY CHECK (id = 1),
-            revision INTEGER NOT NULL,
-            config   TEXT    NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS device_config (
-            device_id TEXT    PRIMARY KEY,
-            revision  INTEGER NOT NULL,
-            config    TEXT    NOT NULL
-        );
-        """
-    )
-    # config 存的是与默认值的差异，空对象即全部沿用默认，无需预置
-    row = get_conn().execute("SELECT revision FROM global_config WHERE id = 1").fetchone()
-    if row is None:
-        write("INSERT INTO global_config (id, revision, config) VALUES (1, 1, '{}')")
 
 
 def _reject(reason: str) -> NoReturn:
@@ -170,26 +150,23 @@ def _known(values: ConfigValues) -> ConfigValues:
     return {key: value for key, value in values.items() if key in SPECS_BY_KEY}
 
 
-def get_global_overrides() -> tuple[int, ConfigValues]:
+def get_global_overrides(session: Session) -> tuple[int, ConfigValues]:
     """全局覆盖项（不含默认值）与修订号。"""
-    row = get_conn().execute("SELECT revision, config FROM global_config WHERE id = 1").fetchone()
-    return (int(row["revision"]), _known(json.loads(row["config"])))
+    revision, config = config_store_persistence.get_global(session)
+    return (revision, _known(config))
 
 
-def put_global_overrides(values: ConfigValues) -> tuple[int, ConfigValues]:
+def put_global_overrides(session: Session, values: ConfigValues) -> tuple[int, ConfigValues]:
     """覆盖式写入全局覆盖项；返回新修订号与入库内容。"""
     with _global_lock:
-        revision, _previous = get_global_overrides()
+        revision, _previous = get_global_overrides(session)
         overrides = _as_overrides(values)
         new_revision = revision + 1
-        write(
-            "UPDATE global_config SET revision = ?, config = ? WHERE id = 1",
-            (new_revision, json.dumps(overrides)),
-        )
+        config_store_persistence.put_global(session, new_revision, overrides)
         return new_revision, overrides
 
 
-def update_global(augment: Callable[[ConfigValues], ConfigValues]) -> tuple[int, ConfigValues]:
+def update_global(session: Session, augment: Callable[[ConfigValues], ConfigValues]) -> tuple[int, ConfigValues]:
     """在一个键上做读—改—写，整段串行；返回新的修订号与入库内容。
 
     `augment` 收到的是**全局有效配置**（默认 ← 全局覆盖，不含设备覆盖），必须返回一份
@@ -203,7 +180,7 @@ def update_global(augment: Callable[[ConfigValues], ConfigValues]) -> tuple[int,
     各读到的旧名单，后写的把先写的抹掉。
     """
     with _global_lock:
-        return put_global_overrides(augment(global_effective()))
+        return put_global_overrides(session, augment(global_effective(session)))
 
 
 def _device_scoped(values: ConfigValues) -> ConfigValues:
@@ -217,46 +194,43 @@ def _device_scoped(values: ConfigValues) -> ConfigValues:
     return {key: value for key, value in values.items() if SPECS_BY_KEY[key].scope is not ConfigScope.SERVER}
 
 
-def get_device_overrides(device_id: str) -> tuple[int, ConfigValues] | None:
-    row = get_conn().execute("SELECT revision, config FROM device_config WHERE device_id = ?", (device_id,)).fetchone()
-    return (int(row["revision"]), _device_scoped(_known(json.loads(row["config"])))) if row else None
+def get_device_overrides(session: Session, device_id: str) -> tuple[int, ConfigValues] | None:
+    row = config_store_persistence.get_device(session, device_id)
+    return (row[0], _device_scoped(_known(row[1]))) if row else None
 
 
-def put_device_overrides(device_id: str, values: ConfigValues) -> tuple[int, ConfigValues]:
-    existing = get_device_overrides(device_id)
+def put_device_overrides(session: Session, device_id: str, values: ConfigValues) -> tuple[int, ConfigValues]:
+    existing = get_device_overrides(session, device_id)
     overrides = _as_overrides(values)
     new_revision = (existing[0] if existing else 0) + 1
-    write(
-        "INSERT OR REPLACE INTO device_config (device_id, revision, config) VALUES (?,?,?)",
-        (device_id, new_revision, json.dumps(overrides)),
-    )
+    config_store_persistence.put_device(session, device_id, new_revision, overrides)
     return new_revision, overrides
 
 
-def delete_device_overrides(device_id: str) -> bool:
-    return write("DELETE FROM device_config WHERE device_id = ?", (device_id,)).rowcount > 0
+def delete_device_overrides(session: Session, device_id: str) -> bool:
+    return config_store_persistence.delete_device(session, device_id)
 
 
-def global_effective() -> ConfigValues:
+def global_effective(session: Session) -> ConfigValues:
     """全局有效配置：默认 ← 全局覆盖，不含任何设备覆盖。"""
     merged = defaults()
-    _, global_overrides = get_global_overrides()
+    _, global_overrides = get_global_overrides(session)
     merged.update(global_overrides)
     return merged
 
 
-def effective(device_id: str) -> ConfigValues:
+def effective(session: Session, device_id: str) -> ConfigValues:
     """合并后的有效配置：默认 ← 全局覆盖 ← 设备覆盖。每次现算，见模块注释。"""
-    merged = global_effective()
-    device_overrides = get_device_overrides(device_id)
+    merged = global_effective(session)
+    device_overrides = get_device_overrides(session, device_id)
     if device_overrides is not None:
         merged.update(device_overrides[1])
     return merged
 
 
-def device_effective(device_id: str) -> ConfigValues:
+def device_effective(session: Session, device_id: str) -> ConfigValues:
     """下发给设备的配置：只含设备侧消费的键，服务端自己的键不占设备的解析路径。"""
-    full = effective(device_id)
+    full = effective(session, device_id)
     return {key: value for key, value in full.items() if SPECS_BY_KEY[key].scope is ConfigScope.DEVICE}
 
 

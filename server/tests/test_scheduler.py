@@ -18,16 +18,14 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from tests import device_link
+from tests import device_link, door_link
 
 from app.core import device_clock, outcomes, problems
 from app.core.clock import now_rfc3339, parse_rfc3339, rfc3339_ago, shift_rfc3339
-from app.core.db import get_conn
 from app.core.problems import ApiProblemError, Problem
 from app.core.protocol import JsonObject
-from app.modules.audit import repository as audit_repository
-from app.modules.doors import service as doors_service
-from app.modules.doors.schemas import DoorState
+from app.db.session import session_scope
+from app.models.enums import DoorState
 from app.modules.sessions import scheduler
 from app.modules.sessions import service as sessions_service
 from app.modules.sessions.decision import (
@@ -37,6 +35,14 @@ from app.modules.sessions.decision import (
     Candidate,
 )
 from app.modules.sessions.schemas import AssignRequest, CommandOutcome, SettleRequest
+from app.persistence import audit as audit_repository
+
+
+def _read_snapshots(device_id: str) -> list:
+    """直读 _snapshots 的短会话包装：测试直调辅助。"""
+    with session_scope() as session:
+        return scheduler._snapshots(session, device_id)
+
 
 SCHEDULER_PATH = Path(scheduler.__file__)
 
@@ -95,6 +101,43 @@ def _clean_scheduler() -> Iterator[None]:
     scheduler._running = False
 
 
+def _seed_session(candidate: Candidate) -> None:
+    """给桩出来的候选会话落真实行：审计行的 session_id 是真外键（usage_sessions）。
+
+    id 显式给、与候选一致；登记设备满足外键；其余列给不参与判定的合法值。
+    未声明库（该用例不落库）直接跳过——审计也不会发生，无需种子。
+    """
+    from datetime import datetime
+
+    from sqlalchemy import text
+    from sqlalchemy.exc import OperationalError
+
+    from app.models.usage import UsageSession
+    from app.persistence import doors as doors_store
+
+    with session_scope() as session:
+        try:
+            session.execute(text("SELECT 1 FROM devices LIMIT 1"))
+        except OperationalError:
+            return
+    device_link.register_trusted_device(candidate.device_id)
+    with session_scope() as session:
+        assigned = datetime.fromisoformat(candidate.assigned_at.replace("Z", "+00:00"))
+        if session.get(UsageSession, candidate.session_id) is None:
+            session.add(
+                UsageSession(
+                    id=candidate.session_id,
+                    device_id=doors_store._device_pk(session, candidate.device_id),
+                    door_no=candidate.door_no,
+                    cert_no=candidate.cert_no,
+                    assigned_at=assigned,
+                    assigned_source="observed",
+                    last_seen_at=assigned,
+                )
+            )
+            session.commit()
+
+
 def _prepare(
     monkeypatch: pytest.MonkeyPatch,
     candidates: list[Candidate],
@@ -107,15 +150,20 @@ def _prepare(
     真前置）与项目原有的 `test_sessions.py` 覆盖。所以这里连入口一起换掉，每条测试只
     验一层。
     """
-    monkeypatch.setattr(scheduler.config_store, "effective", lambda _device_id: CONFIG)
-    monkeypatch.setattr(scheduler, "_snapshots", lambda _device_id: candidates)
+    monkeypatch.setattr(scheduler.config_store, "effective", lambda _session, _device_id: CONFIG)
+    monkeypatch.setattr(scheduler, "_snapshots", lambda _session, _device_id: candidates)
+    # WAITING 无条件落种子：它只是桩（_snapshots 只认 candidates），但手动 _fire 它的
+    # 用例（如"会话已没了"）的审计行同样要过真外键——FK 完整与判定桩是两件事。
+    _seed_session(WAITING)
+    for candidate in candidates:
+        _seed_session(candidate)
     calls = sent if sent is not None else []
 
-    async def fake_settle(device_id: str, req: SettleRequest) -> CommandOutcome:
+    async def fake_settle(_session: object, device_id: str, req: SettleRequest) -> CommandOutcome:
         calls.append((device_id, "session.settle", {"cert_no": req.cert_no, "password": req.password}))
         return CommandOutcome(status=outcomes.OK.value, reason_code="", terminal_message="", data=None)
 
-    async def fake_assign(device_id: str, req: AssignRequest) -> CommandOutcome:
+    async def fake_assign(_session: object, device_id: str, req: AssignRequest) -> CommandOutcome:
         calls.append(
             (
                 device_id,
@@ -134,13 +182,16 @@ def _prepare(
 
 
 def test_start_and_stop_are_idempotent() -> None:
-    scheduler.start()
-    scheduler.start()
-    assert scheduler._running is True
+    async def body() -> None:
+        scheduler.start()
+        scheduler.start()
+        assert scheduler._running is True
 
-    scheduler.stop()
-    scheduler.stop()
-    assert scheduler._running is False
+        await scheduler.stop()
+        await scheduler.stop()
+        assert scheduler._running is False
+
+    asyncio.run(body())
 
 
 def test_hooks_do_nothing_before_start() -> None:
@@ -176,7 +227,8 @@ def test_each_door_gets_exactly_one_timer(monkeypatch: pytest.MonkeyPatch) -> No
 
         assert list(handles) == [3]
         # 三个功能的状态互不相交，所以"已暂停"只有自动结算会认领
-        assert next(iter(scheduler._plan("dev-1").values()))[2].feature == FEATURE_AUTO_SETTLE
+        with session_scope() as session:
+            assert next(iter(scheduler._plan(session, "dev-1").values()))[2].feature == FEATURE_AUTO_SETTLE
 
     asyncio.run(body())
 
@@ -216,11 +268,12 @@ def test_closed_sessions_are_forgotten_without_touching_other_devices(monkeypatc
     而会话 id 是全库自增的，所以**只清本设备的**——否则 B 设备的帧会把 A 设备的记录一起
     清掉，那一场就会被重复动手。
     """
-    monkeypatch.setattr(scheduler.doors_service, "open_sessions", lambda _device_id: [])
+    monkeypatch.setattr(scheduler.doors_service, "open_sessions", lambda _session, _device_id: [])
     scheduler._attempted.add(("dev-1", 7, FEATURE_RENEW_WAIT))
     scheduler._attempted.add(("dev-2", 8, FEATURE_RENEW_WAIT))
 
-    scheduler._forget_closed_sessions("dev-1")
+    with session_scope() as session:
+        scheduler._forget_closed_sessions(session, "dev-1")
 
     assert ("dev-1", 7, FEATURE_RENEW_WAIT) not in scheduler._attempted
     assert ("dev-2", 8, FEATURE_RENEW_WAIT) in scheduler._attempted
@@ -302,7 +355,8 @@ def test_settle_lands_in_the_audit_table_with_its_own_fields(monkeypatch: pytest
 
     asyncio.run(body())
 
-    rows = audit_repository.list_background_task_runs()
+    with session_scope() as session:
+        rows = audit_repository.list_background_task_runs(session)
     assert [row["outcome"] for row in rows] == ["settled"]
     row = rows[0]
     assert row["feature"] == FEATURE_RENEW_WAIT
@@ -319,7 +373,7 @@ def test_a_rejected_settle_is_recorded_with_its_reason(monkeypatch: pytest.Monke
     async def body() -> None:
         _prepare(monkeypatch, [WAITING])
 
-        async def reject(_device_id: str, _req: object) -> object:
+        async def reject(_session: object, _device_id: str, _req: object) -> object:
             raise ApiProblemError(problems.NO_OCCUPIED_DOOR, "已经没有占用中的喷头了")
 
         monkeypatch.setattr(scheduler.sessions_routes, "perform_settle", reject)
@@ -327,7 +381,8 @@ def test_a_rejected_settle_is_recorded_with_its_reason(monkeypatch: pytest.Monke
 
     asyncio.run(body())
 
-    rows = audit_repository.list_background_task_runs()
+    with session_scope() as session:
+        rows = audit_repository.list_background_task_runs(session)
     assert [row["outcome"] for row in rows] == ["not-applicable"]
     assert rows[0]["feature"] == FEATURE_AUTO_SETTLE
     assert rows[0]["action"] == "session.settle"
@@ -355,7 +410,9 @@ def test_settle_stops_when_there_is_no_password(monkeypatch: pytest.MonkeyPatch,
     async def body() -> None:
         calls = _prepare(monkeypatch, [WAITING], sent=[])
         monkeypatch.setattr(
-            scheduler.config_store, "effective", lambda _device_id: {**CONFIG, "renew_wait_students": {}}
+            scheduler.config_store,
+            "effective",
+            lambda _session, _device_id: {**CONFIG, "renew_wait_students": {}},
         )
         await scheduler._perform_settle(_settle_job(FEATURE_RENEW_WAIT))
 
@@ -397,7 +454,9 @@ def test_settle_stops_when_the_roster_changed_underneath(monkeypatch: pytest.Mon
     async def body() -> None:
         calls = _prepare(monkeypatch, [WAITING], sent=[])
         monkeypatch.setattr(
-            scheduler.config_store, "effective", lambda _device_id: {**CONFIG, "renew_wait_enabled": False}
+            scheduler.config_store,
+            "effective",
+            lambda _session, _device_id: {**CONFIG, "renew_wait_enabled": False},
         )
         await scheduler._perform_settle(_settle_job(FEATURE_RENEW_WAIT))
 
@@ -406,29 +465,39 @@ def test_settle_stops_when_the_roster_changed_underneath(monkeypatch: pytest.Mon
     asyncio.run(body())
 
 
-def test_domain_rejections_are_split_into_normal_and_noteworthy(
-    caplog: pytest.LogCaptureFixture, fresh_db: str
-) -> None:
+def test_domain_rejections_are_split_into_normal_and_noteworthy(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """领域层拒了要分清两类：门还被占着/他还有会话/他已经走了是正常，"设备离线"之类不是。
 
     分错的两个方向都坏：把正常当失败会刷满告警，把失败当正常就没人知道这次的维护没做成。
     所以这条**验日志级别**，而不是重述那两个集合——后者会因为错误的原因通过。
+
+    日志观测改用依赖替换而非全局 logger 钩子，依据：
+    - pytest 官方文档「How to use the monkeypatch fixture」：monkeypatch 是官方
+      测试工具，替换依赖对象后测试、用例结束自动还原（docs.pytest.org 的
+      monkeypatch 章节）。
+    - xUnit Test Patterns（Gerard Meszaros）的 Test Stub：观察点是被测代码对
+      依赖（log_event）的调用，而非全局 logging 状态——后者与测试执行顺序耦合。
+    - 实测证据：caplog（挂根 logger）与 assertLogs（替换目标 logger handlers）
+      都是官方工具，但与本应用 lifespan 里的 configure_logging（重建 handlers、
+      propagate=False）相互干扰，在并行与 CI 上实测丢记录；依赖替换不触碰
+      全局 logging 状态，CI 实测通过。
     """
+    _seed_session(WAITING)  # 审计行的 session_id 是真外键
+
+    events: list[tuple[str, str]] = []
+    monkeypatch.setattr(scheduler, "log_event", lambda level, event, *_a, **_kw: events.append((level, event)))
 
     def problem(code: str) -> ApiProblemError:
         return ApiProblemError(Problem(code, 409, "x"), "细节")
 
     normal = (problems.DOOR_NOT_FREE.code, problems.DUPLICATE_SESSION.code, problems.NO_OCCUPIED_DOOR.code)
     for code in normal:
-        caplog.clear()
-        with caplog.at_level("INFO"):
-            scheduler._report_problem(problem(code), _settle_job(FEATURE_AUTO_SETTLE))
-        assert [record.levelname for record in caplog.records] == ["INFO"], code
+        scheduler._report_problem(problem(code), _settle_job(FEATURE_AUTO_SETTLE))
+    assert [level for level, _event in events] == ["INFO", "INFO", "INFO"]
 
-    caplog.clear()
-    with caplog.at_level("INFO"):
-        scheduler._report_problem(problem(problems.DEVICE_OFFLINE.code), _settle_job(FEATURE_AUTO_SETTLE))
-    assert [record.levelname for record in caplog.records] == ["WARNING"]
+    events.clear()
+    scheduler._report_problem(problem(problems.DEVICE_OFFLINE.code), _settle_job(FEATURE_AUTO_SETTLE))
+    assert [level for level, _event in events] == ["WARNING"]
 
 
 def test_assign_is_sent_exactly_once(monkeypatch: pytest.MonkeyPatch, fresh_db: str) -> None:
@@ -450,6 +519,7 @@ def test_assign_is_sent_exactly_once(monkeypatch: pytest.MonkeyPatch, fresh_db: 
 def _arm(monkeypatch: pytest.MonkeyPatch, **overrides: object) -> None:
     scheduler.start()
     _prepare(monkeypatch, [])
+    _seed_session(WAITING)
     fields: dict[str, object] = {
         "device_id": "dev-1",
         "door_no": 3,
@@ -490,7 +560,7 @@ def test_a_wait_rejection_keeps_the_pending_assign(monkeypatch: pytest.MonkeyPat
     async def body() -> None:
         _arm(monkeypatch)
 
-        async def reject(_device_id: str, _req: object) -> object:
+        async def reject(_session: object, _device_id: str, _req: object) -> object:
             raise ApiProblemError(problems.DOOR_NOT_FREE, "还被占着")
 
         monkeypatch.setattr(scheduler.sessions_routes, "perform_assign", reject)
@@ -510,7 +580,7 @@ def test_any_other_rejection_drops_the_pending_assign(monkeypatch: pytest.Monkey
     async def body() -> None:
         _arm(monkeypatch)
 
-        async def reject(_device_id: str, _req: object) -> object:
+        async def reject(_session: object, _device_id: str, _req: object) -> object:
             raise ApiProblemError(problems.DEVICE_OFFLINE, "设备离线")
 
         monkeypatch.setattr(scheduler.sessions_routes, "perform_assign", reject)
@@ -639,7 +709,7 @@ def test_stop_cancels_timers_and_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
         assert worker.timers
         assert worker.task is not None
 
-        scheduler.stop()
+        await scheduler.stop()
 
         assert worker.timers == {}
         assert worker.task is None
@@ -668,9 +738,9 @@ def _frame(captured_at: str = "2026-10-05T11:00:00.000Z", **door: object) -> Jso
 
 def test_snapshots_reads_only_the_derived_layer(fresh_db: str) -> None:
     """取数只走 `usage_session` + `door_live`，原始帧一概不读。"""
-    doors_service.process_snapshot("dev-1", _frame(card_no=1001, open_time="2026-10-05T11:00:00.000Z"))
+    door_link.feed("dev-1", _frame(card_no=1001, open_time="2026-10-05T11:00:00.000Z"))
 
-    found = scheduler._snapshots("dev-1")
+    found = _read_snapshots("dev-1")
 
     assert len(found) == 1
     assert found[0].state is DoorState.WAITING
@@ -683,41 +753,41 @@ def test_snapshots_reads_only_the_derived_layer(fresh_db: str) -> None:
 
 def test_snapshots_skips_a_session_without_a_live_row(fresh_db: str) -> None:
     """会话还在、门的现态却没了：不判，等下一帧。"""
-    doors_service.process_snapshot("dev-1", _frame(card_no=1001, open_time="2026-10-05T11:00:00.000Z"))
-    get_conn().execute("DELETE FROM door_live WHERE device_id = ?", ("dev-1",))
+    door_link.feed("dev-1", _frame(card_no=1001, open_time="2026-10-05T11:00:00.000Z"))
+    door_link.clear_live("dev-1")
 
-    assert scheduler._snapshots("dev-1") == []
+    assert _read_snapshots("dev-1") == []
 
 
 def test_run_started_at_is_the_first_session_of_the_run(fresh_db: str) -> None:
     """这一串的起点是学生自己那一次分配——续出来的每一场都不该把它往后挪。"""
-    doors_service.process_snapshot(
+    door_link.feed(
         "dev-1", _frame(captured_at="2026-10-05T11:00:00.000Z", card_no=1001, open_time="2026-10-05T11:00:00.000Z")
     )
-    assert scheduler._snapshots("dev-1")[0].run_started_at == "2026-10-05T11:00:00.000Z"
+    assert _read_snapshots("dev-1")[0].run_started_at == "2026-10-05T11:00:00.000Z"
 
     # 我们自己续出来的那一场：门空了、紧接着又被分配回同一个喷头
-    doors_service.process_snapshot("dev-1", _frame(captured_at="2026-10-05T11:05:00.000Z"))
-    doors_service.process_snapshot(
+    door_link.feed("dev-1", _frame(captured_at="2026-10-05T11:05:00.000Z"))
+    door_link.feed(
         "dev-1", _frame(captured_at="2026-10-05T11:05:04.000Z", card_no=1001, open_time="2026-10-05T11:05:04.000Z")
     )
 
     # 换了一场，起点仍是第一场——时长上限从第一场算起，挪了它这个上限就永远到不了
-    assert scheduler._snapshots("dev-1")[0].run_started_at == "2026-10-05T11:00:00.000Z"
+    assert _read_snapshots("dev-1")[0].run_started_at == "2026-10-05T11:00:00.000Z"
 
 
 def test_run_started_at_moves_after_a_real_break(fresh_db: str) -> None:
     """喷头空着超过 300 秒，说明那个人的占用真的结束了——计时从头开始。"""
-    doors_service.process_snapshot(
+    door_link.feed(
         "dev-1", _frame(captured_at="2026-10-05T11:00:00.000Z", card_no=1001, open_time="2026-10-05T11:00:00.000Z")
     )
-    doors_service.process_snapshot("dev-1", _frame(captured_at="2026-10-05T11:05:00.000Z"))
+    door_link.feed("dev-1", _frame(captured_at="2026-10-05T11:05:00.000Z"))
     # 中间空了一小时才被重新分配
-    doors_service.process_snapshot(
+    door_link.feed(
         "dev-1", _frame(captured_at="2026-10-05T12:05:00.000Z", card_no=1001, open_time="2026-10-05T12:05:00.000Z")
     )
 
-    assert scheduler._snapshots("dev-1")[0].run_started_at == "2026-10-05T12:05:00.000Z"
+    assert _read_snapshots("dev-1")[0].run_started_at == "2026-10-05T12:05:00.000Z"
 
 
 # ── 接缝：一帧进来，到命令出、再到补上分配 ────────────────────────────────
@@ -757,18 +827,18 @@ def test_a_frame_ends_in_a_settle_then_an_assign(
     """
     calls: list[tuple[str, JsonObject]] = []
 
-    async def fake_send(_device_id: str, action: str, params: JsonObject, **_kw: object) -> object:
+    async def fake_send(_session: object, _device_id: str, action: str, params: JsonObject, **_kw: object) -> object:
         calls.append((action, params))
         return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
 
-    monkeypatch.setattr(scheduler.config_store, "effective", lambda _device_id: CONFIG)
+    monkeypatch.setattr(scheduler.config_store, "effective", lambda _session, _device_id: CONFIG)
     monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
 
     # 一小时前分配、一直没开阀：预约续期的 270 秒早已过点
-    doors_service.process_snapshot("dev-1", _frame(captured_at=_ago(3600), card_no=1001, open_time=_ago(3600)))
+    door_link.feed("dev-1", _frame(captured_at=_ago(3600), card_no=1001, open_time=_ago(3600)))
 
     async def body() -> None:
-        session_id = scheduler._snapshots("dev-1")[0].session_id
+        session_id = _read_snapshots("dev-1")[0].session_id
         scheduler.start()
         scheduler.on_frame("dev-1")  # 网关的挂钩点
         await _let_the_loop_run()
@@ -780,7 +850,7 @@ def test_a_frame_ends_in_a_settle_then_an_assign(
         assert ("dev-1", session_id, FEATURE_RENEW_WAIT) in scheduler._attempted
 
         # 门被释放的那一帧：会话收尾，待分配接上
-        doors_service.process_snapshot("dev-1", _frame(captured_at=_ago(3000)))
+        door_link.feed("dev-1", _frame(captured_at=_ago(3000)))
         scheduler.on_frame("dev-1")
         await _let_the_loop_run()
 
@@ -798,13 +868,13 @@ def test_the_same_session_is_settled_only_once(
     """单次执行：帧再来几次也不会为同一个会话再下一单。"""
     calls: list[tuple[str, JsonObject]] = []
 
-    async def fake_send(_device_id: str, action: str, params: JsonObject, **_kw: object) -> object:
+    async def fake_send(_session: object, _device_id: str, action: str, params: JsonObject, **_kw: object) -> object:
         calls.append((action, params))
         return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
 
-    monkeypatch.setattr(scheduler.config_store, "effective", lambda _device_id: CONFIG)
+    monkeypatch.setattr(scheduler.config_store, "effective", lambda _session, _device_id: CONFIG)
     monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
-    doors_service.process_snapshot("dev-1", _frame(captured_at=_ago(3600), card_no=1001, open_time=_ago(3600)))
+    door_link.feed("dev-1", _frame(captured_at=_ago(3600), card_no=1001, open_time=_ago(3600)))
 
     async def body() -> None:
         scheduler.start()
@@ -828,13 +898,13 @@ def test_auto_settle_only_settles_and_never_reassigns(
     """
     calls: list[tuple[str, JsonObject]] = []
 
-    async def fake_send(_device_id: str, action: str, params: JsonObject, **_kw: object) -> object:
+    async def fake_send(_session: object, _device_id: str, action: str, params: JsonObject, **_kw: object) -> object:
         calls.append((action, params))
         return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
 
-    monkeypatch.setattr(scheduler.config_store, "effective", lambda _device_id: CONFIG)
+    monkeypatch.setattr(scheduler.config_store, "effective", lambda _session, _device_id: CONFIG)
     monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
-    doors_service.process_snapshot(
+    door_link.feed(
         "dev-1", _frame(captured_at=_ago(120), card_no=1001, open_time=_ago(300), close_time=_ago(120), bath_time_s=120)
     )
 
@@ -860,15 +930,13 @@ def test_a_student_outside_the_roster_is_never_touched(
     """
     calls: list[tuple[str, JsonObject]] = []
 
-    async def fake_send(_device_id: str, action: str, params: JsonObject, **_kw: object) -> object:
+    async def fake_send(_session: object, _device_id: str, action: str, params: JsonObject, **_kw: object) -> object:
         calls.append((action, params))
         return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
 
-    monkeypatch.setattr(scheduler.config_store, "effective", lambda _device_id: CONFIG)
+    monkeypatch.setattr(scheduler.config_store, "effective", lambda _session, _device_id: CONFIG)
     monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
-    doors_service.process_snapshot(
-        "dev-1", _frame(captured_at=_ago(3600), card_no=1001, cert_no="2026000006", open_time=_ago(3600))
-    )
+    door_link.feed("dev-1", _frame(captured_at=_ago(3600), card_no=1001, cert_no="2026000006", open_time=_ago(3600)))
 
     async def body() -> None:
         scheduler.start()
@@ -909,7 +977,8 @@ def test_snapshot_reports_scheduled_timers(fresh_db: str) -> None:
             handle=loop.call_later(5.0, lambda: None),
         )
         try:
-            rows = scheduler.snapshot()
+            with session_scope() as session:
+                rows = scheduler.snapshot(session)
         finally:
             worker.timers.clear()
         assert rows == [

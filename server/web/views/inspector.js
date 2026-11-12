@@ -14,12 +14,12 @@
  * 画面与结构都不轮询：定时拉取会让设备持续编码，也挤占采集通道。
  */
 import { api } from '../core/api.js'
+import { copyText } from '../core/clipboard.js'
 import { NEED_DEVICE, REBOOT_CONFIRM } from '../core/copy.js'
 import { INPUT_CHANNELS, UI_KEYS } from '../core/contract.js'
 import { problemText, statusLabel } from '../core/outcome.js'
 import { $, disposer, esc, listen } from '../core/dom.js'
 import { store, subscribe } from '../core/store.js'
-import { toast } from '../core/toast.js'
 
 /**
  * 按住多久算长按而不是单击。
@@ -700,11 +700,9 @@ function handleTreeKey(event) {
   }
 }
 
+/** 失败进本页操作状态区（核心模块不认识各页的结果区），成功文案由核心统一。 */
 function copy(text, what) {
-  navigator.clipboard.writeText(text).then(
-    () => toast(`已复制${what}`),
-    () => setOpState('复制失败（浏览器未授予剪贴板权限）', 'err'),
-  )
+  copyText(text, { label: what, onFail: () => setOpState('复制失败（浏览器未授予剪贴板权限）', 'err') })
 }
 
 // ── 视图 ───────────────────────────────────────────────────
