@@ -63,6 +63,9 @@ def test_logout_drops_the_session(client: TestClient, account: None) -> None:
 def test_tampered_cookie_is_rejected(client: TestClient, account: None) -> None:
     resp = client.post("/api/v1/auth/login", json={"username": USER, "password": PASSWORD})
     token = resp.cookies[SESSION_COOKIE_NAME] + "tampered"
+    # httpx2 2.16 起 set() 不再替换 jar 里的同名条目：两条同名 cookie 并存发出，
+    # 服务端按首个匹配取到未篡改的有效会话。先清空，保证请求只携带篡改值。
+    client.cookies.clear()
     client.cookies.set(SESSION_COOKIE_NAME, token)
     assert client.get("/api/v1/auth/me").status_code == 401
 
