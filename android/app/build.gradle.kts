@@ -255,7 +255,7 @@ tasks.register<JacocoReport>("jacocoUnitTestReport") {
 
 dependencies {
     // API 19 上可用的最新 WebSocket 客户端（4.x 起要求 API 21，见 docs/architecture.md）
-    implementation("com.squareup.okhttp3:okhttp:3.12.13")
+    implementation("com.squareup.okhttp3:okhttp:5.5.1")
     // 系统 TLS 栈（API 19）没有 AEAD；Conscrypt 自带 BoringSSL，提供 TLS1.2 GCM/CHACHA20。
     implementation("org.conscrypt:conscrypt-android:2.5.2")
     // 格式规则集（ktlint 规则镜像）：import 顺序/空白等格式强制，与服务端 ruff format 对位
