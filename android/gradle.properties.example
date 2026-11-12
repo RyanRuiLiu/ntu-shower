@@ -8,5 +8,4 @@ android.useAndroidX=false
 serverDomain=<public-domain>
 
 # 签名密钥（keystore 文件位于 keystore/，已 gitignore）
-keystorePassword=REPLACE_WITH_KEYSTORE_PASSWORD
-keystoreAlias=ntu-shower
+deviceEnrollToken=（与生产 env 的 DEVICE_ENROLL_TOKEN 同值）
