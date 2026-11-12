@@ -1,0 +1,42 @@
+# Dependabot 自动合并（GitHub 官方模式，按 update-type 分档）：
+# https://docs.github.com/en/code-security/dependabot/working-with-dependabot/automating-dependabot-with-github-actions
+# 本仓无分支保护 required checks，官方 --auto 会在 CI 完成前合并——
+# 因此先等待全部 checks 通过再直接 squash，语义等价；等待窗口外或任一
+# check 失败一律不合并。major 与非 semver 升级不自动合并，留人工审阅。
+name: dependabot-auto-merge
+
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: dependabot-auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  automerge:
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 解析更新类型
+        id: metadata
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98  # v3.1.0
+      - name: 等待全部 checks 通过后 squash 合并（patch/minor）
+        if: steps.metadata.outputs.update-type == 'version-update:semver-patch' || steps.metadata.outputs.update-type == 'version-update:semver-minor'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          for i in $(seq 1 60); do
+            gh pr checks "$PR_URL" && gh pr merge "$PR_URL" --squash && exit 0
+            rc=$?
+            if [ "$rc" -ne 8 ]; then
+              echo "checks 失败（rc=$rc），不合并" >&2
+              exit 1
+            fi
+            sleep 30
+          done
+          echo "checks 未在等待窗口内完成，不合并" >&2
+          exit 1
