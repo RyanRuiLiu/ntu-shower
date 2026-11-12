@@ -7,6 +7,6 @@ android.useAndroidX=false
 # 设备端唯一锚点：服务域名（构建期注入 BuildConfig）
 serverDomain=<public-domain>
 
-# 签名密钥（keystore 文件位于 ../config/keystore/，已 gitignore）
+# 签名密钥（keystore 文件位于 keystore/，已 gitignore）
 keystorePassword=REPLACE_WITH_KEYSTORE_PASSWORD
 keystoreAlias=ntu-shower

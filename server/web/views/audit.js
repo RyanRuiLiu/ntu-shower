@@ -1,5 +1,5 @@
 /**
- * 审计：接口调用（api_call）、命令流水（command_audit）、后台任务（background_task_run）。
+ * 审计：接口调用（api_calls）、命令流水（command_audits）、后台任务（background_task_runs）。
  *
  * 三种审计结构不同，页面骨架却是同一个：一张关键列表 + 右侧全部字段。所以**差异只写在
  * [TABS] 里**（标题、取数、列头、每格怎么显示、时间取哪一列），渲染只有一份——加第四种
@@ -15,23 +15,21 @@
  * 去日志里搜（`background-task.settled`、`feature=renew_wait`），翻译成中文反而搜不到。
  */
 import { api } from '../core/api.js'
+import { copyText } from '../core/clipboard.js'
 import { codeCell, deviceCell } from '../core/cells.js'
 import { fmtFullDateTime } from '../core/clock.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
 import { problemText, report, statusBadgeClass, statusLabel } from '../core/outcome.js'
 import { deviceName, store, subscribe } from '../core/store.js'
-import { toast } from '../core/toast.js'
 
 function statusBadge(status) {
   if (status === null || status === undefined) return PLACEHOLDER
   return `<span class="badge ${statusBadgeClass(status)}">${esc(statusLabel(status))}</span>`
 }
 
+/** 失败进本页结果区（核心模块不认识各页的结果区），成功文案由核心统一。 */
 function copy(text, what) {
-  navigator.clipboard.writeText(text).then(
-    () => toast(`已复制${what}`),
-    () => report('auditResult', '复制失败（浏览器未授予剪贴板权限）', 'err'),
-  )
+  copyText(text, { label: what, onFail: () => report('auditResult', '复制失败（浏览器未授予剪贴板权限）', 'err') })
 }
 
 /** 详情卡：标签 + 全量折行的值，点卡即复制。空值不渲染。按钮元素让键盘同样能触发。 */
@@ -218,7 +216,7 @@ async function reload() {
     )
   } catch (error) {
     if (error?.status === 401) {
-      report('auditResult', '身份缺失或未授权，请在顶栏填写身份标识', 'err')
+      report('auditResult', '未登录或会话已过期，请在顶栏登录', 'err')
       return
     }
     report('auditResult', problemText(error), 'err')

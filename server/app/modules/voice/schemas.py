@@ -14,8 +14,9 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.models.enums import DoorState
 from app.modules.doors.events import DoorEventKind
-from app.modules.doors.schemas import DoorState, state_label
+from app.modules.doors.schemas import state_label
 
 from . import time_windows as time_rules
 
@@ -306,3 +307,9 @@ class VoiceSpecView(BaseModel):
     max_time_windows: int
     max_pause_ms: int
     min_pause_ms: int
+    #: 学号分段的位数上限；网页表单的 max 从这里读，不自抄一份
+    max_digits_length: int
+    #: 单位词表（数字念法的「十百千万」）：素材齐备检查与上传表单的词表唯一来源
+    units: list[str]
+    #: 「全部学号」试听用的示例学号（数字变量要能念出内容）；网页不自抄一份
+    sample_cert_no: str

@@ -1,7 +1,7 @@
 """接口调用审计：谁、何时、对什么、结果如何，一行一个调用。
 
 按 OWASP Logging Cheat Sheet 的事件清单与 NIST SP 800-92 的保留框架设计，
-标准依据见 docs/DECISIONS.md「可观测性」。覆盖 /api/v1 与 /ota/manifest 的全部请求
+标准依据见 docs/adr/「可观测性」。覆盖 /api/v1 与 /ota/manifest 的全部请求
 （认证、授权、参数与服务端错误天然落表）与设备网关生命周期；静态资源与
 /healthz 不审计。
 
@@ -10,27 +10,29 @@ JSON 请求体与响应体原文入库，全有或全无、不截断、不脱敏
 保留，过期行由清理任务删除；业务数据永久保留。
 """
 
-import asyncio
 import contextlib
 import json
 import re
 import time
 import uuid
 from collections.abc import Awaitable, Callable
+from datetime import timedelta
 from typing import cast
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI
+from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response, StreamingResponse
 from typing_extensions import TypedDict
 
-from . import db
-from .clock import now_rfc3339
+from app.db.base import utcnow
+from app.db.session import session_scope
+
 from .config import settings
-from .logging import exc_info_text, log_event, request_id_var, trace_id_var
+from .logging import log_event, request_id_var, trace_id_var
 
 
 class ApiCallRecord(TypedDict):
@@ -70,41 +72,7 @@ _AUDITED_PREFIXES = ("/api/v1", "/ota/manifest")
 
 _TRACEPARENT = re.compile(r"^[0-9a-f]{2}-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$", re.IGNORECASE)
 
-_PRUNE_INTERVAL_S = 6 * 3600.0
-
-_prune_task: asyncio.Task[None] | None = None
-
-
-def init_tables() -> None:
-    db.get_conn().executescript(
-        """
-        CREATE TABLE IF NOT EXISTS api_call (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            kind          TEXT    NOT NULL,
-            requested_at  TEXT    NOT NULL,
-            request_id    TEXT    NOT NULL,
-            trace_id      TEXT    NOT NULL,
-            actor_kind    TEXT    NOT NULL,
-            actor         TEXT    NOT NULL,
-            client_ip     TEXT,
-            user_agent    TEXT,
-            method        TEXT    NOT NULL,
-            path          TEXT    NOT NULL,
-            query         TEXT,
-            request_body  TEXT,
-            status_code   INTEGER NOT NULL,
-            duration_ms   INTEGER NOT NULL,
-            device_id     TEXT,
-            problem_type  TEXT,
-            detail        TEXT,
-            response_body TEXT
-        );
-        CREATE INDEX IF NOT EXISTS idx_api_call_requested
-            ON api_call(requested_at);
-        CREATE INDEX IF NOT EXISTS idx_api_call_device
-            ON api_call(device_id, requested_at);
-        """
-    )
+PRUNE_INTERVAL_S = 6 * 3600.0
 
 
 def resolve_trace_id(traceparent: str | None) -> str:
@@ -120,10 +88,20 @@ def resolve_trace_id(traceparent: str | None) -> str:
 
 
 def _actor_of(request: Request) -> tuple[str, str]:
-    """从请求头判定调用方，如实记录原文、不脱敏。"""
-    identity = request.headers.get("X-Identity")
-    if identity:
-        return "identity", identity
+    """判定调用方种类，不记录凭据明文。
+
+    凭据明文进审计等于把密钥又抄了一份；这里只记种类与可关联的标识：
+    会话记用户名（签名校验在 SessionMiddleware 已完成），Bearer 凭据记摘要
+    前 12 位（足以对账、不足以冒用）。
+    """
+    from app.auth.tokens import extract_bearer, hash_token
+
+    username = request.session.get("u")
+    if isinstance(username, str) and username:
+        return "session", username
+    token = extract_bearer(request.headers.get("authorization"))
+    if token:
+        return "token", hash_token(token)[:12]
     return "anonymous", ""
 
 
@@ -166,62 +144,51 @@ def record(
     `query` 是请求的查询串；`request_body` 与 `response_body` 是 JSON 体原文；
     `detail` 是失败响应的中文说明（RFC 9457 的 detail）。
     """
-    db.write(
-        "INSERT INTO api_call (kind, requested_at, request_id, trace_id, actor_kind, actor,"
-        " client_ip, user_agent, method, path, query, request_body, status_code, duration_ms,"
-        " device_id, problem_type, detail, response_body)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (
-            "http",
-            now_rfc3339(),
-            request_id_var.get(),
-            trace_id_var.get(),
-            actor_kind,
-            actor,
-            client_ip or None,
-            user_agent or None,
-            method,
-            path,
-            query or None,
-            request_body or None,
-            status_code,
-            duration_ms,
-            device_id or None,
-            problem_type or None,
-            detail or None,
-            store_body(response_body) or None,
-        ),
-    )
+    from app.db.session import session_scope
+    from app.persistence import audit as audit_store
+
+    with session_scope() as session:
+        audit_store.insert_api_call(
+            session,
+            kind="http",
+            method=method,
+            path=path,
+            status_code=status_code,
+            duration_ms=duration_ms,
+            device_id=device_id,
+            actor_kind=actor_kind,
+            actor=actor,
+            client_ip=client_ip or None,
+            user_agent=user_agent or None,
+            query=query or None,
+            request_body=request_body or None,
+            response_body=store_body(response_body) or None,
+            problem_type=problem_type or None,
+            detail=detail or None,
+            request_id=request_id_var.get(),
+            trace_id=trace_id_var.get(),
+        )
 
 
 def record_gateway(device_id: str, event: str, client_ip: str = "") -> None:
     """网关生命周期一行（connect/disconnect）。kind='gateway'，status 约定 0=连接 1=断开。"""
+    from app.db.session import session_scope
+    from app.persistence import audit as audit_store
+
     status_code = 0 if event == "connect" else 1
-    db.write(
-        "INSERT INTO api_call (kind, requested_at, request_id, trace_id, actor_kind, actor,"
-        " client_ip, user_agent, method, path, query, request_body, status_code, duration_ms,"
-        " device_id, problem_type, detail)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (
-            "gateway",
-            now_rfc3339(),
-            uuid.uuid4().hex,
-            "",
-            "device",
-            device_id,
-            client_ip or None,
-            None,
-            "WS",
-            "/gateway/device",
-            None,
-            None,
-            status_code,
-            0,
-            device_id,
-            None,
-            None,
-        ),
-    )
+    with session_scope() as session:
+        audit_store.insert_api_call(
+            session,
+            kind="gateway",
+            method="WS",
+            path="/gateway/device",
+            status_code=status_code,
+            duration_ms=0,
+            device_id=device_id,
+            actor_kind="device",
+            actor=device_id,
+            client_ip=client_ip or None,
+        )
 
 
 def list_calls(
@@ -232,81 +199,48 @@ def list_calls(
     limit: int = 100,
 ) -> list[ApiCallRecord]:
     """按时间倒序取审计记录（/api/v1/audit/calls）。"""
-    sql = (
-        "SELECT kind, requested_at, request_id, trace_id, actor_kind, actor, client_ip,"
-        " user_agent, method, path, query, request_body, status_code, duration_ms, device_id,"
-        " problem_type, detail, response_body FROM api_call"
-    )
-    params: list[object] = []
-    clauses: list[str] = []
-    if device_id:
-        clauses.append("device_id = ?")
-        params.append(device_id)
-    if actor_kind:
-        clauses.append("actor_kind = ?")
-        params.append(actor_kind)
-    if kind:
-        clauses.append("kind = ?")
-        params.append(kind)
-    if clauses:
-        sql += " WHERE " + " AND ".join(clauses)
-    sql += " ORDER BY id DESC LIMIT ?"
-    params.append(limit)
-    rows = db.get_conn().execute(sql, params).fetchall()
-    return cast("list[ApiCallRecord]", [dict(r) for r in rows])
+    from app.db.session import session_scope
+    from app.persistence import audit as audit_store
+
+    with session_scope() as session:
+        return cast(
+            "list[ApiCallRecord]",
+            audit_store.list_api_calls(session, device_id=device_id, actor_kind=actor_kind, kind=kind, limit=limit),
+        )
 
 
-def prune(retention_days: int) -> int:
+def prune(session: Session, retention_days: int) -> int:
     """删除超过保留期的审计行（api_call 与 command_audit），返回删除行数。
 
     只动审计表：业务数据（喷头状态迁移、使用会话）是运营历史，永久保留；
-    库文件不复缩，页复用即可。两张表的 DELETE 共用一个事务（不走 db.write 的
-    单语句事务）：要么都清、要么都不清，两边保留期才不会错开。
+    库文件不复缩，页复用即可。两张表的 DELETE 共用一个事务：要么都清、
+    要么都不清，两边保留期才不会错开。
     """
-    conn = db.get_conn()
+    from sqlalchemy import delete
+
+    from app.models.ops import ApiCall, CommandAudit
+
+    cutoff = utcnow() - timedelta(days=retention_days)
     removed = 0
-    for table, column in (("api_call", "requested_at"), ("command_audit", "created_at")):
-        cursor = conn.execute(f"DELETE FROM {table} WHERE {column} < datetime('now', ?)", (f"-{retention_days} days",))
-        removed += cursor.rowcount
-    conn.commit()
+    for table, column in ((ApiCall, ApiCall.requested_at), (CommandAudit, CommandAudit.created_at)):
+        result = session.execute(delete(table).where(column < cutoff))
+        removed += int(getattr(result, "rowcount", 0) or 0)
+    session.commit()
     return removed
 
 
-async def _prune_loop() -> None:
-    while True:
-        try:
-            removed = prune(settings.audit_retention_days)
-            if removed:
-                log_event(
-                    "INFO",
-                    "audit.pruned",
-                    "审计过期行已清理",
-                    rows=removed,
-                    retention_days=settings.audit_retention_days,
-                )
-        except asyncio.CancelledError:
-            raise
-        except Exception:  # noqa: BLE001 清理失败不能带垮服务，下一轮重试
-            log_event(
-                "ERROR",
-                "audit.prune-failed",
-                "审计清理失败，等下一轮重试",
-                error=exc_info_text(),
-            )
-        await asyncio.sleep(_PRUNE_INTERVAL_S)
-
-
-def start_prune() -> None:
-    global _prune_task
-    if _prune_task is None or _prune_task.done():
-        _prune_task = asyncio.create_task(_prune_loop())
-
-
-def stop_prune() -> None:
-    global _prune_task
-    if _prune_task is not None:
-        _prune_task.cancel()
-        _prune_task = None
+async def prune_once() -> None:
+    """清理一轮；生命周期（启动、取消、间隔）由 core/background 统一管理。"""
+    with session_scope() as session:
+        removed = prune(session, settings.audit_retention_days)
+    if removed:
+        log_event(
+            "INFO",
+            "audit.pruned",
+            "审计过期行已清理",
+            rows=removed,
+            retention_days=settings.audit_retention_days,
+        )
 
 
 def _device_of(path: str, query: str) -> str:

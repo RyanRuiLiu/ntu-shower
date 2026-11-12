@@ -11,7 +11,7 @@ import java.net.UnknownHostException
 import java.util.Random
 
 /**
- * 内置 DNS 解析器：设备系统 DNS 不可用（实测校园网封锁默认解析器，见 docs/ARCHITECTURE.md），
+ * 内置 DNS 解析器：设备系统 DNS 不可用（实测校园网封锁默认解析器，见 docs/architecture.md），
  * 直接向公共 DNS 发标准查询（UDP 优先，端口超时换 TCP，同为标准查询方式）。
  * 只解析服务域名：域名是设备唯一的网络锚点。无缓存，也不设第二台解析服务器。
  */

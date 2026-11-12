@@ -1,0 +1,78 @@
+# 项目自有规则（Semgrep 本地规则格式）
+#
+# 为什么放这里：能派生的东西不写进文档，写进文档的东西没人执行——所以规则要么有执行者，
+# 要么不存在。Semgrep 是已经在流水线里的工具，用它承载项目规则，不另造扫描器。
+#
+# 每条规则都对应一次真实发生过的漂移，不是假想的整洁偏好。
+
+rules:
+  - id: doc-section-ref
+    languages: [generic]
+    severity: ERROR
+    message: |
+      代码里不要引用仓库文档的章节号（如 `docs/runbook.md §3`）。文档改版后章节号必然失效，
+      而 markdownlint 只检查 .md，这种失效没有任何门禁能发现。只引用文件路径。
+    paths:
+      exclude:
+        - ".semgrep.yml"
+      include:
+        - "*.py"
+        - "*.kt"
+        - "*.kts"
+        - "*.js"
+        - "*.ps1"
+        - "*.sh"
+        - "*.toml"
+        - "*.yml"
+        - "*.yaml"
+        - "*.json"
+        - ".githooks/*"
+    pattern-regex: 'docs/[\w./-]+\.md\s*§'
+
+  - id: deleted-doc-ref
+    languages: [generic]
+    severity: ERROR
+    message: |
+      引用了已删除的文档。现存的所有者文档：docs/architecture.md、docs/reference.md、
+      docs/runbook.md、docs/security.md、docs/adr/、README.md、CONTRIBUTING.md。
+    paths:
+      exclude:
+        - ".semgrep.yml"
+      include:
+        - "*.py"
+        - "*.kt"
+        - "*.kts"
+        - "*.js"
+        - "*.ps1"
+        - "*.sh"
+        - "*.toml"
+        - "*.yml"
+        - "*.yaml"
+        - "*.json"
+        - ".githooks/*"
+    pattern-regex: '(STANDARDS\.md|docs/DECISIONS\.md|docs/glossary\.md|docs/testing\.md)'
+
+  - id: silent-except
+    languages: [python]
+    severity: ERROR
+    message: |
+      except 里只放 pass 是「兜底」的主形态：故障被静默吞掉，主通路不完整的事实不再暴露，
+      出问题时查无可查。要么让异常传播，要么捕获后处理（记录、按原因码应答），并为这次
+      捕获给出依据。确属「故意忽略、范围明确」的场景用 contextlib.suppress 显式写——
+      它是 Python 官方语境里的表达。政策出处：AGENTS.md「不兜底」。
+    pattern-either:
+      - pattern: |
+          try:
+              ...
+          except:
+              pass
+      - pattern: |
+          try:
+              ...
+          except $E:
+              pass
+      - pattern: |
+          try:
+              ...
+          except $E as $E2:
+              pass

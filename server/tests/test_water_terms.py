@@ -1,5 +1,8 @@
-"""水控板术语与界面文案的静态对账。
+"""水控板术语与界面文案的跨端契约测试。
 
+性质：契约测试（contract testing，行业标准分类）——锁的是三端（网页 JS、Android
+Kotlin、ADR 证据记录）对同一组用户可见术语的共同约定，防"改一端漏另一端"。领域词汇
+的单一出处对应 DDD 的 Ubiquitous Language（Evans）；跨实现核对是契约测试的标准形态。
 这些词是网页与设备端对外可见的正名；只改一处、忘了另一处，用户就会看到两套说法。
 状态映射本身由 `core/water.js` 的纯函数负责，这里锁定标签、按钮、计时对应关系
 和不许回流的旧词。
@@ -12,7 +15,7 @@ WATER = REPO / "server/web/core/water.js"
 OVERVIEW = REPO / "server/web/views/overview.js"
 APP = REPO / "server/web/app.js"
 HANDLER = REPO / "android/app/src/main/java/com/ryanliu/ntushower/features/water/WaterHandler.kt"
-WATER_EVIDENCE = REPO / "docs/evidence/2026-10-30-water-board-2f.md"
+WATER_EVIDENCE = REPO / "docs/water-board.md"
 
 
 def read(path: Path) -> str:

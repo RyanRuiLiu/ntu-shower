@@ -7,12 +7,15 @@ query）与数据重型端点的响应排除用纯函数直接钉住。
 
 import io
 import json
+from contextlib import AbstractContextManager, contextmanager
 
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 from tests import apk, frames
 
 from app.core import audit
-from app.modules.audit import repository as command_audit
+from app.db.base import utcnow
+from app.persistence import audit as command_audit
 
 
 def _calls(client: TestClient, admin_headers: dict[str, str], **params: object) -> list[dict[str, object]]:
@@ -61,8 +64,10 @@ def test_identity_call_records_raw_actor(client: TestClient, admin_headers: dict
     assert row["method"] == "GET"
     assert row["path"] == "/api/v1/ota/releases"
     assert row["status_code"] == 200
-    assert row["actor_kind"] == "identity"
-    assert row["actor"] == "admin-identity-0001"
+    assert row["actor_kind"] == "token"
+    # 只记凭据摘要前 12 位：足够对账，不足以冒用；明文身份与凭据都不进审计
+    assert len(row["actor"]) == 12
+    assert row["actor"] != "admin-identity-0001"
     assert row["duration_ms"] >= 0
 
 
@@ -163,14 +168,15 @@ def test_calls_filters_by_actor_kind_and_device(client: TestClient, admin_header
     assert by_device
     assert all(row["device_id"] == "dev-filter-1" for row in by_device)
 
-    by_actor = _calls(client, admin_headers, actor_kind="identity", limit=1)
+    by_actor = _calls(client, admin_headers, actor_kind="token", limit=1)
     assert by_actor
-    assert all(row["actor_kind"] == "identity" for row in by_actor)
+    assert all(row["actor_kind"] == "token" for row in by_actor)
 
 
 def test_commands_lists_command_audit_rows(client: TestClient, admin_headers: dict[str, str]) -> None:
     """GET /audit/commands 裸数组：命令流水，可按设备过滤。"""
-    command_audit.insert_command("cmd-audit-1", "dev-audit-cmd", "session.assign")
+    with _svc() as session:
+        command_audit.insert_command(session, "cmd-audit-1", "dev-audit-cmd", "session.assign", utcnow())
 
     rows = client.get("/api/v1/audit/commands", headers=admin_headers, params={"device_id": "dev-audit-cmd"}).json()
     assert isinstance(rows, list)
@@ -200,19 +206,47 @@ def test_data_heavy_paths_are_excluded_from_response_storage() -> None:
 def test_prune_removes_only_expired_rows(client: TestClient, admin_headers: dict[str, str]) -> None:
     """保留期之内必须留，之外的可删（NIST SP 800-92）；清理幂等。"""
     assert client.get("/api/v1/ota/releases", headers=admin_headers).status_code == 200
-    assert audit.prune(retention_days=90) == 0
+    with _svc() as session:
+        assert audit.prune(session, 90) == 0
     assert len(_calls(client, admin_headers, limit=500)) == 1
 
-    from app.core.db import get_conn
+    # 中间件仍写旧表（audit 域随第二批切换）；保留期语义对新表直接造数据验证
+    from datetime import timedelta
 
-    conn = get_conn()
-    conn.execute(
-        "UPDATE api_call SET requested_at = datetime('now', '-91 days') WHERE id = (SELECT MIN(id) FROM api_call)"
-    )
-    conn.commit()
+    from sqlalchemy import select
 
-    assert audit.prune(retention_days=90) == 1
-    assert audit.prune(retention_days=90) == 0
+    from app.db.base import utcnow
+    from app.models.ops import ApiCall
+
+    with _svc() as session:
+        stale = ApiCall(
+            kind="http",
+            method="GET",
+            path="/api/v1/ota/releases",
+            status_code=200,
+            duration_ms=1,
+            actor_kind="anonymous",
+            requested_at=utcnow() - timedelta(days=91),
+        )
+        fresh = ApiCall(
+            kind="http",
+            method="GET",
+            path="/api/v1/ota/releases",
+            status_code=200,
+            duration_ms=1,
+            actor_kind="anonymous",
+            requested_at=utcnow(),
+        )
+        session.add(stale)
+        session.add(fresh)
+        session.commit()
+        assert audit.prune(session, 90) == 1
+        remaining = session.scalars(select(ApiCall.id)).all()
+        # 过期的那行删掉；中间件记下的与刚造的保留期内各行都留
+        assert stale.id not in remaining
+        assert fresh.id in remaining
+    with _svc() as session:
+        assert audit.prune(session, 90) == 0
 
 
 def test_store_body_replaces_oversize_payload() -> None:
@@ -221,3 +255,12 @@ def test_store_body_replaces_oversize_payload() -> None:
 
     assert audit.store_body("compact") == "compact"
     assert audit.store_body(body).startswith("[JSON 体")
+
+
+@contextmanager
+def _svc() -> "AbstractContextManager[Session]":
+    """审计清理直调的短会话。"""
+    from app.db.session import session_scope
+
+    with session_scope() as session:
+        yield session

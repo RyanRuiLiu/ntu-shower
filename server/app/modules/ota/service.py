@@ -1,16 +1,19 @@
 """OTA 领域服务：APK 存储与发布通知。
 
 发布通知：release 注册后向在线的目标设备即时推送 ota.upgrade_available；
-离线设备不补推——其下次轮询 manifest 时自然获取（协议 §6）。
+离线设备不补推——其下次轮询 `GET /ota/manifest` 时自然获取。
 """
 
 import hashlib
 import re
 from pathlib import Path
 
+from sqlalchemy.orm import Session
+
 from app.core import protocol
 from app.core.config import settings
 from app.core.connections import manager
+from app.persistence import ota as repository
 
 # 发布版本号格式：SemVer 三段数字的严格子集。
 # 该约束同时承担安全职责——版本号最终拼入文件路径，字符集必须排除
@@ -55,23 +58,21 @@ def remove_release_file(version: str) -> bool:
     return True
 
 
-def prune_releases(keep: int) -> list[str]:
+def prune_releases(session: Session, keep: int) -> list[str]:
     """只留最近 keep 个发布（version_code 优先），其余连注册行带文件一起删。
 
     旧的 APK 留在盘上只有体积没有意义，但上一两个版本要留作回滚点，所以 keep
     是配置而不是写死的 1。注册行与盘上文件可能因删除或库重建而脱节，孤儿文件
     （盘上有、注册表里没有）一并清，"不积累垃圾"才算完整。
     """
-    from . import repository
-
     removed: list[str] = []
-    for rel in repository.list_releases()[max(keep, 0) :]:
+    for rel in repository.list_releases(session)[max(keep, 0) :]:
         version = rel["version"]
         remove_release_file(version)
-        repository.delete_release(version)
+        repository.delete_release(session, version)
         removed.append(version)
 
-    known = {rel["version"] for rel in repository.list_releases()}
+    known = {rel["version"] for rel in repository.list_releases(session)}
     for path in sorted(Path(settings.ota_dir).glob("*.apk")):
         if path.stem not in known:
             path.unlink()

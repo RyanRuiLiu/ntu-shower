@@ -1,0 +1,16 @@
+# Dependabot 依赖更新。官方文档：
+# https://docs.github.com/en/code-security/dependabot/dependabot-options-reference
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/server"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "gradle"
+    directory: "/android"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

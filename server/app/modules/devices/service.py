@@ -6,44 +6,51 @@
 device.update 的 payload 是精简档案（DeviceSummary）：版本、来源 IP、时钟偏差
 等运维诊断字段不进公开推送，管理台要详情走 REST。发布只经 [publish_device_update]
 一处，网关生命周期与档案修改共用。
+
+会话来源（全库同一约定）：路由层 `Depends(get_db)`，WS 与后台任务由调用方开
+短生命周期会话传入；本层不自己开库。
 """
 
+from sqlalchemy.orm import Session
+
 from app.core import device_clock, events
-from app.core.clock import now_rfc3339
+from app.core.clock import now_rfc3339, parse_rfc3339
 from app.core.connections import manager
 from app.core.problems import DEVICE_NOT_FOUND, ApiProblemError
 from app.core.protocol import as_int
+from app.db.base import utcnow
+from app.models.enums import DeviceLogKind, LinkEvent
 from app.modules.config import store as config_store
+from app.persistence import devices as repository
 
-from . import repository
 from .schemas import DeviceRecord, DeviceSummary
 
 
-def get_device(device_id: str) -> DeviceRecord | None:
-    record = repository.get(device_id)
+def get_device(session: Session, device_id: str) -> DeviceRecord | None:
+    record = repository.get(session, device_id)
     if record is None:
         return None
     record["online"] = manager.is_online(device_id)
     return record
 
 
-def list_devices() -> list[DeviceRecord]:
-    records = repository.list_all()
+def list_devices(session: Session) -> list[DeviceRecord]:
+    records = repository.list_all(session)
     for record in records:
         record["online"] = manager.is_online(record["device_id"])
     return records
 
 
-def set_order(device_ids: list[str]) -> None:
+def set_order(session: Session, device_ids: list[str]) -> None:
     """按给定顺序重排设备（管理员手动调整，全部设备清单的唯一顺序来源）。
 
     清单里出现未知设备（已拆除的、拼错的）整体拒绝：半排序比不排序更难看。
     """
-    known = {str(record["device_id"]) for record in repository.list_all()}
+    known = {str(record["device_id"]) for record in repository.list_all(session)}
     unknown = [item for item in device_ids if item not in known]
     if unknown:
         raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {unknown[0]}")
-    repository.set_order(device_ids)
+    repository.set_order(session, device_ids)
 
 
 def to_summary(record: DeviceRecord) -> DeviceSummary:
@@ -51,9 +58,9 @@ def to_summary(record: DeviceRecord) -> DeviceSummary:
     return {"device_id": record["device_id"], "name": record["name"], "online": record["online"]}
 
 
-def publish_device_update(device_id: str) -> None:
+def publish_device_update(session: Session, device_id: str) -> None:
     """发布一次 device.update（精简载荷）；档案不存在的设备推最小占位。"""
-    record = get_device(device_id)
+    record = get_device(session, device_id)
     if record is not None:
         payload: dict[str, object] = dict(to_summary(record))
     else:
@@ -63,6 +70,7 @@ def publish_device_update(device_id: str) -> None:
 
 
 def register_device(
+    session: Session,
     device_id: str,
     app_version: str,
     version_code: int,
@@ -71,20 +79,30 @@ def register_device(
     ip: str,
     booted_at: str,
 ) -> None:
-    repository.register(device_id, app_version, version_code, os_version, capabilities, ip, booted_at)
+    repository.register(
+        session,
+        device_id=device_id,
+        app_version=app_version,
+        version_code=version_code,
+        os_version=os_version,
+        capabilities=capabilities,
+        ip=ip,
+        booted_at=parse_rfc3339(booted_at) or utcnow(),
+        seen_at=utcnow(),
+    )
 
 
-def touch_seen(device_id: str) -> None:
+def touch_seen(session: Session, device_id: str) -> None:
     """记下刚收到该设备的一帧（心跳粒度，见 repository.touch_seen）。"""
-    repository.touch_seen(device_id)
+    repository.touch_seen(session, device_id, utcnow())
 
 
-def set_device_offline(device_id: str) -> None:
+def set_device_offline(session: Session, device_id: str) -> None:
     """断开收尾：刷新"最后见到"时刻（列的语义是"最后见到"，不分心跳还是断开）。"""
-    repository.touch_seen(device_id)
+    repository.touch_seen(session, device_id, utcnow())
 
 
-def shift_clock_skew(device_id: str, seconds: float) -> None:
+def shift_clock_skew(session: Session, device_id: str, seconds: float) -> None:
     """设备钟被整体平移 seconds 秒（可负）后，把偏差记录当场跟上。
 
     偏差 = 服务端 − 设备：设备钟被拨快 seconds，偏差就减同量。拨钟由延长服务发起，
@@ -96,57 +114,54 @@ def shift_clock_skew(device_id: str, seconds: float) -> None:
         return  # 没有记录就无从改：拨钟本来就以"有记录"为前提
     skew = device_clock.get(device_id) - seconds
     device_clock.load(device_id, skew)
-    repository.set_clock_skew(device_id, skew)
+    repository.set_clock_skew(session, device_id, skew)
 
 
-def record_link_event(device_id: str, event: str, reason: str = "") -> None:
+def record_link_event(session: Session, device_id: str, event: str, reason: str = "") -> None:
     """记一次上下线（event 取 schemas 的 LINK_ONLINE / LINK_OFFLINE）。
 
     与 [set_device_offline] 分工不同：那个刷新档案上的"最后见到"一列，只记得住最后一次；
     这个留下一串历史，回答"这台设备什么时候在线过"——它是设备利用率的分母，也是
-    "这段时间为什么没有数据"唯一能给出的答案。[reason] 见 repository.insert_link_event。
+    "这段时间为什么没有数据"唯一能给出的答案。
     """
-    repository.insert_link_event(device_id, event, now_rfc3339(), reason)
+    repository.insert_link_event(session, device_id, LinkEvent(event), utcnow(), reason)
 
 
-def record_log_upload(device_id: str, kind: str, content: str) -> None:
+def record_log_upload(session: Session, device_id: str, kind: str, content: str) -> None:
     """落一份设备日志上送（见 repository.append_device_log 的保留规则）。"""
-    repository.append_device_log(device_id, kind, content, now_rfc3339())
+    repository.append_device_log(session, device_id, DeviceLogKind(kind), content, utcnow())
 
 
-def latest_device_log(device_id: str, kind: str) -> dict[str, str] | None:
+def latest_device_log(session: Session, device_id: str, kind: str) -> dict[str, str] | None:
     """最新的日志上送（设备页查看器）；没有则 None。"""
-    row = repository.latest_device_log(device_id, kind)
-    if row is None:
-        return None
-    return {"content": str(row["content"]), "uploaded_at": str(row["uploaded_at"])}
+    return repository.latest_device_log(session, device_id, DeviceLogKind(kind))
 
 
-def load_clock_skew(device_id: str) -> None:
+def load_clock_skew(session: Session, device_id: str) -> None:
     """把持久化的钟偏差载入内存。设备上线时调一次。
 
     不载入的话，从上线到首次 pong 之间偏差读出来是 0，等于这段时间不做平移——而
     "我们刚接手、那边还被占着"恰恰最常发生在这个窗口里。
     """
-    device_clock.load(device_id, repository.get_clock_skew(device_id))
+    device_clock.load(device_id, repository.get_clock_skew(session, device_id))
 
 
-def update_clock_skew(device_id: str, device_time: object, received_at: str) -> None:
+def update_clock_skew(session: Session, device_id: str, device_time: object, received_at: str) -> None:
     """用设备回 pong 时带的墙上时刻更新钟偏差，并落库。
 
     阈值取自配置：单次观测与当前值差得超过它，说明设备钟被动了（重启归零、被手动改
     钟），直接采信新值而不平滑——继续平滑会让之后几次映射都按错误的偏差算。
     """
-    threshold = as_int(config_store.effective(device_id).get("clock_jump_threshold_s"), default=60)
+    threshold = as_int(config_store.effective(session, device_id).get("clock_jump_threshold_s"), default=60)
     skew = device_clock.update(device_id, device_time, received_at, threshold)
-    repository.set_clock_skew(device_id, skew)
+    repository.set_clock_skew(session, device_id, skew)
 
 
-def rename_device(device_id: str, name: str) -> bool:
-    return repository.set_name(device_id, name)
+def rename_device(session: Session, device_id: str, name: str) -> bool:
+    return repository.set_name(session, device_id, name)
 
 
-def set_trusted(device_id: str, trusted: bool) -> bool:
+def set_trusted(session: Session, device_id: str, trusted: bool) -> bool:
     """改信任位（只落库）。
 
     **信任只在那条连接的 hello 握手时判定一次**：库里这个位变了，已经建立的连接不会
@@ -154,7 +169,7 @@ def set_trusted(device_id: str, trusted: bool) -> bool:
     表现是「设备在线、功能全坏」（2026-10-06 首台新设备入网实测）。所以调用方（信任
     路由）改完必须**掐断现有连接**让设备重新握手，见 `routes.patch_device`。
     """
-    return repository.set_trusted(device_id, trusted)
+    return repository.set_trusted(session, device_id, trusted)
 
 
 def is_online(device_id: str) -> bool:

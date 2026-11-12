@@ -1,0 +1,35 @@
+"""设备接入令牌。
+
+令牌本身是 32 字节随机串，熵足够，所以库里只存 SHA-256 摘要——不需要慢哈希。
+用摘要而不是明文的意义在于：数据库被读走，不等于设备被接管。
+"""
+
+from __future__ import annotations
+
+import hashlib
+import secrets
+
+TOKEN_BYTES = 32
+
+
+def generate_token() -> str:
+    """生成一个新令牌（URL 安全字符，可直接放进 Authorization 头）。"""
+    return secrets.token_urlsafe(TOKEN_BYTES)
+
+
+def hash_token(token: str) -> str:
+    """令牌摘要。查询与比对一律用摘要，不比对明文。"""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def extract_bearer(header: str | None) -> str | None:
+    """从 `Authorization: Bearer <token>` 中取出令牌；格式不符返回 None。"""
+    if not header:
+        return None
+    scheme, _, value = header.partition(" ")
+    if scheme.lower() != "bearer" or not value.strip():
+        return None
+    return value.strip()
+
+
+__all__: list[str] = ["TOKEN_BYTES", "extract_bearer", "generate_token", "hash_token"]

@@ -6,9 +6,14 @@ _reset_process_singletons 与 _isolate_default_db 对每个用例自动生效—
 没声明 fresh_db 的用例也碰不到仓库里的真实库与发布目录。
 """
 
+import os
 import shutil
 from collections.abc import Iterator
 from pathlib import Path
+
+# SESSION_SECRET 必须在 app 模块（含 config.Settings 实例化）导入之前就位：
+# create_app 在密钥缺失时拒绝启动，这是生产语义，测试环境同样要给出密钥。
+os.environ.setdefault("SESSION_SECRET", "test-session-secret")
 
 import pytest
 from fastapi.testclient import TestClient
@@ -19,6 +24,19 @@ from app.core import db as db_module
 ADMIN_IDENTITY = "admin-identity-0001"
 OPS_IDENTITY = "test-identity"
 TRUSTED_DEVICE_ID = "dev-test-0001"
+
+
+@pytest.fixture(autouse=True)
+def _disable_device_token_in_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    """测试环境统一关闭设备接入凭据校验。
+
+    生产默认强制校验（见 config.require_device_token），但网关用例关注的是帧协议与
+    推导，逐条签发设备凭据只会把无关噪声塞进每个用例。显式关闭属于测试夹具职责，
+    不是生产侧的旁路开关；凭据校验本身由 tests/test_auth_endpoints.py 单独验证。
+    """
+    from app.core import config as config_module
+
+    monkeypatch.setattr(config_module.settings, "require_device_token", False)
 
 
 @pytest.fixture(autouse=True)
@@ -88,14 +106,14 @@ def _schema_template(tmp_path_factory: pytest.TempPathFactory) -> str:
     每用例执行一遍 init_schema 要 15 毫秒以上，而结果完全相同；复制一个已
     checkpoint 的空库文件是亚毫秒级操作，隔离性不变（每个用例仍是独立文件）。
     """
-    from app.main import init_schema
-
     base = tmp_path_factory.mktemp("schema-template")
     path = str(base / "template.db")
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(config_module.settings, "db_path", path)
-        mp.setattr(config_module.settings, "ota_dir", str(base / "ota_releases"))
-        init_schema()
+    from app.db.engine import create_db_engine
+    from app.models import Base
+
+    engine = create_db_engine(f"sqlite:///{path}")
+    Base.metadata.create_all(engine)
+    engine.dispose()
     db_module.close_all_connections()  # 最后一个连接关闭即 checkpoint，WAL 落盘
     return path
 
@@ -136,13 +154,26 @@ def fresh_db(
 @pytest.fixture
 def admin_headers(fresh_db: str) -> dict[str, str]:
     """管理台调用方：admin 之外还持 session/photo——管理台要代操作用户动作。"""
-    from app.modules.access import repository as access_repository
-    from app.modules.access.identity import IdentityKind
+    from app.db.session import Database
+    from app.models.enums import IdentityKind
+    from app.persistence import principals as principals_store
 
-    access_repository.put_identity(
-        ADMIN_IDENTITY, IdentityKind.WEB, ["admin", "session", "photo"], "测试管理员", device_scope=["*"]
-    )
-    return {"X-Identity": ADMIN_IDENTITY}
+    database = Database(f"sqlite:///{Path(fresh_db).as_posix()}")
+    try:
+        with database.new_session() as session:
+            principals_store.put(
+                session,
+                ADMIN_IDENTITY,
+                IdentityKind.WEB,
+                ["admin", "session", "photo"],
+                "测试管理员",
+                ["*"],
+            )
+            token = principals_store.issue_token(session, ADMIN_IDENTITY)
+    finally:
+        database.dispose()
+    assert token is not None
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture
@@ -152,14 +183,33 @@ def ops_headers(fresh_db: str) -> dict[str, str]:
     同时登记一台已信任设备 dev-test-0001：用户面操作类接口的守卫链要求设备
     存在且已信任，需要现成目标的用例直接用常量 TRUSTED_DEVICE_ID。
     """
-    from app.modules.access import repository as access_repository
-    from app.modules.access.identity import IdentityKind
-    from app.modules.devices import repository as devices_repository
+    from app.db.base import utcnow
+    from app.db.session import Database
+    from app.models.enums import IdentityKind
+    from app.persistence import devices as devices_store
+    from app.persistence import principals as principals_store
 
-    devices_repository.register(TRUSTED_DEVICE_ID, "0.4.13", 57, "4.4.4", [], "127.0.0.1", "2026-06-01T08:00:00.000Z")
-    devices_repository.set_trusted(TRUSTED_DEVICE_ID, True)
-    access_repository.put_identity(OPS_IDENTITY, IdentityKind.WEB, ["session", "photo"], "测试用", device_scope=["*"])
-    return {"X-Identity": OPS_IDENTITY}
+    database = Database(f"sqlite:///{Path(fresh_db).as_posix()}")
+    try:
+        with database.new_session() as session:
+            devices_store.register(
+                session,
+                device_id=TRUSTED_DEVICE_ID,
+                app_version="0.4.13",
+                version_code=57,
+                os_version="4.4.4",
+                capabilities=[],
+                ip="127.0.0.1",
+                booted_at=utcnow(),
+                seen_at=utcnow(),
+            )
+            devices_store.set_trusted(session, TRUSTED_DEVICE_ID, True)
+            principals_store.put(session, OPS_IDENTITY, IdentityKind.WEB, ["session", "photo"], "测试用", ["*"])
+            token = principals_store.issue_token(session, OPS_IDENTITY)
+    finally:
+        database.dispose()
+    assert token is not None
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture

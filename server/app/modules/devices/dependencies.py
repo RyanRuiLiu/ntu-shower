@@ -9,8 +9,12 @@
 超时，各写一遍迟早分叉。
 """
 
+from fastapi import Depends
+from sqlalchemy.orm import Session
+
 from app.core.problems import DEVICE_NOT_FOUND, DEVICE_OFFLINE, UNTRUSTED_DEVICE, ApiProblemError
 from app.core.protocol import JsonObject
+from app.db.deps import get_db
 from app.modules.sessions import service as sessions_service
 from app.modules.sessions.schemas import CommandOutcome
 
@@ -21,9 +25,9 @@ from .schemas import DeviceRecord
 DEVICE_ACTION_TIMEOUT_S = 30.0
 
 
-def require_trusted_online_device(device_id: str) -> DeviceRecord:
+def require_trusted_online_device(device_id: str, session: Session = Depends(get_db)) -> DeviceRecord:
     """依赖守卫：设备必须存在且已信任、当前在线；否则拒绝进入业务。"""
-    device = service.get_device(device_id)
+    device = service.get_device(session, device_id)
     if device is None:
         raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {device_id} 不在档案里")
     if not device["trusted"]:
@@ -34,7 +38,9 @@ def require_trusted_online_device(device_id: str) -> DeviceRecord:
     return device
 
 
-async def device_action(device_id: str, action: str, params: JsonObject, timeout_s: float) -> CommandOutcome:
+async def device_action(
+    session: Session, device_id: str, action: str, params: JsonObject, timeout_s: float
+) -> CommandOutcome:
     """远程动作的公共路径：设备须已信任在线，命令经统一下发与等待取回结果。"""
-    require_trusted_online_device(device_id)
-    return await sessions_service.send_command_and_wait(device_id, action, params, timeout_s=timeout_s)
+    require_trusted_online_device(device_id, session)
+    return await sessions_service.send_command_and_wait(session, device_id, action, params, timeout_s=timeout_s)

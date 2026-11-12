@@ -7,3 +7,11 @@ python-multipart==0.0.33
 # 运行时已升 3.13：websockets 回到 17.x 主线（pyproject 兼容范围本就是 >=17.0）
 websockets==17.4
 typing-extensions==4.16.0
+# 数据层：ORM 与迁移
+sqlalchemy==2.1.8
+alembic==1.20.1
+# 口令哈希：Argon2id 是当前密码哈希的推荐算法（RFC 9106）
+argon2-cffi==25.1.0
+# 会话签名：Starlette SessionMiddleware 的签名机制建立在 itsdangerous 上
+# （Flask 的会话同样用它），是 Python Web 生态里签名令牌的标准实现
+itsdangerous==2.2.0
