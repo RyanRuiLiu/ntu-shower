@@ -14,9 +14,9 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from tests import door_link
 
-from app.core import db
-from app.modules.doors import repository, service
+from app.modules.doors import service
 
 T0 = "2026-09-30T12:00:00.000Z"
 T1 = "2026-09-30T12:01:00.000Z"
@@ -83,23 +83,20 @@ def test_every_cell(fresh_db: str, f_state: str, t_state: str, rel: str, rule: s
     device_id = f"dev-cell-{f_state}-{t_state}-{rel}"
 
     # 第一帧把门置成 from 状态。占用者固定是 A，好让 R5 有得换。
-    service.process_snapshot(device_id, _frame([_reading(f_state, "A")], T0))
-    assert repository.get_all_live(device_id)[1]["state"] == f_state, "首帧的状态派生要准确"
+    door_link.feed(device_id, _frame([_reading(f_state, "A")], T0))
+    assert door_link.get_all_live(device_id)[1]["state"] == f_state, "首帧的状态派生要准确"
 
     # 首帧即占用会开会话；空闲态不开。这一条对 58 格全都成立。
-    opened_after_first = (
-        db.get_conn().execute("SELECT COUNT(*) FROM usage_session WHERE device_id = ?", (device_id,)).fetchone()[0]
-    )
+    opened_after_first = len(door_link.list_sessions(device_id))
     assert opened_after_first == (1 if f_state in OCCUPIED else 0), "首帧：占用态开会话，空闲态不开"
 
     # 第二帧置成 to 状态。人按关系决定——R5 换成 B，其余保持 A。
     who = "B" if rel == "other" else "A"
-    service.process_snapshot(device_id, _frame([_reading(t_state, who)], T1))
-    assert repository.get_all_live(device_id)[1]["state"] == t_state
+    door_link.feed(device_id, _frame([_reading(t_state, who)], T1))
+    assert door_link.get_all_live(device_id)[1]["state"] == t_state
 
-    conn = db.get_conn()
-    events = conn.execute("SELECT * FROM door_state_event WHERE device_id = ? ORDER BY id", (device_id,)).fetchall()
-    sessions = conn.execute("SELECT * FROM usage_session WHERE device_id = ? ORDER BY id", (device_id,)).fetchall()
+    events = door_link.list_events(device_id)
+    sessions = door_link.list_sessions(device_id)
 
     # 事件：状态变了才记一条，没变就一条都不记（首帧从不记）
     assert len(events) == (1 if f_state != t_state else 0), f"{f_state}→{t_state} 的事件数不对"
@@ -121,7 +118,7 @@ def test_every_cell(fresh_db: str, f_state: str, t_state: str, rel: str, rule: s
         assert len(sessions) == 1
         assert sessions[0]["assigned_at"] == T0, "R4 沿用同一个会话"
         assert sessions[0]["last_seen_at"] == T1, "R4 推进 last_seen_at"
-        assert sessions[0]["ended_at"] is None
+        assert sessions[0]["ended_at"] == ""
     elif rule == "R5":
         assert len(sessions) == 2, "R5 一关一开"
         assert sessions[0]["cert_no"] == "A"

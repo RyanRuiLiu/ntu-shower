@@ -348,7 +348,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
     ),
     # ── 屏幕提示 ──
     # 配置面在服务端，显隐判定在设备端：服务端只下发文字/样式/条件，设备用服务端
-    # 时间轴与本地 t_doorlist 判断此刻是否显示。边界与理由见 docs/DECISIONS.md。
+    # 时间轴与本地 t_doorlist 判断此刻是否显示。边界与理由见 docs/adr/。
     ConfigSpec(
         "notice_enabled",
         BOOL,
@@ -1000,7 +1000,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "调试通道的 SSH 目标",
         "网页端生成本机连接命令时用的 `用户@主机`。它是现场那台电脑要 ssh 过去的地方，"
         "与网页自己的域名不是一回事——网页挂在 ntu-shower 子域上，而 ssh 连的是主域，"
-        "所以推不出来，只能配。见 docs/RUNBOOK.md 的连接指引。",
+        "所以推不出来，只能配。见 docs/runbook.md 的连接指引。",
         group="server_bridge",
     ),
     ConfigSpec(

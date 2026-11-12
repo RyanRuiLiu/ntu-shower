@@ -21,7 +21,7 @@ import com.ryanliu.ntushower.core.config.RuntimeConfig
  * 浴室 App 的退出监控和网页端的按状态展示，是那份状态的唯一来源。这里只负责**动作**——
  * 等页面、回首页、找元素、点下去。
  *
- * resId 语义提取自对浴室 App 的实测（见 docs/ARCHITECTURE.md）。
+ * resId 语义提取自对浴室 App 的实测（见 docs/architecture.md）。
  */
 @Suppress("TooManyFunctions") // 页面导航原语集合：查找/操作/状态三组共享同一套资源 ID 与节点遍历上下文
 object BathAppNavigator {

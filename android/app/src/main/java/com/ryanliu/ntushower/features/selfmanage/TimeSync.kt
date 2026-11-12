@@ -18,7 +18,7 @@ import java.util.TimeZone
  *
  * 这台设备没有 NTP，墙上时钟靠 RTC 维持，时区误设或掉电都会跑偏（真机 2026-10-02
  * 实测快了整 1 小时）。MCU 里的开关机截止是按布防那一刻的钟面换算的，钟一动截止就
- * 跟着在真实时间里漂（见 docs/evidence/2026-10-04-device-poweroff.md §11）。因此每次写钟都必须成对——
+ * 跟着在真实时间里漂（见 docs/adr/0007-device-poweroff-evidence.md）。因此每次写钟都必须成对——
  * **先把时钟写对，再按服务端下发的电源计划（power_off_at / power_on_at）重布 MCU**。
  * 何时写钟由服务端决定，这里只把「写」这一件事做对：写入、验证、配对重布。
  *

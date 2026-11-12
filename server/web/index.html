@@ -57,11 +57,35 @@
 
     <div class="bar-group">
       <span class="badge badge-red" id="streamChip">断开</span>
-      <button type="button" class="btn btn-ghost btn-sm" id="btnIdentity">身份标识</button>
+      <button type="button" class="btn btn-ghost btn-sm" id="btnIdentity">登录</button>
       <span id="clock" class="bar-mono">--:--:--</span>
     </div>
   </div>
 </div>
+
+<!--
+  登录对话框：口令走 <input type="password">（浏览器掩码，不用 prompt——prompt 明文可见）。
+  提交后 POST /api/v1/auth/login，成功由服务端 Set-Cookie 签发会话。
+-->
+<dialog id="loginDialog">
+  <form id="loginForm" method="dialog">
+    <div class="field">
+      <label for="loginUser">用户名</label>
+      <input id="loginUser" type="text" name="username" autocomplete="username" required />
+    </div>
+    <div class="field">
+      <label for="loginPassword">口令</label>
+      <input id="loginPassword" type="password" name="password" autocomplete="current-password" required />
+    </div>
+    <!-- 错误就地显示在对话框里（统一 .result.err 样式）：showModal 的对话框在浏览器
+         顶层，全局 toast 会被它盖住 -->
+    <p class="result err" id="loginResult" role="alert" hidden></p>
+    <div class="btn-row">
+      <button type="submit" class="btn">登录</button>
+      <button type="button" class="btn btn-ghost" id="btnLoginCancel">取消</button>
+    </div>
+  </form>
+</dialog>
 
 <!--
   八个能力域各一个容器，切入时才由对应视图模块填充。

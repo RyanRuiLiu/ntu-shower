@@ -16,8 +16,10 @@
 """
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
 from app.core import actions, outcomes
+from app.db.deps import get_db
 from app.modules.access.dependencies import require_admin
 from app.modules.devices.dependencies import DEVICE_ACTION_TIMEOUT_S, device_action
 from app.modules.sessions.schemas import CommandOutcome
@@ -29,14 +31,14 @@ router = APIRouter(prefix="/api/v1/devices", dependencies=[Depends(require_admin
 
 
 @router.get("/{device_id}/freelist")
-async def read_freelist(device_id: str) -> FreelistRead:
+async def read_freelist(device_id: str, session: Session = Depends(get_db)) -> FreelistRead:
     """读设备上那份免费名单。
 
     读不到（文件不在、读不出）时如实回报 status 与原因码，students 留空——**不用 HTTP
     错误代替它**：那会把"设备在线但那份文件没了"说成请求本身有问题，而这两件事要查的
     地方完全不同。
     """
-    outcome = await device_action(device_id, actions.FREELIST_READ, {}, DEVICE_ACTION_TIMEOUT_S)
+    outcome = await device_action(session, device_id, actions.FREELIST_READ, {}, DEVICE_ACTION_TIMEOUT_S)
     # 读失败时 data 为 None，行留空；**不把它当"空名单"**——那两件事要分开看（见 FreelistRead）
     data = outcome["data"]
     students = parse(str(data.get("content", ""))) if outcome["status"] == outcomes.OK.value and data else []
@@ -49,12 +51,12 @@ async def read_freelist(device_id: str) -> FreelistRead:
 
 
 @router.put("/{device_id}/freelist")
-async def write_freelist(device_id: str, req: FreelistRequest) -> CommandOutcome:
+async def write_freelist(device_id: str, req: FreelistRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """整份写回免费名单。
 
     名单在浴室 App **下次启动**时生效（它启动时读一次），所以这里不跟一步重启：重启会
     掐断进行中的会话，而名单改动不急在那几十秒。
     """
     return await device_action(
-        device_id, actions.FREELIST_WRITE, {"content": render(req.students)}, DEVICE_ACTION_TIMEOUT_S
+        session, device_id, actions.FREELIST_WRITE, {"content": render(req.students)}, DEVICE_ACTION_TIMEOUT_S
     )

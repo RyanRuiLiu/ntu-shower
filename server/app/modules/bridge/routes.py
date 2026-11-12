@@ -17,18 +17,25 @@
 import asyncio
 import contextlib
 import uuid
+from typing import cast
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.core import actions, outcomes, protocol, reason_codes
 from app.core.connections import manager
 from app.core.logging import log_event
 from app.core.problems import DEVICE_OFFLINE, ApiProblemError
+from app.db.base import utcnow
+from app.db.deps import get_db
+from app.db.session import Database
+from app.models.enums import CommandStatus
 from app.modules.access.dependencies import require_admin
-from app.modules.audit import repository as command_audit
 from app.modules.bridge.schemas import BridgeClosed, BridgeOpened, BridgeStatus
 from app.modules.config import store as config_store
 from app.modules.devices.dependencies import require_trusted_online_device
+from app.persistence import audit as command_audit
 
 from .manager import (
     BRIDGE_BUFFER_SIZE,
@@ -53,13 +60,27 @@ def _bridge_audit_id() -> str:
     return f"bridge-{uuid.uuid4()}"
 
 
-def _bridge_timeout_s(key: str) -> float:
+def _read_bridge_timeouts(ws: WebSocket) -> tuple[float, float]:
+    """设备 WS 握手路径读两个桥超时：应用状态里的 Database 开短会话。
+
+    WS 路径没有请求会话，与 gateway 的 `_db_session` 同一约定；两值一次读齐，
+    免得一次握手开两个会话。
+    """
+    database = cast("Database", ws.app.state.database)
+    with database.new_session() as session:
+        return (
+            _bridge_timeout_s(session, "bridge_max_lifetime_s"),
+            _bridge_timeout_s(session, "bridge_pair_timeout_s"),
+        )
+
+
+def _bridge_timeout_s(session: Session, key: str) -> float:
     """读一个桥接超时（秒）。
 
     三个键都是 SERVER 归属：桥建在服务端侧，取全局有效值即可。不硬编码，调试
     通道该开多久是运维判断的事，项目规范把超时归在必须可调的那一类。
     """
-    value = config_store.global_effective()[key]
+    value = config_store.global_effective(session)[key]
     return float(value) if isinstance(value, int) else 0.0
 
 
@@ -91,8 +112,7 @@ async def device_bridge(ws: WebSocket) -> None:
     nonce = ws.query_params.get("nonce") or ""
     await ws.accept()
 
-    lifetime_s = _bridge_timeout_s("bridge_max_lifetime_s")
-    pair_s = _bridge_timeout_s("bridge_pair_timeout_s")
+    lifetime_s, pair_s = await run_in_threadpool(_read_bridge_timeouts, ws)
     loop = asyncio.get_running_loop()
 
     bridge = registry.get(device_id)
@@ -160,8 +180,11 @@ async def device_bridge(ws: WebSocket) -> None:
         if bridge.device_ws is ws:
             await bridge.recycle(reason)
             audit_id = _bridge_audit_id()
-            command_audit.insert_command(audit_id, device_id, SESSION_END_ACTION)
-            command_audit.finish(audit_id, outcomes.OK.value, "", reason)
+            from app.db.session import session_scope
+
+            with session_scope() as session:
+                command_audit.insert_command(session, audit_id, device_id, SESSION_END_ACTION, utcnow())
+                command_audit.finish(session, audit_id, CommandStatus(outcomes.OK.value), "", reason, utcnow())
 
 
 async def _pump_tcp_to_ws(bridge: AdbBridge, reader: asyncio.StreamReader) -> None:
@@ -212,7 +235,7 @@ async def _serve_client(bridge: AdbBridge, reader: asyncio.StreamReader, writer:
 
 
 @admin_router.post("/devices/{device_id}/bridge/open")
-async def adb_open(device_id: str) -> BridgeOpened:
+async def adb_open(device_id: str, session: Session = Depends(get_db)) -> BridgeOpened:
     """打开设备的 ADB 桥：下发 bridge.open 并绑定本机回环 TCP 监听。
 
     整个过程持锁：建立过程有 start_server 与退避重试两处让出事件循环的机会，
@@ -221,7 +244,7 @@ async def adb_open(device_id: str) -> BridgeOpened:
     配对超时前），此时建新会话必然撞上自己已绑定的端口。"设备是否连入"由
     bridge/status 的 device_connected 回答。
     """
-    require_trusted_online_device(device_id)
+    require_trusted_online_device(device_id, session)
     async with registry.op_lock:
         existing = registry.get(device_id)
         if existing is not None:
@@ -235,7 +258,7 @@ async def adb_open(device_id: str) -> BridgeOpened:
         loop = asyncio.get_running_loop()
         generation, port, nonce = registry.open_session(device_id, loop.time())
         audit_id = _bridge_audit_id()
-        command_audit.insert_command(audit_id, device_id, actions.BRIDGE_OPEN)
+        command_audit.insert_command(session, audit_id, device_id, actions.BRIDGE_OPEN, utcnow())
         sent = await manager.send_to(
             device_id,
             protocol.envelope(actions.BRIDGE_OPEN, {"device_id": device_id, "nonce": nonce}),
@@ -243,10 +266,12 @@ async def adb_open(device_id: str) -> BridgeOpened:
         if not sent:
             registry.pending.pop(device_id, None)
             command_audit.finish(
+                session,
                 audit_id,
-                outcomes.TIMEOUT.value,
+                CommandStatus(outcomes.TIMEOUT.value),
                 reason_codes.DEVICE_OFFLINE.code,
                 reason_codes.DEVICE_OFFLINE.message,
+                utcnow(),
             )
             raise ApiProblemError(DEVICE_OFFLINE, f"设备 {device_id} 没有活跃连接")
 
@@ -255,9 +280,18 @@ async def adb_open(device_id: str) -> BridgeOpened:
             bridge = await AdbBridge.open(device_id, generation, port, _serve_client)
         except ApiProblemError as exc:
             registry.pending.pop(device_id, None)
-            command_audit.finish(audit_id, outcomes.FAILED.value, reason_codes.PORT_BIND_FAILED.code, str(exc))
+            command_audit.finish(
+                session,
+                audit_id,
+                CommandStatus(outcomes.FAILED.value),
+                reason_codes.PORT_BIND_FAILED.code,
+                str(exc),
+                utcnow(),
+            )
             raise
-        command_audit.finish(audit_id, outcomes.OK.value, "", f"port {port} gen {generation}")
+        command_audit.finish(
+            session, audit_id, CommandStatus(outcomes.OK.value), "", f"port {port} gen {generation}", utcnow()
+        )
         log_event(
             "INFO",
             "bridge.opened",
@@ -266,22 +300,22 @@ async def adb_open(device_id: str) -> BridgeOpened:
             port=bridge.port,
             generation=bridge.generation,
         )
-        # 只返回结构化字段：连接指引属于文档职责（见 docs/RUNBOOK.md「5. 故障处置」）
+        # 只返回结构化字段：连接指引属于文档职责（见 docs/runbook.md「5. 故障处置」）
         return {"device_id": device_id, "port": bridge.port, "already_open": False, "generation": bridge.generation}
 
 
 @admin_router.post("/devices/{device_id}/bridge/close")
-async def adb_close(device_id: str) -> BridgeClosed:
+async def adb_close(device_id: str, session: Session = Depends(get_db)) -> BridgeClosed:
     """关闭桥：回收监听与流，并让设备停掉 adbd。与开桥共用同一把锁，理由见 adb_open。"""
     async with registry.op_lock:
         bridge = registry.get(device_id)
         audit_id = _bridge_audit_id()
-        command_audit.insert_command(audit_id, device_id, actions.BRIDGE_CLOSE)
+        command_audit.insert_command(session, audit_id, device_id, actions.BRIDGE_CLOSE, utcnow())
         if bridge is None:
-            command_audit.finish(audit_id, outcomes.OK.value, "", "already closed")
+            command_audit.finish(session, audit_id, CommandStatus(outcomes.OK.value), "", "already closed", utcnow())
             return {"device_id": device_id, "closed": False}
         await bridge.recycle("requested")
-        command_audit.finish(audit_id, outcomes.OK.value, "", "")
+        command_audit.finish(session, audit_id, CommandStatus(outcomes.OK.value), "", "", utcnow())
         # 通知设备停 adbd 的返回值不看：本地已收干净，设备没收到也只是它的 adbd
         # 多开一会儿，下次开桥会重新下发；为一个不影响本地状态的通知改关桥成败
         # 只会让"关没关掉"变成两个问题。
@@ -290,7 +324,7 @@ async def adb_close(device_id: str) -> BridgeClosed:
 
 
 @admin_router.get("/devices/{device_id}/bridge")
-async def adb_status(device_id: str) -> BridgeStatus:
+async def adb_status(device_id: str, session: Session = Depends(get_db)) -> BridgeStatus:
     """桥接状态可观测（管理面）。
 
     `expires_in_s` 给出距离绝对寿命到点的秒数——运维据此判断还来不来得及做完
@@ -298,11 +332,11 @@ async def adb_status(device_id: str) -> BridgeStatus:
 
     `ssh_target` 与桥开没开无关，所以关着时也给：网页端要靠它拼出本机那条连接命令。
     """
-    ssh_target = str(config_store.global_effective()["bridge_ssh_target"])
+    ssh_target = str(config_store.global_effective(session)["bridge_ssh_target"])
     bridge = registry.get(device_id)
     if bridge is None:
         return {"device_id": device_id, "open": False, "ssh_target": ssh_target}
-    lifetime_s = _bridge_timeout_s("bridge_max_lifetime_s")
+    lifetime_s = _bridge_timeout_s(session, "bridge_max_lifetime_s")
     remaining = max(0.0, lifetime_s - (asyncio.get_running_loop().time() - bridge.opened_at))
     return {
         "device_id": device_id,

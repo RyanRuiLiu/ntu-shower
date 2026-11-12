@@ -1,0 +1,32 @@
+# pre-commit 框架配置。官方文档：https://pre-commit.com
+# 只调用项目已有的质量门入口，不重复定义命令。
+# 启用：server/.venv/Scripts/pre-commit install
+repos:
+  - repo: local
+    hooks:
+      # semgrep 不进应用 venv（见 server/requirements-dev.txt 的说明）；
+      # language: python 让 pre-commit 为它单独建一个隔离环境。
+      - id: semgrep-sast
+        name: semgrep SAST (p/python + p/security-audit)
+        entry: semgrep scan --error --quiet
+        language: python
+        additional_dependencies: ["semgrep==1.184.0"]
+        args: ["--config", "p/python", "--config", "p/security-audit", "server/app"]
+        pass_filenames: false
+        always_run: true
+        stages: [manual]
+      - id: semgrep-project
+        name: semgrep project rules (.semgrep.yml)
+        entry: semgrep scan --error --quiet
+        language: python
+        additional_dependencies: ["semgrep==1.184.0"]
+        args: ["--config", ".semgrep.yml", "."]
+        pass_filenames: false
+        always_run: true
+        stages: [manual]
+      - id: project-checks
+        name: project checks (ruff / mypy / pytest)
+        entry: sh scripts/check.sh
+        language: system
+        pass_filenames: false
+        always_run: true

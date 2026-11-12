@@ -20,12 +20,15 @@
  * 越明显。表格只作展示，点「编辑」把该行值填入下方表单（登记/编辑双模式）并滚动
  * 过去；保存走 PUT，标识与来源不变。
  *
- * ## 签发
+ * ## 签发与凭据轮换
  *
- * kind 二选一：web（自定义标识或留空由服务端生成，明文只在签发响应出现一次，
- * 需显式确认已保存）与 openid（登记小程序用户的 openid）。
+ * kind 二选一：web（自定义标识或留空由服务端生成）与 openid（登记小程序用户的 openid）。
+ * 登记与编辑都会签发/轮换 Bearer 凭据（服务端存哈希，明文只在当次响应出现一次）：
+ * 前端把它放进 issue-once 展示区（复制 + 显式确认已保存后收起）；编辑即轮换，
+ * 旧凭据立即失效。标识本身入表可随时查看，不需要一次明文展示。
  */
 import { api } from '../core/api.js'
+import { copyText } from '../core/clipboard.js'
 import { codeCell } from '../core/cells.js'
 import { problemText, report } from '../core/outcome.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
@@ -211,13 +214,15 @@ async function submitIdentityForm() {
   if (editingIdentity !== null) {
     report('identityResult', '正在保存…', 'info')
     try {
-      await api.updateIdentity(editingIdentity, {
+      const updated = await api.updateIdentity(editingIdentity, {
         kind: editingKind,
         capabilities: capabilitiesSelected,
         device_scope: scope,
         label,
       })
-      toast('已保存，自下一次请求起生效')
+      // 编辑即凭据轮换：旧明文立即失效，新明文只在本次响应出现（tests/test_access.py 钉住
+      // 的语义）。展示必须发生在收起编辑之前——exitEdit 不清这个区，但结果行会被覆盖。
+      showIssuedSecret(updated.token, '已保存，凭据已轮换：旧凭据立即失效，新凭据仅显示一次，请立即保存')
       exitEdit()
       await reload()
     } catch (error) {
@@ -243,11 +248,10 @@ async function submitIdentityForm() {
   report('identityResult', '正在登记…', 'info')
   try {
     const created = await api.createIdentity(payload)
+    // 登记即签发凭据：明文只在本次响应出现（openid 的凭据同样要交给 status-panel 配置）
+    showIssuedSecret(created.token, '已登记，凭据仅显示一次，请立即保存')
     if (kind === 'web' && !$('inCustomIdentity').value.trim()) {
-      // 服务端生成的标识明文只在本次响应出现：确认已保存才收起
-      showIssuedSecret(created.identity)
-    } else {
-      report('identityResult', `已登记：${created.identity}`, 'ok')
+      report('identityResult', `已登记：${created.identity}`, 'info')
     }
     $('inOpenid').value = ''
     $('inCustomIdentity').value = ''
@@ -258,25 +262,19 @@ async function submitIdentityForm() {
 }
 
 /**
- * 签发结果的明文展示区：一键复制 + 显式确认已保存后才收起。
+ * 签发/轮换结果的凭据展示区：一键复制 + 显式确认已保存后才收起。
  *
- * 明文不会再次出现，收起必须是显式动作，不靠刷新或点击别处误触。
+ * 凭据不会再次出现，收起必须是显式动作，不靠刷新或点击别处误触。
+ * `message` 写明这次是签发还是轮换（轮换意味着旧凭据已失效）。
  */
-function showIssuedSecret(identity) {
+function showIssuedSecret(token, message) {
   $('issuedSecret').hidden = false
-  $('issuedValue').value = identity
-  report('identityResult', '身份标识已签发，仅显示一次，请立即保存', 'ok')
+  $('issuedValue').value = token
+  report('identityResult', message, 'ok')
 }
 
-async function copyIssued() {
-  const input = $('issuedValue')
-  try {
-    await navigator.clipboard.writeText(input.value)
-    toast('已复制')
-  } catch {
-    input.select()
-    toast('已选中，按 Ctrl+C 复制')
-  }
+function copyIssued() {
+  copyText($('issuedValue').value, { fallbackInputId: 'issuedValue' })
 }
 
 let dispose = disposer()
@@ -350,7 +348,7 @@ export const identitiesView = {
             <button type="button" class="btn btn-sm" id="btnCreate">登记</button>
           </div>
           <div class="field" id="issuedSecret" hidden>
-            <label for="issuedValue">新签发的身份标识（仅显示一次，确认保存后不再显示）</label>
+            <label for="issuedValue">凭据（Authorization: Bearer 用；仅显示一次，确认保存后不再显示）</label>
             <div class="field-row">
               <input id="issuedValue" class="mono" type="text" readonly>
               <button type="button" class="btn btn-ghost btn-sm" id="btnCopyIssued">复制</button>

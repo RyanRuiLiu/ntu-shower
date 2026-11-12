@@ -1,4 +1,12 @@
-"""网页样式统一门禁。
+"""网页标记契约（fitness function，Building Evolutionary Architectures：项目特定的
+结构规则以自定义脚本检查执行——"architecture rules are only real if they are
+enforced"）。
+
+工具能查的已经交给行业标准工具：CSS 的令牌纪律（颜色仅 tokens、字号/圆角/过渡引用
+tokens）由 **stylelint** 执行（web/.stylelintrc.json，官方规则
+declaration-property-value-disallowed-list，经 overrides 豁免 tokens.css）；本文件只留
+stylelint/eslint 表达不了或表达后更晦涩的**标记语义契约**——表格动作列语义、按钮组件
+体系、时刻格式与单一实现约束，每条都对应一次真实事故或设计决策。
 
 静态样式只能落在 `web/style/` 的共享 CSS 与令牌里；视图与核心脚本不得写内联样式。
 运行时才能知道的几何值（节点缩进、落点、菜单位置、KPI 占比）只能写 CSS 自定义属性，
@@ -17,16 +25,12 @@ STYLE_PROP = re.compile(r"\.style\.(?!setProperty\()")
 #: setProperty 只允许写自定义属性（--*）。
 SET_PROP = re.compile(r"\.style\.setProperty\(\s*[\"'](?!--)")
 #: 颜色只能出现在 tokens.css；CSS 选择器里的 #id 不匹配 3–8 位十六进制。
-COLOR = re.compile(r"(?<![\w-])#[0-9a-fA-F]{3,8}\b|rgba?\(")
 BLANK_HEADER = re.compile(r"<th>\s*</th>")
 BARE_ACTION_HEADER = re.compile(r"<th>操作</th>")
 BUTTON_TAG = re.compile(r"<button\b[^>]*>")
 #: 动作按钮必须复用 .btn；下列是非动作控件，各有自己的组件类（页签、详情卡、
 #: 面包屑、菜单项、右面板恢复把手）。
 BUTTON_CLASSES = ("btn", "tree-restore", "audit-tab", "cfg-tab", "detail-card", 'class="crumb"', 'class="item"')
-FONT_SIZE = re.compile(r"font-size:\s*(?![^\n]*var\(--fs-)")
-RADIUS = re.compile(r"border-radius:\s*(?![^\n]*(?:var\(--radius|\b0\b))")
-TRANSITION = re.compile(r"transition:\s*(?![^\n]*var\(--transition)")
 FMT_SHORT_TIME = re.compile(r"\bfmtDateTime\(")
 LOCAL_DEVICE_CELL = re.compile(r"(?:function|const)\s+deviceCell\b")
 CERT_AS_MONO = re.compile(r"mono\([^)\n]*\bcert_no\b")
@@ -114,18 +118,3 @@ def test_device_and_cert_cells_have_single_implementation() -> None:
             if LOCAL_DEVICE_CELL.search(line) or CERT_AS_MONO.search(line):
                 offenders.append(f"{path.name}:{number} {line.strip()}")
     assert not offenders, "设备名 / 学号请复用 core/cells.js：\n" + "\n".join(offenders)
-
-
-def test_colors_live_only_in_tokens() -> None:
-    tokens = WEB / "style" / "tokens.css"
-    offenders = _offenders(COLOR, (path for path in _style_sources() if path != tokens))
-    assert not offenders, "颜色值只能写在 tokens.css：\n" + "\n".join(offenders)
-
-
-def test_typography_radius_and_transition_use_tokens() -> None:
-    tokens = WEB / "style" / "tokens.css"
-    sources = [path for path in _style_sources() if path != tokens]
-    offenders = (
-        _offenders(FONT_SIZE, iter(sources)) + _offenders(RADIUS, iter(sources)) + _offenders(TRANSITION, iter(sources))
-    )
-    assert not offenders, "字号 / 圆角 / 过渡只能引用 tokens：\n" + "\n".join(offenders)

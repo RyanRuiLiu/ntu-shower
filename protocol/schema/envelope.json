@@ -28,7 +28,7 @@
     },
     "payload": {
       "type": "object",
-      "description": "业务负载。消息按**开放扩展**设计：不声明 additionalProperties: false——新增可选字段不升协议版本，收端忽略不认识的键与类型（设备端 RuntimeConfig 对未知配置键跳过，网关对未知 type 只回 link.error 不断开）。各字段语义以每条消息 Schema 的 properties 为准；这是刻意的开放扩展决策（docs/DECISIONS.md「协议与契约」），不是遗漏。"
+      "description": "业务负载。消息按**开放扩展**设计：不声明 additionalProperties: false——新增可选字段不升协议版本，收端忽略不认识的键与类型（设备端 RuntimeConfig 对未知配置键跳过，网关对未知 type 只回 link.error 不断开）。各字段语义以每条消息 Schema 的 properties 为准；这是刻意的开放扩展决策（docs/adr/0006-protocol-contract.md），不是遗漏。"
     }
   },
   "$defs": {

@@ -13,14 +13,12 @@ from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from tests import device_link
+from tests import device_link, door_link
 
 from app.core import device_clock, outcomes
 from app.core.clock import now_rfc3339, seconds_between
-from app.core.db import get_conn, write
-from app.modules.doors import repository as doors_repository
-from app.modules.doors import service as doors_service
-from app.modules.doors.schemas import DoorState
+from app.db.session import session_scope
+from app.models.enums import DoorState
 from app.modules.sessions import scheduler
 from app.modules.sessions import service as sessions_service
 from app.modules.sessions.decision import (
@@ -202,31 +200,81 @@ REAL_SEGMENTS: tuple[tuple[object, ...], ...] = (
 )
 
 
+def _read_snapshots(device_id: str) -> list:
+    """直读 _snapshots 的短会话包装。"""
+    with session_scope() as session:
+        return scheduler._snapshots(session, device_id)
+
+
+def _moment(text: str) -> datetime:
+    """RFC 3339 文本 → UTC datetime（模型列的落库形状）。"""
+    return datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+
+def _device_pk() -> int | None:
+    from sqlalchemy import select
+
+    from app.models.identity import Device
+
+    with session_scope() as session:
+        return session.scalar(select(Device.id).where(Device.device_id == "dev-1"))
+
+
 def _seed() -> None:
     """把上面这些真实行原样插进库。段通过 (设备, 喷头, 学号) 认领它所属的那一场会话。"""
+    from app.models.usage import UsageSegment, UsageSession
+
+    pk = _device_pk()
+    ids_by_key: dict[tuple[int, str], int] = {}
     for row in REAL_SESSIONS:
-        write(
-            "INSERT INTO usage_session (device_id, door_no, cert_no, assigned_at, assigned_source,"
-            " observed_span, ended_at, last_seen_at, flow_s, device_flow_s, segments_complete)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            ("dev-1", *row),
+        (
+            door_no,
+            cert_no,
+            assigned_at,
+            assigned_source,
+            observed_span,
+            ended_at,
+            last_seen_at,
+            flow_s,
+            device_flow_s,
+            complete,
+        ) = row
+        orm_row = UsageSession(
+            device_id=pk,
+            door_no=door_no,
+            cert_no=cert_no,
+            assigned_at=_moment(assigned_at),
+            assigned_source=assigned_source,
+            observed_span=observed_span,
+            ended_at=_moment(ended_at) if ended_at else None,
+            last_seen_at=_moment(last_seen_at),
+            flow_s=flow_s,
+            device_flow_s=device_flow_s,
+            segments_complete=bool(complete),
         )
+        with session_scope() as session:
+            session.add(orm_row)
+            session.commit()
+            session.flush()
+        ids_by_key[(int(door_no), str(cert_no))] = int(orm_row.id)
     for row in REAL_SEGMENTS:
         door_no, cert_no, *rest = row
-        session_id = (
-            get_conn()
-            .execute(
-                "SELECT id FROM usage_session WHERE device_id=? AND door_no=? AND cert_no=? ORDER BY id LIMIT 1",
-                ("dev-1", door_no, cert_no),
+        (opened_at, closed_at, flow_s, source, opened_raw, closed_raw) = rest
+        with session_scope() as session:
+            session.add(
+                UsageSegment(
+                    session_id=ids_by_key[(int(door_no), str(cert_no))],
+                    device_id=pk,
+                    door_no=door_no,
+                    opened_at=_moment(opened_at),
+                    closed_at=_moment(closed_at) if closed_at else None,
+                    flow_s=flow_s,
+                    source=source,
+                    opened_raw=opened_raw,
+                    closed_raw=closed_raw,
+                )
             )
-            .fetchone()["id"]
-        )
-        write(
-            "INSERT INTO usage_segment (session_id, device_id, door_no, opened_at, closed_at, flow_s,"
-            " source, opened_raw, closed_raw)"
-            " VALUES (?,?,?,?,?,?,?,?,?)",
-            (session_id, "dev-1", door_no, *rest),
-        )
+            session.commit()
 
 
 @pytest.fixture
@@ -237,6 +285,8 @@ def real_rows(fresh_db: str) -> None:
     一个往返内就有（网关在 `link.hello` 之后立刻 ping），而且偏差跨重启持久化。
     """
     device_clock.load("dev-1", 0.0)
+    # 新层的行经外键挂设备：播种前先登记（与线上握手先行的次序一致）
+    device_link.register_trusted_device("dev-1")
     _seed()
 
 
@@ -245,17 +295,13 @@ def real_rows(fresh_db: str) -> None:
 
 def test_the_real_two_segment_session_adds_up(real_rows: None) -> None:
     """真实那一场：251 + 175 = 426，与 `flow_s` 和 `device_flow_s` 都对得上。"""
-    rows = (
-        get_conn()
-        .execute("SELECT flow_s, device_flow_s, segments_complete FROM usage_session WHERE door_no = 6")
-        .fetchall()
-    )
-    segments = get_conn().execute("SELECT flow_s FROM usage_segment WHERE door_no = 6 ORDER BY opened_at").fetchall()
+    rows = [row for row in door_link.list_sessions("dev-1") if row["door_no"] == 6]
+    segments = [seg for row in rows for seg in door_link.list_segments_of(row["id"])]
 
-    assert [s["flow_s"] for s in segments] == [251, 175]
-    assert rows[0]["flow_s"] == sum(s["flow_s"] for s in segments) == 426
+    assert [seg["flow_s"] for seg in segments] == [251, 175]
+    assert rows[0]["flow_s"] == sum(seg["flow_s"] for seg in segments) == 426
     assert rows[0]["device_flow_s"] == 426
-    assert rows[0]["segments_complete"]
+    assert rows[0]["segments_complete"] is True
 
 
 def test_the_real_pause_would_be_cut_by_a_sixty_second_threshold(real_rows: None) -> None:
@@ -265,11 +311,8 @@ def test_the_real_pause_would_be_cut_by_a_sixty_second_threshold(real_rows: None
     "60 秒的代价"钉在真实数字上：全库 4960 次暂停里，60 秒内又开阀的占 70.8%，
     90 秒内占 87.2%，180 秒内占 98.8%。阈值调大，被打断的人就越少。
     """
-    segments = (
-        get_conn()
-        .execute("SELECT opened_at, closed_at FROM usage_segment WHERE door_no = 6 ORDER BY opened_at")
-        .fetchall()
-    )
+    sessions = [row for row in door_link.list_sessions("dev-1") if row["door_no"] == 6]
+    segments = [seg for row in sessions for seg in door_link.list_segments_of(row["id"])]
     hold = seconds_between(str(segments[0]["closed_at"]), str(segments[1]["opened_at"]))
 
     assert hold == 63  # 秒级取整（截断）：16:58:27.568 → 16:59:31.213
@@ -278,14 +321,10 @@ def test_the_real_pause_would_be_cut_by_a_sixty_second_threshold(real_rows: None
 
 def test_the_real_incomplete_session_reports_a_mismatch(real_rows: None) -> None:
     """段没记齐的那一场：设备报 900 秒，我们的两段只累到 600——差额就是"有段没进表"。"""
-    row = (
-        get_conn()
-        .execute("SELECT flow_s, device_flow_s, segments_complete, observed_span FROM usage_session WHERE door_no = 2")
-        .fetchone()
-    )
+    row = next(item for item in door_link.list_sessions("dev-1") if item["door_no"] == 2)
 
     assert row["flow_s"] < row["device_flow_s"]
-    assert not row["segments_complete"]
+    assert row["segments_complete"] is False
     assert row["observed_span"] == "gap"
 
 
@@ -299,13 +338,15 @@ def test_run_started_at_on_the_real_consecutive_run(real_rows: None) -> None:
     差别只在间隔量级——我们自己的续期是秒级，真人走了再回来是分钟级；而这里隔了 92 秒，
     仍落在 300 秒那条线以内。
     """
-    started = doors_repository.run_started_at
+    from app.persistence import doors as doors_store
 
-    assert started("dev-1", 3, "2026000001", 300) == "2026-10-03T18:50:22.210Z"
-    # 把那条线收到 60 秒：92 秒那一跳被划断，起点跟着挪到最后两场里最早的那一场
-    assert started("dev-1", 3, "2026000001", 60) == "2026-10-03T18:52:18.233Z"
-    # 另一个喷头、另一个学号：只有一场，它自己就是起点
-    assert started("dev-1", 6, "2026000002", 300) == "2026-10-03T16:53:57.213Z"
+    with session_scope() as session:
+        # 同一喷头同一学号：间隔 92 秒仍落在 300 秒那条线以内，起点是最早那场
+        assert doors_store.run_started_at(session, "dev-1", 3, "2026000001", 300) == "2026-10-03T18:50:22.210Z"
+        # 把那条线收到 60 秒：92 秒那一跳被划断，起点跟着挪到最后两场里最早的那一场
+        assert doors_store.run_started_at(session, "dev-1", 3, "2026000001", 60) == "2026-10-03T18:52:18.233Z"
+        # 另一个喷头、另一个学号：只有一场，它自己就是起点
+        assert doors_store.run_started_at(session, "dev-1", 6, "2026000002", 300) == "2026-10-03T16:53:57.213Z"
 
 
 def _candidate(door_no: int, cert_no: str, state: DoorState, assigned_at: str, paused_at: str = "") -> Candidate:
@@ -378,25 +419,26 @@ def test_snapshots_walks_real_rows_and_the_live_view(real_rows: None) -> None:
     帧按真实形状给：**本机无卡，占用是靠 `acc_no` 判出来的**（`card_no` 恒为 0），
     只给 `cert_no` 会被判成空闲——这是真实帧里才看得到的事。
     """
-    write(
-        "INSERT INTO usage_session (device_id, door_no, cert_no, assigned_at, assigned_source,"
-        " observed_span, ended_at, last_seen_at, flow_s, device_flow_s, segments_complete)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-        (
-            "dev-1",
-            1,
-            "2026000001",
-            "2026-10-03T21:57:02.488Z",
-            "inferred",
-            "continuous",
-            None,
-            "2026-10-03T21:57:02.488Z",
-            0,
-            0,
-            0,
-        ),
-    )
-    doors_service.process_snapshot(
+    from app.models.usage import UsageSession
+
+    with session_scope() as session:
+        session.add(
+            UsageSession(
+                device_id=_device_pk(),
+                door_no=1,
+                cert_no="2026000001",
+                assigned_at=_moment("2026-10-03T21:57:02.488Z"),
+                assigned_source="inferred",
+                observed_span="continuous",
+                ended_at=None,
+                last_seen_at=_moment("2026-10-03T21:57:02.488Z"),
+                flow_s=0,
+                device_flow_s=0,
+                segments_complete=False,
+            )
+        )
+        session.commit()
+    door_link.feed(
         "dev-1",
         _frame(
             captured_at="2026-10-03T21:57:03.244Z",
@@ -407,7 +449,7 @@ def test_snapshots_walks_real_rows_and_the_live_view(real_rows: None) -> None:
         ),
     )
 
-    found = scheduler._snapshots("dev-1")
+    found = _read_snapshots("dev-1")
 
     assert len(found) == 1
     assert found[0].state is DoorState.WAITING  # 分配了、还没开阀
@@ -426,13 +468,13 @@ def test_a_real_shape_ends_in_a_settle(
     """
     calls: list[tuple[str, object]] = []
 
-    async def fake_send(_device_id: str, action: str, params: object, **_kw: object) -> object:
+    async def fake_send(_session: object, _device_id: str, action: str, params: object, **_kw: object) -> object:
         calls.append((action, params))
         return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
 
-    monkeypatch.setattr(scheduler.config_store, "effective", lambda _device_id: CONFIG)
+    monkeypatch.setattr(scheduler.config_store, "effective", lambda _session, _device_id: CONFIG)
     monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
-    doors_service.process_snapshot(
+    door_link.feed(
         "dev-1",
         _frame(
             captured_at="2026-10-03T21:57:03.244Z",

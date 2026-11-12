@@ -76,10 +76,14 @@ def list_of(frame: JsonObject, key: str) -> list[Any]:
 
 
 def as_int(value: object, default: int = 0) -> int:
-    """把外部 JSON 标量安全转为 int；类型不符或不可转换时取默认值。"""
+    """把外部 JSON 标量安全转为 int；类型不符或不可转换时取默认值。
+
+    OverflowError 也在收口之列：`int(float("inf"))` 抛的是 OverflowError 而非
+    ValueError——无穷大与 NaN 属于"不可转换"，同样取默认（属性测试试点抓出的漏网）。
+    """
     if isinstance(value, (int, float, str)):
         try:
             return int(value)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, OverflowError):
             return default
     return default

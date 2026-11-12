@@ -1,5 +1,5 @@
 #!/bin/sh
-# 按 STANDARDS.md §4.3 校验提交信息。启用：git config core.hooksPath .githooks
+# 按 Conventional Commits 1.0.0 校验提交信息。启用：git config core.hooksPath .githooks
 set -eu
 
 message_file=${1:?缺少提交信息文件参数}
@@ -13,7 +13,7 @@ fi
 pattern='^(feat|fix|docs|refactor|test|build|ci|chore|perf|style|revert)(\([a-z0-9-]+\))?: .+'
 if ! printf '%s\n' "$subject" | grep -Eq "$pattern"; then
     echo "提交信息不符合 Conventional Commits：$subject" >&2
-    echo "格式：<类型>(<范围>): <摘要>；类型见 STANDARDS.md §4.3。" >&2
+    echo "格式：<类型>(<范围>): <摘要>；类型清单见 CONTRIBUTING.md 的「分支与提交」。" >&2
     exit 1
 fi
 

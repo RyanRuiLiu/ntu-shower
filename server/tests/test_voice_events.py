@@ -6,6 +6,8 @@
 import uuid
 from typing import Any
 
+from tests import door_link
+
 from app.core import device_clock
 from app.modules.doors import service
 from app.modules.doors.events import DoorEvent, DoorEventKind
@@ -44,7 +46,7 @@ def _process(
     at: str,
     source: str = service.SOURCE_DB_WATCH,
 ) -> tuple[DoorEvent, ...]:
-    return service.process_snapshot(device_id, _snapshot(doors, at, source)).events
+    return door_link.feed(device_id, _snapshot(doors, at, source)).events
 
 
 def _occupied(cert_no: str = "C1", **overrides: object) -> dict[str, Any]:

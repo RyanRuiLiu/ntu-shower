@@ -15,10 +15,11 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from tests import door_link
 
-from app.core import db, device_clock
+from app.core import device_clock
 from app.core.clock import shift_rfc3339
-from app.modules.doors import repository, service
+from app.modules.doors import service
 
 T0 = "2026-09-30T12:00:00.000Z"
 T1 = "2026-09-30T12:01:00.000Z"
@@ -63,15 +64,11 @@ def _plus(rfc3339: str, seconds: int) -> str:
 
 def _segments_of(session_id: int) -> list[Any]:
     """某个会话的全部段，按开阀先后。"""
-    return (
-        db.get_conn()
-        .execute("SELECT * FROM usage_segment WHERE session_id = ? ORDER BY opened_at, id", (session_id,))
-        .fetchall()
-    )
+    return door_link.list_segments_of(session_id)
 
 
 def _sessions(device_id: str) -> list[Any]:
-    return db.get_conn().execute("SELECT * FROM usage_session WHERE device_id = ? ORDER BY id", (device_id,)).fetchall()
+    return door_link.list_sessions(device_id)
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -102,8 +99,8 @@ def _sessions(device_id: str) -> list[Any]:
 def test_state_derivation(fresh_db: str, door: dict[str, Any], expected: str) -> None:
     """七态的判据与优先级，逐条验。"""
     device_id = "dev-state"
-    service.process_snapshot(device_id, _frame([door], T0))
-    live = repository.get_all_live(device_id)
+    door_link.feed(device_id, _frame([door], T0))
+    live = door_link.get_all_live(device_id)
     assert live[1]["state"] == expected
 
 
@@ -119,19 +116,15 @@ def test_full_session_four_moments(fresh_db: str) -> None:
     同一行。
     """
     device_id = "dev-full-session"
-    service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C")], "2026-09-30T12:00:00.000Z"))
-    service.process_snapshot(
-        device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], "2026-09-30T12:00:30.000Z")
-    )
-    service.process_snapshot(
-        device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], "2026-09-30T12:01:30.000Z")
-    )
+    door_link.feed(device_id, _frame([_door(acc_no="A", cert_no="C")], "2026-09-30T12:00:00.000Z"))
+    door_link.feed(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], "2026-09-30T12:00:30.000Z"))
+    door_link.feed(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], "2026-09-30T12:01:30.000Z"))
     # 设备在暂停那一刻结算本段：12:00:30 → 12:01:30 正好 100 秒
-    service.process_snapshot(
+    door_link.feed(
         device_id,
         _frame([_door(acc_no="A", cert_no="C", bath_time_s=100, close_time=CLOSE)], "2026-09-30T12:02:10.000Z"),
     )
-    service.process_snapshot(device_id, _frame([_door()], "2026-09-30T12:02:30.000Z"))
+    door_link.feed(device_id, _frame([_door()], "2026-09-30T12:02:30.000Z"))
 
     sessions = _sessions(device_id)
     assert len(sessions) == 1
@@ -155,8 +148,8 @@ def test_leaving_while_bathing_keeps_last_segment(fresh_db: str) -> None:
     这是设备"整体清零"写法的直接后果——只看本帧会把每次不关阀就结算都记成 0 秒。
     """
     device_id = "dev-leave-bathing"
-    service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], T0))
-    service.process_snapshot(device_id, _frame([_door()], "2026-09-30T12:03:20.000Z"))
+    door_link.feed(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], T0))
+    door_link.feed(device_id, _frame([_door()], "2026-09-30T12:03:20.000Z"))
 
     row = _sessions(device_id)[0]
     assert row["flow_s"] == 200
@@ -168,8 +161,8 @@ def test_leaving_while_bathing_keeps_last_segment(fresh_db: str) -> None:
 def test_assign_then_settle_without_water(fresh_db: str) -> None:
     """分配后没开阀就结算：会话存在，但从未观测到出水——一段都没有。"""
     device_id = "dev-no-water"
-    service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C")], T0))
-    service.process_snapshot(device_id, _frame([_door()], "2026-09-30T12:00:20.000Z"))
+    door_link.feed(device_id, _frame([_door(acc_no="A", cert_no="C")], T0))
+    door_link.feed(device_id, _frame([_door()], "2026-09-30T12:00:20.000Z"))
 
     row = _sessions(device_id)[0]
     assert _segments_of(row["id"]) == []
@@ -180,21 +173,21 @@ def test_assign_then_settle_without_water(fresh_db: str) -> None:
 def test_repair_interrupts_session(fresh_db: str) -> None:
     """淋浴中被打上维修：占用态结束，会话收尾。"""
     device_id = "dev-repair"
-    service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], T0))
-    service.process_snapshot(device_id, _frame([_door(status_raw=1)], "2026-09-30T12:00:40.000Z"))
+    door_link.feed(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], T0))
+    door_link.feed(device_id, _frame([_door(status_raw=1)], "2026-09-30T12:00:40.000Z"))
 
     row = _sessions(device_id)[0]
     assert row["ended_at"] == "2026-09-30T12:00:40.000Z"
-    assert repository.get_all_live(device_id)[1]["state"] == "repair"
+    assert door_link.get_all_live(device_id)[1]["state"] == "repair"
 
 
 def test_two_sessions_are_separate(fresh_db: str) -> None:
     """两次独立使用各记一条，时长不互相污染。"""
     device_id = "dev-two-sessions"
-    service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], T0))
-    service.process_snapshot(device_id, _frame([_door()], T1))
-    service.process_snapshot(device_id, _frame([_door(acc_no="B", cert_no="D", in_time=IN)], T2))
-    service.process_snapshot(device_id, _frame([_door()], T3))
+    door_link.feed(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], T0))
+    door_link.feed(device_id, _frame([_door()], T1))
+    door_link.feed(device_id, _frame([_door(acc_no="B", cert_no="D", in_time=IN)], T2))
+    door_link.feed(device_id, _frame([_door()], T3))
 
     rows = _sessions(device_id)
     assert [row["cert_no"] for row in rows] == ["C", "D"]
@@ -209,9 +202,9 @@ def test_handover_leaves_the_previous_accumulation_unowned(fresh_db: str) -> Non
     某一段，等于替前人编出那一段的起止。
     """
     device_id = "dev-handover-paused"
-    service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C", bath_time_s=200, close_time=CLOSE)], T0))
+    door_link.feed(device_id, _frame([_door(acc_no="A", cert_no="C", bath_time_s=200, close_time=CLOSE)], T0))
     # 设备不清零累计值：它是"这台设备出过的水"，换人不重置（后人的帧里仍是 200）
-    service.process_snapshot(device_id, _frame([_door(acc_no="B", cert_no="D", bath_time_s=200)], T1))
+    door_link.feed(device_id, _frame([_door(acc_no="B", cert_no="D", bath_time_s=200)], T1))
 
     first, second = _sessions(device_id)
     assert first["cert_no"] == "C"
@@ -227,12 +220,10 @@ def test_same_occupant_repeated_frames_do_not_split(fresh_db: str) -> None:
     device_id = "dev-repeat"
     for index in range(5):
         at = f"2026-09-30T12:00:{index * 10:02d}.000Z"
-        service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], at))
+        door_link.feed(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], at))
 
     assert len(_sessions(device_id)) == 1
-    events = (
-        db.get_conn().execute("SELECT COUNT(*) FROM door_state_event WHERE device_id = ?", (device_id,)).fetchone()[0]
-    )
+    events = len(door_link.list_events(device_id))
     assert events == 0
 
 
@@ -249,8 +240,8 @@ def test_gap_exactly_at_session_limit_is_still_continuous(fresh_db: str) -> None
     """
     device_id = "dev-edge-exact"
     limit = service.SESSION_MAX_S
-    service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], T0))
-    service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], _plus(T0, limit)))
+    door_link.feed(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], T0))
+    door_link.feed(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], _plus(T0, limit)))
 
     assert _sessions(device_id)[0]["flow_s"] == limit
 
@@ -259,8 +250,8 @@ def test_gap_one_second_over_the_limit_breaks_the_segment(fresh_db: str) -> None
     """超出一秒即判断开：那一段没有被观测到，一秒都不算。"""
     device_id = "dev-edge-over"
     limit = service.SESSION_MAX_S
-    service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], T0))
-    service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], _plus(T0, limit + 1)))
+    door_link.feed(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], T0))
+    door_link.feed(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], _plus(T0, limit + 1)))
 
     assert _sessions(device_id)[0]["flow_s"] == 0
 
@@ -273,9 +264,9 @@ def test_offline_gap_does_not_inflate_flow(fresh_db: str) -> None:
     "当前时刻减 in_time"，实测出现过 24 小时的脏值，而且只增不减。
     """
     device_id = "dev-offline-gap"
-    service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], T0))
-    service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], _plus(T0, 100)))
-    service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], _plus(T0, 8 * 3600)))
+    door_link.feed(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], T0))
+    door_link.feed(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], _plus(T0, 100)))
+    door_link.feed(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], _plus(T0, 8 * 3600)))
 
     rows = _sessions(device_id)
     assert len(rows) == 2
@@ -292,9 +283,9 @@ def test_session_crossing_gap_keeps_last_seen_as_the_bound(fresh_db: str) -> Non
     超过一次占用的上限时，两者不再是同一件事。
     """
     device_id = "dev-cross-night"
-    service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C")], T0))
-    service.process_snapshot(device_id, _frame([_door(acc_no="A", cert_no="C")], _plus(T0, 3600)))
-    service.process_snapshot(device_id, _frame([_door()], _plus(T0, 12 * 3600)))
+    door_link.feed(device_id, _frame([_door(acc_no="A", cert_no="C")], T0))
+    door_link.feed(device_id, _frame([_door(acc_no="A", cert_no="C")], _plus(T0, 3600)))
+    door_link.feed(device_id, _frame([_door()], _plus(T0, 12 * 3600)))
 
     rows = _sessions(device_id)
     assert len(rows) == 2, "盲区 11 小时，前后是两次会话"
@@ -314,27 +305,25 @@ def test_non_object_entries_are_skipped(fresh_db: str) -> None:
     device_id = "dev-non-object"
     payload = _frame([_door(acc_no="A")], T0)
     payload["doors"] = [None, 1, "x", [], payload["doors"][0]]
-    service.process_snapshot(device_id, payload)
+    door_link.feed(device_id, payload)
 
-    assert repository.get_all_live(device_id)[1]["state"] == "waiting"
+    assert door_link.get_all_live(device_id)[1]["state"] == "waiting"
 
 
 def test_garbage_time_is_not_treated_as_present(fresh_db: str) -> None:
     """解析不了的时间字段不算"有"——否则一条乱码会被读成"正在出水"。"""
     device_id = "dev-garbage-time"
-    service.process_snapshot(device_id, _frame([_door(acc_no="A", in_time="不是时间", close_time=1782135693)], T0))
+    door_link.feed(device_id, _frame([_door(acc_no="A", in_time="不是时间", close_time=1782135693)], T0))
 
-    assert repository.get_all_live(device_id)[1]["state"] == "waiting"
+    assert door_link.get_all_live(device_id)[1]["state"] == "waiting"
 
 
 def test_first_frame_does_not_fabricate_a_transition(fresh_db: str) -> None:
     """首帧没有"从哪来"，不该记一条空前态的迁移。"""
     device_id = "dev-first-frame"
-    service.process_snapshot(device_id, _frame([_door(acc_no="A")], T0))
+    door_link.feed(device_id, _frame([_door(acc_no="A")], T0))
 
-    events = (
-        db.get_conn().execute("SELECT COUNT(*) FROM door_state_event WHERE device_id = ?", (device_id,)).fetchone()[0]
-    )
+    events = len(door_link.list_events(device_id))
     assert events == 0
     assert len(_sessions(device_id)) == 1, "但占用态要开会话"
 
@@ -344,25 +333,23 @@ def test_replaying_the_same_frame_is_idempotent(fresh_db: str) -> None:
     device_id = "dev-idempotent"
     frame = _frame([_door(acc_no="A", cert_no="C", in_time=IN)], T0)
     for _ in range(3):
-        service.process_snapshot(device_id, frame)
+        door_link.feed(device_id, frame)
 
     assert len(_sessions(device_id)) == 1
     assert _sessions(device_id)[0]["flow_s"] == 0
-    events = (
-        db.get_conn().execute("SELECT COUNT(*) FROM door_state_event WHERE device_id = ?", (device_id,)).fetchone()[0]
-    )
+    events = len(door_link.list_events(device_id))
     assert events == 0
 
 
 def test_missing_door_in_a_later_frame_keeps_its_state(fresh_db: str) -> None:
     """设备漏报某个门时，那个门不该被判成空闲。"""
     device_id = "dev-missing-door"
-    service.process_snapshot(device_id, _frame([_door(1, acc_no="A"), _door(2)], T0))
-    service.process_snapshot(device_id, _frame([_door(2)], T1))
+    door_link.feed(device_id, _frame([_door(1, acc_no="A"), _door(2)], T0))
+    door_link.feed(device_id, _frame([_door(2)], T1))
 
-    live = repository.get_all_live(device_id)
+    live = door_link.get_all_live(device_id)
     assert live[1]["state"] == "waiting", "缺席的门保留原状态"
-    assert repository.get_open_session(device_id, 1) is not None
+    assert door_link.get_open_session(device_id, 1) is not None
     assert len(_sessions(device_id)) == 1, "会话没有因为漏报而结束"
 
 
@@ -384,7 +371,7 @@ def test_first_frame_already_occupied_marks_the_observation_bound(fresh_db: str)
     但那段水是真实的，**它的秒数已经在 `bath_time_s` 里**，会被计入 `flow_s`。
     """
     device_id = "dev-takeover"
-    service.process_snapshot(
+    door_link.feed(
         device_id,
         _frame([_door(acc_no="A", cert_no="C", bath_time_s=180, in_time=IN)], T0),
     )
@@ -397,7 +384,7 @@ def test_first_frame_already_occupied_marks_the_observation_bound(fresh_db: str)
 
     segments = _segments_of(row["id"])
     assert segments[0]["opened_at"] == T0, "无偏差可平移，段起点退回首次观测到出水的那一帧"
-    assert segments[0]["closed_at"] is None, "还没关阀，长度等它关阀那一刻才定"
+    assert segments[0]["closed_at"] == "", "还没关阀，长度等它关阀那一刻才定"
     assert segments[0]["source"] == "", "在途段的来源还没有定论"
 
 
@@ -412,7 +399,7 @@ def test_takeover_with_open_time_infers_the_real_start(fresh_db: str) -> None:
     device_id = "dev-takeover-inferred"
     # 设备钟比服务端慢 30 秒：偏差（服务端 − 设备）为正
     device_clock.load(device_id, 30.0)
-    service.process_snapshot(
+    door_link.feed(
         device_id,
         _frame(
             [
@@ -448,7 +435,7 @@ def test_inferred_start_makes_the_span_cover_the_duration(fresh_db: str) -> None
     """
     device_id = "dev-takeover-span-fixed"
     device_clock.load(device_id, 30.0)
-    service.process_snapshot(
+    door_link.feed(
         device_id,
         _frame(
             [
@@ -463,7 +450,7 @@ def test_inferred_start_makes_the_span_cover_the_duration(fresh_db: str) -> None
             T0,
         ),
     )
-    service.process_snapshot(device_id, _frame([_door()], "2026-09-30T12:05:00.000Z"))
+    door_link.feed(device_id, _frame([_door()], "2026-09-30T12:05:00.000Z"))
 
     row = _sessions(device_id)[0]
     assert row["assigned_at"] == "2026-09-30T11:45:30.000Z", "分配平移"
@@ -482,11 +469,11 @@ def test_takeover_session_duration_stays_within_its_span(fresh_db: str) -> None:
     把那 600 秒并进 `flow_s`，于是时长大于跨度；现在两者各归各位。
     """
     device_id = "dev-takeover-span"
-    service.process_snapshot(
+    door_link.feed(
         device_id,
         _frame([_door(acc_no="A", cert_no="C", bath_time_s=600, in_time=IN)], T0),
     )
-    service.process_snapshot(device_id, _frame([_door()], "2026-09-30T12:05:00.000Z"))
+    door_link.feed(device_id, _frame([_door()], "2026-09-30T12:05:00.000Z"))
 
     row = _sessions(device_id)[0]
     span = 300  # 12:00:00 → 12:05:00，我们只看了这五分钟
@@ -511,7 +498,7 @@ def test_takeover_while_paused_recovers_the_open_time(fresh_db: str) -> None:
     device_id = "dev-takeover-paused"
     device_clock.load(device_id, 60.0)  # 设备钟比服务端慢 60 秒
 
-    service.process_snapshot(
+    door_link.feed(
         device_id,
         _frame(
             [
@@ -546,7 +533,7 @@ def test_opened_at_comes_from_the_shifted_in_time(fresh_db: str) -> None:
     device_id = "dev-open-shift"
     device_clock.load(device_id, 60.0)
 
-    service.process_snapshot(
+    door_link.feed(
         device_id,
         _frame(
             [
@@ -577,7 +564,7 @@ def test_out_of_range_open_time_is_not_adopted(fresh_db: str) -> None:
     device_id = "dev-open-out-of-range"
     device_clock.load(device_id, 60.0)
 
-    service.process_snapshot(
+    door_link.feed(
         device_id,
         _frame(
             [
@@ -607,11 +594,11 @@ def test_takeover_does_not_inherit_the_previous_open_time(fresh_db: str) -> None
     它归旧账，不归新账。
     """
     device_id = "dev-takeover-opened"
-    service.process_snapshot(
+    door_link.feed(
         device_id,
         _frame([_door(acc_no="A", cert_no="甲", open_time="2026-09-30T11:50:00.000Z", in_time=IN)], T0),
     )
-    service.process_snapshot(
+    door_link.feed(
         device_id,
         _frame([_door(acc_no="B", cert_no="乙", open_time="2026-09-30T12:02:00.000Z", in_time=IN)], T2),
     )
@@ -635,7 +622,7 @@ def test_start_later_than_the_frame_is_not_adopted(fresh_db: str) -> None:
     device_id = "dev-assign-future"
     device_clock.load(device_id, 3600.0)  # 设备钟慢 1 小时：平移会把读数推后
 
-    service.process_snapshot(
+    door_link.feed(
         device_id,
         _frame([_door(cert_no="C", acc_no="A", open_time="2026-09-30T11:10:00.000Z")], "2026-09-30T12:05:00.000Z"),
     )
@@ -654,8 +641,8 @@ def test_start_before_the_last_sighting_is_not_adopted(fresh_db: str) -> None:
     device_id = "dev-assign-early"
     device_clock.load(device_id, 0.0)
 
-    service.process_snapshot(device_id, _frame([_door()], "2026-09-30T12:00:00.000Z"))  # 12:00 它空着
-    service.process_snapshot(
+    door_link.feed(device_id, _frame([_door()], "2026-09-30T12:00:00.000Z"))  # 12:00 它空着
+    door_link.feed(
         device_id,
         _frame([_door(cert_no="C", acc_no="A", open_time="2026-09-30T11:50:00.000Z")], "2026-09-30T12:10:00.000Z"),
     )
@@ -678,7 +665,7 @@ def test_start_far_from_in_time_is_not_adopted(fresh_db: str) -> None:
     device_id = "dev-assign-skew"
     device_clock.load(device_id, -3600.0)  # 拨钟后：设备钟快 1 小时
 
-    service.process_snapshot(
+    door_link.feed(
         device_id,
         _frame(
             [

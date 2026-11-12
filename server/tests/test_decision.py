@@ -6,7 +6,7 @@
 
 from dataclasses import replace
 
-from app.modules.doors.schemas import DoorState
+from app.models.enums import DoorState
 from app.modules.sessions.decision import (
     FEATURE_AUTO_SETTLE,
     FEATURE_RENEW_SESSION,

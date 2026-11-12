@@ -16,7 +16,7 @@
 
 from typing_extensions import TypedDict
 
-from app.modules.doors.schemas import DoorState
+from app.models.enums import DoorState
 
 
 class LabeledOption(TypedDict):

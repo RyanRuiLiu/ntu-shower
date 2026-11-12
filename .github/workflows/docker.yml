@@ -1,4 +1,3 @@
-# 依据：GitHub Docs "Reuse workflows"
 name: docker
 
 on:
@@ -12,7 +11,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: RyanRuiLiu/.github/.github/workflows/docker.yml@3ab9093eb84a1aac7c942a25a473761fde8deec5
+    uses: RyanRuiLiu/.github/.github/workflows/docker.yml@f36af60bd552aa03e93fa1f4dff9b2ef9a963a65
     with:
       acr_registry: <registry>
       acr_namespace: <namespace>

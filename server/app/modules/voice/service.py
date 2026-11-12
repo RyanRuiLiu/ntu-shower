@@ -12,13 +12,13 @@
 """
 
 import asyncio
-import json
 import shutil
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from sqlite3 import Row
-from typing import NoReturn
+from typing import Any, NoReturn
+
+from sqlalchemy.orm import Session
 
 from app.core import actions
 from app.core.clock import now_rfc3339, parse_rfc3339, to_local
@@ -31,14 +31,17 @@ from app.core.problems import (
     VOICE_RULE_NOT_FOUND,
     ApiProblemError,
 )
+from app.db.base import utcnow
 from app.modules.config import store as config_store
 from app.modules.devices import service as devices_service
 from app.modules.doors.events import DoorEvent, DoorEventKind
 from app.modules.sessions import service as sessions_service
 from app.modules.sessions.schemas import CommandOutcome
+from app.persistence import voice as repository
 
-from . import audio, numbers, repository, schemas
+from . import audio, numbers, schemas
 from . import time_windows as time_rules
+from .priority import rule_priority
 
 #: 预下载命令只让设备排入后台队列，不等待实际下载。预留 0.1 Mbps 链路下
 #: 命令帧与回执的往返时间；它走独立通道，超时只影响后续预下载，不阻塞播放。
@@ -117,9 +120,9 @@ def asset_url(asset_id: str) -> str:
     return f"/voice/assets/{asset_id}.mp3"
 
 
-def _asset_view(row: Row) -> schemas.VoiceAssetView:
+def _asset_view(session: Session, row: dict[str, Any]) -> schemas.VoiceAssetView:
     asset_id = str(row["asset_id"])
-    unit_row = repository.get_unit_by_asset(asset_id)
+    unit_row = repository.get_unit_by_asset(session, asset_id)
     return schemas.VoiceAssetView(
         asset_id=asset_id,
         name=str(row["name"]),
@@ -133,41 +136,41 @@ def _asset_view(row: Row) -> schemas.VoiceAssetView:
     )
 
 
-def list_assets() -> list[schemas.VoiceAssetView]:
-    return [_asset_view(row) for row in repository.list_assets()]
+def list_assets(session: Session) -> list[schemas.VoiceAssetView]:
+    return [_asset_view(session, row) for row in repository.list_assets(session)]
 
 
-def _digit_rows() -> dict[int, Row]:
+def _digit_rows(session: Session) -> dict[int, dict[str, Any]]:
     return {
         int(row["digit"]): row
-        for row in repository.list_assets()
+        for row in repository.list_assets(session)
         if row["digit"] is not None and 0 <= int(row["digit"]) <= 9
     }
 
 
-def _digit_set() -> list[int]:
-    return sorted(_digit_rows())
+def _digit_set(session: Session) -> list[int]:
+    return sorted(_digit_rows(session))
 
 
-def _unit_rows() -> dict[str, Row]:
-    return repository.unit_rows()
+def _unit_rows(session: Session) -> dict[str, dict[str, Any]]:
+    return repository.unit_rows(session)
 
 
-def _unit_set() -> list[str]:
-    present = set(_unit_rows())
+def _unit_set(session: Session) -> list[str]:
+    present = set(_unit_rows(session))
     return [unit for unit in numbers.unit_chars() if unit in present]
 
 
-def status() -> schemas.VoiceStatusView:
+def status(session: Session) -> schemas.VoiceStatusView:
     return schemas.VoiceStatusView(
-        asset_count=len(repository.list_assets()),
-        digits=_digit_set(),
-        units=_unit_set(),
+        asset_count=len(repository.list_assets(session)),
+        digits=_digit_set(session),
+        units=_unit_set(session),
         ffmpeg_available=shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None,
     )
 
 
-def spec() -> schemas.VoiceSpecView:
+def spec(session: Session) -> schemas.VoiceSpecView:
     return schemas.VoiceSpecView(
         events=[
             schemas.VoiceEventView(
@@ -181,16 +184,21 @@ def spec() -> schemas.VoiceSpecView:
         volume=schemas.VoiceBoundView(
             minimum=schemas.VOLUME_MIN, maximum=schemas.VOLUME_MAX, default=schemas.VOLUME_DEFAULT
         ),
-        digits=_digit_set(),
-        asset_count=len(repository.list_assets()),
+        digits=_digit_set(session),
+        asset_count=len(repository.list_assets(session)),
         max_segments=schemas.MAX_SEGMENTS_PER_RULE,
         max_time_windows=time_rules.MAX_TIME_WINDOWS_PER_RULE,
         max_pause_ms=schemas.MAX_PAUSE_MS,
         min_pause_ms=schemas.MIN_PAUSE_MS,
+        max_digits_length=schemas.MAX_DIGITS_LENGTH,
+        units=list(numbers.unit_chars()),
+        sample_cert_no=SAMPLE_CERT_NO,
     )
 
 
-def create_asset(name: str, data: bytes, digit: int | None, unit: str | None) -> schemas.VoiceAssetView:
+def create_asset(
+    session: Session, name: str, data: bytes, digit: int | None, unit: str | None
+) -> schemas.VoiceAssetView:
     clean = name.strip()
     if not clean or len(clean) > schemas.MAX_NAME_LENGTH:
         _reject_asset(f"名称必须为 1–{schemas.MAX_NAME_LENGTH} 个字符")
@@ -204,11 +212,11 @@ def create_asset(name: str, data: bytes, digit: int | None, unit: str | None) ->
         _reject_asset("文件为空")
     if len(data) > MAX_UPLOAD_BYTES:
         _reject_asset(f"文件超过 {MAX_UPLOAD_BYTES // (1024 * 1024)}MB")
-    if repository.get_asset_by_name(clean) is not None:
+    if repository.get_asset_by_name(session, clean) is not None:
         _reject_asset(f"素材名称已存在：{clean}")
-    if digit is not None and repository.get_asset_by_digit(digit) is not None:
+    if digit is not None and repository.get_asset_by_digit(session, digit) is not None:
         _reject_asset(f"数字 {digit} 已有素材")
-    if unit is not None and unit in _unit_rows():
+    if unit is not None and unit in _unit_rows(session):
         _reject_asset(f"单位「{unit}」已有素材")
 
     source = audio.tmp_dir() / f"upload-{uuid.uuid4().hex}.src"
@@ -218,7 +226,7 @@ def create_asset(name: str, data: bytes, digit: int | None, unit: str | None) ->
         source.write_bytes(data)
         duration_ms = audio.normalize_to_mp3(source, target)
         asset_id = audio.sha256_file(target)
-        existing = repository.get_asset(asset_id)
+        existing = repository.get_asset(session, asset_id)
         if existing is not None:
             _reject_asset(f"相同音频已存在：{existing['name']}")
         final = audio.asset_path(asset_id)
@@ -227,22 +235,22 @@ def create_asset(name: str, data: bytes, digit: int | None, unit: str | None) ->
         if created_final:
             target.replace(final)
         try:
-            repository.insert_asset(asset_id, clean, digit, duration_ms, final.stat().st_size, now_rfc3339())
+            repository.insert_asset(session, asset_id, clean, digit, duration_ms, final.stat().st_size)
             if unit is not None:
-                repository.insert_unit(unit, asset_id)
+                repository.insert_unit(session, unit, asset_id)
         except Exception:
-            repository.delete_unit(asset_id)
-            repository.delete_asset(asset_id)
+            repository.delete_unit(session, asset_id)
+            repository.delete_asset(session, asset_id)
             if created_final:
                 final.unlink(missing_ok=True)
             raise
-        row = repository.get_asset(asset_id)
+        row = repository.get_asset(session, asset_id)
         if row is None:
-            repository.delete_asset(asset_id)
+            repository.delete_asset(session, asset_id)
             if created_final:
                 final.unlink(missing_ok=True)
             _reject_asset("素材写入后读不到")
-        return _asset_view(row)
+        return _asset_view(session, row)
     except audio.AudioError as exc:
         _reject_asset(str(exc))
     finally:
@@ -250,24 +258,24 @@ def create_asset(name: str, data: bytes, digit: int | None, unit: str | None) ->
         target.unlink(missing_ok=True)
 
 
-def rename_asset(asset_id: str, name: str) -> schemas.VoiceAssetView:
+def rename_asset(session: Session, asset_id: str, name: str) -> schemas.VoiceAssetView:
     clean = name.strip()
     if not clean or len(clean) > schemas.MAX_NAME_LENGTH:
         _reject_asset(f"名称必须为 1–{schemas.MAX_NAME_LENGTH} 个字符")
-    existing = repository.get_asset_by_name(clean)
+    existing = repository.get_asset_by_name(session, clean)
     if existing is not None and str(existing["asset_id"]) != asset_id:
         _reject_asset(f"素材名称已存在：{clean}")
-    if repository.rename_asset(asset_id, clean) == 0:
+    if repository.rename_asset(session, asset_id, clean) is False:
         raise ApiProblemError(VOICE_ASSET_NOT_FOUND, asset_id)
-    row = repository.get_asset(asset_id)
+    row = repository.get_asset(session, asset_id)
     if row is None:
         raise ApiProblemError(VOICE_ASSET_NOT_FOUND, asset_id)
-    return _asset_view(row)
+    return _asset_view(session, row)
 
 
-def _rules_using_asset(asset_id: str, digit: int | None, unit: str | None) -> bool:
-    for row in repository.list_rules():
-        for item in json.loads(str(row["segments"])):
+def _rules_using_asset(session: Session, asset_id: str, digit: int | None, unit: str | None) -> bool:
+    for row in repository.list_rules(session):
+        for item in row["segments"]:
             if item.get("kind") == "asset" and item.get("asset_id") == asset_id:
                 return True
             if item.get("kind") != "digits":
@@ -279,22 +287,22 @@ def _rules_using_asset(asset_id: str, digit: int | None, unit: str | None) -> bo
     return False
 
 
-def delete_asset(asset_id: str) -> None:
-    row = repository.get_asset(asset_id)
+def delete_asset(session: Session, asset_id: str) -> None:
+    row = repository.get_asset(session, asset_id)
     if row is None:
         raise ApiProblemError(VOICE_ASSET_NOT_FOUND, asset_id)
     digit = int(row["digit"]) if row["digit"] is not None else None
-    unit_row = repository.get_unit_by_asset(asset_id)
+    unit_row = repository.get_unit_by_asset(session, asset_id)
     unit = str(unit_row["unit"]) if unit_row is not None else None
-    if _rules_using_asset(asset_id, digit, unit):
+    if _rules_using_asset(session, asset_id, digit, unit):
         raise ApiProblemError(VOICE_ASSET_IN_USE, f"「{row['name']}」正在被规则使用")
-    repository.delete_unit(asset_id)
-    repository.delete_asset(asset_id)
+    repository.delete_unit(session, asset_id)
+    repository.delete_asset(session, asset_id)
     audio.asset_path(asset_id).unlink(missing_ok=True)
 
 
-def asset_file(asset_id: str) -> Path:
-    row = repository.get_asset(asset_id)
+def asset_file(session: Session, asset_id: str) -> Path:
+    row = repository.get_asset(session, asset_id)
     path = audio.asset_path(asset_id)
     if row is None or not path.is_file():
         raise ApiProblemError(VOICE_ASSET_NOT_FOUND, asset_id)
@@ -317,31 +325,31 @@ def _segment_from_dict(value: object) -> schemas.Segment:
     _reject(f"未知的分段类型：{kind}")
 
 
-def _validate_segments(segments: list[schemas.Segment]) -> None:
+def _validate_segments(session: Session, segments: list[schemas.Segment]) -> None:
     if not segments:
         _reject("至少需要一个分段")
     asset_ids = [segment.asset_id for segment in segments if isinstance(segment, schemas.AssetSegment)]
-    missing = [asset_id for asset_id in set(asset_ids) if repository.get_asset(asset_id) is None]
+    missing = [asset_id for asset_id in set(asset_ids) if repository.get_asset(session, asset_id) is None]
     if missing:
         _reject(f"素材不存在：{missing[0]}")
     for segment in segments:
         if isinstance(segment, schemas.DigitsSegment) and segment.source == "door_no" and segment.length is not None:
             _reject("喷头号不支持截取位数")
     if any(isinstance(segment, schemas.DigitsSegment) for segment in segments):
-        missing_digits = [digit for digit in range(10) if digit not in _digit_rows()]
+        missing_digits = [digit for digit in range(10) if digit not in _digit_rows(session)]
         if missing_digits:
             _reject("数字素材不全，缺：" + "、".join(str(digit) for digit in missing_digits))
     if any(isinstance(segment, schemas.DigitsSegment) and segment.source == "door_no" for segment in segments):
-        missing_units = [unit for unit in numbers.unit_chars() if unit not in _unit_rows()]
+        missing_units = [unit for unit in numbers.unit_chars() if unit not in _unit_rows(session)]
         if missing_units:
             _reject("单位素材不全，缺：" + "、".join(missing_units))
 
 
-def _segments_json(segments: list[schemas.Segment]) -> str:
-    return json.dumps([segment.model_dump() for segment in segments], ensure_ascii=False)
+def _segments_dicts(segments: list[schemas.Segment]) -> list[dict[str, object]]:
+    return [segment.model_dump() for segment in segments]
 
 
-def _segment_summary(segments: list[schemas.Segment], assets: dict[str, Row]) -> str:
+def _segment_summary(segments: list[schemas.Segment], assets: dict[str, dict[str, Any]]) -> str:
     parts: list[str] = []
     for segment in segments:
         if isinstance(segment, schemas.AssetSegment):
@@ -357,12 +365,12 @@ def _segment_summary(segments: list[schemas.Segment], assets: dict[str, Row]) ->
     return " · ".join(parts)
 
 
-def _rule_view(row: Row) -> schemas.VoiceRuleView:
-    segments = [_segment_from_dict(value) for value in json.loads(str(row["segments"]))]
+def _rule_view(session: Session, row: dict[str, Any]) -> schemas.VoiceRuleView:
+    segments = [_segment_from_dict(value) for value in row["segments"]]
     asset_ids = [segment.asset_id for segment in segments if isinstance(segment, schemas.AssetSegment)]
-    assets = repository.asset_rows_by_ids(asset_ids)
+    assets = repository.asset_rows_by_ids(session, asset_ids)
     try:
-        windows = time_rules.parse_json(str(row["time_windows"]))
+        windows = time_rules.parse_json(row["time_windows"])
     except ValueError as exc:
         log_event(
             "ERROR",
@@ -374,10 +382,10 @@ def _rule_view(row: Row) -> schemas.VoiceRuleView:
         windows = []
     return schemas.VoiceRuleView(
         id=int(row["id"]),
-        devices=json.loads(str(row["devices"])),
-        certs=json.loads(str(row["certs"])),
-        exempt=json.loads(str(row["exempt"])),
-        events=[DoorEventKind(value) for value in json.loads(str(row["events"]))],
+        devices=list(row["devices"]),
+        certs=list(row["certs"]),
+        exempt=list(row["exempt"]),
+        events=[DoorEventKind(value) for value in row["events"]],
         time_windows=[
             schemas.TimeWindow(days=list(window.days), start=window.start, end=window.end) for window in windows
         ],
@@ -413,21 +421,22 @@ def _normalized_exemptions(values: list[str]) -> list[str]:
     return targets
 
 
-def _exempt_json(cert_nos: list[str], exemptions: list[str]) -> str:
+def _exempt_list(cert_nos: list[str], exemptions: list[str]) -> list[str]:
     if exemptions and schemas.WILDCARD not in cert_nos:
         _reject("排除名单只用于「全部学号」的规则")
-    return json.dumps(exemptions, ensure_ascii=False)
+    return exemptions
 
 
-def _require_known_devices(device_ids: list[str]) -> None:
+def _require_known_devices(session: Session, device_ids: list[str]) -> None:
     for device_id in device_ids:
         if device_id == schemas.WILDCARD:
             continue
-        if devices_service.get_device(device_id) is None:
+        if devices_service.get_device(session, device_id) is None:
             raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {device_id} 不在档案里")
 
 
 def _duplicate_rule(
+    session: Session,
     devices: list[str],
     certs: list[str],
     events: list[DoorEventKind],
@@ -443,20 +452,20 @@ def _duplicate_rule(
     target_certs = set(certs)
     target_events = {event.value for event in events}
     target_windows = [window.to_window() for window in time_windows]
-    priority = repository.rule_priority(devices, certs, target_windows)
-    for row in repository.list_rules():
+    priority = rule_priority(devices, certs, target_windows)
+    for row in repository.list_rules(session):
         if exclude_id is not None and int(row["id"]) == exclude_id:
             continue
-        row_devices = set(json.loads(str(row["devices"])))
-        row_certs = set(json.loads(str(row["certs"])))
-        if not target_events & set(json.loads(str(row["events"]))):
+        row_devices = set(row["devices"])
+        row_certs = set(row["certs"])
+        if not target_events & set(row["events"]):
             continue
         device_overlap = "*" in target_devices or "*" in row_devices or bool(target_devices & row_devices)
         cert_overlap = "*" in target_certs or "*" in row_certs or bool(target_certs & row_certs)
         if not (device_overlap and cert_overlap):
             continue
         try:
-            row_windows = time_rules.parse_json(str(row["time_windows"]))
+            row_windows = time_rules.parse_json(row["time_windows"])
         except ValueError as exc:
             log_event(
                 "ERROR",
@@ -466,7 +475,7 @@ def _duplicate_rule(
                 error=str(exc),
             )
             continue
-        if repository.rule_priority(sorted(row_devices), sorted(row_certs), row_windows) != priority:
+        if rule_priority(sorted(row_devices), sorted(row_certs), row_windows) != priority:
             continue
         if not target_windows and not row_windows:
             _reject("同优先级的规则目标重叠，请调整设备或学号范围")
@@ -475,6 +484,7 @@ def _duplicate_rule(
 
 
 def _normalize_rule(
+    session: Session,
     devices: list[str],
     certs: list[str],
     events: list[DoorEventKind],
@@ -482,87 +492,94 @@ def _normalize_rule(
     segments: list[schemas.Segment],
     exempt_cert_nos: list[str],
     exclude_id: int | None,
-) -> tuple[list[str], list[str], list[DoorEventKind], str, list[schemas.Segment], str]:
+) -> tuple[list[str], list[str], list[DoorEventKind], list[dict[str, object]], list[schemas.Segment], list[str]]:
     normalized_devices = _normalized_targets(devices, "设备")
     normalized_certs = _normalized_targets(certs, "学号")
-    _require_known_devices(normalized_devices)
+    _require_known_devices(session, normalized_devices)
     normalized_events = list(dict.fromkeys(events))
     if not normalized_events:
         _reject("至少选择一个事件")
-    _validate_segments(segments)
+    _validate_segments(session, segments)
     exemptions = _normalized_exemptions(exempt_cert_nos)
-    exempt = _exempt_json(normalized_certs, exemptions)
-    _duplicate_rule(normalized_devices, normalized_certs, normalized_events, time_windows, exclude_id)
-    windows_json = time_rules.dump([window.to_window() for window in time_windows])
-    return normalized_devices, normalized_certs, normalized_events, windows_json, segments, exempt
+    exempt = _exempt_list(normalized_certs, exemptions)
+    _duplicate_rule(session, normalized_devices, normalized_certs, normalized_events, time_windows, exclude_id)
+    windows: list[dict[str, Any]] = [
+        {"days": list(window.to_window().days), "start": window.to_window().start, "end": window.to_window().end}
+        for window in time_windows
+    ]
+    return normalized_devices, normalized_certs, normalized_events, windows, segments, exempt
 
 
-def create_rule(req: schemas.VoiceRuleCreate) -> schemas.VoiceRuleView:
-    devices, certs, events, windows_json, segments, exempt = _normalize_rule(
-        req.devices, req.certs, req.events, req.time_windows, req.segments, req.exempt_cert_nos, None
+def create_rule(session: Session, req: schemas.VoiceRuleCreate) -> schemas.VoiceRuleView:
+    devices, certs, events, windows, segments, exempt = _normalize_rule(
+        session, req.devices, req.certs, req.events, req.time_windows, req.segments, req.exempt_cert_nos, None
     )
     rule_id = repository.insert_rule(
-        json.dumps(devices, ensure_ascii=False),
-        json.dumps(certs, ensure_ascii=False),
-        json.dumps([event.value for event in events], ensure_ascii=False),
-        windows_json,
+        session,
+        devices,
+        certs,
+        [event.value for event in events],
+        windows,
         exempt,
-        _segments_json(segments),
+        _segments_dicts(segments),
         req.volume,
         req.enabled,
-        now_rfc3339(),
+        utcnow(),
     )
-    row = repository.get_rule(rule_id)
+    row = repository.get_rule(session, rule_id)
     if row is None:
         raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
-    return _rule_view(row)
+    return _rule_view(session, row)
 
 
-def update_rule(rule_id: int, req: schemas.VoiceRuleUpdate) -> schemas.VoiceRuleView:
-    if repository.get_rule(rule_id) is None:
+def update_rule(session: Session, rule_id: int, req: schemas.VoiceRuleUpdate) -> schemas.VoiceRuleView:
+    if repository.get_rule(session, rule_id) is None:
         raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
-    devices, certs, events, windows_json, segments, exempt = _normalize_rule(
-        req.devices, req.certs, req.events, req.time_windows, req.segments, req.exempt_cert_nos, rule_id
+    devices, certs, events, windows, segments, exempt = _normalize_rule(
+        session, req.devices, req.certs, req.events, req.time_windows, req.segments, req.exempt_cert_nos, rule_id
     )
     if (
         repository.update_rule(
+            session,
             rule_id,
-            json.dumps(devices, ensure_ascii=False),
-            json.dumps(certs, ensure_ascii=False),
-            json.dumps([event.value for event in events], ensure_ascii=False),
-            windows_json,
+            devices,
+            certs,
+            [event.value for event in events],
+            windows,
             exempt,
-            _segments_json(segments),
+            _segments_dicts(segments),
             req.volume,
             req.enabled,
-            now_rfc3339(),
+            utcnow(),
         )
-        == 0
+        is False
     ):
         raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
-    row = repository.get_rule(rule_id)
+    row = repository.get_rule(session, rule_id)
     if row is None:
         raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
-    return _rule_view(row)
+    return _rule_view(session, row)
 
 
-def set_enabled(rule_id: int, enabled: bool) -> schemas.VoiceRuleView:
-    if repository.set_enabled(rule_id, enabled, now_rfc3339()) == 0:
+def set_enabled(session: Session, rule_id: int, enabled: bool) -> schemas.VoiceRuleView:
+    if repository.set_enabled(session, rule_id, enabled, utcnow()) is False:
         raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
-    row = repository.get_rule(rule_id)
+    row = repository.get_rule(session, rule_id)
     if row is None:
         raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
-    return _rule_view(row)
+    return _rule_view(session, row)
 
 
-def delete_rule(rule_id: int) -> None:
-    if repository.delete_rule(rule_id) == 0:
+def delete_rule(session: Session, rule_id: int) -> None:
+    if repository.delete_rule(session, rule_id) is False:
         raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
 
 
-def _rule_order(view: schemas.VoiceRuleView) -> tuple[bool, str, bool, int, int]:
+def _rule_order(session: Session, view: schemas.VoiceRuleView) -> tuple[bool, str, bool, int, int]:
     cert_label = "~" if "*" in view.certs else (view.certs[0] if view.certs else "~")
-    device_order = {str(record["device_id"]): index for index, record in enumerate(devices_service.list_devices())}
+    device_order = {
+        str(record["device_id"]): index for index, record in enumerate(devices_service.list_devices(session))
+    }
     return (
         "*" in view.certs,
         cert_label,
@@ -572,23 +589,28 @@ def _rule_order(view: schemas.VoiceRuleView) -> tuple[bool, str, bool, int, int]
     )
 
 
-def list_rules() -> list[schemas.VoiceRuleView]:
-    return sorted((_rule_view(row) for row in repository.list_rules()), key=_rule_order)
+def list_rules(session: Session) -> list[schemas.VoiceRuleView]:
+    return sorted(
+        (_rule_view(session, row) for row in repository.list_rules(session)),
+        key=lambda view: _rule_order(session, view),
+    )
 
 
 # ── 解析与播放清单 ──
 
 
-def _resolve(segments: list[schemas.Segment], door_no: int, cert_no: str) -> list[PlanItem]:
+def _resolve(session: Session, segments: list[schemas.Segment], door_no: int, cert_no: str) -> list[PlanItem]:
     """把规则分段解析成设备播放清单；数字变量只取数字字符。"""
     plan: list[PlanItem] = []
-    assets = repository.asset_rows_by_ids(
-        [segment.asset_id for segment in segments if isinstance(segment, schemas.AssetSegment)]
-    )
-    digits = _digit_rows()
-    units = _unit_rows()
+    asset_ids = {segment.asset_id for segment in segments if isinstance(segment, schemas.AssetSegment)}
+    # 数字/单位素材也要档案：door_no 段按"百""十"展开到对应素材
+    asset_ids.update(unit["asset_id"] for unit in _unit_rows(session).values())
+    asset_ids.update(digit["asset_id"] for digit in _digit_rows(session).values())
+    assets = repository.asset_rows_by_ids(session, sorted(asset_ids))
+    digits = _digit_rows(session)
+    units = _unit_rows(session)
 
-    def clip(row: Row) -> ClipPlan:
+    def clip(row: dict[str, Any]) -> ClipPlan:
         asset_id = str(row["asset_id"])
         return ClipPlan(
             clip_id=asset_id,
@@ -610,11 +632,12 @@ def _resolve(segments: list[schemas.Segment], door_no: int, cert_no: str) -> lis
                 except ValueError as exc:
                     _reject(str(exc))
                 for symbol in symbols:
-                    row = (
-                        digits.get(numbers.digit_value(symbol))
-                        if symbol in numbers.DIGIT_SYMBOLS
-                        else units.get(symbol)
-                    )
+                    if symbol in numbers.DIGIT_SYMBOLS:
+                        row = digits.get(numbers.digit_value(symbol))
+                    else:
+                        # 单位表只给 asset_id：取到后再查素材档案，clip 需要完整形状
+                        unit_row = units.get(symbol)
+                        row = assets.get(unit_row["asset_id"]) if unit_row else None
                     if row is None:
                         _reject(f"数字/单位素材缺失：{symbol}")
                     plan.append(clip(row))
@@ -644,8 +667,8 @@ def _play_params(plan: list[PlanItem], volume: int) -> dict[str, object]:
     }
 
 
-def _plan_summary(plan: list[PlanItem]) -> str:
-    assets = repository.asset_rows_by_ids([item.clip_id for item in plan if isinstance(item, ClipPlan)])
+def _plan_summary(session: Session, plan: list[PlanItem]) -> str:
+    assets = repository.asset_rows_by_ids(session, [item.clip_id for item in plan if isinstance(item, ClipPlan)])
     parts: list[str] = []
     for item in plan:
         if isinstance(item, ClipPlan):
@@ -656,8 +679,8 @@ def _plan_summary(plan: list[PlanItem]) -> str:
     return " · ".join(parts)
 
 
-def _preview(plan: list[PlanItem]) -> schemas.VoicePreviewView:
-    assets = repository.asset_rows_by_ids([item.clip_id for item in plan if isinstance(item, ClipPlan)])
+def _preview(session: Session, plan: list[PlanItem]) -> schemas.VoicePreviewView:
+    assets = repository.asset_rows_by_ids(session, [item.clip_id for item in plan if isinstance(item, ClipPlan)])
     segments: list[schemas.ResolvedSegment] = []
     for item in plan:
         if isinstance(item, ClipPlan):
@@ -682,34 +705,33 @@ def _preview(plan: list[PlanItem]) -> schemas.VoicePreviewView:
     return schemas.VoicePreviewView(
         segments=segments,
         total_ms=_plan_duration_ms(plan),
-        summary=_plan_summary(plan),
+        summary=_plan_summary(session, plan),
     )
 
 
-def preview(req: schemas.VoicePreviewRequest) -> schemas.VoicePreviewView:
-    _validate_segments(req.segments)
-    return _preview(_resolve(req.segments, req.door_no, req.cert_no))
+def preview(session: Session, req: schemas.VoicePreviewRequest) -> schemas.VoicePreviewView:
+    _validate_segments(session, req.segments)
+    return _preview(session, _resolve(session, req.segments, req.door_no, req.cert_no))
 
 
-def _sample_cert(row: Row) -> str:
-    certs = json.loads(str(row["certs"]))
+def _sample_cert(row: dict[str, Any]) -> str:
+    certs = list(row["certs"])
     return SAMPLE_CERT_NO if "*" in certs or not certs else str(certs[0])
 
 
-def _sample_event(row: Row) -> DoorEventKind:
-    events = json.loads(str(row["events"]))
-    return DoorEventKind(str(events[0]))
+def _sample_event(row: dict[str, Any]) -> DoorEventKind:
+    return DoorEventKind(next(iter(row["events"])))
 
 
-async def push_to_device(rule_id: int, device_id: str) -> schemas.VoicePushView:
-    row = repository.get_rule(rule_id)
+async def push_to_device(session: Session, rule_id: int, device_id: str) -> schemas.VoicePushView:
+    row = repository.get_rule(session, rule_id)
     if row is None:
         raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
-    if devices_service.get_device(device_id) is None:
+    if devices_service.get_device(session, device_id) is None:
         raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {device_id} 不在档案里")
-    segments = [_segment_from_dict(value) for value in json.loads(str(row["segments"]))]
+    segments = [_segment_from_dict(value) for value in row["segments"]]
     try:
-        plan = _resolve(segments, 1, _sample_cert(row))
+        plan = _resolve(session, segments, 1, _sample_cert(row))
     except InvalidVoiceRuleError as exc:
         raise ApiProblemError(INVALID_VOICE_RULE, str(exc)) from exc
     duration_ms = _plan_duration_ms(plan)
@@ -724,16 +746,22 @@ async def push_to_device(rule_id: int, device_id: str) -> schemas.VoicePushView:
         event_key=f"{MANUAL_EVENT_PREFIX}{rule_id}:{uuid.uuid4().hex[:12]}",
     )
     repository.claim_delivery(
-        event,
+        session,
+        event.event_key,
         rule_id,
-        _plan_summary(plan),
+        event.device_id,
+        event.door_no,
+        event.cert_no,
+        event.kind.value,
+        _plan_summary(session, plan),
         len(plan),
         duration_ms,
-        now,
+        parse_rfc3339(event.occurred_at) or utcnow(),
         trace_id_var.get(),
-        now,
+        utcnow(),
     )
     outcome = await sessions_service.send_command_and_wait(
+        session,
         device_id,
         actions.VOICE_PLAY,
         _play_params(plan, int(row["volume"])),
@@ -741,11 +769,12 @@ async def push_to_device(rule_id: int, device_id: str) -> schemas.VoicePushView:
     )
     detail = _detail(outcome)
     repository.finish_delivery(
+        session,
         event.event_key,
-        now_rfc3339(),
+        utcnow(),
         str(outcome["status"]),
         "手动推送：" + detail,
-        now_rfc3339(),
+        utcnow(),
         _downloaded(outcome),
     )
     return schemas.VoicePushView(
@@ -761,15 +790,15 @@ async def push_to_device(rule_id: int, device_id: str) -> schemas.VoicePushView:
 # ── 预下载 ──
 
 
-def _clips_for_rule(row: Row) -> list[dict[str, object]]:
-    segments = [_segment_from_dict(value) for value in json.loads(str(row["segments"]))]
+def _clips_for_rule(session: Session, row: dict[str, Any]) -> list[dict[str, object]]:
+    segments = [_segment_from_dict(value) for value in row["segments"]]
     asset_ids = {segment.asset_id for segment in segments if isinstance(segment, schemas.AssetSegment)}
     digit_segments = [segment for segment in segments if isinstance(segment, schemas.DigitsSegment)]
     if digit_segments:
-        asset_ids.update(str(digit_row["asset_id"]) for digit_row in _digit_rows().values())
+        asset_ids.update(str(digit_row["asset_id"]) for digit_row in _digit_rows(session).values())
     if any(segment.source == "door_no" for segment in digit_segments):
-        asset_ids.update(str(unit_row["asset_id"]) for unit_row in _unit_rows().values())
-    rows = repository.asset_rows_by_ids(sorted(asset_ids))
+        asset_ids.update(str(unit_row["asset_id"]) for unit_row in _unit_rows(session).values())
+    rows = repository.asset_rows_by_ids(session, sorted(asset_ids))
     return [
         {
             "clip_id": str(asset["asset_id"]),
@@ -785,7 +814,7 @@ def _spawn_prepare(device_id: str, clips: list[dict[str, object]]) -> None:
     if not clips:
         return
     try:
-        task = asyncio.get_running_loop().create_task(_prepare(device_id, {"clips": clips}, VOICE_PREPARE_TIMEOUT_S))
+        task = asyncio.get_running_loop().create_task(_prepare_task(device_id, {"clips": clips}))
     except Exception as exc:  # noqa: BLE001 — 调度失败只记日志
         log_event("ERROR", "voice.schedule-failed", "语音预下载调度失败", device_id=device_id, error=str(exc))
         return
@@ -793,9 +822,18 @@ def _spawn_prepare(device_id: str, clips: list[dict[str, object]]) -> None:
     task.add_done_callback(_task_done)
 
 
-async def _prepare(device_id: str, params: dict[str, object], timeout_s: float) -> None:
+async def _prepare_task(device_id: str, params: dict[str, object]) -> None:
+    """asyncio 任务入口：自己开短会话。"""
+    from app.db.session import session_scope
+
+    with session_scope() as session:
+        await _prepare(session, device_id, params, VOICE_PREPARE_TIMEOUT_S)
+
+
+async def _prepare(session: Session, device_id: str, params: dict[str, object], timeout_s: float) -> None:
     try:
         outcome = await sessions_service.send_command_and_wait(
+            session,
             device_id,
             actions.VOICE_PREPARE,
             params,
@@ -821,16 +859,16 @@ async def _prepare(device_id: str, params: dict[str, object], timeout_s: float) 
     )
 
 
-def schedule_rule_prepare(view: schemas.VoiceRuleView) -> None:
+def schedule_rule_prepare(session: Session, view: schemas.VoiceRuleView) -> None:
     if not view.enabled:
         return
-    row = repository.get_rule(view.id)
+    row = repository.get_rule(session, view.id)
     if row is None:
         return
-    clips = _clips_for_rule(row)
+    clips = _clips_for_rule(session, row)
     devices = view.devices
     if schemas.WILDCARD in devices:
-        ids = [str(record["device_id"]) for record in devices_service.list_devices()]
+        ids = [str(record["device_id"]) for record in devices_service.list_devices(session)]
     else:
         ids = list(devices)
     for device_id in ids:
@@ -863,24 +901,27 @@ def _task_done(task: asyncio.Task[None]) -> None:
 
 
 async def handle_events(events: tuple[DoorEvent, ...]) -> None:
-    value = config_store.global_effective()["voice_event_max_age_s"]
-    max_age = value if isinstance(value, int) else 0
-    for event in events:
-        try:
-            await _dispatch_event(event, max_age)
-        except Exception as exc:  # noqa: BLE001 — 单事件失败不拖垮同一帧其它事件
-            log_event(
-                "ERROR",
-                "voice.delivery-error",
-                "语音事件处理失败",
-                device_id=event.device_id,
-                door_no=event.door_no,
-                event=event.kind.value,
-                error=str(exc),
-            )
+    from app.db.session import session_scope
+
+    with session_scope() as session:
+        value = config_store.global_effective(session)["voice_event_max_age_s"]
+        max_age = value if isinstance(value, int) else 0
+        for event in events:
+            try:
+                await _dispatch_event(session, event, max_age)
+            except Exception as exc:  # noqa: BLE001 — 单事件失败不拖垮同一帧其它事件
+                log_event(
+                    "ERROR",
+                    "voice.delivery-error",
+                    "语音事件处理失败",
+                    device_id=event.device_id,
+                    door_no=event.door_no,
+                    event=event.kind.value,
+                    error=str(exc),
+                )
 
 
-async def _dispatch_event(event: DoorEvent, max_age: int) -> None:
+async def _dispatch_event(session: Session, event: DoorEvent, max_age: int) -> None:
     if max_age > 0 and _elapsed_s(event.occurred_at) > max_age:
         log_event(
             "INFO",
@@ -893,7 +934,7 @@ async def _dispatch_event(event: DoorEvent, max_age: int) -> None:
         return
     if not event.cert_no:
         return
-    zone_offset = config_store.global_effective()["extend_hours_zone_offset_minutes"]
+    zone_offset = config_store.global_effective(session)["extend_hours_zone_offset_minutes"]
     if not isinstance(zone_offset, int):
         log_event(
             "ERROR",
@@ -906,7 +947,7 @@ async def _dispatch_event(event: DoorEvent, max_age: int) -> None:
     if local is None:
         log_event("ERROR", "voice.local-time-invalid", "无法换算服务端当地时间，跳过语音匹配")
         return
-    matched = repository.matching_rules(event.device_id, event.cert_no, event.kind.value, local)
+    matched = repository.matching_rules(session, event.device_id, event.cert_no, event.kind.value, local)
     rule = matched[0] if matched else None
     if rule is None:
         log_event(
@@ -918,9 +959,9 @@ async def _dispatch_event(event: DoorEvent, max_age: int) -> None:
             local_time=local.isoformat(timespec="minutes"),
         )
         return
-    segments = [_segment_from_dict(value) for value in json.loads(str(rule["segments"]))]
+    segments = [_segment_from_dict(value) for value in rule["segments"]]
     try:
-        plan = _resolve(segments, event.door_no, event.cert_no)
+        plan = _resolve(session, segments, event.door_no, event.cert_no)
     except InvalidVoiceRuleError as exc:
         log_event(
             "ERROR",
@@ -933,29 +974,35 @@ async def _dispatch_event(event: DoorEvent, max_age: int) -> None:
         return
     duration_ms = _plan_duration_ms(plan)
     if not repository.claim_delivery(
-        event,
+        session,
+        event.event_key,
         int(rule["id"]),
-        _plan_summary(plan),
+        event.device_id,
+        event.door_no,
+        event.cert_no,
+        event.kind.value,
+        _plan_summary(session, plan),
         len(plan),
         duration_ms,
-        event.occurred_at,
+        parse_rfc3339(event.occurred_at) or utcnow(),
         trace_id_var.get(),
-        now_rfc3339(),
+        utcnow(),
     ):
         return
-    dispatched_at = now_rfc3339()
     outcome = await sessions_service.send_command_and_wait(
+        session,
         event.device_id,
         actions.VOICE_PLAY,
         _play_params(plan, int(rule["volume"])),
         timeout_s=_play_timeout_s(duration_ms),
     )
     repository.finish_delivery(
+        session,
         event.event_key,
-        dispatched_at,
+        utcnow(),
         str(outcome["status"]),
         _detail(outcome),
-        now_rfc3339(),
+        utcnow(),
         _downloaded(outcome),
     )
     log_event(
@@ -972,9 +1019,9 @@ async def _dispatch_event(event: DoorEvent, max_age: int) -> None:
     )
 
 
-def list_deliveries(limit: int) -> list[schemas.VoiceDeliveryView]:
+def list_deliveries(session: Session, limit: int) -> list[schemas.VoiceDeliveryView]:
     deliveries: list[schemas.VoiceDeliveryView] = []
-    for row in repository.list_deliveries(limit):
+    for row in repository.list_deliveries(session, limit):
         event_key = str(row["event_key"])
         deliveries.append(
             schemas.VoiceDeliveryView(

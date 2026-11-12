@@ -4,13 +4,13 @@
 
 对外 HTTP 面统一挂 `/api/v1` 前缀（路径版本化，对外契约的破坏性变更升 v2）；
 URL 只表达资源，不表达权限——谁能调用由能力位守卫决定（统一身份制，
-X-Identity 头）：
+标准 Bearer 凭据）：
 
 - /api/v1/devices、/api/v1/doors     设备域：精简清单公开；runtime 档案与远程
                                       操作 admin；分配/结算/拍照按 session/photo 能力位
 - /api/v1/config                     配置域（admin）
 - /api/v1/identities                 身份域：名单与签发/编辑/撤销 admin；`/identities/me`
-                                      是自己的记录（凭 X-Identity）
+                                      是自己的记录（凭 Bearer 凭据）
 - /api/v1/tasks                      后台任务登记：按 tasks 能力位增删某个学号的登记
 - /api/v1/stats                      浴室统计：按 stats 能力位读一台设备的聚合、某一天的
                                      状态序列（客户端本地重放）、个人的跨设备统计
@@ -31,33 +31,31 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
+from starlette.middleware.sessions import SessionMiddleware
 from typing_extensions import TypedDict
 
-from .core import audit, db
-from .core.clock import now_rfc3339
+from .auth.routes import router as auth_router
+from .core import audit
+from .core.background import Background
 from .core.config import settings
 from .core.errors import install_error_handlers
 from .core.logging import configure_logging, log_event
 from .core.version import APP_VERSION
-from .modules.access import repository as access_repository
+from .db.base import utcnow
+from .db.session import Database
 from .modules.access.routes import admin_router as identities_admin_router
 from .modules.access.routes import router as identity_router
-from .modules.audit import repository as command_audit_repository
 from .modules.audit.routes import admin_router as audit_admin_router
 from .modules.bridge.routes import admin_router as bridge_admin_router
 from .modules.bridge.routes import router as bridge_router
-from .modules.config import store as config_store
 from .modules.config.routes import admin_router as config_admin_router
-from .modules.devices import repository as devices_repository
 from .modules.devices.routes import admin_router as devices_admin_router
 from .modules.devices.routes import router as devices_router
-from .modules.doors import repository as doors_repository
 from .modules.doors.routes import router as doors_router
-from .modules.extend_hours import repository as extend_hours_repository
 from .modules.extend_hours import service as extend_hours_service
 from .modules.freelist.routes import router as freelist_router
 from .modules.gateway.routes import router as gateway_router
-from .modules.ota import repository as ota_repository
 from .modules.ota.routes import device_router as ota_device_router
 from .modules.ota.routes import router as ota_router
 from .modules.sessions import scheduler as sessions_scheduler
@@ -66,13 +64,29 @@ from .modules.stats.routes import router as stats_router
 from .modules.status_line import service as status_line_service
 from .modules.tasks.routes import admin_router as tasks_admin_router
 from .modules.tasks.routes import router as tasks_router
-from .modules.voice import repository as voice_repository
 from .modules.voice.routes import admin_router as voice_admin_router
 from .modules.voice.routes import router as voice_router
 from .modules.water.routes import router as water_router
+from .persistence import audit as command_audit_store
 
 #: 要求浏览器每次回来验证的前端资源后缀。
 STATIC_SUFFIXES = (".html", ".js", ".css")
+
+#: 管理台会话 Cookie 名。不取库默认的通用名 "session"：同一域名的其他应用若也用
+#: 通用名（路径同为 /），会互相覆盖对方的 Cookie。
+SESSION_COOKIE_NAME = "ntu_session"
+
+
+def _cookie_secure() -> bool:
+    """配了 https 对外基址才置 Secure；本地与测试走 http，Cookie 仍要能用。"""
+    return settings.public_base_url.startswith("https://")
+
+
+#: SESSION_SECRET 缺失时的启动错误——错误消息只在这里出现一次。
+ERR_SESSION_SECRET = (
+    "SESSION_SECRET 未配置：会话签名密钥不能为空。"
+    '在 .env / 环境变量里注入一枚随机值（如 `python -c "import secrets; print(secrets.token_urlsafe(32))"`）。'
+)
 
 
 class HealthStatus(TypedDict):
@@ -83,45 +97,45 @@ class HealthStatus(TypedDict):
     version: str
 
 
-def init_schema() -> None:
-    """建全部表。
+def _abort_pending_commands() -> None:
+    """启动时收尾上一进程留下的 pending 命令（审计页不再永久显示进行中）。
 
-    各领域仓储持有自己的表结构，这里是唯一的装配点：应用启动与测试夹具都调它。
-    全部用 CREATE TABLE IF NOT EXISTS，重复调用没有副作用。
+    在 lifespan 里调而不是 init_schema：新表的建立归 Alembic（compose 的 migrate
+    服务先于应用启动），init_schema 的旧建表阶段它们还不存在。
     """
-    db.init_db()
-    devices_repository.init_tables()
-    doors_repository.init_tables()
-    access_repository.init_tables()
-    ota_repository.init_tables()
-    config_store.init_tables()
-    audit.init_tables()
-    command_audit_repository.init_tables()
-    aborted = command_audit_repository.abort_pending(now_rfc3339())
+    from .db.session import session_scope
+
+    with session_scope() as session:
+        aborted = command_audit_store.abort_pending(session, utcnow())
     if aborted:
         log_event("WARNING", "command.aborted-on-startup", "启动时收尾未完成命令", count=aborted)
-    extend_hours_repository.init_tables()
-    voice_repository.init_tables()
 
 
 def create_app() -> FastAPI:
     # 先装配日志：此后的初始化失败才有痕迹可查
     configure_logging(settings.log_level)
-    init_schema()
     Path(settings.ota_dir).mkdir(parents=True, exist_ok=True)
     Path(settings.voice_dir).mkdir(parents=True, exist_ok=True)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        # 数据库是全应用唯一的会话来源；表结构归 Alembic（compose 的 migrate
+        # 服务先于应用启动）。探活一次：库打不开/不可写在这里就炸，不拖到首个请求。
+        _app.state.database = Database(settings.effective_database_url)
+        with _app.state.database.new_session() as session:
+            session.execute(text("SELECT 1"))
+        # 间隔任务统一装配：各模块只提供「一轮做什么」，生命周期集中在这一个对象上。
+        background.interval("extend-hours", extend_hours_service.TICK_INTERVAL_S, extend_hours_service.tick_once)
+        background.interval("status-line", status_line_service.PUSH_INTERVAL_S, status_line_service.tick)
+        background.interval("audit-prune", audit.PRUNE_INTERVAL_S, audit.prune_once)
+        _abort_pending_commands()
+        background.start()
+        # 事件驱动型任务保持自己的模型：按设备惰性起 worker，不占统一循环。
         sessions_scheduler.start()
-        extend_hours_service.start()
-        status_line_service.start()
-        audit.start_prune()
         yield
-        audit.stop_prune()
-        await status_line_service.stop()
-        extend_hours_service.stop()
-        sessions_scheduler.stop()
+        await sessions_scheduler.stop()
+        await background.stop()
+        _app.state.database.dispose()
 
     app = FastAPI(title="NTU Shower", version=APP_VERSION, lifespan=lifespan)
     install_error_handlers(app)
@@ -149,6 +163,7 @@ def create_app() -> FastAPI:
     app.include_router(voice_router)
     app.include_router(water_router)
     app.include_router(voice_admin_router)
+    app.include_router(auth_router)
 
     @app.get("/healthz", tags=["meta"])
     def health() -> HealthStatus:
@@ -172,7 +187,23 @@ def create_app() -> FastAPI:
             response.headers["Cache-Control"] = "no-store"
         return response
 
+    # 会话走 Starlette SessionMiddleware（签名基于 itsdangerous）：签发、校验、过期与
+    # 注销都是库的职责，端点只读写 request.session。必须最后注册——add_middleware
+    # 越晚加越靠外，审计中间件要读到 request.session 就得在它内侧。
+    if not settings.session_secret:
+        raise RuntimeError(ERR_SESSION_SECRET)
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=settings.session_secret,
+        session_cookie=SESSION_COOKIE_NAME,
+        max_age=settings.session_ttl_seconds,
+        same_site="lax",
+        https_only=_cookie_secure(),
+    )
+
     return app
 
+
+background = Background()
 
 app = create_app()

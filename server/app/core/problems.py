@@ -33,6 +33,7 @@ RELEASE_NOT_FOUND = Problem("release-not-found", 404, "找不到版本")
 RELEASE_TOO_LARGE = Problem("release-too-large", 413, "安装包超过体积上限")
 OTA_APK_MISMATCH = Problem("ota-apk-mismatch", 422, "APK 内容版本与发布的版本不一致")
 UNTRUSTED_DEVICE = Problem("untrusted-device", 403, "设备尚未被信任")
+INVALID_DEVICE_CLAIM = Problem("invalid-device-claim", 401, "设备注册令牌无效")
 DUPLICATE_SESSION = Problem("duplicate-session", 409, "该学号已有进行中的会话")
 
 # ── 后台任务 ──
@@ -71,6 +72,7 @@ REGISTRY: tuple[Problem, ...] = (
     RELEASE_TOO_LARGE,
     OTA_APK_MISMATCH,
     UNTRUSTED_DEVICE,
+    INVALID_DEVICE_CLAIM,
     DUPLICATE_SESSION,
     TASK_NOT_FOUND,
     UNAUTHENTICATED,
