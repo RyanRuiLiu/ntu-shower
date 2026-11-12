@@ -29,17 +29,27 @@ jobs:
       - name: 解析更新类型
         id: metadata
         uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98  # v3.1.0
-      - name: 等待全部 checks 通过后 squash 合并（patch/minor）
+      - name: 等待其余 checks 全绿后 squash 合并（patch/minor）
         if: steps.metadata.outputs.update-type == 'version-update:semver-patch' || steps.metadata.outputs.update-type == 'version-update:semver-minor'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
+          # 本 job 自身也是一个 check：轮询必须排除，否则等待自己完成构成死锁
           for i in $(seq 1 60); do
-            gh pr checks "$PR_URL" && gh pr merge "$PR_URL" --squash && exit 0
-            rc=$?
-            if [ "$rc" -ne 8 ]; then
-              echo "checks 失败（rc=$rc），不合并" >&2
+            out=$(gh pr checks "$PR_URL" 2>/dev/null || true)
+            others=$(printf '%s\n' "$out" | grep -v "^automerge")
+            if printf '%s\n' "$others" | grep -q "fail"; then
+              echo "存在失败 check，不合并" >&2
+              exit 1
+            fi
+            if printf '%s\n' "$others" | grep -q "pending"; then
+              sleep 30
+              continue
+            fi
+            if [ -n "$others" ]; then
+              gh pr merge "$PR_URL" --squash && exit 0
+              echo "合并命令失败" >&2
               exit 1
             fi
             sleep 30
