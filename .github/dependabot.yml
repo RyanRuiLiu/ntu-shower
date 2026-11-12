@@ -10,6 +10,14 @@ updates:
     directory: "/android"
     schedule:
       interval: "weekly"
+    ignore:
+      # 设备 ROM 冻结 Android 4.4（API 19，minSdk/targetSdk 不可动）：
+      # okhttp 4.x 起要求 API 21，3.12.x 是支持 API 19 的最后一条线
+      - dependency-name: "com.squareup.okhttp3:okhttp"
+        versions: [">=3.13"]
+      # conscrypt-android 2.9.0 抬高 minSdk（PR #14 manifest 合并冲突实测）
+      - dependency-name: "org.conscrypt:conscrypt-android"
+        versions: [">=2.9"]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
