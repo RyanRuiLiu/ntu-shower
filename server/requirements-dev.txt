@@ -1,6 +1,6 @@
 -r requirements.txt
 # Starlette 1.7 起 TestClient 改用它；沿用 httpx 会触发 StarletteDeprecationWarning
-httpx2==2.13.1
+httpx2==2.16.0
 # 协议 Schema 校验（tests/test_protocol_schemas.py）；上限来自 semgrep==1.184.0 的 ~=4.25.1
 jsonschema==4.26.0
 mypy==2.4.1
