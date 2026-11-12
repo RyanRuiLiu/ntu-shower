@@ -10,6 +10,9 @@ on: pull_request
 permissions:
   contents: write
   pull-requests: write
+  # gh pr checks 读取 statusCheckRollup 需要；缺它报
+  # "Resource not accessible by integration"
+  checks: read
 
 concurrency:
   group: dependabot-auto-merge-${{ github.event.pull_request.number }}
