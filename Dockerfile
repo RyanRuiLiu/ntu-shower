@@ -13,7 +13,7 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONFAULTHANDLER=1
 
 # ffmpeg/ffprobe 静态二进制（含 libmp3lame）：apt 全量编解码库是镜像最大层
-# （压缩后 164MB），静态方案把该层压到约 50MB 且跨架构一致。镜像按 digest 钉版
+# （压缩后 164MB），静态方案实测把该层压到 108.5MB。镜像按 digest 钉版
 # 保证内容不可变；冒烟以与 normalize_to_mp3 相同的参数实转一段音频，二进制
 # 不可用或缺编解码器时构建即失败。
 COPY --from=mwader/static-ffmpeg@sha256:f5d100184884eb3e82b0eb14bb5ebf98da99826ac824989720297fb9ef21c822 \
