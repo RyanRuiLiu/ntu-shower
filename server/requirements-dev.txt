@@ -10,7 +10,7 @@ pytest-cov==7.1.0
 pytest-timeout==2.4.0
 pytest-xdist==3.8.0
 pytest==9.1.1
-ruff==0.16.9
+ruff==0.17.4
 # 本地提交前质量门（.githooks/pre-commit 调用）
 pre-commit==4.7.0
 # 架构边界：模型层不依赖业务模块（pyproject [tool.importlinter]）
