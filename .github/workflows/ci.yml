@@ -40,7 +40,7 @@ jobs:
       - name: Check pull request title
         # dependabot 豁免：SHA→SHA bump 的机器标题结构性超过 72 字摘要上限，
         # 无法通过人工规范；其合并 subject 由合并时显式提供。
-        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]'
+        if: github.event_name == 'pull_request' && !contains(github.event.pull_request.user.login, 'dependabot')
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
