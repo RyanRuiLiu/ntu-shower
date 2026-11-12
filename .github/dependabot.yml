@@ -15,9 +15,10 @@ updates:
       # okhttp 4.x 起要求 API 21，3.12.x 是支持 API 19 的最后一条线
       - dependency-name: "com.squareup.okhttp3:okhttp"
         versions: [">=3.13"]
-      # conscrypt-android 2.9.0 抬高 minSdk（PR #14 manifest 合并冲突实测）
+      # conscrypt-android 2.8.0 与 2.9.0 均抬高 minSdk（PR #14/#30 manifest
+      # 合并冲突实测），API 19 兼容线止于 2.5.x
       - dependency-name: "org.conscrypt:conscrypt-android"
-        versions: [">=2.9"]
+        versions: [">=2.8"]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
