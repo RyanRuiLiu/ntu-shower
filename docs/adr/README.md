@@ -8,7 +8,7 @@
 | [ADR-0002](0002-time-axis.md) | 时间轴：两条铁律 | Accepted |
 | [ADR-0003](0003-data-layering.md) | 数据分层：五张表 | Accepted |
 | [ADR-0004](0004-stats.md) | 统计层：口径与数据集 | Accepted |
-| [ADR-0005](0005-architecture.md) | 架构与模块 | Accepted |
+| [ADR-0005](0005-architecture.md) | 架构与模块 | Accepted（其中「设备影子」一条 Deprecated，见文内后记） |
 | [ADR-0006](0006-protocol-contract.md) | 协议与契约 | Accepted |
 | [ADR-0007](0007-device.md) | 设备端 | Accepted |
 | [ADR-0008](0008-identity.md) | 身份与能力 | Superseded（被 ADR-0019 取代） |
@@ -25,3 +25,4 @@
 | [ADR-0019](0019-auth-standardization.md) | 认证标准化——删除自定 `X-Identity` 头，统一 Bearer 凭据与会话 | Accepted |
 | [ADR-0020](0020-device-enrollment.md) | 设备接入采用 claim 自注册（fleet provisioning by claim） | Accepted |
 | [ADR-0021](0021-gateway-1008.md) | 网关凭据校验在 accept 之后，以 RFC 6455 1008 关闭 | Accepted |
+| [ADR-0022](0022-android-api19-freeze.md) | 设备端依赖冻结：API 19 兼容线 | Accepted |

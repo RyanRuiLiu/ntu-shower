@@ -8,6 +8,36 @@
 
 ## [Unreleased]
 
+### Added
+
+- import-linter 契约扩到 5 条：业务模块全族禁环（acyclic_siblings）、核心层零向上依赖、
+  持久化层禁业务模块整包、持久化层禁认证层，加上原有两条——分层纪律全部机器化。
+- 网关对入站帧校验协议版本：hello 与会话帧的 `v` 不符回 `proto.version_mismatch` 并断开
+  （RFC 6455 1002），信封版本字段首次有了运行时语义。
+- CI server job 补 ESLint 门禁（与本地 check.sh 同参）：全仓唯一"本地有门、CI 无门"的检查补齐。
+
+### Changed
+
+- 破除 config↔sessions↔devices 三个包级循环依赖：命令传输下沉 `devices/actions.py`、
+  会话领域入口下沉 `sessions/service.py`、设备在线守卫落到 `access.dependencies`、
+  共享形状 `CommandOutcome` 上移 `app/contracts.py`、配置推送改依赖倒置
+  （`config/notifier` 通知槽 + `main.py` 组合根装配）。
+- `core/audit.py` 按归属拆分：采集与装配 → `app/audit_middleware.py`，存储 →
+  `persistence/api_calls.py`；令牌与口令哈希工具从 auth 下沉 `core/tokens.py`/`core/passwords.py`。
+- `semgrep` 文档引用规则封堵三种真实逃逸形态（裸文件名、反引号分隔、书名号章节、行号），
+  现存文档清单补全。
+
+### Removed
+
+- 无消费者的死面整体移除：`ui.scroll` 动作三端全链（含唯一配置键 `ui_swipe_duration_ms`）、
+  `power.schedule` HTTP 端点（动作保留，延长服务在用）、`DELETE /devices/{id}/config` 全链、
+  `SOURCE_IMPORT`、`SnapshotSource` 枚举、`adhoc_problem`、v1 遗留裸 sqlite3 层 `core/db.py`。
+
+### Fixed
+
+- CHANGELOG 0.7.0 的 Added/Changed 重复块与"systemd 冻结保留"失实描述；
+  12 篇 ADR 的悬空引用（不存在的模块/路由/日志文件、单数表名、备份机制描述）以后记修正。
+
 ### Changed
 
 - main 分支保护上线：五个门禁为 required checks、线性历史强制、管理员不豁免（应急旁路保留）；android 门禁按 PR 变更路径裁剪，纯服务端改动不再等待安卓全量构建（push main 仍全量）。
@@ -23,7 +53,7 @@
 
 - 服务端切换为 Docker Compose 部署：镜像由 CI 构建并双推 GHCR/ACR，服务器 `docker pull` +
   `compose up -d`；容器以非 root（UID 997）运行，根文件系统只读、能力全丢弃、端口仅绑回环。
-  旧 systemd 单元与 venv 冻结保留作应急回滚；数据库备份仍在宿主机 timer 上执行。
+  旧 systemd 单元与 venv 已于 2026-11-12 删除：回滚只有指回上一个镜像 tag 一条路。
 - compose 为 ADB 调试桥补回环端口段映射（15655-15664）：桥接监听随服务进入容器后，
   运维的 SSH 隧道需要这段映射才能到达。
 
@@ -38,23 +68,6 @@
 - Dependabot 依赖更新（pip / gradle / github-actions，每周）：patch 与 minor 升级在
   CI 全绿后自动 squash 合并，major 与非 semver 升级留人工审阅；设备 ROM 冻结
   Android 4.4（API 19），okhttp 与 conscrypt-android 的升级上限以 ignore 规则钉死。
-
-### Changed
-
-- 服务端切换为 Docker Compose 部署：镜像由 CI 构建并双推 GHCR/ACR，服务器 `docker pull` +
-  `compose up -d`；容器以非 root（UID 997）运行，根文件系统只读、能力全丢弃、端口仅绑回环。
-  旧 systemd 单元与 venv 冻结保留作应急回滚；数据库备份仍在宿主机 timer 上执行。
-- compose 为 ADB 调试桥补回环端口段映射（15655-15664）：桥接监听随服务进入容器后，
-  运维的 SSH 隧道需要这段映射才能到达。
-
-- 根目录 `LICENSE`：此前许可证缺位（按默认版权处理），现以专有声明显式登记。
-- Docker 构建资产（`Dockerfile`、`compose.yaml`、`.dockerignore`）入库：此前仅存在于本机工作区，
-  `docker.yml` 工作流在远端按可复用流程构建时缺少 Dockerfile。
-- 持续集成新增安全门禁：gitleaks 秘密扫描（全历史）与 pip-audit 依赖漏洞扫描
-  （OSV，高危未修复即红灯），对应执行矩阵两项"待建立"转"已执行"。
-- compose 增加 `migrate` 一次性服务：业务容器启动前先 `alembic upgrade head`，迁移
-  失败业务容器不拉起；新增 `tests/test_migrations.py` 看守模型与迁移的一致性
-  （`alembic check` 无差异），改模型忘生成迁移在门禁里当场红。
 
 ### Changed
 

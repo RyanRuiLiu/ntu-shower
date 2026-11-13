@@ -1,5 +1,9 @@
 # ADR-0003: 数据分层：五张表
 
+> 后记 2026-11-14：文中单数表名在 v2 数据层重写中改为复数并更名——`door_snapshot`→`door_snapshots`、
+> `door_live`→`door_states`、`door_state_event`→`door_state_events`、`usage_session`→`usage_sessions`、
+> `usage_segment`→`usage_segments`。分层本体不变，表名以 `server/app/models/` 为准。
+
 - 状态：Accepted
 - 日期：2026-10-30（整理入档；原始决策日期见 Git 历史）
 - 决策者：项目负责人
