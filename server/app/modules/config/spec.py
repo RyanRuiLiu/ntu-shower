@@ -176,8 +176,96 @@ TEXT_MAP = ConfigKind.TEXT_MAP
 TIME = ConfigKind.TIME
 WEEKDAYS = ConfigKind.WEEKDAYS
 
+
 #: 全部配置键的规格。新增配置键时只改这里——服务端校验、客户端渲染、文档
 #: 生成都从它派生。
+def _condition_specs(prefix: str, group: str, subject: str) -> list[ConfigSpec]:
+    """两族窗口（屏幕提示 / 楼层状态行）共用的显示条件键：时间窗与占用区间。
+
+    判定语义完全一致——同一套窗口模型、同一份占用口径（见 modules/status_line 与
+    modules/notice 的判定实现）——差异只在键前缀、分组与说明里的主语。表驱动生成，
+    改口径只动这一处。
+    """
+    return [
+        ConfigSpec(
+            f"{prefix}_time_enabled",
+            BOOL,
+            DEVICE,
+            False,
+            "启用时间条件",
+            "开启后，只有设备当前的服务端时间落在下面的星期与时段内才显示"
+            f"{subject}。服务端时间尚无锚点时（刚启动且未连上服务端）不显示；设备离线但已有"
+            "锚点时，仍按单调钟继续走时。时间按设备系统时区换算，与浴室 App 的日历一致",
+            group=group,
+        ),
+        ConfigSpec(
+            f"{prefix}_time_start",
+            TIME,
+            DEVICE,
+            "22:00",
+            f"{subject}时段开始",
+            "每天的开始时刻，含这一刻。开始晚于结束时视为跨午夜（如 23:30–00:30）；开始等于"
+            "结束表示全天。延长服务期间设备表盘可能被拨快跨日，而本条件按真实的服务端时间"
+            "判断，两者会不一致",
+            group=group,
+        ),
+        ConfigSpec(
+            f"{prefix}_time_end",
+            TIME,
+            DEVICE,
+            "23:00",
+            f"{subject}时段结束",
+            "每天的结束时刻，不含这一刻。与开始时刻相同表示全天",
+            group=group,
+        ),
+        ConfigSpec(
+            f"{prefix}_weekdays",
+            WEEKDAYS,
+            DEVICE,
+            "1,2,3,4,5,6,7",
+            f"{subject}生效星期",
+            "只在选中的星期生效。1=周一……7=周日。跨午夜的时段按开始那一天归属：例如周五 "
+            "23:30–00:30 会覆盖周六 00:00–00:30，即使周六未勾选",
+            group=group,
+        ),
+        ConfigSpec(
+            f"{prefix}_occupancy_enabled",
+            BOOL,
+            DEVICE,
+            False,
+            "启用占用条件",
+            "开启后，只有当前占用的喷头数落在下面的区间内才显示"
+            f"{subject}。占用指等待开阀、淋浴中、已暂停三种状态；维修中与已禁用不算。"
+            "读不到完整的喷头读数时不显示",
+            group=group,
+        ),
+        ConfigSpec(
+            f"{prefix}_occupancy_min",
+            INT,
+            DEVICE,
+            0,
+            "占用喷头数下限",
+            f"包含下限。与上限相同可以精确匹配一个数字；下限大于上限时{subject}不会显示",
+            minimum=0,
+            maximum=48,
+            unit="个",
+            group=group,
+        ),
+        ConfigSpec(
+            f"{prefix}_occupancy_max",
+            INT,
+            DEVICE,
+            48,
+            "占用喷头数上限",
+            "包含上限。最大 48 与协议里的喷头号上限一致；0 表示只在没有喷头被占用时显示",
+            minimum=0,
+            maximum=48,
+            unit="个",
+            group=group,
+        ),
+    ]
+
+
 CONFIG_SPECS: tuple[ConfigSpec, ...] = (
     # ── 通信时序 ──
     ConfigSpec(
@@ -436,81 +524,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         group="notice",
     ),
     # ── 提示条件 ──
-    ConfigSpec(
-        "notice_time_enabled",
-        BOOL,
-        DEVICE,
-        False,
-        "启用时间条件",
-        "开启后，只有设备当前的服务端时间落在下面的星期与时段内才显示。服务端时间尚无锚点"
-        "时（刚启动且未连上服务端）不显示；设备离线但已有锚点时，仍按单调钟继续走时。"
-        "时间按设备系统时区换算，与浴室 App 的日历一致",
-        group="notice_condition",
-    ),
-    ConfigSpec(
-        "notice_time_start",
-        TIME,
-        DEVICE,
-        "22:00",
-        "提示时段开始",
-        "每天的开始时刻，含这一刻。开始晚于结束时视为跨午夜（如 23:30–00:30）；开始等于"
-        "结束表示全天。延长服务期间设备表盘可能被拨快跨日，而本条件按真实的服务端时间"
-        "判断，两者会不一致",
-        group="notice_condition",
-    ),
-    ConfigSpec(
-        "notice_time_end",
-        TIME,
-        DEVICE,
-        "23:00",
-        "提示时段结束",
-        "每天的结束时刻，不含这一刻。与开始时刻相同表示全天",
-        group="notice_condition",
-    ),
-    ConfigSpec(
-        "notice_weekdays",
-        WEEKDAYS,
-        DEVICE,
-        "1,2,3,4,5,6,7",
-        "提示生效星期",
-        "只在选中的星期生效。1=周一……7=周日。跨午夜的时段按开始那一天归属：例如周五 "
-        "23:30–00:30 会覆盖周六 00:00–00:30，即使周六未勾选",
-        group="notice_condition",
-    ),
-    ConfigSpec(
-        "notice_occupancy_enabled",
-        BOOL,
-        DEVICE,
-        False,
-        "启用占用条件",
-        "开启后，只有当前占用的喷头数落在下面的区间内才显示。占用指等待开阀、淋浴中、"
-        "已暂停三种状态；维修中与已禁用不算。读不到完整的喷头读数时不显示",
-        group="notice_condition",
-    ),
-    ConfigSpec(
-        "notice_occupancy_min",
-        INT,
-        DEVICE,
-        0,
-        "占用喷头数下限",
-        "包含下限。与上限相同可以精确匹配一个数字；下限大于上限时提示不会显示",
-        minimum=0,
-        maximum=48,
-        unit="个",
-        group="notice_condition",
-    ),
-    ConfigSpec(
-        "notice_occupancy_max",
-        INT,
-        DEVICE,
-        48,
-        "占用喷头数上限",
-        "包含上限。最大 48 与协议里的喷头号上限一致；0 表示只在没有喷头被占用时显示",
-        minimum=0,
-        maximum=48,
-        unit="个",
-        group="notice_condition",
-    ),
+    *_condition_specs("notice", "notice_condition", "提示"),
     # ── 楼层状态行 ──
     # 内容（各楼层空闲喷头数）由服务端汇总后推送；这里只管"本设备怎么显示它"。
     # 与屏幕提示是两个独立的窗口，位置各调各的，互不挤占。
@@ -650,81 +664,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
     # ── 状态行条件 ──
     # 与屏幕提示共用同一套判定（时间窗 / 本地占用），但值是独立的一组：两个窗口
     # 可以各自显示、各自隐藏，互不牵连。
-    ConfigSpec(
-        "status_line_time_enabled",
-        BOOL,
-        DEVICE,
-        False,
-        "启用时间条件",
-        "开启后，只有设备当前的服务端时间落在下面的星期与时段内才显示状态行。服务端时间"
-        "尚无锚点时（刚启动且未连上服务端）不显示；设备离线但已有锚点时，仍按单调钟"
-        "继续走时。时间按设备系统时区换算，与浴室 App 的日历一致",
-        group="status_line_condition",
-    ),
-    ConfigSpec(
-        "status_line_time_start",
-        TIME,
-        DEVICE,
-        "22:00",
-        "状态行时段开始",
-        "每天的开始时刻，含这一刻。开始晚于结束时视为跨午夜（如 23:30–00:30）；开始等于"
-        "结束表示全天。延长服务期间设备表盘可能被拨快跨日，而本条件按真实的服务端时间"
-        "判断，两者会不一致",
-        group="status_line_condition",
-    ),
-    ConfigSpec(
-        "status_line_time_end",
-        TIME,
-        DEVICE,
-        "23:00",
-        "状态行时段结束",
-        "每天的结束时刻，不含这一刻。与开始时刻相同表示全天",
-        group="status_line_condition",
-    ),
-    ConfigSpec(
-        "status_line_weekdays",
-        WEEKDAYS,
-        DEVICE,
-        "1,2,3,4,5,6,7",
-        "状态行生效星期",
-        "只在选中的星期生效。1=周一……7=周日。跨午夜的时段按开始那一天归属：例如周五 "
-        "23:30–00:30 会覆盖周六 00:00–00:30，即使周六未勾选",
-        group="status_line_condition",
-    ),
-    ConfigSpec(
-        "status_line_occupancy_enabled",
-        BOOL,
-        DEVICE,
-        False,
-        "启用占用条件",
-        "开启后，只有当前占用的喷头数落在下面的区间内才显示状态行。占用指等待开阀、"
-        "淋浴中、已暂停三种状态；维修中与已禁用不算。读不到完整的喷头读数时不显示",
-        group="status_line_condition",
-    ),
-    ConfigSpec(
-        "status_line_occupancy_min",
-        INT,
-        DEVICE,
-        0,
-        "占用喷头数下限",
-        "包含下限。与上限相同可以精确匹配一个数字；下限大于上限时状态行不会显示",
-        minimum=0,
-        maximum=48,
-        unit="个",
-        group="status_line_condition",
-    ),
-    ConfigSpec(
-        "status_line_occupancy_max",
-        INT,
-        DEVICE,
-        48,
-        "占用喷头数上限",
-        "包含上限。最大 48 与协议里的喷头号上限一致；0 表示只在没有喷头被占用时显示",
-        minimum=0,
-        maximum=48,
-        unit="个",
-        group="status_line_condition",
-    ),
+    *_condition_specs("status_line", "status_line_condition", "状态行"),
     ConfigSpec(
         "automation_trace_enabled",
         BOOL,
