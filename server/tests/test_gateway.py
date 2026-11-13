@@ -35,6 +35,31 @@ def test_first_frame_must_be_hello(client: TestClient, fresh_db: str) -> None:
         assert err["payload"]["code"] == "proto.hello_required"
 
 
+def test_hello_with_wrong_protocol_version_is_rejected(client: TestClient, fresh_db: str) -> None:
+    """hello 携带其他协议版本：回 proto.version_mismatch 并断开（1002）。
+
+    信封版本字段因此有了运行时语义——它不再是"登记了但永不触发"的死码。
+    """
+    with client.websocket_connect("/gateway/device") as ws:
+        ws.send_text(frames.hello_frame("dev-wrong-version", v=2))
+        err = frames.recv_until(ws, "link.error")
+        assert err["payload"]["code"] == "proto.version_mismatch"
+
+
+def test_frame_with_wrong_protocol_version_closes_the_link(
+    client: TestClient, admin_headers: dict[str, str], fresh_db: str
+) -> None:
+    """会话中途出现异版本帧：回错后关闭连接，不静默丢帧。
+
+    静默丢帧会让"连着但什么都不动"——比明确拒绝更难排查。
+    """
+    with device_link.trusted_online(client, "dev-version-frame", admin_headers) as ws:
+        ws.send_text(frames.frame("link.ping", {"sender_time": now_rfc3339()}, v=2))
+        err = frames.recv_until(ws, "link.error")
+        assert err["payload"]["code"] == "proto.version_mismatch"
+        assert err["payload"]["message"].startswith("服务端协议版本为 1")
+
+
 def test_bad_json_gets_structured_error(client: TestClient, fresh_db: str) -> None:
     """非 JSON 帧回 proto.bad_json，连接保持。"""
     with client.websocket_connect("/gateway/device") as ws:
