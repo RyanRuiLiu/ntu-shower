@@ -30,7 +30,6 @@ from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import current_user
-from app.auth.tokens import extract_bearer
 from app.contracts import DeviceRecord
 from app.core.connections import manager
 from app.core.problems import (
@@ -42,6 +41,7 @@ from app.core.problems import (
     UNTRUSTED_DEVICE,
     ApiProblemError,
 )
+from app.core.tokens import extract_bearer
 from app.db.deps import get_db
 from app.persistence import devices as devices_store
 from app.persistence import principals as principals_store

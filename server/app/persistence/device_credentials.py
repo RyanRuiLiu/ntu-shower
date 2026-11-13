@@ -11,7 +11,7 @@ from datetime import datetime
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from ..auth.tokens import generate_token, hash_token
+from ..core.tokens import generate_token, hash_token
 from ..db.base import utcnow
 from ..models.identity import Device, DeviceCredential
 
