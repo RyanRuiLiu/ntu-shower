@@ -1393,7 +1393,7 @@ def test_rule_repository_races(
 
     monkeypatch.setattr(repository, "insert_rule", lambda *_args, **_kwargs: 4242)
     monkeypatch.setattr(repository, "get_rule", lambda _session, _rule_id: None)
-    request = schemas.VoiceRuleCreate(
+    request = schemas.VoiceRuleBody(
         devices=[DEVICE_ID],
         certs=["C9"],
         events=[DoorEventKind.PAUSED],
@@ -1409,7 +1409,7 @@ def test_rule_repository_races(
         service.update_rule(
             session,
             rule_id,
-            schemas.VoiceRuleUpdate(
+            schemas.VoiceRuleBody(
                 devices=[DEVICE_ID],
                 certs=["C1"],
                 events=[DoorEventKind.ASSIGNED],
@@ -1427,7 +1427,7 @@ def test_rule_repository_races(
         service.update_rule(
             session,
             rule_id,
-            schemas.VoiceRuleUpdate(
+            schemas.VoiceRuleBody(
                 devices=[DEVICE_ID],
                 certs=["C1"],
                 events=[DoorEventKind.ASSIGNED],

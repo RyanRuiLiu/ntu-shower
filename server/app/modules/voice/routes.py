@@ -98,7 +98,7 @@ def list_rules(session: Session = Depends(get_db)) -> list[schemas.VoiceRuleView
 
 
 @admin_router.post("/voice/rules")
-async def create_rule(req: schemas.VoiceRuleCreate, session: Session = Depends(get_db)) -> schemas.VoiceRuleView:
+async def create_rule(req: schemas.VoiceRuleBody, session: Session = Depends(get_db)) -> schemas.VoiceRuleView:
     try:
         view = await run_in_threadpool(service.create_rule, session, req)
     except service.InvalidVoiceRuleError as exc:
@@ -109,7 +109,7 @@ async def create_rule(req: schemas.VoiceRuleCreate, session: Session = Depends(g
 
 @admin_router.put("/voice/rules/{rule_id}")
 async def update_rule(
-    rule_id: int, req: schemas.VoiceRuleUpdate, session: Session = Depends(get_db)
+    rule_id: int, req: schemas.VoiceRuleBody, session: Session = Depends(get_db)
 ) -> schemas.VoiceRuleView:
     try:
         view = await run_in_threadpool(service.update_rule, session, rule_id, req)
