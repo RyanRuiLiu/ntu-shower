@@ -10,8 +10,10 @@ rules:
     languages: [generic]
     severity: ERROR
     message: |
-      代码里不要引用仓库文档的章节号（如 `docs/runbook.md §3`）。文档改版后章节号必然失效，
-      而 markdownlint 只检查 .md，这种失效没有任何门禁能发现。只引用文件路径。
+      代码里不要引用仓库文档的章节号、行号或书名号定位（`docs/runbook.md §3`、
+      `reference.md 4.4`、`runbook.md「5. …」`、`xxx.md:182` 都是真实逃逸过的形态）。
+      文档改版后这些定位必然失效，而 markdownlint 只检查 .md，这种失效没有任何
+      门禁能发现。只引用文件路径本身。
     paths:
       exclude:
         - ".semgrep.yml"
@@ -27,14 +29,17 @@ rules:
         - "*.yaml"
         - "*.json"
         - ".githooks/*"
-    pattern-regex: 'docs/[\w./-]+\.md\s*§'
+    pattern-regex: >-
+      [\w./-]+\.md[`'"\s（）()]*[（(]?[`'"]*(§\d*|「\s*\d|\d+\.\d+|:\d+)
 
   - id: deleted-doc-ref
     languages: [generic]
     severity: ERROR
     message: |
       引用了已删除的文档。现存的所有者文档：docs/architecture.md、docs/reference.md、
-      docs/runbook.md、docs/security.md、docs/adr/、README.md、CONTRIBUTING.md。
+      docs/runbook.md、docs/security.md、docs/device-poweroff.md、docs/water-board.md、
+      docs/adr/、AGENTS.md、CHANGELOG.md、README.md、CONTRIBUTING.md。删除文档时
+      必须同步清理代码与配置里的引用，并把清单更新到这里。
     paths:
       exclude:
         - ".semgrep.yml"

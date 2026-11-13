@@ -300,7 +300,7 @@ async def adb_open(device_id: str, session: Session = Depends(get_db)) -> Bridge
             port=bridge.port,
             generation=bridge.generation,
         )
-        # 只返回结构化字段：连接指引属于文档职责（见 docs/runbook.md「5. 故障处置」）
+        # 只返回结构化字段：连接指引属于文档职责（见 docs/runbook.md）
         return {"device_id": device_id, "port": bridge.port, "already_open": False, "generation": bridge.generation}
 
 
