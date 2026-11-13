@@ -19,7 +19,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core import config as config_module
-from app.core import db as db_module
 
 ADMIN_IDENTITY = "admin-identity-0001"
 OPS_IDENTITY = "test-identity"
@@ -113,8 +112,8 @@ def _schema_template(tmp_path_factory: pytest.TempPathFactory) -> str:
 
     engine = create_db_engine(f"sqlite:///{path}")
     Base.metadata.create_all(engine)
+    # 最后一个连接关闭即 checkpoint，WAL 落盘，模板才是可整文件复制的静止状态
     engine.dispose()
-    db_module.close_all_connections()  # 最后一个连接关闭即 checkpoint，WAL 落盘
     return path
 
 
@@ -124,7 +123,7 @@ def fresh_db(
     monkeypatch: pytest.MonkeyPatch,
     _schema_template: str,
     _isolate_default_db: None,
-) -> Iterator[str]:
+) -> str:
     """换到独立临时库并建好全部表。
 
     显式依赖 _isolate_default_db：先落到的"未声明"路径之上，再覆盖成本用例的
@@ -135,7 +134,6 @@ def fresh_db(
     0.3 秒，依赖超时的用例不白等；发布目录同入临时区，测试写下的 APK 不会
     碰到真实文件。
     """
-    db_module.close_all_connections()
     path = str(tmp_path / "test.db")
     monkeypatch.setattr(config_module.settings, "db_path", path)
     # 桥端口按 xdist worker 分段：多 worker 并行时共用同一固定端口，A worker 的
@@ -156,8 +154,7 @@ def fresh_db(
     # 目录存在性由 create_app 在装配时保证一次；共享应用后每个用例自己补
     Path(config_module.settings.ota_dir).mkdir(parents=True, exist_ok=True)
     shutil.copyfile(_schema_template, path)
-    yield path
-    db_module.close_all_connections()
+    return path
 
 
 @pytest.fixture

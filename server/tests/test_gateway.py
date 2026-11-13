@@ -10,13 +10,19 @@ from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from starlette.testclient import WebSocketTestSession
 from starlette.websockets import WebSocketDisconnect
 from tests import apk, device_link, frames
 
-from app.core import db, events
+from app.core import events
 from app.core.clock import now_rfc3339, rfc3339_ago
+from app.db.session import session_scope
+from app.models.doors import DoorSnapshot
+from app.models.enums import DeviceLogKind
+from app.models.identity import Device
+from app.models.ops import DeviceLinkEvent, DeviceLog
 from app.modules.devices.schemas import LINK_OFFLINE, LINK_ONLINE
 from app.modules.doors import service as doors_service
 
@@ -159,8 +165,10 @@ def test_unparsable_snapshot_is_acknowledged_and_recorded(
         ack = frames.recv_until(ws, "door.snapshot_ack")
         assert ack["payload"]["snapshot_id"] == "bad-1"
 
-    rows = db.get_conn().execute("SELECT doors FROM door_snapshots WHERE snapshot_id = ?", ("bad-1",)).fetchall()
-    assert [row["doors"] for row in rows] == ["[]"]
+    with session_scope() as session:
+        stored = session.scalars(select(DoorSnapshot.doors).where(DoorSnapshot.snapshot_id == "bad-1")).all()
+    # doors 是 JSON 列：ORM 读出的是反序列化后的值，与写入的空列表同构
+    assert stored == [[]]
 
 
 def test_valid_snapshot_gets_ack(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:
@@ -472,16 +480,15 @@ def test_link_events_record_connect_and_disconnect(client: TestClient, fresh_db:
     # 测试线程不等它跑完就读库会偶发地只看到 online；等结果出现即可，不掩盖任何产品路径。
     deadline = time.monotonic() + 2
     while True:
-        rows = (
-            db.get_conn()
-            .execute(
-                "SELECT event FROM device_link_events"
-                " WHERE device_id = (SELECT id FROM devices WHERE device_id = ?) ORDER BY id",
-                (device_id,),
+        with session_scope() as session:
+            events = list(
+                session.scalars(
+                    select(DeviceLinkEvent.event)
+                    .join(Device, Device.id == DeviceLinkEvent.device_id)
+                    .where(Device.device_id == device_id)
+                    .order_by(DeviceLinkEvent.id)
+                )
             )
-            .fetchall()
-        )
-        events = [row["event"] for row in rows]
         if events == [LINK_ONLINE, LINK_OFFLINE] or time.monotonic() > deadline:
             break
         # 只让出执行权：结果由服务端线程写入，读库本身不产生等待
@@ -506,14 +513,15 @@ def test_reconnect_does_not_record_a_false_offline(client: TestClient, fresh_db:
             second.send_text(frames.hello_frame(device_id))
             frames.recv_until(second, "link.hello_ack")
 
-    events = [
-        row["event"]
-        for row in db.get_conn().execute(
-            "SELECT event FROM device_link_events"
-            " WHERE device_id = (SELECT id FROM devices WHERE device_id = ?) ORDER BY id",
-            (device_id,),
+    with session_scope() as session:
+        events = list(
+            session.scalars(
+                select(DeviceLinkEvent.event)
+                .join(Device, Device.id == DeviceLinkEvent.device_id)
+                .where(Device.device_id == device_id)
+                .order_by(DeviceLinkEvent.id)
+            )
         )
-    ]
     assert events.count(LINK_ONLINE) == 2
     # 两条连接都收尾了，但设备全程在线——只有最后真正断开那一次才算
     assert events.count(LINK_OFFLINE) == 1
@@ -651,17 +659,14 @@ def test_device_log_upload_keeps_only_recent_per_kind(
 
     body = client.get("/api/v1/devices/dev-log-trim/logs?kind=device", headers=admin_headers).json()
     assert body["content"] == "round-6"
-    rows = (
-        db.get_conn()
-        .execute(
-            "SELECT COUNT(*) AS n FROM device_logs"
-            " WHERE device_id = (SELECT id FROM devices WHERE device_id = 'dev-log-trim')"
-            " AND kind = 'device'"
+    with session_scope() as session:
+        logs_n = session.scalar(
+            select(func.count())
+            .select_from(DeviceLog)
+            .join(Device, Device.id == DeviceLog.device_id)
+            .where(Device.device_id == "dev-log-trim", DeviceLog.kind == DeviceLogKind.DEVICE)
         )
-        .fetchone()
-    )
-    assert rows is not None
-    assert rows["n"] == 5
+    assert logs_n == 5
 
 
 @contextmanager
