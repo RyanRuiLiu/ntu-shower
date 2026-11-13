@@ -31,6 +31,9 @@ AI 协作者的唯一入口。人类协作者从 [README.md](README.md) 开始�
 | 依赖漏洞 | `pip-audit` | `.github/workflows/ci.yml` |
 | 已入库的秘密 | `gitleaks`（全历史） | `.github/workflows/ci.yml` |
 | 文档格式与同文档锚点 | `markdownlint` | `.markdownlint.json` |
+| 网页端 JS：漏导入（no-undef）与内联样式纪律 | `eslint` | `server/web/eslint.config.mjs` |
+| 网页端 CSS 令牌纪律 | `stylelint` | `server/web/.stylelintrc.json` |
+| 设备端风格、单测与覆盖率下限 98% | detekt / lint / JaCoCo | `android/app/build.gradle.kts`、`android/detekt.yml` |
 
 **想加一条约束，就加一个检查。** 写进文档不算数——文档不会被执行。
 同一事实只写一处，其余链接；能由代码、`/openapi.json` 或 `protocol/schema/` 读出的事实，不写进文档。
