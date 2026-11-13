@@ -14,7 +14,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.clock import format_rfc3339
-from ..core.logging import log_event
 from ..models.identity import Device
 from ..models.voice import VoiceAsset, VoiceDelivery, VoiceRule, VoiceUnit
 
@@ -362,72 +361,3 @@ __all__: list[str] = [
     "unit_rows",
     "update_rule",
 ]
-
-
-def matching_rules(
-    session: Session,
-    device_id: str,
-    cert_no: str,
-    event: str,
-    local: datetime,
-) -> list[dict[str, Any]]:
-    """一次事件命中的启用规则，按优先级排序；完全同优先级时拒绝替用户挑一条。
-
-    优先级比较与坏行处置见 modules.voice.service.rule_priority 与 time_rules——
-    本函数只负责查询、命中判定与排序。
-    """
-    from ..modules.voice import time_windows as time_rules
-    from ..modules.voice.priority import rule_priority
-
-    hits: list[tuple[tuple[int, int, int, int, int, int], dict[str, Any]]] = []
-    for row in session.scalars(select(VoiceRule).where(VoiceRule.enabled.is_(True))).all():
-        view = _rule_view(row)
-        if event not in view["events"]:
-            continue
-        devices = view["devices"]
-        certs = view["certs"]
-        if not ("*" in devices or device_id in devices):
-            continue
-        if "*" in certs:
-            if cert_no in view["exempt"]:
-                continue
-        elif cert_no not in certs:
-            continue
-        try:
-            windows = time_rules.parse_json(row.time_windows)
-        except (TypeError, ValueError) as exc:
-            # TypeError 与 ValueError 都来自解析：前者是列内容不是数组（库被外部改坏），
-            # 后者是时段值非法。两者同属"这条规则的时段不可用"，一并跳过并留痕。
-            log_event(
-                "ERROR",
-                "voice.rule-time-invalid",
-                "规则时段格式非法，跳过",
-                rule_id=int(row.id),
-                error=str(exc),
-            )
-            continue
-        if not time_rules.match(windows, local):
-            log_event(
-                "DEBUG",
-                "voice.rule-time-filtered",
-                "规则不在生效时段内",
-                device_id=device_id,
-                event=event,
-                rule_id=int(row.id),
-                local_time=local.isoformat(timespec="minutes"),
-            )
-            continue
-        hits.append((rule_priority(devices, certs, windows), view))
-    hits.sort(key=lambda item: item[0], reverse=True)
-    if len(hits) >= 2 and hits[0][0] == hits[1][0]:
-        log_event(
-            "ERROR",
-            "voice.rule-ambiguous",
-            "同优先级规则同时命中，拒绝随机选择",
-            device_id=device_id,
-            event=event,
-            local_time=local.isoformat(timespec="minutes"),
-            rule_ids=[int(hits[0][1]["id"]), int(hits[1][1]["id"])],
-        )
-        return []
-    return [row for _priority, row in hits]
