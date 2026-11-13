@@ -19,8 +19,8 @@ from app.core import device_clock, outcomes
 from app.core.clock import now_rfc3339, seconds_between
 from app.db.session import session_scope
 from app.models.enums import DoorState
+from app.modules.devices import actions as device_actions
 from app.modules.sessions import scheduler
-from app.modules.sessions import service as sessions_service
 from app.modules.sessions.decision import (
     FEATURE_AUTO_SETTLE,
     FEATURE_RENEW_SESSION,
@@ -473,7 +473,7 @@ def test_a_real_shape_ends_in_a_settle(
         return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
 
     monkeypatch.setattr(scheduler.config_store, "effective", lambda _session, _device_id: CONFIG)
-    monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
+    monkeypatch.setattr(device_actions, "send_command_and_wait", fake_send)
     door_link.feed(
         "dev-1",
         _frame(

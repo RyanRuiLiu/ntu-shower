@@ -49,6 +49,7 @@ from .modules.access.routes import router as identity_router
 from .modules.audit.routes import admin_router as audit_admin_router
 from .modules.bridge.routes import admin_router as bridge_admin_router
 from .modules.bridge.routes import router as bridge_router
+from .modules.config import notifier as config_notifier
 from .modules.config.routes import admin_router as config_admin_router
 from .modules.devices.routes import admin_router as devices_admin_router
 from .modules.devices.routes import router as devices_router
@@ -140,6 +141,9 @@ def create_app() -> FastAPI:
     app = FastAPI(title="NTU Shower", version=APP_VERSION, lifespan=lifespan)
     install_error_handlers(app)
     audit.install_audit(app)
+    # 配置保存 → 定时器重算 + 设备推送：组合根装配（写侧不 import sessions，见
+    # modules/config/notifier.py 的模块注释）。
+    config_notifier.register(sessions_scheduler.on_config_change)
 
     app.include_router(gateway_router)
     app.include_router(doors_router)
