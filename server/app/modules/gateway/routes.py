@@ -16,8 +16,9 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
+from ... import audit_middleware
 from ...auth.tokens import extract_bearer
-from ...core import audit, protocol, reason_codes
+from ...core import protocol, reason_codes
 from ...core.clock import now_rfc3339, rfc3339_ago
 from ...core.config import settings
 from ...core.connections import manager
@@ -141,7 +142,7 @@ async def device_gateway(ws: WebSocket) -> None:
                 reason = offline_reason[0] if offline_reason else ""
                 await _call(ws, devices_service.record_link_event, device_id, LINK_OFFLINE, reason)
             await _call(ws, devices_service.set_device_offline, device_id)
-            await run_in_threadpool(audit.record_gateway, device_id, "disconnect", ip)
+            await run_in_threadpool(audit_middleware.record_gateway, device_id, "disconnect", ip)
             log_event("INFO", "gateway.device-disconnected", "设备断开", device_id=device_id)
             with _db_session(ws) as session:
                 devices_service.publish_device_update(session, device_id)
@@ -233,7 +234,7 @@ async def _accept_hello(ws: WebSocket, token_device_id: str | None) -> tuple[str
     # 读到的是 0（等于不平移）——而刚接手、那边还被占着恰恰最常落在窗口里。
     await _call(ws, devices_service.load_clock_skew, device_id)
     await _call(ws, devices_service.record_link_event, device_id, LINK_ONLINE, last_offline_reason)
-    await run_in_threadpool(audit.record_gateway, device_id, "connect", ip)
+    await run_in_threadpool(audit_middleware.record_gateway, device_id, "connect", ip)
     log_event(
         "INFO",
         "gateway.device-connected",
