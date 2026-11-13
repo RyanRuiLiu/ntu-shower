@@ -3,3 +3,6 @@ dbs:
     replicas:
       - type: file
         path: /var/backups/ntu-shower/litestream
+        # 默认 1s 会把 WAL 剪成海量碎片（实测 36h 1.8 万段），3M 带宽下
+        # 持续上传小文件；10s 使段数降一个数量级，恢复点最多落后 10s
+        sync-interval: 10s
