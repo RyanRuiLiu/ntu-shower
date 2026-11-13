@@ -687,6 +687,28 @@ def _peak_hours(heat: list[list[float]]) -> tuple[int, int]:
     return spec.HOUR_START + low, spec.HOUR_START + high
 
 
+def _compare_row(
+    device_id: str,
+    name: str,
+    door_count: int,
+    flowed: list[dict[str, Any]],
+    usable: list[dict[str, Any]],
+    peak: tuple[int, int],
+) -> CompareRow:
+    """对齐行公共构造：均值口径一处实现，主设备与对齐设备共用。"""
+    low, high = peak
+    return CompareRow(
+        device_id=device_id,
+        name=name,
+        door_count=door_count,
+        sessions_flowed=len(flowed),
+        flow_avg_s=_average([int(row["flow_s"]) for row in flowed]),
+        wait_avg_s=_average(_full_wait_seconds(usable, door_count)),
+        peak_start=low,
+        peak_end=high,
+    )
+
+
 def _compare_rows(
     session: Session, current: CompareRow, since: str, until: str, settled: str, offset_minutes: int
 ) -> list[CompareRow]:
@@ -715,18 +737,7 @@ def _compare_rows(
         low, high = _peak_hours(_heat(session, usable, since, settled, offset_minutes, device_id))
         # 只查一次喷头数：行里要用、等待算法也要用，两次 COUNT 是白走一趟库。
         door_count = _door_count(session, device_id)
-        rows.append(
-            CompareRow(
-                device_id=device_id,
-                name=str(record["name"]),
-                door_count=door_count,
-                sessions_flowed=len(flowed),
-                flow_avg_s=_average([int(row["flow_s"]) for row in flowed]),
-                wait_avg_s=_average(_full_wait_seconds(usable, door_count)),
-                peak_start=low,
-                peak_end=high,
-            )
-        )
+        rows.append(_compare_row(device_id, str(record["name"]), door_count, flowed, usable, (low, high)))
     return rows
 
 
@@ -782,16 +793,7 @@ def device_stats(session: Session, device_id: str, days: int, tz_offset_minutes:
         "leaderboards": _leaderboards(rows, tz_offset_minutes),
         "compare": _compare_rows(
             session,
-            CompareRow(
-                device_id=device_id,
-                name=_device_name(session, device_id),
-                door_count=door_count,
-                sessions_flowed=len(flowed),
-                flow_avg_s=_average([int(row["flow_s"]) for row in flowed]),
-                wait_avg_s=_average(_full_wait_seconds(usable, door_count)),
-                peak_start=low,
-                peak_end=high,
-            ),
+            _compare_row(device_id, _device_name(session, device_id), door_count, flowed, usable, (low, high)),
             since,
             until,
             settled,
