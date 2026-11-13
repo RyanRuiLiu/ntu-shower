@@ -56,9 +56,9 @@ def _reset_process_singletons() -> Iterator[None]:
     from app.core import device_clock, events
     from app.core.connections import manager
     from app.modules.bridge.manager import registry
+    from app.modules.devices import actions as device_actions
     from app.modules.doors import service as doors_service
     from app.modules.extend_hours import service as extend_hours_service
-    from app.modules.sessions import service as sessions_service
     from app.modules.voice import service as voice_service
 
     def clear() -> None:
@@ -66,9 +66,10 @@ def _reset_process_singletons() -> Iterator[None]:
         manager._generations.clear()
         registry.reset()
         doors_service._device_locks.clear()
-        sessions_service._pending.clear()
-        sessions_service._config_pending.clear()
-        sessions_service._channel_waiting.clear()
+        device_actions._pending.clear()
+        device_actions._config_pending.clear()
+        device_actions._channel_waiting.clear()
+        device_actions._channel_locks.clear()
         events._subscribers.clear()
         device_clock.clear()
         extend_hours_service._reassign_tasks.clear()

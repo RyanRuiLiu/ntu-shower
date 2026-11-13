@@ -1,15 +1,30 @@
 """共享视图契约：持久化层与业务模块共同消费的数据形状。
 
-这些 TypedDict 只描述"一行记录有哪些字段"，不含业务规则。它们不属于任何单个
-业务模块：持久化层按这个形状返回，业务模块按这个形状消费。放在共享层，两边的
-导入方向都指向这里，避免持久化层反向依赖业务模块的 API 契约。
+这些 TypedDict 只描述"一行记录有哪些字段"或"一次交互的结果"，不含业务规则。
+它们不属于任何单个业务模块：生产方按这个形状返回，消费方按这个形状消费。放在
+共享层，两边的导入方向都指向这里，避免模块之间互相导入对方的 API 契约。
 """
 
 from __future__ import annotations
 
 from typing_extensions import TypedDict
 
+from .core.protocol import JsonObject
 from .models.enums import DoorState, IdentityKind
+
+
+class CommandOutcome(TypedDict):
+    """设备命令的终态结果。
+
+    对齐 protocol/schema/session.command_result.json。`data` 按命令而异
+    （拍照回 image_base64、远程执行回 output），因此保持开放对象：前端按
+    `action` 分支取字段，而非为每种命令各造一个响应类型。
+    """
+
+    status: str
+    reason_code: str
+    terminal_message: str
+    data: JsonObject | None
 
 
 class CommandAuditRecord(TypedDict):
@@ -168,6 +183,7 @@ class IdentityRecord(TypedDict):
 __all__: list[str] = [
     "BackgroundTaskRun",
     "CommandAuditRecord",
+    "CommandOutcome",
     "DeviceRecord",
     "DoorView",
     "IdentityRecord",

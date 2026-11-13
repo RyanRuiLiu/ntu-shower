@@ -77,7 +77,7 @@ def _prepare(
             sent.append((action, params))
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
 
-    monkeypatch.setattr(extend_hours.sessions_service, "send_command_and_wait", fake_send)
+    monkeypatch.setattr(extend_hours.device_actions, "send_command_and_wait", fake_send)
     return server_now
 
 
@@ -237,7 +237,7 @@ def test_failed_shift_leaves_no_row_so_the_next_tick_retries(fresh_db: str, monk
     async def failing(_session: object, _device_id: str, _action: str, _params: object, **_kw: object) -> object:
         return {"status": "failed", "reason_code": "device.offline", "terminal_message": "", "data": None}
 
-    monkeypatch.setattr(extend_hours.sessions_service, "send_command_and_wait", failing)
+    monkeypatch.setattr(extend_hours.device_actions, "send_command_and_wait", failing)
 
     _tick()
 
@@ -363,7 +363,7 @@ def test_on_frame_does_nothing_without_a_row(fresh_db: str, monkeypatch: pytest.
         assigned.append(req)
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
 
-    monkeypatch.setattr(extend_hours.sessions_routes, "perform_assign", fake_assign)
+    monkeypatch.setattr(extend_hours.sessions_service, "perform_assign", fake_assign)
 
     extend_hours.on_frame(DEVICE)
 
@@ -379,7 +379,7 @@ def test_on_frame_assigns_back_who_is_missing(fresh_db: str, monkeypatch: pytest
         assigned.append((req.door_no, req.cert_no, req.password))
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
 
-    monkeypatch.setattr(extend_hours.sessions_routes, "perform_assign", fake_assign)
+    monkeypatch.setattr(extend_hours.sessions_service, "perform_assign", fake_assign)
     _record_shift(
         DEVICE,
         "2026-10-05T23:50:00.000Z",
@@ -411,7 +411,7 @@ def test_reassign_skips_someone_already_occupying(fresh_db: str, monkeypatch: py
         assigned.append(req)
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
 
-    monkeypatch.setattr(extend_hours.sessions_routes, "perform_assign", fake_assign)
+    monkeypatch.setattr(extend_hours.sessions_service, "perform_assign", fake_assign)
 
     _reassign_with_db(_shift("2026-10-05T23:50:00.000Z"), roster(CONFIG, "extend_hours_students"))
 
@@ -436,7 +436,7 @@ def test_reassign_waits_for_a_leftover_session_from_before_the_shift(
         assigned.append((req.door_no, req.cert_no))
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
 
-    monkeypatch.setattr(extend_hours.sessions_routes, "perform_assign", fake_assign)
+    monkeypatch.setattr(extend_hours.sessions_service, "perform_assign", fake_assign)
     shift = _shift("2026-10-05T23:50:00.000Z")
 
     # 拨钟后第一次（门还占着）：不分配，且**不标记**——下一次还要再来
@@ -529,7 +529,7 @@ def test_power_failure_after_shift_keeps_the_row_and_retries(fresh_db: str, monk
             return {"status": "failed", "reason_code": "device.offline", "terminal_message": "", "data": None}
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
 
-    monkeypatch.setattr(extend_hours.sessions_service, "send_command_and_wait", half)
+    monkeypatch.setattr(extend_hours.device_actions, "send_command_and_wait", half)
 
     _tick()
 
@@ -555,7 +555,7 @@ def test_restore_rearm_failure_keeps_the_row_for_retry(fresh_db: str, monkeypatc
             return {"status": "failed", "reason_code": "device.offline", "terminal_message": "", "data": None}
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
 
-    monkeypatch.setattr(extend_hours.sessions_service, "send_command_and_wait", half)
+    monkeypatch.setattr(extend_hours.device_actions, "send_command_and_wait", half)
 
     _tick()
 
@@ -610,7 +610,7 @@ def test_reassign_reports_a_failed_command(fresh_db: str, monkeypatch: pytest.Mo
     async def failed(_session: object, _device_id: str, _req: AssignRequest) -> dict[str, object]:
         return {"status": "timeout", "reason_code": "server.deadline-exceeded", "terminal_message": "", "data": None}
 
-    monkeypatch.setattr(extend_hours.sessions_routes, "perform_assign", failed)
+    monkeypatch.setattr(extend_hours.sessions_service, "perform_assign", failed)
 
     async def body() -> None:
         extend_hours.on_frame(DEVICE)
@@ -635,7 +635,7 @@ def test_a_refused_command_is_not_marked_as_a_failure(fresh_db: str, monkeypatch
     async def refusing(_session: object, _device_id: str, _req: AssignRequest) -> object:
         raise ApiProblemError(DOOR_NOT_FREE, "喷头 3 当前状态：bathing")
 
-    monkeypatch.setattr(extend_hours.sessions_routes, "perform_assign", refusing)
+    monkeypatch.setattr(extend_hours.sessions_service, "perform_assign", refusing)
 
     async def body() -> None:
         extend_hours.on_frame(DEVICE)
@@ -657,7 +657,7 @@ def test_a_failed_command_is_not_tried_again(fresh_db: str, monkeypatch: pytest.
         attempts.append(1)
         return {"status": "timeout", "reason_code": "server.deadline-exceeded", "terminal_message": "", "data": None}
 
-    monkeypatch.setattr(extend_hours.sessions_routes, "perform_assign", failed)
+    monkeypatch.setattr(extend_hours.sessions_service, "perform_assign", failed)
 
     async def body() -> None:
         for _ in range(2):
@@ -767,7 +767,7 @@ def test_runtime_correction_failure_is_logged(fresh_db: str, monkeypatch: pytest
     async def failing(_session: object, _device_id: str, _action: str, _params: object, **_kw: object) -> object:
         return {"status": "failed", "reason_code": "device.offline", "terminal_message": "", "data": None}
 
-    monkeypatch.setattr(extend_hours.sessions_service, "send_command_and_wait", failing)
+    monkeypatch.setattr(extend_hours.device_actions, "send_command_and_wait", failing)
 
     _tick()
 
@@ -809,7 +809,7 @@ def test_set_clock_warns_on_command_failure(fresh_db: str, monkeypatch: pytest.M
     async def failing(_session: object, _device_id: str, _action: str, _params: object, **_kw: object) -> object:
         return {"status": "failed", "reason_code": "device.offline", "terminal_message": "", "data": None}
 
-    monkeypatch.setattr(extend_hours.sessions_service, "send_command_and_wait", failing)
+    monkeypatch.setattr(extend_hours.device_actions, "send_command_and_wait", failing)
 
     ok = _set_clock_with_db(3600, 480)
 
@@ -882,7 +882,7 @@ def test_tick_advances_each_extending_device_with_its_own_config(
         sent.append((device_id, action, params))
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
 
-    monkeypatch.setattr(extend_hours.sessions_service, "send_command_and_wait", fake_send)
+    monkeypatch.setattr(extend_hours.device_actions, "send_command_and_wait", fake_send)
 
     # 拨钟时刻记为"现在"：恢复条件（过午夜）不成立，推进只做滚动续写
     _record_shift("dev-ext-a", server_now, [])
@@ -910,7 +910,7 @@ def test_tick_clears_the_shift_row_of_a_delisted_device(fresh_db: str, monkeypat
         sent.append((_device_id, _action))
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
 
-    monkeypatch.setattr(extend_hours.sessions_service, "send_command_and_wait", fake_send)
+    monkeypatch.setattr(extend_hours.device_actions, "send_command_and_wait", fake_send)
     _record_shift("dev-gone", "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2026000001"}])
     assert _get_shift("dev-gone") is not None
 
@@ -943,7 +943,7 @@ def test_reassign_is_one_shot_per_extension(fresh_db: str, monkeypatch: pytest.M
         attempts.append(req)
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
 
-    monkeypatch.setattr(extend_hours.sessions_routes, "perform_assign", fake_assign)
+    monkeypatch.setattr(extend_hours.sessions_service, "perform_assign", fake_assign)
     shift = _shift("2026-10-05T23:50:00.000Z")
 
     # 第一次：他不在占用态，放回

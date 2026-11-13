@@ -31,14 +31,44 @@ from sqlalchemy.orm import Session
 
 from app.auth.dependencies import current_user
 from app.auth.tokens import extract_bearer
-from app.core.problems import CAPABILITY_DENIED, UNAUTHENTICATED, UNKNOWN_IDENTITY, ApiProblemError
+from app.contracts import DeviceRecord
+from app.core.connections import manager
+from app.core.problems import (
+    CAPABILITY_DENIED,
+    DEVICE_NOT_FOUND,
+    DEVICE_OFFLINE,
+    UNAUTHENTICATED,
+    UNKNOWN_IDENTITY,
+    UNTRUSTED_DEVICE,
+    ApiProblemError,
+)
 from app.db.deps import get_db
+from app.persistence import devices as devices_store
 from app.persistence import principals as principals_store
 
 from ...models.enums import IdentityKind
 from . import service
 from .capabilities import DEVICE_SCOPED, Capability
 from .schemas import IdentityRecord
+
+
+def require_trusted_online_device(device_id: str, session: Session = Depends(get_db)) -> DeviceRecord:
+    """依赖守卫：设备必须存在且已信任、当前在线；否则拒绝进入业务。
+
+    住在守卫层而不是 devices.dependencies：config、bridge、sessions 的写路径都要
+    先过这道闸，而 devices 域自身要读 config.store——守卫若放设备域，config →
+    devices → config 就是包级循环。设备存在性与信任位经持久化层读取，在线与否看
+    连接表，全程不 import devices 包。
+    """
+    record = devices_store.get(session, device_id)
+    if record is None:
+        raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {device_id} 不在档案里")
+    if not record["trusted"]:
+        # 设备存在但未信任是 403，不是 404：混淆两者会让客户端以为设备不存在
+        raise ApiProblemError(UNTRUSTED_DEVICE, f"设备 {device_id} 尚未被信任")
+    if not manager.is_online(device_id):
+        raise ApiProblemError(DEVICE_OFFLINE, f"设备 {device_id} 没有活跃连接")
+    return record
 
 
 def _from_account(user: dict[str, Any]) -> IdentityRecord:

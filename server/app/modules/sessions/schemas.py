@@ -11,9 +11,6 @@
 """
 
 from pydantic import BaseModel, Field
-from typing_extensions import TypedDict
-
-from app.core.protocol import JsonObject
 
 
 class AssignRequest(BaseModel):
@@ -29,25 +26,3 @@ class SettleRequest(BaseModel):
 
     cert_no: str = Field(min_length=1)
     password: str = Field(min_length=1)
-
-
-class CommandOutcome(TypedDict):
-    """设备命令的终态结果。
-
-    对齐 protocol/schema/session.command_result.json。`data` 按命令而异
-    （拍照回 image_base64、远程执行回 output），因此保持开放对象：前端按
-    `action` 分支取字段，而非为每种命令各造一个响应类型。
-    """
-
-    status: str
-    reason_code: str
-    terminal_message: str
-    data: JsonObject | None
-
-
-class ConfigPushResult(TypedDict, total=False):
-    """配置推送结果；`reason` 仅在下发或设备确认失败时出现。"""
-
-    notified: bool
-    applied: bool
-    reason: str
