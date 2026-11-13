@@ -130,6 +130,12 @@ type = "acyclic_siblings"
 ancestors = ["app.modules"]
 
 [[tool.importlinter.contracts]]
+name = "核心层零向上依赖"
+type = "forbidden"
+source_modules = ["app.core"]
+forbidden_modules = ["app.auth", "app.modules", "app.persistence", "app.db"]
+
+[[tool.importlinter.contracts]]
 name = "持久化层不依赖业务模块"
 type = "forbidden"
 source_modules = ["app.persistence"]
