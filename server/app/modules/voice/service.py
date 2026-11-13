@@ -20,6 +20,7 @@ from typing import Any, NoReturn
 
 from sqlalchemy.orm import Session
 
+from app.contracts import CommandOutcome
 from app.core import actions
 from app.core.clock import now_rfc3339, parse_rfc3339, to_local
 from app.core.logging import log_event, trace_id_var
@@ -33,10 +34,9 @@ from app.core.problems import (
 )
 from app.db.base import utcnow
 from app.modules.config import store as config_store
+from app.modules.devices import actions as device_actions
 from app.modules.devices import service as devices_service
 from app.modules.doors.events import DoorEvent, DoorEventKind
-from app.modules.sessions import service as sessions_service
-from app.modules.sessions.schemas import CommandOutcome
 from app.persistence import voice as repository
 
 from . import audio, numbers, schemas
@@ -760,7 +760,7 @@ async def push_to_device(session: Session, rule_id: int, device_id: str) -> sche
         trace_id_var.get(),
         utcnow(),
     )
-    outcome = await sessions_service.send_command_and_wait(
+    outcome = await device_actions.send_command_and_wait(
         session,
         device_id,
         actions.VOICE_PLAY,
@@ -832,7 +832,7 @@ async def _prepare_task(device_id: str, params: dict[str, object]) -> None:
 
 async def _prepare(session: Session, device_id: str, params: dict[str, object], timeout_s: float) -> None:
     try:
-        outcome = await sessions_service.send_command_and_wait(
+        outcome = await device_actions.send_command_and_wait(
             session,
             device_id,
             actions.VOICE_PREPARE,
@@ -989,7 +989,7 @@ async def _dispatch_event(session: Session, event: DoorEvent, max_age: int) -> N
         utcnow(),
     ):
         return
-    outcome = await sessions_service.send_command_and_wait(
+    outcome = await device_actions.send_command_and_wait(
         session,
         event.device_id,
         actions.VOICE_PLAY,

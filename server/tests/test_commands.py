@@ -14,7 +14,7 @@ from tests import device_link
 from app.core import actions, outcomes, protocol, reason_codes
 from app.core.connections import manager
 from app.db.base import utcnow
-from app.modules.sessions import service
+from app.modules.devices import actions as service
 from app.persistence import audit as command_audit
 
 

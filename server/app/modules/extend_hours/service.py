@@ -83,9 +83,9 @@ from app.db.base import utcnow
 from app.db.session import session_scope
 from app.modules.config import store as config_store
 from app.modules.config.schemas import ConfigValues
+from app.modules.devices import actions as device_actions
 from app.modules.devices import service as devices_service
 from app.modules.doors import service as doors_service
-from app.modules.sessions import routes as sessions_routes
 from app.modules.sessions import service as sessions_service
 from app.modules.sessions.decision import roster
 from app.modules.sessions.schemas import AssignRequest
@@ -266,7 +266,7 @@ async def _set_clock(session: Session, device_id: str, seconds: float, zone_offs
         return False
 
     # rearm=false：延长流程自己管理 MCU 的滚动重布，拨快/拨回不触发设备端的配对重布
-    written = await sessions_service.send_command_and_wait(
+    written = await device_actions.send_command_and_wait(
         session, device_id, actions.CLOCK_SET, {"datetime": text, "rearm": False}
     )
     if written["status"] != outcomes.OK.value:
@@ -295,7 +295,7 @@ async def _schedule_power(session: Session, device_id: str, off_at: str, on_at: 
     设备端用自己的钟换算相对延时：断电延时从命令落地起算，开机延时从断电时刻起算，
     目标已过就落到次日（"下一个"）。见 [McuPowerSchedule]。
     """
-    result = await sessions_service.send_command_and_wait(
+    result = await device_actions.send_command_and_wait(
         session, device_id, actions.POWER_SCHEDULE, {"off_at": off_at, "on_at": on_at}
     )
     if result["status"] != outcomes.OK.value:
@@ -381,7 +381,7 @@ async def _maybe_correct_clock(session: Session, device_id: str, config: ConfigV
     text = wall_clock_text(shift_rfc3339(now_rfc3339(), zone * 60))
     if text is None:
         return
-    result = await sessions_service.send_command_and_wait(
+    result = await device_actions.send_command_and_wait(
         session, device_id, actions.CLOCK_SET, {"datetime": text, "rearm": True}
     )
     if result["status"] != outcomes.OK.value:
@@ -544,7 +544,7 @@ async def _reassign(session: Session, shift: Shift, students: dict[str, str]) ->
             # 拨钟之前就有的会话还没被清场（拨钟刚完成的那一瞬间）：等，不标记
             continue
         try:
-            result = await sessions_routes.perform_assign(
+            result = await sessions_service.perform_assign(
                 session,
                 device_id,
                 AssignRequest(door_no=door_no, cert_no=cert_no, password=password),
