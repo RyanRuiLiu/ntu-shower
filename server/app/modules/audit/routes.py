@@ -11,11 +11,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.core.audit import ApiCallRecord, list_calls
 from app.db.deps import get_db
 from app.modules.access.dependencies import require_admin
 from app.modules.audit.schemas import BackgroundTaskRun, CommandAuditRecord
 from app.persistence import audit as command_audit
+from app.persistence.api_calls import ApiCallRecord, list_calls
 
 admin_router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_admin)], tags=["audit"])
 
