@@ -8,6 +8,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- main 分支保护上线：五个门禁为 required checks、线性历史强制、管理员不豁免（应急旁路保留）；android 门禁按 PR 变更路径裁剪，纯服务端改动不再等待安卓全量构建（push main 仍全量）。
+- 基镜像按 digest 钉版（python 构建两级与 litestream），tag 保留供人读；升版即换 digest 走评审。
+
+### Added
+
+- ADR-0022：安卓依赖冻结 API 19 兼容线的裁定、备选方案与重启条件（useAndroidX=false、okhttp 3.12.x、conscrypt 2.5.x、dependabot ignore 编码上限）。
+
 ## [0.7.0] - 2026-11-13
 
 ### Added
