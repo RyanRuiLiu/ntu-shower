@@ -4,12 +4,16 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from tests import device_link, frames
 from tests.identity import bearer
 
-from app.core import actions, db
+from app.core import actions
 from app.core.clock import now_rfc3339
 from app.core.connections import manager
+from app.db.session import session_scope
+from app.models.identity import Device
+from app.models.ops import DeviceLinkEvent
 from app.modules.sessions import service as sessions_service
 
 DEVICE_ID = "dev-debug-1"
@@ -671,18 +675,18 @@ def test_link_events_record_the_reasons(client: TestClient, admin_headers: dict[
     with device_link.trusted_online(client, device_id, admin_headers):
         # 老设备（hello 不带 last_offline_*）→ reason 空；夹具的信任踢会产生多轮事件，
         # 只看最后一条 online
-        rows = (
-            db.get_conn()
-            .execute(
-                "SELECT event, reason FROM device_link_events"
-                " WHERE device_id = (SELECT id FROM devices WHERE device_id = ?) ORDER BY id",
-                (device_id,),
+        with session_scope() as session:
+            rows = list(
+                session.execute(
+                    select(DeviceLinkEvent.event, DeviceLinkEvent.reason)
+                    .join(Device, Device.id == DeviceLinkEvent.device_id)
+                    .where(Device.device_id == device_id)
+                    .order_by(DeviceLinkEvent.id)
+                )
             )
-            .fetchall()
-        )
-        assert rows is not None
-        assert rows[-1]["event"] == "online"
-        assert rows[-1]["reason"] == ""
+        assert rows
+        assert rows[-1].event == "online"
+        assert rows[-1].reason == ""
 
     # 重连，hello 带上一次断开的原因（dns = 网线/交换机/DHCP 一类）：服务端把它记进
     # 这次 online 事件
@@ -690,15 +694,15 @@ def test_link_events_record_the_reasons(client: TestClient, admin_headers: dict[
         ws.send_text(frames.hello_frame(device_id, last_offline_reason="dns", last_offline_at=now_rfc3339()))
         frames.recv_until(ws, "link.hello_ack")
 
-        rows = (
-            db.get_conn()
-            .execute(
-                "SELECT event, reason FROM device_link_events"
-                " WHERE device_id = (SELECT id FROM devices WHERE device_id = ?) ORDER BY id",
-                (device_id,),
+        with session_scope() as session:
+            rows = list(
+                session.execute(
+                    select(DeviceLinkEvent.event, DeviceLinkEvent.reason)
+                    .join(Device, Device.id == DeviceLinkEvent.device_id)
+                    .where(Device.device_id == device_id)
+                    .order_by(DeviceLinkEvent.id)
+                )
             )
-            .fetchall()
-        )
-        assert rows is not None
-        assert rows[-1]["event"] == "online"
-        assert rows[-1]["reason"] == "dns"
+        assert rows
+        assert rows[-1].event == "online"
+        assert rows[-1].reason == "dns"
