@@ -203,15 +203,6 @@ def test_device_override_leaves_other_keys_following_global(fresh_db: str) -> No
         assert effective["ota_check_interval_s"] == 7200
 
 
-def test_delete_override_falls_back_to_global(fresh_db: str) -> None:
-    with session_scope() as session:
-        store.put_device_overrides(session, "dev-1", {"heartbeat_interval_s": 10})
-
-        assert store.delete_device_overrides(session, "dev-1") is True
-        assert store.effective(session, "dev-1")["heartbeat_interval_s"] == 30
-        assert store.delete_device_overrides(session, "dev-1") is False
-
-
 def test_device_effective_excludes_server_only_keys(fresh_db: str) -> None:
     """服务端自己的键不下发给设备。"""
     with session_scope() as session:
@@ -511,7 +502,7 @@ def test_device_config_lifecycle_without_ack(
     admin_headers: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """设备在线但不应答：notified 为真、applied 为假并带原因；覆盖与删除照常落库。"""
+    """设备在线但不应答：notified 为真、applied 为假并带原因；覆盖照常落库。"""
     monkeypatch.setattr(config_module.settings, "config_ack_timeout_s", 0.2)
 
     with device_link.trusted_online(client, "dev-cfg-1", admin_headers):
@@ -532,13 +523,6 @@ def test_device_config_lifecycle_without_ack(
         override = client.get("/api/v1/devices/dev-cfg-1/config", headers=admin_headers).json()
         assert override["overrides"] == {"heartbeat_interval_s": 20}
         assert override["config"]["heartbeat_interval_s"] == 20
-
-        removed = client.delete("/api/v1/devices/dev-cfg-1/config", headers=admin_headers)
-        assert removed.json()["override_removed"] is True
-
-    after = client.get("/api/v1/devices/dev-cfg-1/config", headers=admin_headers).json()
-    assert after["overrides"] is None
-    assert after["config"]["heartbeat_interval_s"] == 30
 
 
 def test_device_config_rejected_when_offline(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:

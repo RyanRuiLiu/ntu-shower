@@ -57,8 +57,6 @@ object CommandFactory {
         SupportedActions.UI_INPUT ->
             CommandScheduler.Command.UiInput(commandId, params.optString("text"), params.optString("channel"))
 
-        SupportedActions.UI_SCROLL -> CommandScheduler.Command.UiScroll(commandId, params.optString("direction"))
-
         SupportedActions.VOICE_PLAY -> CommandScheduler.Command.PlayVoice(commandId, params)
 
         SupportedActions.VOICE_PREPARE -> CommandScheduler.Command.PrepareVoice(commandId, params)
@@ -80,13 +78,6 @@ object CommandFactory {
 
     /** 取一个可空整数：键不存在返回 null，存在则返回值（含 0）。 */
     private fun JSONObject.optIntOrNull(key: String): Int? = if (has(key)) optInt(key) else null
-
-    /**
-     * 滚动方向在协议里的取值。方向是必填的闭集，执行器（[CommandScheduler.executeScroll]）
-     * 按这两个常量分派——字面量只在这里出现一次。
-     */
-    const val DIRECTION_FORWARD = "forward"
-    const val DIRECTION_BACKWARD = "backward"
 
     /** 滑动默认时长（毫秒）。太短会被识别成快速抛掷而非拖动。 */
     private const val DEFAULT_SWIPE_MS = 300

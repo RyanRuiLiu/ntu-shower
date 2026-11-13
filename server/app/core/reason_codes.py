@@ -73,7 +73,6 @@ DOOR_NO_OCCUPIED = Reason("door.no_occupied", "该学号没有正在使用的喷
 # ── 界面操作（无障碍）──
 
 UI_NO_TARGET_AT_POINT = Reason("ui.no_target_at_point", "该位置没有可点击的控件")
-UI_NO_SCROLLABLE_CONTAINER = Reason("ui.no_scrollable_container", "当前界面上没有可滚动的容器")
 UI_NO_EDITABLE_FIELD = Reason("ui.no_editable_field", "没有可输入的控件")
 UI_KEY_REJECTED = Reason("ui.key_rejected", "系统拒绝了该按键")
 UI_UNKNOWN_KEY = Reason("ui.unknown_key", "未知的按键名")
@@ -83,7 +82,6 @@ UI_CLICK_NO_EFFECT = Reason("ui.click_no_effect", "点击已发出，但界面�
 UI_TEXT_REJECTED = Reason("ui.text_rejected", "系统拒绝了文本注入")
 UI_KEYS_ASCII_ONLY = Reason("ui.keys_ascii_only", "按键通道仅支持英文、数字与符号")
 UI_UNKNOWN_CHANNEL = Reason("ui.unknown_channel", "未知的输入通道")
-UI_UNKNOWN_DIRECTION = Reason("ui.unknown_direction", "未知的滚动方向")
 
 # ── 采集 ──
 
@@ -135,7 +133,6 @@ REGISTRY: tuple[Reason, ...] = (
     DOOR_NOT_FOUND,
     DOOR_NO_OCCUPIED,
     UI_NO_TARGET_AT_POINT,
-    UI_NO_SCROLLABLE_CONTAINER,
     UI_NO_EDITABLE_FIELD,
     UI_KEY_REJECTED,
     UI_UNKNOWN_KEY,
@@ -145,7 +142,6 @@ REGISTRY: tuple[Reason, ...] = (
     UI_TEXT_REJECTED,
     UI_KEYS_ASCII_ONLY,
     UI_UNKNOWN_CHANNEL,
-    UI_UNKNOWN_DIRECTION,
     CAMERA_CAPTURE_FAILED,
     SCREEN_CAPTURE_FAILED,
     WATER_TARGET_NOT_FOUND,

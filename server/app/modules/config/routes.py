@@ -27,7 +27,6 @@ from .schemas import (
     ConfigPushNotice,
     ConfigSpecCatalog,
     ConfigValues,
-    DeviceConfigRemovalReport,
     DeviceConfigUpdateReport,
     DeviceConfigView,
     GlobalConfigUpdateReport,
@@ -173,32 +172,3 @@ async def put_device_config(
         "applied": result.get("applied", False),
         "reason": result.get("reason", ""),
     }
-
-
-@admin_router.delete("/devices/{device_id}/config")
-async def delete_device_config(device_id: str, session: Session = Depends(get_db)) -> DeviceConfigRemovalReport:
-    """删除设备级覆盖：该设备回落为跟随全局，并把回落后的值推给它。
-
-    **改了生效值就得让设备知道**——与 PUT 同一条规矩。只落库不推的话，那台设备会一直
-    用着旧覆盖，直到它重连（`link.hello_ack` 带回新值）、或者下一次全局配置推送顺带带上它。
-
-    修订号取全局那个：覆盖删掉之后这台设备已经没有自己的修订号，而它此刻的生效值就是
-    全局版本。而设备端的 `config.ack` 也不回传修订号，所以这个值只进日志与审计。
-    """
-    removed = store.delete_device_overrides(session, device_id)
-    if not removed:
-        return {"device_id": device_id, "override_removed": False, "config": store.effective(session, device_id)}
-
-    # 该设备回落为跟随全局：后台任务的定时器也要按新值重算
-    sessions_scheduler.reload()
-    revision, _overrides = store.get_global_overrides(session)
-    result = await sessions_service.push_config_update(device_id, revision, store.device_effective(session, device_id))
-    log_event(
-        "INFO",
-        "config.device-override-removed",
-        "设备覆盖已移除并推送",
-        device_id=device_id,
-        revision=revision,
-        notified=result.get("notified", False),
-    )
-    return {"device_id": device_id, "override_removed": True, "config": store.effective(session, device_id)}

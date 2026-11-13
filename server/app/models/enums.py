@@ -92,14 +92,6 @@ class SegmentSource(StrEnum):
     DERIVED = "derived"
 
 
-class SnapshotSource(StrEnum):
-    """原始帧的来源。"""
-
-    IMPORT = "import"
-    STARTUP = "startup"
-    DB_WATCH = "db_watch"
-
-
 class BackgroundOutcome(StrEnum):
     """后台任务的执行结果。
 
@@ -146,5 +138,4 @@ __all__: list[str] = [
     "LinkEvent",
     "ObservedSpan",
     "SegmentSource",
-    "SnapshotSource",
 ]
