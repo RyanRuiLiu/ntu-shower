@@ -21,7 +21,7 @@
   曾试过 Taro + React 的跨端方案，两个页面的规模撑不起它的接入成本，工程已删除；
   服务端契约为任何前端保留。
 - **`mount("/")` 必须在所有路由之后注册**：Starlette 按注册顺序匹配，提前挂载会让 `/api`、
-  `/ops`、`/ota`、`/gateway` 全部变成静态文件查找并返回 404。顺序由 `test_e2e_branches.py`
+  `/api/v1`、`/ota`、`/gateway` 全部变成静态文件查找并返回 404（后记 2026-11-14：`/ops` 为 v1 路由，v2 已不存在）。顺序由 `test_e2e_branches.py`
   锁定。
 - **前端资源响应带 `Cache-Control: no-cache`**（`.html`/`.js`/`.css`）：浏览器每次都带 ETag
   回来验，未变即 304。没有它时只有 `Last-Modified`，浏览器会走启发式缓存，改完样式刷新看到的

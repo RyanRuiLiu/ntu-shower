@@ -7,6 +7,10 @@
 
 ## 背景
 
+> 后记 2026-11-14：文中 `/ops` 路由与设备端 `audit.log` 是 v1 时代机制；v2 起可观测性为
+> stdout JSON 事件流 + `api_calls`/`command_audits`/`background_task_runs` 三张审计表（见
+> `app/audit_middleware.py` 与 `docs/adr/` 本篇其余部分），决策本体不变。
+
 本条目汇总该领域的有效决策；原始讨论、实测与取舍见相关代码注释、`docs/adr/` 的 evidence 附录 与 Git 历史。
 
 ## 决策
