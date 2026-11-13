@@ -12,10 +12,10 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..auth.passwords import hash_password, needs_rehash, verify_password
-from ..auth.tokens import generate_token, hash_token
 from ..contracts import IdentityRecord
 from ..core.clock import format_rfc3339
+from ..core.passwords import hash_password, needs_rehash, verify_password
+from ..core.tokens import generate_token, hash_token
 from ..db.base import utcnow
 from ..models.enums import IdentityKind
 from ..models.identity import Principal
