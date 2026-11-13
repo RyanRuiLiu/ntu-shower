@@ -1,12 +1,13 @@
 # syntax=docker/dockerfile:1
-FROM python:3.13.13-slim-bookworm AS builder
+# 基镜像按 digest 钉版（tag 供人读，digest 承诺内容不可变）；升版 = 换 digest，走正常评审
+FROM python:3.13.13-slim-bookworm@sha256:355bfa66770995d7e9a0da4b3473b44d0cb451f6b56f5615ad9c39e3c4eca03f AS builder
 
 COPY server/requirements.txt /tmp/requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir --prefix=/install -r /tmp/requirements.txt
 
 
-FROM python:3.13.13-slim-bookworm AS runtime
+FROM python:3.13.13-slim-bookworm@sha256:355bfa66770995d7e9a0da4b3473b44d0cb451f6b56f5615ad9c39e3c4eca03f AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
