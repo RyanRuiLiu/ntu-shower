@@ -51,6 +51,12 @@
 | identities | 身份域读模型与签发/编辑/撤销 |
 | ota | 版本清单 / 下载 / 发布管理 |
 | audit | 接口调用与命令级审计，以 trace_id 关联 |
+| stats | 按设备聚合洗浴数据（stats 能力位，小程序统计页） |
+| tasks | 用户名单（免费名单/续期名单等）的增删，按 tasks 能力位 |
+| freelist | 浴室 App 读取的免费名单，admin 维护 |
+| water | 水控板直控（开阀/关阀/读状态），admin |
+| status_line | 楼层状态行的汇总与推送 |
+| extend_hours | 延长服务：拨钟、MCU 滚动重布、定时续写 |
 
 **这张表列的是分工，不是路径清单**：路径会随功能增删而变，而它们已经写在代码里（各模块的
 `APIRouter` 前缀加上装饰器），前端那一侧由 `tests/test_api_contract.py` 守着。在文档里再抄
@@ -149,7 +155,7 @@ closed_at   = close_time + skew@关这一段那一刻
 实起止。
 
 **逐个平移之所以安全，是因为窗口内偏差是常量**：一次占用压在 20 分钟以内（设备满
-`maxbathtime` 就强制释放），而 20 分钟里的漂移只有 0.03 秒。跳变只有 23:5x 那一处，而设备
+`maxbatchtime` 就强制释放），而 20 分钟里的漂移只有 0.03 秒。跳变只有 23:5x 那一处，而设备
 23:53 会自动释放所有喷头——任何一次会话都不会跨过它。（为什么这么定、被它取代的那套锚点
 换算错在哪，见 [ADR-0002](adr/0002-time-axis.md)。）
 
@@ -172,7 +178,7 @@ bathTime             各段累加，每次关阀时 += |inTime − now|
 ```
 
 钟一旦变化这些值全部变化，且因为是绝对值，**向前拨与向后拨的后果相同**。四个自动释放条件
-（`maxinspacetime` / `maxbathtime` / `maxbathspacetime` / 关机前 5 分钟）都建立在这些差值上。
+（`maxinspacetime` / `maxbatchtime` / `maxbathspacetime` / 关机前 5 分钟）都建立在这些差值上。
 
 当偏差还无从确定或设备离线（差值里混进了与使用无关的时间）时，本项目**按同样的公式、用第一条
 与第二条给出的时刻重算**，得到与浴室 App 一致的数字，并如实标明这一段不可信。"无从确定"的
@@ -189,7 +195,7 @@ bathTime             各段累加，每次关阀时 += |inTime − now|
 | 离线时学生在 | 库里的残留 | 命中的条件 | 该次的时长口径 |
 |---|---|---|---|
 | 已分配未开阀 | `openTime` 有 | `\|openTime − now\| ≥ maxinspacetime` | 不计时长 |
-| 正在出水 | `openTime` + `inTime` 有 | `\|openTime − now\| ≥ maxbathtime` | `min(\|inTime − now\| + bathTime, maxbathtime)` |
+| 正在出水 | `openTime` + `inTime` 有 | `\|openTime − now\| ≥ maxbatchtime` | `min(\|inTime − now\| + bathTime, maxbatchtime)` |
 | 暂停中 | `openTime` + `closeTime` 有 | `\|closeTime − now\| ≥ maxbathspacetime` | `bathTime` |
 | 已选中未分配 | `status = 2` | `\|openTime − now\| ≥ maxinspacetime` | 不计时长 |
 
