@@ -91,15 +91,7 @@ def _plan_json(plan: list[PlanItem]) -> list[dict[str, object]]:
     result: list[dict[str, object]] = []
     for item in plan:
         if isinstance(item, ClipPlan):
-            result.append(
-                {
-                    "kind": "clip",
-                    "clip_id": item.clip_id,
-                    "sha256": item.sha256,
-                    "size_bytes": item.size_bytes,
-                    "duration_ms": item.duration_ms,
-                }
-            )
+            result.append({"kind": "clip", **_clip_payload(item)})
         else:
             result.append({"kind": "pause", "ms": item.ms})
     return result
@@ -510,7 +502,7 @@ def _normalize_rule(
     return normalized_devices, normalized_certs, normalized_events, windows, segments, exempt
 
 
-def create_rule(session: Session, req: schemas.VoiceRuleCreate) -> schemas.VoiceRuleView:
+def create_rule(session: Session, req: schemas.VoiceRuleBody) -> schemas.VoiceRuleView:
     devices, certs, events, windows, segments, exempt = _normalize_rule(
         session, req.devices, req.certs, req.events, req.time_windows, req.segments, req.exempt_cert_nos, None
     )
@@ -526,15 +518,11 @@ def create_rule(session: Session, req: schemas.VoiceRuleCreate) -> schemas.Voice
         req.enabled,
         utcnow(),
     )
-    row = repository.get_rule(session, rule_id)
-    if row is None:
-        raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
-    return _rule_view(session, row)
+    return _rule_view(session, _rule_row_or_404(session, rule_id))
 
 
-def update_rule(session: Session, rule_id: int, req: schemas.VoiceRuleUpdate) -> schemas.VoiceRuleView:
-    if repository.get_rule(session, rule_id) is None:
-        raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
+def update_rule(session: Session, rule_id: int, req: schemas.VoiceRuleBody) -> schemas.VoiceRuleView:
+    _rule_row_or_404(session, rule_id)
     devices, certs, events, windows, segments, exempt = _normalize_rule(
         session, req.devices, req.certs, req.events, req.time_windows, req.segments, req.exempt_cert_nos, rule_id
     )
@@ -555,19 +543,13 @@ def update_rule(session: Session, rule_id: int, req: schemas.VoiceRuleUpdate) ->
         is False
     ):
         raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
-    row = repository.get_rule(session, rule_id)
-    if row is None:
-        raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
-    return _rule_view(session, row)
+    return _rule_view(session, _rule_row_or_404(session, rule_id))
 
 
 def set_enabled(session: Session, rule_id: int, enabled: bool) -> schemas.VoiceRuleView:
     if repository.set_enabled(session, rule_id, enabled, utcnow()) is False:
         raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
-    row = repository.get_rule(session, rule_id)
-    if row is None:
-        raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
-    return _rule_view(session, row)
+    return _rule_view(session, _rule_row_or_404(session, rule_id))
 
 
 def delete_rule(session: Session, rule_id: int) -> None:
@@ -610,21 +592,12 @@ def _resolve(session: Session, segments: list[schemas.Segment], door_no: int, ce
     digits = _digit_rows(session)
     units = _unit_rows(session)
 
-    def clip(row: dict[str, Any]) -> ClipPlan:
-        asset_id = str(row["asset_id"])
-        return ClipPlan(
-            clip_id=asset_id,
-            sha256=asset_id,
-            size_bytes=int(row["size_bytes"]),
-            duration_ms=int(row["duration_ms"]),
-        )
-
     for segment in segments:
         if isinstance(segment, schemas.AssetSegment):
             row = assets.get(segment.asset_id)
             if row is None:
                 _reject(f"素材不存在：{segment.asset_id}")
-            plan.append(clip(row))
+            plan.append(_clip_from_row(row))
         elif isinstance(segment, schemas.DigitsSegment):
             if segment.source == "door_no":
                 try:
@@ -640,7 +613,7 @@ def _resolve(session: Session, segments: list[schemas.Segment], door_no: int, ce
                         row = assets.get(unit_row["asset_id"]) if unit_row else None
                     if row is None:
                         _reject(f"数字/单位素材缺失：{symbol}")
-                    plan.append(clip(row))
+                    plan.append(_clip_from_row(row))
             else:
                 chars = numbers.digit_chars(str(cert_no))
                 if segment.length is not None:
@@ -649,7 +622,7 @@ def _resolve(session: Session, segments: list[schemas.Segment], door_no: int, ce
                     row = digits.get(int(char))
                     if row is None:
                         _reject(f"数字素材缺失：{char}")
-                    plan.append(clip(row))
+                    plan.append(_clip_from_row(row))
         else:
             plan.append(PausePlan(ms=segment.ms))
     return plan
@@ -723,10 +696,80 @@ def _sample_event(row: dict[str, Any]) -> DoorEventKind:
     return DoorEventKind(next(iter(row["events"])))
 
 
-async def push_to_device(session: Session, rule_id: int, device_id: str) -> schemas.VoicePushView:
+def _rule_row_or_404(session: Session, rule_id: int) -> dict[str, Any]:
+    """取规则行；不存在即领域异常（HTTP 层转 404）。"""
     row = repository.get_rule(session, rule_id)
     if row is None:
         raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
+    return row
+
+
+def _clip_from_row(row: dict[str, Any]) -> ClipPlan:
+    """素材行 → 片段计划。sha256 即 asset_id：素材内容寻址，下载后按它校验。"""
+    asset_id = str(row["asset_id"])
+    return ClipPlan(
+        clip_id=asset_id,
+        sha256=asset_id,
+        size_bytes=int(row["size_bytes"]),
+        duration_ms=int(row["duration_ms"]),
+    )
+
+
+def _clip_payload(clip: ClipPlan) -> dict[str, object]:
+    """协议面（session.command 参数）与预下载面（VOICE_PREPARE 参数）共用的片段四字段。"""
+    return {
+        "clip_id": clip.clip_id,
+        "sha256": clip.sha256,
+        "size_bytes": clip.size_bytes,
+        "duration_ms": clip.duration_ms,
+    }
+
+
+def _claim_delivery(session: Session, event: DoorEvent, rule_id: int, plan: list[PlanItem], duration_ms: int) -> bool:
+    """幂等认领投递权：event_key 是唯一键，重复事件只有第一次拿到。"""
+    return repository.claim_delivery(
+        session,
+        event.event_key,
+        rule_id,
+        event.device_id,
+        event.door_no,
+        event.cert_no,
+        event.kind.value,
+        _plan_summary(session, plan),
+        len(plan),
+        duration_ms,
+        parse_rfc3339(event.occurred_at) or utcnow(),
+        trace_id_var.get(),
+        utcnow(),
+    )
+
+
+async def _send_play(session: Session, device_id: str, plan: list[PlanItem], volume: int) -> CommandOutcome:
+    """下发 VOICE_PLAY 并等待设备回执。"""
+    return await device_actions.send_command_and_wait(
+        session,
+        device_id,
+        actions.VOICE_PLAY,
+        _play_params(plan, volume),
+        timeout_s=_play_timeout_s(_plan_duration_ms(plan)),
+    )
+
+
+def _finish_delivery(session: Session, event_key: str, outcome: CommandOutcome, detail: str) -> None:
+    """落回执：状态、说明与下载标记写入投递记录。"""
+    repository.finish_delivery(
+        session,
+        event_key,
+        utcnow(),
+        str(outcome["status"]),
+        detail,
+        utcnow(),
+        _downloaded(outcome),
+    )
+
+
+async def push_to_device(session: Session, rule_id: int, device_id: str) -> schemas.VoicePushView:
+    row = _rule_row_or_404(session, rule_id)
     if devices_service.get_device(session, device_id) is None:
         raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {device_id} 不在档案里")
     segments = [_segment_from_dict(value) for value in row["segments"]]
@@ -745,38 +788,11 @@ async def push_to_device(session: Session, rule_id: int, device_id: str) -> sche
         occurred_at=now,
         event_key=f"{MANUAL_EVENT_PREFIX}{rule_id}:{uuid.uuid4().hex[:12]}",
     )
-    repository.claim_delivery(
-        session,
-        event.event_key,
-        rule_id,
-        event.device_id,
-        event.door_no,
-        event.cert_no,
-        event.kind.value,
-        _plan_summary(session, plan),
-        len(plan),
-        duration_ms,
-        parse_rfc3339(event.occurred_at) or utcnow(),
-        trace_id_var.get(),
-        utcnow(),
-    )
-    outcome = await device_actions.send_command_and_wait(
-        session,
-        device_id,
-        actions.VOICE_PLAY,
-        _play_params(plan, int(row["volume"])),
-        timeout_s=_play_timeout_s(duration_ms),
-    )
+    # 手动推送的 event_key 内嵌随机段，认领永不撞车，认领结果无需判读
+    _claim_delivery(session, event, rule_id, plan, duration_ms)
+    outcome = await _send_play(session, device_id, plan, int(row["volume"]))
     detail = _detail(outcome)
-    repository.finish_delivery(
-        session,
-        event.event_key,
-        utcnow(),
-        str(outcome["status"]),
-        "手动推送：" + detail,
-        utcnow(),
-        _downloaded(outcome),
-    )
+    _finish_delivery(session, event.event_key, outcome, "手动推送：" + detail)
     return schemas.VoicePushView(
         device_id=device_id,
         status=str(outcome["status"]),
@@ -800,13 +816,7 @@ def _clips_for_rule(session: Session, row: dict[str, Any]) -> list[dict[str, obj
         asset_ids.update(str(unit_row["asset_id"]) for unit_row in _unit_rows(session).values())
     rows = repository.asset_rows_by_ids(session, sorted(asset_ids))
     return [
-        {
-            "clip_id": str(asset["asset_id"]),
-            "sha256": str(asset["asset_id"]),
-            "size_bytes": int(asset["size_bytes"]),
-            "duration_ms": int(asset["duration_ms"]),
-        }
-        for asset in sorted(rows.values(), key=lambda item: str(item["asset_id"]))
+        _clip_payload(_clip_from_row(asset)) for asset in sorted(rows.values(), key=lambda item: str(item["asset_id"]))
     ]
 
 
@@ -973,38 +983,10 @@ async def _dispatch_event(session: Session, event: DoorEvent, max_age: int) -> N
         )
         return
     duration_ms = _plan_duration_ms(plan)
-    if not repository.claim_delivery(
-        session,
-        event.event_key,
-        int(rule["id"]),
-        event.device_id,
-        event.door_no,
-        event.cert_no,
-        event.kind.value,
-        _plan_summary(session, plan),
-        len(plan),
-        duration_ms,
-        parse_rfc3339(event.occurred_at) or utcnow(),
-        trace_id_var.get(),
-        utcnow(),
-    ):
+    if not _claim_delivery(session, event, int(rule["id"]), plan, duration_ms):
         return
-    outcome = await device_actions.send_command_and_wait(
-        session,
-        event.device_id,
-        actions.VOICE_PLAY,
-        _play_params(plan, int(rule["volume"])),
-        timeout_s=_play_timeout_s(duration_ms),
-    )
-    repository.finish_delivery(
-        session,
-        event.event_key,
-        utcnow(),
-        str(outcome["status"]),
-        _detail(outcome),
-        utcnow(),
-        _downloaded(outcome),
-    )
+    outcome = await _send_play(session, event.device_id, plan, int(rule["volume"]))
+    _finish_delivery(session, event.event_key, outcome, _detail(outcome))
     log_event(
         "INFO",
         "voice.delivery-finished",

@@ -178,18 +178,10 @@ class TimeWindow(BaseModel):
         )
 
 
-class VoiceRuleCreate(BaseModel):
-    devices: list[str] = Field(min_length=1, max_length=MAX_DEVICE_TARGETS_PER_CREATE)
-    certs: list[str] = Field(min_length=1, max_length=MAX_CERT_TARGETS_PER_CREATE)
-    events: list[DoorEventKind] = Field(min_length=1)
-    time_windows: list[TimeWindow] = Field(default_factory=list, max_length=time_rules.MAX_TIME_WINDOWS_PER_RULE)
-    segments: list[Segment] = Field(min_length=1, max_length=MAX_SEGMENTS_PER_RULE)
-    volume: int = Field(default=VOLUME_DEFAULT, ge=VOLUME_MIN, le=VOLUME_MAX)
-    enabled: bool = True
-    exempt_cert_nos: list[str] = Field(default_factory=list, max_length=MAX_EXEMPT_PER_RULE)
+class VoiceRuleBody(BaseModel):
+    """规则完整请求体：POST（新建）与 PUT（全量更新）共用——两者的字段形状一字不差，
+    此前是两份逐字段复制的模型，改一处漏一处必然漂移。"""
 
-
-class VoiceRuleUpdate(BaseModel):
     devices: list[str] = Field(min_length=1, max_length=MAX_DEVICE_TARGETS_PER_CREATE)
     certs: list[str] = Field(min_length=1, max_length=MAX_CERT_TARGETS_PER_CREATE)
     events: list[DoorEventKind] = Field(min_length=1)
