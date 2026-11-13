@@ -314,8 +314,8 @@ def _javascript() -> str:
     # 设备输入能力的两组闭集，直接取服务端 Literal 的取值——网页端的按钮清单此前是手抄的：
     # 服务端删一个取值，按钮还在，点了得到 422 而页面看不出为什么。
     #
-    # 只生成网页端**真用得上的**：`ui.scroll.direction` 也一样是闭集，但页面上没有滚动入口，
-    # 生成了没人 import 就是白添一个会漂的副本（与 CHANNELS 同一个道理）。
+    # 只生成网页端**真用得上的**：闭集多的是，没被页面用到的（与 CHANNELS 同一个道理）
+    # 不生成——没人 import 的副本只会各自漂移。
     from typing import get_args
 
     from app.modules.devices.schemas import DeviceUiKeyRequest, DeviceUiTextRequest

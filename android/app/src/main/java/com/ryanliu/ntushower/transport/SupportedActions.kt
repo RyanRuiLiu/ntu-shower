@@ -63,7 +63,6 @@ object SupportedActions {
     // ── 设备界面（无障碍） ──
     const val UI_DUMP = "ui.dump"
     const val UI_TOUCH = "ui.touch"
-    const val UI_SCROLL = "ui.scroll"
     const val UI_KEY = "ui.key"
     const val UI_INPUT = "ui.input"
 
@@ -91,7 +90,6 @@ object SupportedActions {
         BRIDGE_CLOSE,
         UI_DUMP,
         UI_TOUCH,
-        UI_SCROLL,
         UI_KEY,
         UI_INPUT,
     )

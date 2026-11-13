@@ -176,7 +176,7 @@ BRIDGE_CLOSE = "bridge.close"
 
 # ── 设备界面 ──
 # 各动作的后端按动作固定，不由调用方选路（ui.input 的 channel 除外）：
-# touch/scroll/key 走 root shell（设备无坐标手势能力，见下方运行时约束）；
+# touch/key 走 root shell（设备无坐标手势能力，见下方运行时约束）；
 # dump 走无障碍（shell 侧 uiautomator dump 会接管系统无障碍会话，不采用）；
 # input 由调用方在两条并列通路中显式选择。无障碍整体失效时，shell 组照常工作。
 
@@ -192,13 +192,6 @@ UI_TOUCH = "ui.touch"
 """触摸：点击给 x 与 y；滑动再给 to_x、to_y 与 duration_ms。
 
 定位先经 ui.dump 读节点树，由元素的 bounds 求中心点，不使用遍历序号。
-"""
-
-UI_SCROLL = "ui.scroll"
-"""滚动：direction 取 forward 或 backward，作用于可滚动容器。
-
-与 ui.touch 的滑动分开：滑动的落点取决于起点，滚动只表达方向。闭集，路由层
-以 422 挡下非法值，不发给设备。
 """
 
 UI_KEY = "ui.key"
@@ -238,7 +231,6 @@ ALL_ACTIONS: tuple[str, ...] = (
     BRIDGE_CLOSE,
     UI_DUMP,
     UI_TOUCH,
-    UI_SCROLL,
     UI_KEY,
     UI_INPUT,
 )
@@ -272,7 +264,6 @@ ACTION_CHANNELS: dict[str, str] = {
     SESSION_ASSIGN: CHANNEL_AUTOMATION,
     SESSION_SETTLE: CHANNEL_AUTOMATION,
     UI_TOUCH: CHANNEL_AUTOMATION,
-    UI_SCROLL: CHANNEL_AUTOMATION,
     UI_KEY: CHANNEL_AUTOMATION,
     UI_INPUT: CHANNEL_AUTOMATION,
     UI_DUMP: CHANNEL_AUTOMATION,

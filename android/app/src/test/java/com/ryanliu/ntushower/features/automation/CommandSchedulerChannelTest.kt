@@ -23,7 +23,6 @@ class CommandSchedulerChannelTest {
         SupportedActions.SESSION_ASSIGN to CommandChannel.AUTOMATION,
         SupportedActions.SESSION_SETTLE to CommandChannel.AUTOMATION,
         SupportedActions.UI_TOUCH to CommandChannel.AUTOMATION,
-        SupportedActions.UI_SCROLL to CommandChannel.AUTOMATION,
         SupportedActions.UI_KEY to CommandChannel.AUTOMATION,
         SupportedActions.UI_INPUT to CommandChannel.AUTOMATION,
         SupportedActions.UI_DUMP to CommandChannel.AUTOMATION,

@@ -1,12 +1,10 @@
 package com.ryanliu.ntushower.features.automation
 
-import android.content.res.Resources
 import android.util.Log
-import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.shell.RootShell
 
 /**
- * 界面操作的 root shell 实现：点击、滑动、滚动、按键。
+ * 界面操作的 root shell 实现：点击、滑动、按键。
  *
  * ## 什么时候走这一条
  *
@@ -31,7 +29,6 @@ import com.ryanliu.ntushower.core.shell.RootShell
  * |---|---|---|
  * | `input tap` | 可用 | 设置界面节点树前后 DIFF |
  * | `input swipe` | 可用 | 同上 |
- * | `input roll` | 可用 | 同上 |
  * | `input keyevent` | 可用 | 前台 Activity 由设置变为桌面 |
  * | `input text` | 可用（仅 ASCII） | 拨号盘 `digits` 节点文本变为写入值 |
  *
@@ -46,13 +43,6 @@ object ShellUiChannel {
     private const val TAG = "ShellUiChannel"
 
     private val DURATION = Regex("""\d+""")
-
-    /**
-     * 滚动一次的滑动幅度，取屏幕高度的这个比例。
-     *
-     * 太小不足以触发滚动；太大在带惯性的列表上会变成抛掷、一次冲过好几屏。
-     */
-    private const val SCROLL_SPAN_RATIO = 0.4
 
     /** 点击。 */
     fun tap(x: Int, y: Int): Boolean = run("input tap $x $y", "tap")
@@ -71,25 +61,6 @@ object ShellUiChannel {
             return false
         }
         return run("input swipe $fromX $fromY $toX $toY $durationMs", "swipe")
-    }
-
-    /**
-     * 滚动：以一次竖直滑动等效。
-     *
-     * `forward` 是"往列表后面滚"，视觉上内容上移，对应手指**向上**滑
-     * （起点 y 更大）；反向则相反。
-     */
-    fun scroll(forward: Boolean): Boolean {
-        val metrics = Resources.getSystem().displayMetrics
-        val centerX = metrics.widthPixels / 2
-        val centerY = metrics.heightPixels / 2
-        val halfSpan = (metrics.heightPixels * SCROLL_SPAN_RATIO / 2).toInt()
-        val duration = RuntimeConfig.uiSwipeDurationMs.toInt()
-        return if (forward) {
-            swipe(centerX, centerY + halfSpan, centerX, centerY - halfSpan, duration)
-        } else {
-            swipe(centerX, centerY - halfSpan, centerX, centerY + halfSpan, duration)
-        }
     }
 
     /** 系统按键。 */

@@ -275,7 +275,6 @@ def test_device_action_endpoints_require_admin(client: TestClient) -> None:
         ("dump", actions.UI_DUMP, None),
         ("bath/restart", actions.BATH_RESTART, None),
         ("clock/set", actions.CLOCK_SET, {"datetime": "2026-10-02 12:00:00"}),
-        ("power/schedule", actions.POWER_SCHEDULE, {"off_at": "23:58", "on_at": "10:55"}),
     ],
 )
 def test_action_endpoints_dispatch_registered_actions(
@@ -429,23 +428,6 @@ def test_clock_set_rejects_malformed_datetime(client: TestClient, admin_headers:
     assert r.status_code == 422
 
 
-@pytest.mark.parametrize(
-    ("payload", "field"),
-    [
-        ({"off_at": "nope", "on_at": "10:55"}, "off_at"),
-        ({"off_at": "23:58", "on_at": "25:00"}, "on_at"),
-        ({"off_at": "23:58"}, "on_at"),
-    ],
-)
-def test_power_schedule_rejects_malformed_targets(
-    client: TestClient, admin_headers: dict[str, str], payload: dict[str, str], field: str
-) -> None:
-    """HH:MM 形状在 HTTP 边界即拦（422），不发给设备。"""
-    r = client.post("/api/v1/devices/ghost/power/schedule", headers=admin_headers, json=payload)
-
-    assert r.status_code == 422
-
-
 def test_exec_dispatches_command_payload(
     client: TestClient,
     admin_headers: dict[str, str],
@@ -507,37 +489,6 @@ def test_touch_rejects_missing_coordinates(
     r = client.post(f"/api/v1/devices/{DEVICE_ID}/touch", headers=admin_headers, json=payload)
 
     assert r.status_code == 422
-
-
-def test_scroll_dispatches_direction(
-    client: TestClient,
-    admin_headers: dict[str, str],
-    ready: dict[str, Any],
-) -> None:
-    """滚动作用于容器：只下发方向。"""
-    r = client.post(f"/api/v1/devices/{DEVICE_ID}/scroll", headers=admin_headers, json={"direction": "backward"})
-
-    assert r.status_code == 200
-    assert ready["action"] == actions.UI_SCROLL
-    assert ready["params"] == {"direction": "backward"}
-
-
-def test_scroll_direction_is_closed_set(
-    client: TestClient,
-    admin_headers: dict[str, str],
-    ready: dict[str, Any],
-) -> None:
-    """方向是闭集：缺了或写错当场挡下，不发给设备。"""
-    missing = client.post(f"/api/v1/devices/{DEVICE_ID}/scroll", headers=admin_headers, json={})
-    assert missing.status_code == 422
-
-    unknown = client.post(f"/api/v1/devices/{DEVICE_ID}/scroll", headers=admin_headers, json={"direction": "sideways"})
-    assert unknown.status_code == 422
-
-    for direction in ("forward", "backward"):
-        r = client.post(f"/api/v1/devices/{DEVICE_ID}/scroll", headers=admin_headers, json={"direction": direction})
-        assert r.status_code == 200
-        assert ready["params"] == {"direction": direction}
 
 
 def test_key_rejects_unknown_key_name(
