@@ -11,7 +11,7 @@
 
 ## 决策
 
-备份维持明文 gzip：`VACUUM INTO` 在线备份 + 完整性校验 + 滚动保留 14 份，落在 `/var/backups/ntu-shower/`（700，root）。加密相关的脚本与文档改动已从分支移除。
+备份维持明文（决策本体不变）。机制后记 2026-11-14：脚本时代的 `VACUUM INTO` + 滚动保留 14 份已由 LiteStream sidecar（文件副本，`compose.yaml`）替代，副本目录 `/var/backups/ntu-shower/litestream`；明文例外与依据见 `docs/security.md`。
 
 ## 备选方案
 

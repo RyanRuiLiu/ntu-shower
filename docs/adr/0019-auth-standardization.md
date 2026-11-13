@@ -3,9 +3,7 @@
 - 状态：Accepted
 - 日期：2026-11-09
 - 决策者：项目负责人
-
-- 决策者：项目负责人
-- 取代：身份通道由 `X-Identity` 头改为标准凭据；`access_identity` 与 `app_users` 两张身份表合并为 `principals`
+- 取代：ADR-0008（身份与能力）——身份通道由 `X-Identity` 头改为标准凭据；`access_identity` 与 `app_users` 两张身份表合并为 `principals`
 
 ## 背景
 
