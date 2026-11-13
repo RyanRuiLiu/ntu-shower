@@ -13,8 +13,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 from tests import apk, frames
 
-from app.core import audit
+from app import audit_middleware
 from app.db.base import utcnow
+from app.persistence import api_calls
 from app.persistence import audit as command_audit
 
 
@@ -154,7 +155,7 @@ def test_gateway_lifecycle_is_recorded(client: TestClient, admin_headers: dict[s
     assert all(row["actor_kind"] == "device" for row in rows)
 
     # 断开行由网关在连接收尾时写入；测试客户端的断开会取消网关协程，直接验证写入路径
-    audit.record_gateway(device_id, "disconnect")
+    audit_middleware.record_gateway(device_id, "disconnect")
     rows = _calls(client, admin_headers, kind="gateway")
     disconnect_rows = [row for row in rows if row["device_id"] == device_id and row["status_code"] == 1]
     assert disconnect_rows
@@ -186,28 +187,28 @@ def test_commands_lists_command_audit_rows(client: TestClient, admin_headers: di
 
 def test_device_of_resolves_path_segment_then_query() -> None:
     """审计行的 device_id 只来自路径段或 query：路径优先，都没有为空。"""
-    assert audit._device_of("/api/v1/devices/dev-1/exec", "") == "dev-1"
-    assert audit._device_of("/api/v1/devices/dev-1/exec", "x=1") == "dev-1"
-    assert audit._device_of("/api/v1/devices/dev-1/exec", "device_id=dev-from-query") == "dev-1"  # 路径优先
-    assert audit._device_of("/ota/manifest", "device_id=dev-from-query") == "dev-from-query"
-    assert audit._device_of("/api/v1/config", "") == ""
-    assert audit._device_of("/api/v1/devices", "") == ""
+    assert audit_middleware._device_of("/api/v1/devices/dev-1/exec", "") == "dev-1"
+    assert audit_middleware._device_of("/api/v1/devices/dev-1/exec", "x=1") == "dev-1"
+    assert audit_middleware._device_of("/api/v1/devices/dev-1/exec", "device_id=dev-from-query") == "dev-1"  # 路径优先
+    assert audit_middleware._device_of("/ota/manifest", "device_id=dev-from-query") == "dev-from-query"
+    assert audit_middleware._device_of("/api/v1/config", "") == ""
+    assert audit_middleware._device_of("/api/v1/devices", "") == ""
 
 
 def test_data_heavy_paths_are_excluded_from_response_storage() -> None:
     """截图、拍照、UI 节点树端点的响应不落库（数据重型且可重取）。"""
-    assert audit._DATA_HEAVY_PATH.search("/api/v1/devices/dev-1/capture")
-    assert audit._DATA_HEAVY_PATH.search("/api/v1/devices/dev-1/dump")
-    assert audit._DATA_HEAVY_PATH.search("/api/v1/devices/dev-1/photo")
-    assert audit._DATA_HEAVY_PATH.search("/api/v1/devices/dev-1/exec") is None
-    assert audit._DATA_HEAVY_PATH.search("/ota/manifest") is None
+    assert audit_middleware._DATA_HEAVY_PATH.search("/api/v1/devices/dev-1/capture")
+    assert audit_middleware._DATA_HEAVY_PATH.search("/api/v1/devices/dev-1/dump")
+    assert audit_middleware._DATA_HEAVY_PATH.search("/api/v1/devices/dev-1/photo")
+    assert audit_middleware._DATA_HEAVY_PATH.search("/api/v1/devices/dev-1/exec") is None
+    assert audit_middleware._DATA_HEAVY_PATH.search("/ota/manifest") is None
 
 
 def test_prune_removes_only_expired_rows(client: TestClient, admin_headers: dict[str, str]) -> None:
     """保留期之内必须留，之外的可删（NIST SP 800-92）；清理幂等。"""
     assert client.get("/api/v1/ota/releases", headers=admin_headers).status_code == 200
     with _svc() as session:
-        assert audit.prune(session, 90) == 0
+        assert api_calls.prune(session, 90) == 0
     assert len(_calls(client, admin_headers, limit=500)) == 1
 
     # 中间件仍写旧表（audit 域随第二批切换）；保留期语义对新表直接造数据验证
@@ -240,21 +241,21 @@ def test_prune_removes_only_expired_rows(client: TestClient, admin_headers: dict
         session.add(stale)
         session.add(fresh)
         session.commit()
-        assert audit.prune(session, 90) == 1
+        assert api_calls.prune(session, 90) == 1
         remaining = session.scalars(select(ApiCall.id)).all()
         # 过期的那行删掉；中间件记下的与刚造的保留期内各行都留
         assert stale.id not in remaining
         assert fresh.id in remaining
     with _svc() as session:
-        assert audit.prune(session, 90) == 0
+        assert api_calls.prune(session, 90) == 0
 
 
 def test_store_body_replaces_oversize_payload() -> None:
     """超限的体以占位说明入库，绝不截断；限内原文返回。"""
-    body = "x" * (audit.BODY_MAX_BYTES + 1)
+    body = "x" * (audit_middleware.BODY_MAX_BYTES + 1)
 
-    assert audit.store_body("compact") == "compact"
-    assert audit.store_body(body).startswith("[JSON 体")
+    assert audit_middleware.store_body("compact") == "compact"
+    assert audit_middleware.store_body(body).startswith("[JSON 体")
 
 
 @contextmanager

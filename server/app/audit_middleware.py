@@ -1,13 +1,16 @@
-"""接口调用审计：谁、何时、对什么、结果如何，一行一个调用。
+"""HTTP 审计的采集与装配：谁、何时、对什么、结果如何，一行一个调用。
 
 按 OWASP Logging Cheat Sheet 的事件清单与 NIST SP 800-92 的保留框架设计，
-标准依据见 docs/adr/「可观测性」。覆盖 /api/v1 与 /ota/manifest 的全部请求
-（认证、授权、参数与服务端错误天然落表）与设备网关生命周期；静态资源与
+标准依据见 docs/adr/0014-observability.md。覆盖 /api/v1 与 /ota/manifest 的全部
+请求（认证、授权、参数与服务端错误天然落表）与设备网关生命周期；静态资源与
 /healthz 不审计。
 
-JSON 请求体与响应体原文入库，全有或全无、不截断、不脱敏（受限审计表；stdout 日志不写这些字段）；数据重型且可重取的
-截图、拍照、UI 节点树与 multipart 上传体除外。审计行按 audit_retention_days
-保留，过期行由清理任务删除；业务数据永久保留。
+JSON 请求体与响应体原文入库，全有或全无、不截断、不脱敏（受限审计表；stdout 日志
+不写这些字段）；数据重型且可重取的截图、拍照、UI 节点树与 multipart 上传体除外。
+审计行按 audit_retention_days 保留，过期行由清理任务删除；业务数据永久保留。
+
+存储在 persistence/api_calls.py（2026-11 审计拆分）：采集归 HTTP 侧，落库归
+持久化层——core 保持零向上依赖。
 """
 
 import contextlib
@@ -16,52 +19,19 @@ import re
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from datetime import timedelta
 from typing import cast
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI
-from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response, StreamingResponse
-from typing_extensions import TypedDict
 
-from app.db.base import utcnow
+from app.core.config import settings
+from app.core.logging import log_event, request_id_var, trace_id_var
 from app.db.session import session_scope
-
-from .config import settings
-from .logging import log_event, request_id_var, trace_id_var
-
-
-class ApiCallRecord(TypedDict):
-    """一行调用审计（`GET /audit/calls` 的行）。
-
-    列即 api_call 表的列；可空字段对应"本行没有该事实"（如网关生命周期行没有
-    method/path 语义、匿名调用没有 actor）。`request_body`/`response_body` 是
-    JSON 体原文，数据重型响应为占位说明（见 store_body）。
-    """
-
-    kind: str
-    requested_at: str
-    request_id: str
-    trace_id: str
-    actor_kind: str
-    actor: str
-    client_ip: str | None
-    user_agent: str | None
-    method: str
-    path: str
-    query: str | None
-    request_body: str | None
-    status_code: int
-    duration_ms: int
-    device_id: str | None
-    problem_type: str | None
-    detail: str | None
-    response_body: str | None
-
+from app.persistence import api_calls
 
 #: 需要审计的路径前缀 = 版本化对外面的全部域（/api/v1，见 main.py 的模块注释）。
 #: /ota/manifest 是设备硬编码契约，无版本前缀（见 ota/routes.py），但它是设备
@@ -121,58 +91,8 @@ def store_body(body: str) -> str:
     return f"[JSON 体 {len(body.encode())} 字节，超出 {BODY_MAX_BYTES} 字节上限未存储]"
 
 
-def record(
-    *,
-    method: str,
-    path: str,
-    query: str = "",
-    status_code: int = 0,
-    duration_ms: int = 0,
-    actor_kind: str = "",
-    actor: str = "",
-    client_ip: str = "",
-    user_agent: str = "",
-    request_body: str = "",
-    response_body: str = "",
-    device_id: str = "",
-    problem_type: str = "",
-    detail: str = "",
-) -> None:
-    """写一行 HTTP 审计（kind='http'）。关联字段取自中间件置位的 contextvar。
-
-    与命令审计以 trace_id 关联：本行与 command_audit 各带一份，查两边即得全链路。
-    `query` 是请求的查询串；`request_body` 与 `response_body` 是 JSON 体原文；
-    `detail` 是失败响应的中文说明（RFC 9457 的 detail）。
-    """
-    from app.db.session import session_scope
-    from app.persistence import audit as audit_store
-
-    with session_scope() as session:
-        audit_store.insert_api_call(
-            session,
-            kind="http",
-            method=method,
-            path=path,
-            status_code=status_code,
-            duration_ms=duration_ms,
-            device_id=device_id,
-            actor_kind=actor_kind,
-            actor=actor,
-            client_ip=client_ip or None,
-            user_agent=user_agent or None,
-            query=query or None,
-            request_body=request_body or None,
-            response_body=store_body(response_body) or None,
-            problem_type=problem_type or None,
-            detail=detail or None,
-            request_id=request_id_var.get(),
-            trace_id=trace_id_var.get(),
-        )
-
-
 def record_gateway(device_id: str, event: str, client_ip: str = "") -> None:
     """网关生命周期一行（connect/disconnect）。kind='gateway'，status 约定 0=连接 1=断开。"""
-    from app.db.session import session_scope
     from app.persistence import audit as audit_store
 
     status_code = 0 if event == "connect" else 1
@@ -191,48 +111,10 @@ def record_gateway(device_id: str, event: str, client_ip: str = "") -> None:
         )
 
 
-def list_calls(
-    *,
-    device_id: str | None = None,
-    actor_kind: str | None = None,
-    kind: str | None = None,
-    limit: int = 100,
-) -> list[ApiCallRecord]:
-    """按时间倒序取审计记录（/api/v1/audit/calls）。"""
-    from app.db.session import session_scope
-    from app.persistence import audit as audit_store
-
-    with session_scope() as session:
-        return cast(
-            "list[ApiCallRecord]",
-            audit_store.list_api_calls(session, device_id=device_id, actor_kind=actor_kind, kind=kind, limit=limit),
-        )
-
-
-def prune(session: Session, retention_days: int) -> int:
-    """删除超过保留期的审计行（api_call 与 command_audit），返回删除行数。
-
-    只动审计表：业务数据（喷头状态迁移、使用会话）是运营历史，永久保留；
-    库文件不复缩，页复用即可。两张表的 DELETE 共用一个事务：要么都清、
-    要么都不清，两边保留期才不会错开。
-    """
-    from sqlalchemy import delete
-
-    from app.models.ops import ApiCall, CommandAudit
-
-    cutoff = utcnow() - timedelta(days=retention_days)
-    removed = 0
-    for table, column in ((ApiCall, ApiCall.requested_at), (CommandAudit, CommandAudit.created_at)):
-        result = session.execute(delete(table).where(column < cutoff))
-        removed += int(getattr(result, "rowcount", 0) or 0)
-    session.commit()
-    return removed
-
-
 async def prune_once() -> None:
     """清理一轮；生命周期（启动、取消、间隔）由 core/background 统一管理。"""
     with session_scope() as session:
-        removed = prune(session, settings.audit_retention_days)
+        removed = api_calls.prune(session, settings.audit_retention_days)
     if removed:
         log_event(
             "INFO",
@@ -334,7 +216,7 @@ def install_audit(app: FastAPI) -> None:
             client_ip = request.headers.get("x-real-ip") or (request.client.host if request.client else "")
             actor_kind, actor = _actor_of(request)
             await run_in_threadpool(
-                record,
+                api_calls.record,
                 method=request.method,
                 path=path,
                 query=request.url.query,
