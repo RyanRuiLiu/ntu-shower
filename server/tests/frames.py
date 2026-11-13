@@ -17,6 +17,7 @@ def hello_frame(
     capabilities: list[str] | None = None,
     last_offline_reason: str | None = None,
     last_offline_at: str | None = None,
+    v: int = 1,
 ) -> str:
     """构造 link.hello 帧；capabilities 为 None 时空声明。
 
@@ -35,7 +36,7 @@ def hello_frame(
         payload["last_offline_at"] = last_offline_at
     return json.dumps(
         {
-            "v": 1,
+            "v": v,
             "type": "link.hello",
             "id": str(uuid.uuid4()),
             "ts": "2026-09-30T12:00:00.000Z",
@@ -44,10 +45,10 @@ def hello_frame(
     )
 
 
-def frame(msg_type: str, payload: dict[str, Any], *, reply_to: str | None = None) -> str:
+def frame(msg_type: str, payload: dict[str, Any], *, reply_to: str | None = None, v: int = 1) -> str:
     """构造任意协议帧。"""
     message: dict[str, Any] = {
-        "v": 1,
+        "v": v,
         "type": msg_type,
         "id": str(uuid.uuid4()),
         "ts": "2026-09-30T12:00:00.000Z",
