@@ -31,10 +31,9 @@ from app.db.base import utcnow
 from app.db.deps import get_db
 from app.db.session import Database
 from app.models.enums import CommandStatus
-from app.modules.access.dependencies import require_admin
+from app.modules.access.dependencies import require_admin, require_trusted_online_device
 from app.modules.bridge.schemas import BridgeClosed, BridgeOpened, BridgeStatus
 from app.modules.config import store as config_store
-from app.modules.devices.dependencies import require_trusted_online_device
 from app.persistence import audit as command_audit
 
 from .manager import (

@@ -51,11 +51,13 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
 from sqlalchemy.orm import Session
 
+from app.contracts import CommandOutcome
 from app.core import actions, outcomes, problems
 from app.core.clock import now_rfc3339, shift_rfc3339
 from app.core.logging import log_event
@@ -65,9 +67,11 @@ from app.db.base import utcnow
 from app.db.session import session_scope
 from app.models.enums import BackgroundOutcome, DoorState
 from app.modules.config import store as config_store
+from app.modules.config.schemas import ConfigPushNotice
+from app.modules.devices import actions as device_actions
 from app.modules.doors import service as doors_service
 
-from . import routes as sessions_routes
+from . import service as sessions_service
 from .decision import (
     FEATURES_BY_KEY,
     Candidate,
@@ -77,7 +81,7 @@ from .decision import (
     recheck,
     still_allowed,
 )
-from .schemas import AssignRequest, CommandOutcome, SettleRequest
+from .schemas import AssignRequest, SettleRequest
 
 #: 结算成功之后等"门变空闲"的那一帧，最多等这么久。没有它的话，设备离线几小时再上线，
 #: 第一帧会去执行一条陈旧的待分配——**给一个早已走掉的学生开一场会话**。
@@ -368,6 +372,34 @@ def reload() -> None:
         reschedule(device_id)
 
 
+async def on_config_change(revision: int, device_ids: Sequence[str]) -> list[ConfigPushNotice]:
+    """配置保存后的下游行为（经 config.notifier 在组合根注册）。
+
+    定时器重算无条件执行：服务端自己的键（阈值、名单）也在配置里，保存即生效。
+    设备推送只针对调用方给出的清单——那是「这次改动真的动了设备域的键」时调用方
+    算出来的目标设备；逐台并发推送，单台慢设备不拖慢整批。
+    """
+    reload()
+    if not device_ids:
+        return []
+
+    async def _push(device_id: str) -> ConfigPushNotice:
+        with session_scope() as session:
+            values = config_store.device_effective(session, device_id)
+        result = await device_actions.push_config_update(device_id, revision, values)
+        notice: ConfigPushNotice = {
+            "device_id": device_id,
+            "notified": bool(result.get("notified", False)),
+            "applied": bool(result.get("applied", False)),
+        }
+        reason = result.get("reason")
+        if reason:
+            notice["reason"] = str(reason)
+        return notice
+
+    return list(await asyncio.gather(*(_push(device_id) for device_id in device_ids)))
+
+
 def reschedule(device_id: str) -> None:
     """重算该设备的定时器。帧到达、配置保存、一次执行跑完之后都调它。
 
@@ -547,7 +579,7 @@ async def _perform_settle(job: _SettleJob) -> None:
 
     try:
         with session_scope() as session:
-            result = await sessions_routes.perform_settle(
+            result = await sessions_service.perform_settle(
                 session, candidate.device_id, SettleRequest(cert_no=candidate.cert_no, password=password)
             )
     except ApiProblemError as error:
@@ -585,7 +617,7 @@ async def _perform_assign(job: _AssignJob) -> None:
     key = (job.device_id, job.door_no)
     try:
         with session_scope() as session:
-            result = await sessions_routes.perform_assign(
+            result = await sessions_service.perform_assign(
                 session, job.device_id, AssignRequest(door_no=job.door_no, cert_no=job.cert_no, password=job.password)
             )
     except ApiProblemError as error:

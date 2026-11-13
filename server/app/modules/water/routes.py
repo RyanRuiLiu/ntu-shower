@@ -26,11 +26,11 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.contracts import CommandOutcome
 from app.core import actions
 from app.db.deps import get_db
 from app.modules.access.dependencies import require_admin
 from app.modules.devices.dependencies import device_action
-from app.modules.sessions.schemas import CommandOutcome
 
 from .schemas import WaterDoorRequest
 
