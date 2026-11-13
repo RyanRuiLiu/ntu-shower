@@ -96,6 +96,26 @@ async def device_gateway(ws: WebSocket) -> None:
             if msg is None:
                 await ws.send_text(protocol.error(reason_codes.BAD_JSON.code, "收到的帧不是合法 JSON 对象"))
                 continue
+            if msg.get("v") != protocol.PROTOCOL_VERSION:
+                # 版本不符等于双方说的是两套协议：回错后断开（1002）。不静默丢帧——
+                # 那会让新协议设备表现为"连着但什么都不动"，比明确拒绝更难排查。
+                log_event(
+                    "WARNING",
+                    "gateway.version-mismatch",
+                    "帧协议版本不符，连接关闭",
+                    device_id=device_id,
+                    server_version=protocol.PROTOCOL_VERSION,
+                    frame_version=msg.get("v"),
+                )
+                await ws.send_text(
+                    protocol.error(
+                        reason_codes.VERSION_MISMATCH.code,
+                        f"服务端协议版本为 {protocol.PROTOCOL_VERSION}，收到的帧携带 {msg.get('v')!r}",
+                        reply_to=protocol.text_of(msg, "id"),
+                    )
+                )
+                await ws.close(code=1002)
+                break
             # 未知类型只回错不断开：这是协议的前向扩展点
             await _handle_frame(ws, msg, device_id, trusted, pong_seen)
     except WebSocketDisconnect:
@@ -159,6 +179,25 @@ async def _accept_hello(ws: WebSocket, token_device_id: str | None) -> tuple[str
 
     hello_payload = payload_of(hello)
     device_id = text_of(hello_payload, "device_id")
+    if hello.get("v") != protocol.PROTOCOL_VERSION:
+        # 版本不符等于双方说的是两套协议，继续握手没有意义：回错后断开
+        # （1002，RFC 6455 的协议错误）。日志带设备自报标识，便于追是哪台设备升错了版。
+        log_event(
+            "WARNING",
+            "gateway.version-mismatch",
+            "hello 协议版本不符，连接被拒",
+            device_id=device_id or "<unknown>",
+            server_version=protocol.PROTOCOL_VERSION,
+            frame_version=hello.get("v"),
+        )
+        await ws.send_text(
+            protocol.error(
+                reason_codes.VERSION_MISMATCH.code,
+                f"服务端协议版本为 {protocol.PROTOCOL_VERSION}，收到的帧携带 {hello.get('v')!r}",
+            )
+        )
+        await ws.close(code=1002)
+        return None
     if token_device_id is not None and device_id != token_device_id:
         log_event("WARNING", "gateway.device-token-mismatch", "hello 设备与令牌绑定设备不一致")
         await ws.send_text(protocol.error(reason_codes.HELLO_REQUIRED.code, "设备与凭据不匹配"))
