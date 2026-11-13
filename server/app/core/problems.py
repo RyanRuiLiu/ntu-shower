@@ -92,16 +92,10 @@ REGISTRY: tuple[Problem, ...] = (
 class ApiProblemError(Exception):
     """携带登记过的问题类型的 API 异常。
 
-    路由只抛本异常；未登记的临时问题用 adhoc_problem 显式构造，避免随手写
-    字符串当错误码。
+    路由只抛本异常；错误码必须先在本模块登记再抛，避免随手写字符串当错误码。
     """
 
     def __init__(self, problem: Problem, detail: str = "") -> None:
         super().__init__(f"{problem.code}: {detail}" if detail else problem.code)
         self.problem = problem
         self.detail = detail
-
-
-def adhoc_problem(code: str, status: int, title: str, detail: str = "") -> ApiProblemError:
-    """构造未登记的问题，仅用于确实一次性的场景，仍要求显式给出 code。"""
-    return ApiProblemError(Problem(code, status, title), detail)

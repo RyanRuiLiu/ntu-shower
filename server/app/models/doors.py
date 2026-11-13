@@ -94,7 +94,7 @@ class DoorSnapshot(Base):
     snapshot_id: Mapped[str] = mapped_column(String(64))
     seq: Mapped[int | None] = mapped_column(Integer, default=None)
     #: 帧来源原话。原始层不解释：协议外的取值也照记（回执语义要求原话落库），
-    #: 词汇表（models/enums.SnapshotSource）只在派生层做判定时使用。
+    #: 派生层判定用的词汇表是 modules/doors/service.py 的 SOURCE_* 常量。
     source: Mapped[str] = mapped_column(String(16), default="")
     captured_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
     received_at: Mapped[datetime] = mapped_column(UtcDateTime, index=True)

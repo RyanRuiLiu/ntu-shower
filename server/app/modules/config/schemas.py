@@ -114,11 +114,3 @@ class DeviceConfigUpdateReport(TypedDict):
     notified: bool
     applied: bool
     reason: str
-
-
-class DeviceConfigRemovalReport(TypedDict):
-    """设备级覆盖删除结果；删除后该设备回落为跟随全局。"""
-
-    device_id: str
-    override_removed: bool
-    config: ConfigValues

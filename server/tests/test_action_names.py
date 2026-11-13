@@ -126,7 +126,7 @@ def test_channel_names_are_defined_constants() -> None:
 
 def test_ui_actions_share_the_automation_channel_with_sessions() -> None:
     """界面注入必须与分配/结算同通道：并发操作界面会让节点定位互相错位。"""
-    for action in (actions.UI_TOUCH, actions.UI_SCROLL, actions.UI_KEY, actions.UI_INPUT):
+    for action in (actions.UI_TOUCH, actions.UI_KEY, actions.UI_INPUT):
         assert actions.ACTION_CHANNELS[action] == actions.CHANNEL_AUTOMATION, action
     for action in (actions.SESSION_ASSIGN, actions.SESSION_SETTLE):
         assert actions.ACTION_CHANNELS[action] == actions.CHANNEL_AUTOMATION, action

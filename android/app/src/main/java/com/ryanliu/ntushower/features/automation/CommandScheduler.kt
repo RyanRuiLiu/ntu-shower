@@ -72,15 +72,6 @@ class CommandScheduler(
         class UiTouch(id: String, val x: Int, val y: Int, val toX: Int?, val toY: Int?, val durationMs: Int) :
             Command(id)
 
-        /**
-         * 滚动可滚动容器。
-         *
-         * 与 [UiTouch] 的滑动分开：这条作用于**容器**而不是坐标，语义不同——
-         * 滑动的落点取决于起点，滚动只表达"往哪边滚"。[direction] 必须是
-         * forward / backward 之一，由调用方明确给出，缺了或值不认识直接拒绝。
-         */
-        class UiScroll(id: String, val direction: String) : Command(id)
-
         /** 系统按键（返回/主页/最近任务/通知栏）。 */
         class UiKey(id: String, val key: String) : Command(id)
 
@@ -450,8 +441,6 @@ class CommandScheduler(
                     outcome(command.id, ok, ReasonCodes.UI_NO_TARGET_AT_POINT, "该位置没有可点击的节点")
                 }
 
-                is Command.UiScroll -> executeScroll(command)
-
                 is Command.UiKey -> {
                     val key = UiKey.parse(command.key)
                         ?: return CommandOutcome(
@@ -478,28 +467,6 @@ class CommandScheduler(
         CommandOutcome(id, OutcomeStatus.OK, "", "")
     } else {
         CommandOutcome(id, OutcomeStatus.FAILED, failCode, failMessage)
-    }
-
-    /**
-     * 滚动：方向是必填的闭集，缺失或不认识直接拒绝，不做静默回落。
-     */
-    private fun executeScroll(command: Command.UiScroll): CommandOutcome = when (command.direction) {
-        CommandFactory.DIRECTION_FORWARD -> {
-            val ok = ShellUiChannel.scroll(forward = true)
-            outcome(command.id, ok, ReasonCodes.UI_NO_SCROLLABLE_CONTAINER, "界面上没有可滚动的容器")
-        }
-
-        CommandFactory.DIRECTION_BACKWARD -> {
-            val ok = ShellUiChannel.scroll(forward = false)
-            outcome(command.id, ok, ReasonCodes.UI_NO_SCROLLABLE_CONTAINER, "界面上没有可滚动的容器")
-        }
-
-        else -> CommandOutcome(
-            command.id,
-            OutcomeStatus.FAILED,
-            ReasonCodes.UI_UNKNOWN_DIRECTION,
-            "未知的滚动方向：${command.direction}",
-        )
     }
 
     /**

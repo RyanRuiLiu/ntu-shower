@@ -846,19 +846,6 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         group="server_ui",
     ),
     ConfigSpec(
-        "ui_swipe_duration_ms",
-        INT,
-        DEVICE,
-        300,
-        "滑动默认时长",
-        "网页上做滑动操作时，从起点滑到终点的持续时间。太短会被设备当成「用力一甩」"
-        "（惯性滚动），太长则滑动显得迟缓；300 毫秒是正常拖动的手感",
-        minimum=50,
-        maximum=5000,
-        unit="毫秒",
-        group="ui",
-    ),
-    ConfigSpec(
         "device_exec_max_output_bytes",
         INT,
         DEVICE,
