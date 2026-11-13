@@ -28,13 +28,13 @@ curl -s -H "Authorization: Bearer <admin凭据>"   "http://127.0.0.1:8110/api/v1
 curl -s -H "Authorization: Bearer <admin凭据>" "http://127.0.0.1:8110/api/v1/audit/commands?device_id=<设备>"
 
 # ③ 设备端命令痕迹（与 ② 同一 command_id 呼应）
-#    经 ops 页设备面板的命令执行，或 bridge shell：
+#    经管理台设备页的命令执行，或 bridge shell：
 tail -n 50 /sdcard/ntu-shower/device.log     # JSONL：受理/重复/结果/网关生命周期
 tail -n 50 /sdcard/ntu-shower/automation.log # 自动化性能采样
 tail -n 50 /sdcard/ntu-shower/crash.log      # 崩溃现场
 
 # ④ 应用 stdout（容器 json-file，JSON 事件流，含 trace_id 可与 ① 对上）
-ssh <deploy-host> 'docker logs ntu-shower --since 1h' | grep '"trace_id":"<trace-id>"'
+ssh deploy@<deploy-host> 'docker logs ntu-shower --since 1h' | grep '"trace_id":"<trace-id>"'
 ```
 
 保留期：`api_calls` 表按 `audit_retention_days` 每日自动清理；OTA 发布按
@@ -51,20 +51,20 @@ compose 的 `environment` 已把数据路径钉死到挂载点（`/var/lib/ntu-s
 #    合并进 main 后 CI 自动构建镜像，docker/build job 日志里查本次 tag（形如 sha-1ed250f）。
 
 # ② 服务器：预拉镜像——在停旧服务之前做，拉取期间旧服务照常运行，零停机窗口被压到切换那一步
-ssh <deploy-host> 'docker pull <registry>/<namespace>/ntu-shower:<tag>'
+ssh deploy@<deploy-host> 'docker pull <registry>/<namespace>/ntu-shower:<tag>'
 
 # ③ 本地：同步编排文件（deploy 资产唯一事实源；协议 schema 随镜像走，不再单独同步）
 scp compose.yaml <deploy-host>:/opt/ntu-shower/compose.yaml
 
 # ④ 服务器：切换。停旧容器与拉起新容器之间是唯一的停机窗口（秒级）。
 #    NTU_SHOWER_TAG 必填（compose 拒绝空值）。
-ssh <deploy-host> 'cd /opt/ntu-shower && NTU_SHOWER_TAG=<tag> docker compose up -d'
+ssh deploy@<deploy-host> 'cd /opt/ntu-shower && NTU_SHOWER_TAG=<tag> docker compose up -d'
 
 # ⑤ 服务器：验证。healthz 的 version 字段证明目标版本生效（不止在运行）；
 #    设备重连看容器日志的 "WebSocket /gateway/device [accepted]"——设备断电时段切机器的，
 #    次日 10:55 上电后自行回连，以日志出现 accepted 为准补一次部署后验证。
-ssh <deploy-host> 'curl -fsS http://127.0.0.1:8110/healthz; echo; docker ps --filter name=ntu-shower --format "{{.Status}}"'
-ssh <deploy-host> 'docker logs ntu-shower 2>&1 | tail -20'
+ssh deploy@<deploy-host> 'curl -fsS http://127.0.0.1:8110/healthz; echo; docker ps --filter name=ntu-shower --format "{{.Status}}"'
+ssh deploy@<deploy-host> 'docker logs ntu-shower 2>&1 | tail -20'
 ```
 
 ## 数据库迁移
@@ -91,7 +91,7 @@ alembic upgrade head && alembic check
 **回滚**（部署后发现问题时，回滚到上一个镜像 tag——一条命令，秒级）：
 
 ```bash
-ssh <deploy-host> 'cd /opt/ntu-shower && NTU_SHOWER_TAG=<上一个tag> docker compose up -d'
+ssh deploy@<deploy-host> 'cd /opt/ntu-shower && NTU_SHOWER_TAG=<上一个tag> docker compose up -d'
 ```
 
 ### 应急回滚（venv+systemd 旧形态）
@@ -160,7 +160,7 @@ ffmpeg 统一转成 MP3，因此只需系统有 `ffmpeg` 与 `ffprobe`（需带 
 ```bash
 # ffmpeg / ffprobe（MP3 编码）已内置于镜像（Dockerfile 静态二进制层，钉 digest），无需宿主机安装；
 # 就绪状态与数字素材齐备性走接口看
-ssh <deploy-host> 'curl -sS -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/v1/voice/status'
+ssh deploy@<deploy-host> 'curl -sS -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/v1/voice/status'
 ```
 
 `ffmpeg_available=true` 才能上传素材；`digits` 列出已标记的 0–9 数字素材，含数字变量的
@@ -179,8 +179,8 @@ compose 的 `litestream` sidecar 实时复制 WAL 到 `/var/backups/ntu-shower/l
 查看与恢复：
 
 ```bash
-ssh <deploy-host> "docker exec ntu-shower-litestream litestream replicas -config /etc/ntu-shower/litestream.yml"
-ssh <deploy-host> "docker run --rm -v /var/lib/ntu-shower:/var/lib/ntu-shower -v /var/backups/ntu-shower/litestream:/var/backups/ntu-shower/litestream litestream/litestream:0.3 restore -o /var/lib/ntu-shower/ntu-shower.db file:///var/backups/ntu-shower/litestream"
+ssh deploy@<deploy-host> "docker exec ntu-shower-litestream litestream replicas -config /etc/ntu-shower/litestream.yml"
+ssh deploy@<deploy-host> "docker run --rm -v /var/lib/ntu-shower:/var/lib/ntu-shower -v /var/backups/ntu-shower/litestream:/var/backups/ntu-shower/litestream litestream/litestream:0.3 restore -o /var/lib/ntu-shower/ntu-shower.db file:///var/backups/ntu-shower/litestream"
 ```
 
 ### keystore（不做自动滚动）
@@ -191,11 +191,11 @@ keystore 是**全系统唯一长期绑定物件**：丢失意味着所有在网�
 ```bash
 # 备份到服务器（异地于开发机）
 scp android/ntu-shower.keystore <deploy-host>:/var/backups/manual/ntu-shower/
-ssh <deploy-host> 'chmod 600 /var/backups/manual/ntu-shower/ntu-shower.keystore'
+ssh deploy@<deploy-host> 'chmod 600 /var/backups/manual/ntu-shower/ntu-shower.keystore'
 
 # 校验两侧一致（指纹必须相同）
 Get-FileHash android/ntu-shower.keystore -Algorithm SHA256    # 本地
-ssh <deploy-host> 'sha256sum /var/backups/manual/ntu-shower/ntu-shower.keystore'
+ssh deploy@<deploy-host> 'sha256sum /var/backups/manual/ntu-shower/ntu-shower.keystore'
 ```
 
 keystore 的可用性验证：从备份副本执行 `gradlew assembleRelease` 能签名成功
@@ -243,7 +243,7 @@ docker run --rm \
 
 ```bash
 # 诊断：发布记录与安装确认
-ssh <deploy-host> 'docker exec ntu-shower python - <<PY
+ssh deploy@<deploy-host> 'docker exec ntu-shower python - <<PY
 import sqlite3
 con = sqlite3.connect("/var/lib/ntu-shower/ntu-shower.db")
 print("release:", con.execute("SELECT version, version_code, force, target FROM ota_releases").fetchall())
@@ -260,13 +260,12 @@ curl -X DELETE -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/ap
 ### 服务起不来
 
 ```bash
-ssh <deploy-host> 'docker ps -a --filter name=ntu-shower --format "{{.Status}}"; docker logs ntu-shower --tail 40'
+ssh deploy@<deploy-host> 'docker ps -a --filter name=ntu-shower --format "{{.Status}}"; docker logs ntu-shower --tail 40'
 ```
 
 - 容器反复重启（Restarting）→ 看日志首屏的异常栈；启动即崩的代码问题按部署章节回滚到
   上一镜像 tag。镜像与 CI 测的是同一份依赖集，`PydanticUserError` / `ImportError` 这类
   解释器版本错配在当前形态下应已绝迹——真出现说明镜像构建与 CI 不一致，先查 tag 推错没有。
-- 旧形态的 `systemctl is-active ntu-shower` 只在「应急回滚」里才有意义。
 
 ### 设备能力集（capabilities）
 
@@ -274,13 +273,13 @@ ssh <deploy-host> 'docker ps -a --filter name=ntu-shower --format "{{.Status}}";
 **排查**：若某命令被拒且 `reason_code=device.unsupported_action`，先看设备声明里有没有它：
 
 ```bash
-ssh <deploy-host> 'curl -s -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/v1/devices/runtime | python3 -m json.tool'
+ssh deploy@<deploy-host> 'curl -s -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/v1/devices/runtime | python3 -m json.tool'
 ```
 
 ### 设备离线
 
 ```bash
-ssh <deploy-host> 'curl -s -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/v1/devices/runtime'
+ssh deploy@<deploy-host> 'curl -s -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/v1/devices/runtime'
 ```
 
 注意 `online` 字段是**最后一次上报值**，与内存中的活动连接分开判断；
@@ -374,8 +373,8 @@ curl -X POST -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/
 
 | 任务 | 命令 |
 |---|---|
-| 服务状态 | `ssh <deploy-host> 'docker ps --filter name=ntu-shower'` |
-| 实时日志 | `ssh <deploy-host> 'docker logs -f ntu-shower'` |
+| 服务状态 | `ssh deploy@<deploy-host> 'docker ps --filter name=ntu-shower'` |
+| 实时日志 | `ssh deploy@<deploy-host> 'docker logs -f ntu-shower'` |
 | 备份列表 | `ls -lh /var/backups/ntu-shower/` |
 | 抓设备画面 | `POST /api/v1/devices/<id>/capture`（返回 `data.image_base64`） |
 | 远程执行 shell | `POST /api/v1/devices/<id>/exec`，body `{"command": "..."}` |

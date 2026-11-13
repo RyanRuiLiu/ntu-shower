@@ -70,6 +70,7 @@ cp gradle.properties.example gradle.properties
 | [`docs/runbook.md`](docs/runbook.md) | 部署、回滚、备份、恢复、故障处置与日常运维 |
 | [`docs/security.md`](docs/security.md) | 资产、数据分级、信任边界、安全控制与事件响应 |
 | [`docs/adr/`](docs/adr/) | 约束代码的决策、取舍与后果 |
+| [`docs/device-poweroff.md`](docs/device-poweroff.md) · [`docs/water-board.md`](docs/water-board.md) | 设备断电布防与水控板直控的现场依据 |
 
 接口契约以 `protocol/schema/` 与代码路由为准；文档只做索引，不复制字段表。
 

@@ -86,7 +86,7 @@ sh scripts/check.sh
 ```
 
 它依次执行：ruff format --check、ruff check、mypy --strict、lint-imports、semgrep（p/python + p/security-audit）、
-semgrep 项目规则（`.semgrep.yml`）、pytest + 覆盖率、markdownlint。提交前由 pre-commit 自动执行同一脚本（`.githooks/pre-commit`）。
+semgrep 项目规则（`.semgrep.yml`）、pytest + 覆盖率、eslint、stylelint、markdownlint。提交前由 pre-commit 自动执行同一脚本（`.githooks/pre-commit`）。
 
 设备端单独执行：
 
