@@ -39,7 +39,7 @@ from app.modules.devices import service as devices_service
 from app.modules.doors.events import DoorEvent, DoorEventKind
 from app.persistence import voice as repository
 
-from . import audio, numbers, schemas
+from . import audio, matching, numbers, schemas
 from . import time_windows as time_rules
 from .priority import rule_priority
 
@@ -957,7 +957,7 @@ async def _dispatch_event(session: Session, event: DoorEvent, max_age: int) -> N
     if local is None:
         log_event("ERROR", "voice.local-time-invalid", "无法换算服务端当地时间，跳过语音匹配")
         return
-    matched = repository.matching_rules(session, event.device_id, event.cert_no, event.kind.value, local)
+    matched = matching.matching_rules(session, event.device_id, event.cert_no, event.kind.value, local)
     rule = matched[0] if matched else None
     if rule is None:
         log_event(

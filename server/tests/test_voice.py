@@ -23,13 +23,13 @@ from app.db.session import session_scope
 from app.modules.devices import actions as device_actions
 from app.modules.devices import service as devices_service
 from app.modules.doors.events import DoorEvent, DoorEventKind
-from app.modules.voice import audio, schemas, service
+from app.modules.voice import audio, matching, schemas, service
 from app.persistence import voice as repository
 
 
 def _match(device_id: str, cert_no: str, event: str, local: datetime) -> list[dict[str, Any]]:
     with _svc_session() as session:
-        return repository.matching_rules(session, device_id, cert_no, event, local)
+        return matching.matching_rules(session, device_id, cert_no, event, local)
 
 
 def _repo_call(name: str, *args: object, **kwargs: object) -> object:
@@ -752,7 +752,7 @@ def test_ambiguous_rules_are_not_picked_by_id(
             assert isinstance(ids, list)
             errors.append((key, ids[0], ids[1]))
 
-    monkeypatch.setattr(repository, "log_event", capture)
+    monkeypatch.setattr(matching, "log_event", capture)
     with _svc_session() as session:
         first = repository.insert_rule(session, [DEVICE_ID], ["C1", "C2"], ["assigned"], [], [], [], 3, True, utcnow())
         second = repository.insert_rule(session, [DEVICE_ID], ["C1", "C3"], ["assigned"], [], [], [], 3, True, utcnow())
@@ -775,7 +775,7 @@ def test_rule_with_corrupted_time_windows_is_skipped(
         if key == "voice.rule-time-invalid":
             invalid.append(int(kwargs["rule_id"]))  # type: ignore[arg-type]
 
-    monkeypatch.setattr(repository, "log_event", capture)
+    monkeypatch.setattr(matching, "log_event", capture)
     with _svc_session() as session:
         rule_id = repository.insert_rule(
             session,
@@ -1576,7 +1576,7 @@ def test_dispatch_uses_server_local_time(fresh_db: str, monkeypatch: pytest.Monk
         captured["local"] = local
         return []
 
-    monkeypatch.setattr(repository, "matching_rules", capture)
+    monkeypatch.setattr(matching, "matching_rules", capture)
     with _svc_session() as session:
         asyncio.run(service._dispatch_event(session, _event("2026-01-05T14:00:00.000Z"), 0))
     local = captured["local"]
