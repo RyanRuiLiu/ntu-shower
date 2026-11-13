@@ -83,6 +83,9 @@ jobs:
       - name: Stylelint
         working-directory: .
         run: npx --yes stylelint@16 "server/web/style/*.css" --config server/web/.stylelintrc.json
+      - name: ESLint
+        working-directory: .
+        run: npx --yes eslint@9 --config server/web/eslint.config.mjs "server/web/app.js" "server/web/views/*.js" "server/web/core/*.js"
 
   semgrep:
     runs-on: ubuntu-latest
