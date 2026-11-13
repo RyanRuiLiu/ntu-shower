@@ -67,7 +67,7 @@ AI 协作者的唯一入口。人类协作者从 [README.md](README.md) 开始�
 | HTTP 问题类型与命令失败原因 | `server/app/core/problems.py`、`server/app/core/reason_codes.py` |
 | 配置键的类型、范围与归属 | `server/app/modules/config/spec.py` |
 | 协议消息结构 | `protocol/schema/*.json` |
-| 数据库命名与时间格式 | `server/app/core/db.py` |
+| 数据库命名与时间格式 | `server/app/db/base.py` |
 
 ## 停止条件
 

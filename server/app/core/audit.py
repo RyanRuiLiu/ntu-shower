@@ -265,7 +265,7 @@ def _device_of(path: str, query: str) -> str:
 def install_audit(app: FastAPI) -> None:
     """装配审计中间件：一行一个 API 调用，并回填 X-Request-ID 响应头。
 
-    写库经线程池走每线程连接（见 core.db），不在事件循环里做同步 IO。
+    写库经线程池走 SQLAlchemy 会话（db.session 的 session_scope），不在事件循环里做同步 IO。
     WebSocket 不经过 HTTP 中间件，网关生命周期由 gateway 调 record_gateway 记录。
     """
 
