@@ -20,21 +20,22 @@ import pytest
 from fastapi.testclient import TestClient
 from tests import device_link, door_link
 
+from app.contracts import CommandOutcome
 from app.core import device_clock, outcomes, problems
 from app.core.clock import now_rfc3339, parse_rfc3339, rfc3339_ago, shift_rfc3339
 from app.core.problems import ApiProblemError, Problem
 from app.core.protocol import JsonObject
 from app.db.session import session_scope
 from app.models.enums import DoorState
+from app.modules.devices import actions as device_actions
 from app.modules.sessions import scheduler
-from app.modules.sessions import service as sessions_service
 from app.modules.sessions.decision import (
     FEATURE_AUTO_SETTLE,
     FEATURE_RENEW_SESSION,
     FEATURE_RENEW_WAIT,
     Candidate,
 )
-from app.modules.sessions.schemas import AssignRequest, CommandOutcome, SettleRequest
+from app.modules.sessions.schemas import AssignRequest, SettleRequest
 from app.persistence import audit as audit_repository
 
 
@@ -173,8 +174,8 @@ def _prepare(
         )
         return CommandOutcome(status=outcomes.OK.value, reason_code="", terminal_message="", data=None)
 
-    monkeypatch.setattr(scheduler.sessions_routes, "perform_settle", fake_settle)
-    monkeypatch.setattr(scheduler.sessions_routes, "perform_assign", fake_assign)
+    monkeypatch.setattr(scheduler.sessions_service, "perform_settle", fake_settle)
+    monkeypatch.setattr(scheduler.sessions_service, "perform_assign", fake_assign)
     return calls
 
 
@@ -376,7 +377,7 @@ def test_a_rejected_settle_is_recorded_with_its_reason(monkeypatch: pytest.Monke
         async def reject(_session: object, _device_id: str, _req: object) -> object:
             raise ApiProblemError(problems.NO_OCCUPIED_DOOR, "已经没有占用中的喷头了")
 
-        monkeypatch.setattr(scheduler.sessions_routes, "perform_settle", reject)
+        monkeypatch.setattr(scheduler.sessions_service, "perform_settle", reject)
         await scheduler._perform_settle(_settle_job(FEATURE_AUTO_SETTLE))
 
     asyncio.run(body())
@@ -563,7 +564,7 @@ def test_a_wait_rejection_keeps_the_pending_assign(monkeypatch: pytest.MonkeyPat
         async def reject(_session: object, _device_id: str, _req: object) -> object:
             raise ApiProblemError(problems.DOOR_NOT_FREE, "还被占着")
 
-        monkeypatch.setattr(scheduler.sessions_routes, "perform_assign", reject)
+        monkeypatch.setattr(scheduler.sessions_service, "perform_assign", reject)
         await scheduler._perform_assign(_assign_job(3))
 
         assert ("dev-1", 3) in scheduler._pending_assigns
@@ -583,7 +584,7 @@ def test_any_other_rejection_drops_the_pending_assign(monkeypatch: pytest.Monkey
         async def reject(_session: object, _device_id: str, _req: object) -> object:
             raise ApiProblemError(problems.DEVICE_OFFLINE, "设备离线")
 
-        monkeypatch.setattr(scheduler.sessions_routes, "perform_assign", reject)
+        monkeypatch.setattr(scheduler.sessions_service, "perform_assign", reject)
         await scheduler._perform_assign(_assign_job(3))
 
         assert ("dev-1", 3) not in scheduler._pending_assigns
@@ -832,7 +833,7 @@ def test_a_frame_ends_in_a_settle_then_an_assign(
         return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
 
     monkeypatch.setattr(scheduler.config_store, "effective", lambda _session, _device_id: CONFIG)
-    monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
+    monkeypatch.setattr(device_actions, "send_command_and_wait", fake_send)
 
     # 一小时前分配、一直没开阀：预约续期的 270 秒早已过点
     door_link.feed("dev-1", _frame(captured_at=_ago(3600), card_no=1001, open_time=_ago(3600)))
@@ -873,7 +874,7 @@ def test_the_same_session_is_settled_only_once(
         return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
 
     monkeypatch.setattr(scheduler.config_store, "effective", lambda _session, _device_id: CONFIG)
-    monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
+    monkeypatch.setattr(device_actions, "send_command_and_wait", fake_send)
     door_link.feed("dev-1", _frame(captured_at=_ago(3600), card_no=1001, open_time=_ago(3600)))
 
     async def body() -> None:
@@ -903,7 +904,7 @@ def test_auto_settle_only_settles_and_never_reassigns(
         return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
 
     monkeypatch.setattr(scheduler.config_store, "effective", lambda _session, _device_id: CONFIG)
-    monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
+    monkeypatch.setattr(device_actions, "send_command_and_wait", fake_send)
     door_link.feed(
         "dev-1", _frame(captured_at=_ago(120), card_no=1001, open_time=_ago(300), close_time=_ago(120), bath_time_s=120)
     )
@@ -935,7 +936,7 @@ def test_a_student_outside_the_roster_is_never_touched(
         return {"status": outcomes.OK.value, "reason_code": "", "terminal_message": "", "data": None}
 
     monkeypatch.setattr(scheduler.config_store, "effective", lambda _session, _device_id: CONFIG)
-    monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
+    monkeypatch.setattr(device_actions, "send_command_and_wait", fake_send)
     door_link.feed("dev-1", _frame(captured_at=_ago(3600), card_no=1001, cert_no="2026000006", open_time=_ago(3600)))
 
     async def body() -> None:

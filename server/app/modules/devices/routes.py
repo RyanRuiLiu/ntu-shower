@@ -25,6 +25,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.auth.tokens import extract_bearer, hash_token
+from app.contracts import CommandOutcome
 from app.core import actions
 from app.core.clock import now_rfc3339
 from app.core.config import settings
@@ -44,7 +45,6 @@ from app.modules.access.capabilities import user_actions
 from app.modules.access.dependencies import optional_identity, require_admin
 from app.modules.access.schemas import IdentityRecord
 from app.modules.config import store as config_store
-from app.modules.sessions.schemas import CommandOutcome
 from app.persistence import device_credentials
 from app.persistence import devices as devices_store
 

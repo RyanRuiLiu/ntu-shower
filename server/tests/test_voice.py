@@ -15,14 +15,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 from tests import device_link, frames
 
+from app.contracts import CommandOutcome
 from app.core.clock import now_rfc3339
 from app.core.problems import INVALID_VOICE_RULE, ApiProblemError
 from app.db.base import utcnow
 from app.db.session import session_scope
+from app.modules.devices import actions as device_actions
 from app.modules.devices import service as devices_service
 from app.modules.doors.events import DoorEvent, DoorEventKind
-from app.modules.sessions import service as sessions_service
-from app.modules.sessions.schemas import CommandOutcome
 from app.modules.voice import audio, schemas, service
 from app.persistence import voice as repository
 
@@ -883,7 +883,7 @@ def test_push_records_manual_delivery(
         time_windows=[{"days": [1], "start": "03:00", "end": "03:01"}],
     )
     calls: list[tuple[str, dict[str, object]]] = []
-    monkeypatch.setattr(sessions_service, "send_command_and_wait", _collector(calls))
+    monkeypatch.setattr(device_actions, "send_command_and_wait", _collector(calls))
     response = client.post(
         f"/api/v1/voice/rules/{rule['id']}/push",
         headers=admin_headers,
@@ -940,7 +940,7 @@ def test_push_failure_is_recorded(
     failure = CommandOutcome(
         status="failed", reason_code="voice.play_failed", terminal_message="播放失败", data={"downloaded": True}
     )
-    monkeypatch.setattr(sessions_service, "send_command_and_wait", _collector([], outcome=failure))
+    monkeypatch.setattr(device_actions, "send_command_and_wait", _collector([], outcome=failure))
     body = client.post(
         f"/api/v1/voice/rules/{rule['id']}/push",
         headers=admin_headers,
@@ -969,7 +969,7 @@ def test_push_wildcard_rule_reads_sample_cert_digits(
         segments=[{"kind": "digits", "source": "cert_no"}],
     )
     calls: list[tuple[str, dict[str, object]]] = []
-    monkeypatch.setattr(sessions_service, "send_command_and_wait", _collector(calls))
+    monkeypatch.setattr(device_actions, "send_command_and_wait", _collector(calls))
     body = client.post(
         f"/api/v1/voice/rules/{rule['id']}/push",
         headers=admin_headers,
@@ -1031,7 +1031,7 @@ def test_prepare_worker_sends_clips_and_swallows_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[str, dict[str, object]]] = []
-    monkeypatch.setattr(sessions_service, "send_command_and_wait", _collector(calls))
+    monkeypatch.setattr(device_actions, "send_command_and_wait", _collector(calls))
     clips: list[dict[str, object]] = [{"clip_id": "a" * 64, "sha256": "a" * 64, "size_bytes": 1, "duration_ms": 1}]
 
     async def run() -> None:
@@ -1047,7 +1047,7 @@ def test_prepare_worker_sends_clips_and_swallows_failure(
         message = "offline"
         raise RuntimeError(message)
 
-    monkeypatch.setattr(sessions_service, "send_command_and_wait", boom)
+    monkeypatch.setattr(device_actions, "send_command_and_wait", boom)
 
     async def run_failure() -> None:
         service._spawn_prepare(DEVICE_ID, clips)
@@ -1103,7 +1103,7 @@ def test_handle_events_delivers_once(
         volume=4,
     )
     calls: list[tuple[str, dict[str, object]]] = []
-    monkeypatch.setattr(sessions_service, "send_command_and_wait", _collector(calls, _ok_outcome(downloaded=True)))
+    monkeypatch.setattr(device_actions, "send_command_and_wait", _collector(calls, _ok_outcome(downloaded=True)))
 
     event = _event(now_rfc3339(), door_no=5)
     asyncio.run(service.handle_events((event,)))
@@ -1141,7 +1141,7 @@ def test_handle_events_skips_stale_no_rule_and_empty_cert(
 ) -> None:
     _create(client, admin_headers, assets["请到"])
     calls: list[tuple[str, dict[str, object]]] = []
-    monkeypatch.setattr(sessions_service, "send_command_and_wait", _collector(calls))
+    monkeypatch.setattr(device_actions, "send_command_and_wait", _collector(calls))
 
     asyncio.run(
         service.handle_events(
@@ -1180,7 +1180,7 @@ def test_handle_events_specific_rule_and_exemption_yields(
         segments=[_asset_segment(assets["欢迎"])],
     )
     calls: list[tuple[str, dict[str, object]]] = []
-    monkeypatch.setattr(sessions_service, "send_command_and_wait", _collector(calls))
+    monkeypatch.setattr(device_actions, "send_command_and_wait", _collector(calls))
 
     asyncio.run(service.handle_events((_event(now_rfc3339(), cert_no="C1", key="c1"),)))
     asyncio.run(service.handle_events((_event(now_rfc3339(), cert_no="C2", key="c2"),)))
@@ -1206,7 +1206,7 @@ def test_handle_events_resolution_failure_does_not_deliver(
         repository.delete_asset(session, assets["五"])
     audio.asset_path(assets["五"]).unlink()
     calls: list[tuple[str, dict[str, object]]] = []
-    monkeypatch.setattr(sessions_service, "send_command_and_wait", _collector(calls))
+    monkeypatch.setattr(device_actions, "send_command_and_wait", _collector(calls))
 
     asyncio.run(service.handle_events((_event(now_rfc3339(), door_no=5),)))
     assert calls == []
@@ -1279,7 +1279,7 @@ def test_dispatch_event_handles_malformed_rule(
             utcnow(),
         )
     calls: list[tuple[str, dict[str, object]]] = []
-    monkeypatch.setattr(sessions_service, "send_command_and_wait", _collector(calls))
+    monkeypatch.setattr(device_actions, "send_command_and_wait", _collector(calls))
     asyncio.run(service.handle_events((_event(now_rfc3339()),)))
     assert calls == []
     assert client.get("/api/v1/voice/deliveries", headers=admin_headers).json() == []

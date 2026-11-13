@@ -7,8 +7,6 @@
 错误若下发到设备，后果是设备侧行为异常（例如心跳间隔为 0 会导致心跳风暴）。
 """
 
-import asyncio
-
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -17,12 +15,9 @@ from app.core.connections import manager
 from app.core.logging import log_event
 from app.core.problems import INVALID_CONFIG, ApiProblemError
 from app.db.deps import get_db
-from app.modules.access.dependencies import require_admin
-from app.modules.devices.dependencies import require_trusted_online_device
-from app.modules.sessions import scheduler as sessions_scheduler
-from app.modules.sessions import service as sessions_service
+from app.modules.access.dependencies import require_admin, require_trusted_online_device
 
-from . import store
+from . import notifier, store
 from .schemas import (
     ConfigPushNotice,
     ConfigSpecCatalog,
@@ -96,31 +91,16 @@ async def put_global_config(req: ConfigUpdateRequest, session: Session = Depends
     """更新全局覆盖，并把新的有效配置推送给所有在线设备。"""
     _before_revision, before = store.get_global_overrides(session)
     revision, overrides = store.put_global_overrides(session, _validated(req.config))
-    # 后台任务的阈值与名单也在配置里，而定时器是按旧值挂着的——这里立刻重算，保存即生效。
-    sessions_scheduler.reload()
-    notified: list[ConfigPushNotice] = []
     # 服务端的键不下发，所以只有**设备域那部分真的变了**才需要惊动设备：在服务器上运行的
     # 那些改动保存即生效，再推一条与上次一模一样的 config.update 只是白跑一趟。
-    if _device_scope(before) != _device_scope(overrides):
-        # 逐台推送但**并发等待**：每台的 ack 至多等 config_ack_timeout_s，串行的话一台
-        # 慢设备就把整个保存拖慢一倍时长的乘数，几十台设备下一次保存能挂到分钟级。
-        # 设备之间互不相干（在途回执按 device_id 记），并发没有共享状态。
-        targets = list(manager.online_connections())
-        results = await asyncio.gather(
-            *(
-                sessions_service.push_config_update(device_id, revision, store.device_effective(session, device_id))
-                for device_id, _ws in targets
-            )
-        )
-        notified = [
-            {
-                "device_id": device_id,
-                "notified": result.get("notified", False),
-                "applied": result.get("applied", False),
-                "reason": result.get("reason", ""),
-            }
-            for (device_id, _ws), result in zip(targets, results, strict=True)
-        ]
+    # 定时器重算与设备推送都由订阅者做（写侧不 import sessions，见 notifier.py 的
+    # 模块注释）；推送目标是在线设备全体，订阅者逐台并发等待，单台慢设备不拖慢整批。
+    push_targets = (
+        [device_id for device_id, _ws in manager.online_connections()]
+        if _device_scope(before) != _device_scope(overrides)
+        else []
+    )
+    notified = await notifier.notify(revision, push_targets)
     log_event(
         "INFO",
         "config.global-updated",
@@ -154,8 +134,8 @@ async def put_device_config(
     """设置设备级覆盖并推送给该设备。"""
     require_trusted_online_device(device_id, session)
     revision, overrides = store.put_device_overrides(session, device_id, _validated_device_overrides(req.config))
-    sessions_scheduler.reload()
-    result = await sessions_service.push_config_update(device_id, revision, store.device_effective(session, device_id))
+    notified = await notifier.notify(revision, [device_id])
+    result = notified[0] if notified else ConfigPushNotice(device_id=device_id)
     log_event(
         "INFO",
         "config.device-updated",

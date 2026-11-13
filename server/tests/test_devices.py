@@ -14,7 +14,7 @@ from app.core.connections import manager
 from app.db.session import session_scope
 from app.models.identity import Device
 from app.models.ops import DeviceLinkEvent
-from app.modules.sessions import service as sessions_service
+from app.modules.devices import actions as device_actions
 
 DEVICE_ID = "dev-debug-1"
 
@@ -234,7 +234,7 @@ def ready(
         captured.update(device_id=device_id, action=action, params=params, timeout_s=timeout_s)
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": {"image_base64": "ZGF0YQ=="}}
 
-    monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
+    monkeypatch.setattr(device_actions, "send_command_and_wait", fake_send)
     return captured
 
 
@@ -321,7 +321,7 @@ def test_live_log_reads_from_device(
             },
         }
 
-    monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
+    monkeypatch.setattr(device_actions, "send_command_and_wait", fake_send)
     r = client.get(f"/api/v1/devices/{DEVICE_ID}/logs/live?kind=device&lines=2", headers=admin_headers)
 
     assert r.status_code == 200
@@ -361,7 +361,7 @@ def test_live_log_absent_file_is_not_an_error(
             },
         }
 
-    monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
+    monkeypatch.setattr(device_actions, "send_command_and_wait", fake_send)
     r = client.get(f"/api/v1/devices/{DEVICE_ID}/logs/live?kind=crash", headers=admin_headers)
 
     assert r.status_code == 200
@@ -393,7 +393,7 @@ def test_live_log_maps_device_failure_to_problem(
             "data": None,
         }
 
-    monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
+    monkeypatch.setattr(device_actions, "send_command_and_wait", fake_send)
     r = client.get(f"/api/v1/devices/{DEVICE_ID}/logs/live?kind=device", headers=admin_headers)
 
     assert r.status_code == 502
@@ -414,7 +414,7 @@ def test_live_log_rejects_empty_result_data(
     ) -> dict[str, Any]:
         return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
 
-    monkeypatch.setattr(sessions_service, "send_command_and_wait", fake_send)
+    monkeypatch.setattr(device_actions, "send_command_and_wait", fake_send)
     r = client.get(f"/api/v1/devices/{DEVICE_ID}/logs/live?kind=device", headers=admin_headers)
 
     assert r.status_code == 502

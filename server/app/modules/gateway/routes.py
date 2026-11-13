@@ -27,12 +27,12 @@ from ...db.session import Database
 from ...persistence import device_credentials
 from ...persistence import ota as ota_store
 from ..config import store as config_store
+from ..devices import actions as device_actions
 from ..devices import service as devices_service
 from ..devices.schemas import LINK_OFFLINE, LINK_ONLINE
 from ..doors import service as doors_service
 from ..extend_hours import service as extend_hours_service
 from ..sessions import scheduler as sessions_scheduler
-from ..sessions import service as sessions_service
 from ..voice import service as voice_service
 
 router = APIRouter()
@@ -297,7 +297,7 @@ async def _handle_frame(
         )
         pong_seen.set()
     elif mtype == "config.ack":
-        sessions_service.resolve_config_ack(device_id, as_int(payload.get("revision")))
+        device_actions.resolve_config_ack(device_id, as_int(payload.get("revision")))
     elif mtype == "door.snapshot":
         if not trusted:
             return
@@ -354,7 +354,7 @@ async def _handle_frame(
     elif mtype == "session.command_result":
         if not trusted:
             return
-        if not sessions_service.resolve(text_of(msg, "reply_to"), payload):
+        if not device_actions.resolve(text_of(msg, "reply_to"), payload):
             # 回执找不到对应的在途命令（多半是命令已超时收尾）：回错误帧保持
             # 协议完整性反馈，设备端只记日志，不产生副作用。
             await ws.send_text(
