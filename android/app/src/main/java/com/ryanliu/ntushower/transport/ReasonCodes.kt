@@ -86,9 +86,6 @@ object ReasonCodes {
     /** 该位置没有可点击的控件 */
     const val UI_NO_TARGET_AT_POINT = "ui.no_target_at_point"
 
-    /** 当前界面上没有可滚动的容器 */
-    const val UI_NO_SCROLLABLE_CONTAINER = "ui.no_scrollable_container"
-
     /** 没有可输入的控件 */
     const val UI_NO_EDITABLE_FIELD = "ui.no_editable_field"
 
@@ -115,9 +112,6 @@ object ReasonCodes {
 
     /** 未知的输入通道 */
     const val UI_UNKNOWN_CHANNEL = "ui.unknown_channel"
-
-    /** 未知的滚动方向 */
-    const val UI_UNKNOWN_DIRECTION = "ui.unknown_direction"
 
     /** 拍照失败 */
     const val CAMERA_CAPTURE_FAILED = "camera.capture_failed"

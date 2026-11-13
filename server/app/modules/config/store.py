@@ -207,10 +207,6 @@ def put_device_overrides(session: Session, device_id: str, values: ConfigValues)
     return new_revision, overrides
 
 
-def delete_device_overrides(session: Session, device_id: str) -> bool:
-    return config_store_persistence.delete_device(session, device_id)
-
-
 def global_effective(session: Session) -> ConfigValues:
     """全局有效配置：默认 ← 全局覆盖，不含任何设备覆盖。"""
     merged = defaults()

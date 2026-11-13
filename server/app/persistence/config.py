@@ -15,9 +15,8 @@ from ..models.identity import Device
 from ..models.settings import AppSettings, DeviceConfig
 
 GLOBAL_ROW_ID = 1
-#: 库里还没有这一行时（全新安装、尚未写过任何覆盖）对外呈现的修订号。
-#: 旧层的 `init_tables` 预置过 revision=1 的行；转换工具会把生产库的真实修订号
-#: 原样搬过来，两侧语义一致：GET 报 1，第一次写入变成 2。
+#: 库里还没有这一行时（全新安装、尚未写过任何覆盖）对外呈现的修订号：
+#: GET 报 1，第一次写入变成 2。
 FRESH_REVISION = 1
 
 
@@ -62,13 +61,4 @@ def put_device(session: Session, device_id: str, revision: int, values: dict[str
     session.commit()
 
 
-def delete_device(session: Session, device_id: str) -> bool:
-    row = session.scalars(select(DeviceConfig).where(DeviceConfig.device_key == device_id)).one_or_none()
-    if row is None:
-        return False
-    session.delete(row)
-    session.commit()
-    return True
-
-
-__all__: list[str] = ["GLOBAL_ROW_ID", "delete_device", "get_device", "get_global", "put_device", "put_global"]
+__all__: list[str] = ["GLOBAL_ROW_ID", "get_device", "get_global", "put_device", "put_global"]
