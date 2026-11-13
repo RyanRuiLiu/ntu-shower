@@ -205,18 +205,30 @@ keystore 的可用性验证：从备份副本执行 `gradlew assembleRelease` �
 
 脚本时代（VACUUM INTO + gzip）演练记录：2026-09-30 执行，`integrity_check` 返回 `ok`。
 
-LiteStream 副本演练（恢复到临时位置，不碰生产）：
+LiteStream 副本演练（**本地 Docker** 恢复，不碰生产机——副本目录只读拉回本地）：
 
 ```bash
-ssh <deploy-host> 'rm -f /tmp/restore_test.db
-  docker run --rm -v /var/backups/ntu-shower/litestream:/replica -v /tmp:/out \
-    litestream/litestream:0.3 restore -o /out/restore_test.db file:///replica
-  docker run --rm -v /tmp/restore_test.db:/restore_test.db python:3.13-slim \
-    python -c "import sqlite3; print(sqlite3.connect(\"/restore_test.db\").execute(\"PRAGMA integrity_check\").fetchone()[0])"
-  rm -f /tmp/restore_test.db'
+# ① 副本拉回本地；Git Bash 下 docker 参数里的容器路径需 MSYS_NO_PATHCONV=1
+scp -r <deploy-host>:/var/backups/ntu-shower/litestream <本地临时目录>/litestream
+# ② 本地 litestream.yml：dbs[].path 与生产同形，replica path 指向挂载点 /replica
+docker run --rm \
+  -v <本地临时目录>/litestream:/replica:ro \
+  -v <本地临时目录>/out:/out \
+  -v <本地临时目录>/litestream.yml:/etc/litestream.yml:ro \
+  litestream/litestream@sha256:c5a1e1b01916b3a110f6600820ef176d048d9b9c2411ef0a680de0caa68934a5 \
+  restore -config /etc/litestream.yml -o /out/ntu-shower.db /var/lib/ntu-shower/ntu-shower.db
+# ③ 校验：integrity_check、行数与生产只读比对、alembic upgrade head 幂等
+# ④ 终验：0.7.0 真镜像以生产同款姿势（user 997 / read_only / cap_drop ALL）起服打 healthz。
+#    注意：Windows bind mount 上 SQLite WAL 无法建 -shm，须先把库拷入 named volume 再起服。
 ```
 
-**验证记录**：2026-11-12 执行，恢复出 25 张表，`integrity_check` 返回 `ok`。
+**验证记录**：
+
+- 2026-11-12：restore + `integrity_check` ok（25 张表）。
+- 2026-11-14：全链路——restore 至 WAL index 2186，`integrity_check` ok，22 张业务表行数
+  与生产只读参照**逐表一致**（零丢失），`alembic upgrade head` 幂等通过，
+  0.7.0 镜像在生产安全约束下起服 `healthz` ok。
+
 **该步骤此后按季度重复**；任一次失败都说明备份链路已坏，须在下一轮之前修好。
 
 ## 故障处置
