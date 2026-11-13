@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy.orm import Session
 
-from app.auth import passwords, tokens
+from app.core import passwords, tokens
 from app.db.session import Database
 from app.models import Base
 from app.persistence import device_credentials, devices, principals

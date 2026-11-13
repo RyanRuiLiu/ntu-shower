@@ -64,7 +64,7 @@ def _actor_of(request: Request) -> tuple[str, str]:
     会话记用户名（签名校验在 SessionMiddleware 已完成），Bearer 凭据记摘要
     前 12 位（足以对账、不足以冒用）。
     """
-    from app.auth.tokens import extract_bearer, hash_token
+    from app.core.tokens import extract_bearer, hash_token
 
     username = request.session.get("u")
     if isinstance(username, str) and username:

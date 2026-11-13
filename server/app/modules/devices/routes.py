@@ -24,7 +24,6 @@ import hmac
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
-from app.auth.tokens import extract_bearer, hash_token
 from app.contracts import CommandOutcome
 from app.core import actions
 from app.core.clock import now_rfc3339
@@ -39,6 +38,7 @@ from app.core.problems import (
     ApiProblemError,
 )
 from app.core.protocol import as_int
+from app.core.tokens import extract_bearer, hash_token
 from app.db.base import utcnow
 from app.db.deps import get_db
 from app.modules.access.capabilities import user_actions
