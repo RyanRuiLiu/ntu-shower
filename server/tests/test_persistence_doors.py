@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session
 
 from app.db.session import Database
 from app.models import Base
-from app.models.enums import DoorState, SegmentSource, SnapshotSource
+from app.models.enums import DoorState, SegmentSource
+from app.modules.doors import service as doors_service
 from app.persistence import devices, doors
 
 T0 = datetime(2026, 11, 7, 12, 0, 0, tzinfo=UTC)
@@ -68,9 +69,11 @@ def test_live_state_upsert_and_list(session: Session) -> None:
 
 def test_snapshot_is_idempotent(session: Session) -> None:
     _device(session)
-    first = doors.insert_snapshot(session, "dev-a", "s1", 1, SnapshotSource.DB_WATCH, T0, "12:00", T0, [{"door_no": 1}])
+    first = doors.insert_snapshot(
+        session, "dev-a", "s1", 1, doors_service.SOURCE_DB_WATCH, T0, "12:00", T0, [{"door_no": 1}]
+    )
     second = doors.insert_snapshot(
-        session, "dev-a", "s1", 1, SnapshotSource.DB_WATCH, T0, "12:00", T0, [{"door_no": 1}]
+        session, "dev-a", "s1", 1, doors_service.SOURCE_DB_WATCH, T0, "12:00", T0, [{"door_no": 1}]
     )
     assert first is True
     # 重复投递按「已落库」回真：设备在收到 ack 前重发同一条，回执语义不变
@@ -166,7 +169,7 @@ def test_missing_device_is_a_noop(session: Session) -> None:
     assert doors.get_door_live(session, "missing", 1) is None
     assert doors.get_occupied_by_cert(session, "missing", "c") is None
     doors.upsert_door_live(session, "missing", 1, DoorState.FREE, reported_at=T0)
-    assert doors.insert_snapshot(session, "missing", "s", None, SnapshotSource.STARTUP, T0, "", T0, []) is False
+    assert doors.insert_snapshot(session, "missing", "s", None, doors_service.SOURCE_STARTUP, T0, "", T0, []) is False
     assert doors.insert_event(session, T0, "missing", 1, DoorState.FREE, DoorState.FREE, 0, "", 0) == 0
     assert doors.open_session(session, "missing", 1, 0, "", T0, "observed") == 0
     assert doors.get_session(session, 9999) is None

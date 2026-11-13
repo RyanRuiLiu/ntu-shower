@@ -225,10 +225,6 @@ object RuntimeConfig {
     @Volatile var uiDumpMaxNodes = ConfigDefaults.UI_DUMP_MAX_NODES
         private set
 
-    // 滑动手势从按下到抬起的时长；过短会被识别成快速抛掷而非拖动。
-    @Volatile var uiSwipeDurationMs = ConfigDefaults.UI_SWIPE_DURATION_MS
-        private set
-
     // 播报前等浴室 App 提示音结束的最长时间；见 VoicePlayer。
     @Volatile var voiceBathWaitMaxMs = ConfigDefaults.VOICE_BATH_WAIT_MAX_MS
         private set
@@ -388,8 +384,6 @@ object RuntimeConfig {
             { c, key -> uiClickDelayMs = c.optLong(key, uiClickDelayMs) },
         "ui_dump_max_nodes" to
             { c, key -> uiDumpMaxNodes = atLeastOne(c.optLong(key, uiDumpMaxNodes)) },
-        "ui_swipe_duration_ms" to
-            { c, key -> uiSwipeDurationMs = atLeastOne(c.optLong(key, uiSwipeDurationMs)) },
         "voice_bath_wait_max_ms" to
             { c, key -> voiceBathWaitMaxMs = atLeastOne(c.optLong(key, voiceBathWaitMaxMs)) },
         "device_exec_max_output_bytes" to

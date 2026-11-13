@@ -56,10 +56,8 @@ from .schemas import (
     DeviceListItem,
     DeviceOrderRequest,
     DevicePatchRequest,
-    DevicePowerScheduleRequest,
     DeviceRecord,
     DeviceUiKeyRequest,
-    DeviceUiScrollRequest,
     DeviceUiTextRequest,
     DeviceUiTouchRequest,
 )
@@ -283,23 +281,6 @@ async def set_clock(device_id: str, req: DeviceClockSetRequest, session: Session
     )
 
 
-@admin_router.post("/{device_id}/power/schedule")
-async def schedule_power(
-    device_id: str, req: DevicePowerScheduleRequest, session: Session = Depends(get_db)
-) -> CommandOutcome:
-    """重布设备定时开关机（off_at 断电、on_at 上电，设备表盘 HH:MM）。
-
-    现场依据见 docs/device-poweroff.md。
-    """
-    return await device_action(
-        session,
-        device_id,
-        actions.POWER_SCHEDULE,
-        {"off_at": req.off_at, "on_at": req.on_at},
-        DEVICE_ACTION_TIMEOUT_S,
-    )
-
-
 @admin_router.post("/{device_id}/bath/restart")
 async def restart_bath_app(device_id: str, session: Session = Depends(get_db)) -> CommandOutcome:
     """重启浴室 App：先强停再冷启动。排障用——延长服务流程已改用 power.schedule。"""
@@ -313,7 +294,7 @@ async def reboot_device(device_id: str, session: Session = Depends(get_db)) -> C
 
 
 # ── 设备界面 ──
-# 这一组是"看到并操作设备界面"：dump 给结构（节点树），touch/scroll/key/input
+# 这一组是"看到并操作设备界面"：dump 给结构（节点树），touch/key/input
 # 给动作，与 capture（一张图）互补。排查"设备卡在某个弹窗"时节点树比截图有用。
 
 
@@ -339,14 +320,6 @@ async def touch(device_id: str, req: DeviceUiTouchRequest, session: Session = De
     if req.duration_ms is not None:
         params["duration_ms"] = req.duration_ms
     return await device_action(session, device_id, actions.UI_TOUCH, params, _ui_timeout_s(session, device_id))
-
-
-@admin_router.post("/{device_id}/scroll")
-async def scroll(device_id: str, req: DeviceUiScrollRequest, session: Session = Depends(get_db)) -> CommandOutcome:
-    """滚动可滚动容器。与 touch 的滑动分开：作用于容器而非坐标。"""
-    return await device_action(
-        session, device_id, actions.UI_SCROLL, {"direction": req.direction}, _ui_timeout_s(session, device_id)
-    )
 
 
 @admin_router.post("/{device_id}/key")

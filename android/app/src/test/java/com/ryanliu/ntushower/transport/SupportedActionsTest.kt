@@ -39,7 +39,6 @@ class SupportedActionsTest {
             "bridge.close",
             "ui.dump",
             "ui.touch",
-            "ui.scroll",
             "ui.key",
             "ui.input",
         )
@@ -62,7 +61,6 @@ class SupportedActionsTest {
         assertTrue(SupportedActions.BRIDGE_CLOSE in SupportedActions.ALL)
         assertTrue(SupportedActions.UI_DUMP in SupportedActions.ALL)
         assertTrue(SupportedActions.UI_TOUCH in SupportedActions.ALL)
-        assertTrue(SupportedActions.UI_SCROLL in SupportedActions.ALL)
         assertTrue(SupportedActions.UI_KEY in SupportedActions.ALL)
         assertTrue(SupportedActions.UI_INPUT in SupportedActions.ALL)
         assertTrue(SupportedActions.FREELIST_READ in SupportedActions.ALL)

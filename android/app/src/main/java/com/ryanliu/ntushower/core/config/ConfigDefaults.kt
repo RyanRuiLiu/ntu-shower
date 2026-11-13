@@ -173,9 +173,6 @@ object ConfigDefaults {
     /** 节点导出上限 */
     const val UI_DUMP_MAX_NODES = 2000L
 
-    /** 滑动默认时长 */
-    const val UI_SWIPE_DURATION_MS = 300L
-
     /** 命令输出上限 */
     const val DEVICE_EXEC_MAX_OUTPUT_BYTES = 32768L
 
@@ -264,7 +261,6 @@ object ConfigDefaults {
         .put("ui_poll_interval_ms", UI_POLL_INTERVAL_MS)
         .put("ui_click_delay_ms", UI_CLICK_DELAY_MS)
         .put("ui_dump_max_nodes", UI_DUMP_MAX_NODES)
-        .put("ui_swipe_duration_ms", UI_SWIPE_DURATION_MS)
         .put("device_exec_max_output_bytes", DEVICE_EXEC_MAX_OUTPUT_BYTES)
         .put("ota_check_interval_s", OTA_CHECK_INTERVAL_S)
         .put("bath_app_guard_enabled", BATH_APP_GUARD_ENABLED)

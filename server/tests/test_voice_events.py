@@ -179,12 +179,11 @@ def test_occupant_change_announces_new_only(fresh_db: str) -> None:
     assert events[0].cert_no == "C2"
 
 
-def test_startup_and_import_emit_nothing_without_open_time(fresh_db: str) -> None:
-    """没有 open_time 时只有观测下界；startup/import 都不补 assigned。"""
+def test_startup_emits_nothing_without_open_time(fresh_db: str) -> None:
+    """没有 open_time 时只有观测下界；startup 不补 assigned。"""
     device_id = "voice-event-source"
     _process(device_id, [_door(1)], T0)
     assert _process(device_id, [_occupied()], T1, source=service.SOURCE_STARTUP) == ()
-    assert _process(device_id, [_occupied()], T2, source=service.SOURCE_IMPORT) == ()
 
 
 def test_startup_waiting_with_open_time_emits_assigned(fresh_db: str) -> None:
@@ -226,14 +225,6 @@ def test_gap_with_open_time_emits_assigned(fresh_db: str) -> None:
     assert [event.kind for event in events] == [DoorEventKind.ASSIGNED]
     assert events[0].cert_no == "C2"
     assert events[0].occurred_at == "2026-09-30T12:20:00.000Z"
-
-
-def test_import_with_open_time_emits_nothing(fresh_db: str) -> None:
-    """历史重放只回放数据，不补播。"""
-    device_id = "voice-event-import-open-time"
-    device_clock.load(device_id, 0.0)
-    _process(device_id, [_door(1)], T0)
-    assert _process(device_id, [_occupied(open_time=T1)], T2, source=service.SOURCE_IMPORT) == ()
 
 
 def test_startup_release_without_gap_emits_release(fresh_db: str) -> None:
