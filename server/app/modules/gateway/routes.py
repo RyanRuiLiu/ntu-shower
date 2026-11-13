@@ -17,13 +17,13 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from ... import audit_middleware
-from ...auth.tokens import extract_bearer
 from ...core import protocol, reason_codes
 from ...core.clock import now_rfc3339, rfc3339_ago
 from ...core.config import settings
 from ...core.connections import manager
 from ...core.logging import log_event
 from ...core.protocol import JsonObject, as_int, list_of, payload_of, text_of
+from ...core.tokens import extract_bearer
 from ...db.session import Database
 from ...persistence import device_credentials
 from ...persistence import ota as ota_store
