@@ -19,6 +19,7 @@ URL 只表达资源，不表达权限——谁能调用由能力位守卫决定�
 - /api/v1/audit                      审计域（admin）
 - /api/v1/stream                     实时推送（公开，可按 device_id 过滤）
 - /gateway/device                    设备 WS 网关（设备硬编码契约，路径冻结）
+- /voice/assets/{id}.mp3             语音素材下载（设备硬编码契约，路径冻结）
 
 模块按领域划分（modules/<域>），URL 按资源组织：/devices/* 由 devices、
 sessions、bridge、config 各域按资源归属提供端点。网页端（web/）挂在根路径，
