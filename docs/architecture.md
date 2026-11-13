@@ -28,6 +28,10 @@
 - 因此 APK 内置 Conscrypt（BoringSSL）提供 TLS1.2 AEAD；服务端为纯 AEAD（TLS1.3 + TLS1.2 GCM/CHACHA20），不保留 CBC
 - 实测握手：设备 ClientHello 仅 3 个 AEAD 套件（CHACHA20 / AES128-GCM / AES256-GCM），协商 CHACHA20-POLY1305
 - 服务端单张 ECDSA 通配符证书
+- 信封 `v` 的升级条件：新增可选字段不升版本（收端忽略未知键，ADR-0006）；改字段语义、
+  删字段等不兼容变化升 `v` 并两端同发。网关对入站帧校验 `v`：hello 不符回
+  `proto.version_mismatch` 并断开（1002），会话中途不符回错后同样断开——不静默丢帧，
+  那会让新协议设备表现为"连着但什么都不动"
 
 ## 服务端平面
 
