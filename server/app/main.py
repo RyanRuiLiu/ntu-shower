@@ -35,8 +35,8 @@ from sqlalchemy import text
 from starlette.middleware.sessions import SessionMiddleware
 from typing_extensions import TypedDict
 
+from . import audit_middleware
 from .auth.routes import router as auth_router
-from .core import audit
 from .core.background import Background
 from .core.config import settings
 from .core.errors import install_error_handlers
@@ -128,7 +128,7 @@ def create_app() -> FastAPI:
         # 间隔任务统一装配：各模块只提供「一轮做什么」，生命周期集中在这一个对象上。
         background.interval("extend-hours", extend_hours_service.TICK_INTERVAL_S, extend_hours_service.tick_once)
         background.interval("status-line", status_line_service.PUSH_INTERVAL_S, status_line_service.tick)
-        background.interval("audit-prune", audit.PRUNE_INTERVAL_S, audit.prune_once)
+        background.interval("audit-prune", audit_middleware.PRUNE_INTERVAL_S, audit_middleware.prune_once)
         _abort_pending_commands()
         background.start()
         # 事件驱动型任务保持自己的模型：按设备惰性起 worker，不占统一循环。
@@ -140,7 +140,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="NTU Shower", version=APP_VERSION, lifespan=lifespan)
     install_error_handlers(app)
-    audit.install_audit(app)
+    audit_middleware.install_audit(app)
     # 配置保存 → 定时器重算 + 设备推送：组合根装配（写侧不 import sessions，见
     # modules/config/notifier.py 的模块注释）。
     config_notifier.register(sessions_scheduler.on_config_change)
