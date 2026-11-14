@@ -7,7 +7,7 @@
 from fastapi.testclient import TestClient
 
 from app.modules.config.spec import SPECS_BY_KEY, ConfigKind, ConfigScope
-from app.modules.sessions.decision import FEATURES
+from app.modules.sessions import decision
 from app.modules.tasks.spec import TASKS, TASKS_BY_KEY
 
 CERT_NO = "2026000001"
@@ -22,13 +22,13 @@ def test_task_keys_are_derived_from_the_decision_table() -> None:
     它们是从那张表派生的。这条防的是"派生被改回手抄"之后两边各自漂——判据按 A 判、
     看板按 B 显示，表现是"开关开了却不生效"，而库里看不出任何异常。
     """
-    decision_keys = {spec.key for spec in FEATURES}
+    decision_keys = {spec.key for spec in decision.TASKS}
     outside = [spec.key for spec in TASKS if spec.key not in decision_keys]
 
     assert outside == ["extend_hours"], "判据表里没有的只该是它——它的判据是设备级的"
 
     for spec in TASKS:
-        source = next(item for item in FEATURES if item.key == spec.key) if spec.key in decision_keys else None
+        source = next(item for item in decision.TASKS if item.key == spec.key) if spec.key in decision_keys else None
         if source is None:
             continue
         assert spec.enabled_key == source.enabled_key
@@ -54,7 +54,7 @@ def test_task_config_keys_exist_are_server_scoped_and_of_the_right_kind() -> Non
 
 def test_extend_hours_is_not_in_the_decision_table() -> None:
     """它不在判据表里是有意的：它的判据是设备级的，塞进去要放一个不成立的形状。"""
-    assert "extend_hours" not in {spec.key for spec in FEATURES}
+    assert "extend_hours" not in {spec.key for spec in decision.TASKS}
     assert TASKS_BY_KEY["extend_hours"].enabled_key == "extend_hours_enabled"
     assert TASKS_BY_KEY["extend_hours"].students_key == "extend_hours_students"
 
@@ -69,7 +69,7 @@ def test_status_reports_tasks_extending_and_scheduled(
 
     新库上四任务全关、无延长、无排定——看板在"系统闲着"时也必须能如实显示闲着。
     """
-    resp = client.get("/api/v1/background-tasks/status", headers=admin_headers)
+    resp = client.get("/api/v1/tasks/status", headers=admin_headers)
 
     assert resp.status_code == 200
     data = resp.json()
@@ -107,7 +107,7 @@ def test_status_includes_the_extending_device(client: TestClient, admin_headers:
         )
         extend_repository.record(session, "dev-status-ext", shifted_at, [{"door_no": 3, "cert_no": CERT_NO}])
 
-    data = client.get("/api/v1/background-tasks/status", headers=admin_headers).json()
+    data = client.get("/api/v1/tasks/status", headers=admin_headers).json()
 
     extending = data["extending"]
     assert len(extending) == 1
@@ -125,6 +125,6 @@ def test_status_includes_the_extending_device(client: TestClient, admin_headers:
 
 def test_status_requires_admin(client: TestClient, ops_headers: dict[str, str], fresh_db: str) -> None:
     """当前态是管理面的问题：非 admin 位调不动它。"""
-    resp = client.get("/api/v1/background-tasks/status", headers=ops_headers)
+    resp = client.get("/api/v1/tasks/status", headers=ops_headers)
 
     assert resp.status_code == 403
