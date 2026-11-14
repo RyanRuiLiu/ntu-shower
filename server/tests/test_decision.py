@@ -16,8 +16,8 @@ from app.modules.sessions.decision import (
     decide,
     password_of,
     recheck,
-    roster,
     still_allowed,
+    students_of,
 )
 
 #: 基准时刻：判据的全部时刻都是服务端轴的 RFC 3339。
@@ -60,16 +60,16 @@ def test_roster_reads_the_map_and_trims_the_id_only() -> None:
 
     配置页那侧两个都 trim 过了，所以这里只兜住"直接调接口"的情形。
     """
-    assert roster({"k": {"1001": "pw"}}, "k") == {"1001": "pw"}
-    assert roster({"k": {" 1001 ": "pw"}}, "k") == {"1001": "pw"}
-    assert roster({"k": {}}, "k") == {}
-    assert roster({}, "k") == {}
+    assert students_of({"k": {"1001": "pw"}}, "k") == {"1001": "pw"}
+    assert students_of({"k": {" 1001 ": "pw"}}, "k") == {"1001": "pw"}
+    assert students_of({"k": {}}, "k") == {}
+    assert students_of({}, "k") == {}
 
 
 def test_roster_tolerates_a_wrong_shape() -> None:
     """名单是配置值，人手改错了不该让整个功能抛异常。"""
-    assert roster({"k": "1001,pw"}, "k") == {}
-    assert roster({"k": ["1001"]}, "k") == {}
+    assert students_of({"k": "1001,pw"}, "k") == {}
+    assert students_of({"k": ["1001"]}, "k") == {}
 
 
 def test_password_of_comes_from_that_tasks_own_roster() -> None:

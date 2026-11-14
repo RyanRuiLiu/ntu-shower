@@ -6,12 +6,12 @@ from pydantic import BaseModel
 
 
 class BackgroundTaskStatus(BaseModel):
-    """一个后台任务的开关与名单规模。"""
+    """一个后台任务的开关与名单规模（students_count 是名单里的人数）。"""
 
     key: str
     title: str
     enabled: bool
-    roster: int
+    students_count: int
 
 
 class DoorAssignment(BaseModel):

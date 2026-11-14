@@ -20,7 +20,7 @@ from app.core.problems import DOOR_NOT_FREE, ApiProblemError
 from app.db.session import session_scope
 from app.modules.config import store as config_store
 from app.modules.extend_hours import service as extend_hours
-from app.modules.sessions.decision import roster
+from app.modules.sessions.decision import students_of
 from app.modules.sessions.schemas import AssignRequest
 from app.persistence import extend_hours as repository
 from test_scheduler import _frame
@@ -413,7 +413,7 @@ def test_reassign_skips_someone_already_occupying(fresh_db: str, monkeypatch: py
 
     monkeypatch.setattr(extend_hours.sessions_service, "perform_assign", fake_assign)
 
-    _reassign_with_db(_shift("2026-10-05T23:50:00.000Z"), roster(CONFIG, "extend_hours_students"))
+    _reassign_with_db(_shift("2026-10-05T23:50:00.000Z"), students_of(CONFIG, "extend_hours_students"))
 
     assert assigned == []
     assert (DEVICE, "2026000001") in extend_hours._reassigned
@@ -440,13 +440,13 @@ def test_reassign_waits_for_a_leftover_session_from_before_the_shift(
     shift = _shift("2026-10-05T23:50:00.000Z")
 
     # 拨钟后第一次（门还占着）：不分配，且**不标记**——下一次还要再来
-    _reassign_with_db(shift, roster(CONFIG, "extend_hours_students"))
+    _reassign_with_db(shift, students_of(CONFIG, "extend_hours_students"))
     assert assigned == []
     assert (DEVICE, "2026000001") not in extend_hours._reassigned
 
     # 浴室端清场之后：放回原喷头，并把这一次记成"已成立"
     _clear_door("2026-10-05T23:50:01.000Z")
-    _reassign_with_db(shift, roster(CONFIG, "extend_hours_students"))
+    _reassign_with_db(shift, students_of(CONFIG, "extend_hours_students"))
     assert assigned == [(3, "2026000001")]
     assert (DEVICE, "2026000001") in extend_hours._reassigned
 
@@ -936,7 +936,7 @@ def test_reassign_is_one_shot_per_extension(fresh_db: str, monkeypatch: pytest.M
     又被分配），会话永不空闲、拨回条件永远不成立、滚动重布通宵跑、设备通宵不断电。
     """
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z")
-    students = roster(CONFIG, "extend_hours_students")
+    students = students_of(CONFIG, "extend_hours_students")
     attempts: list[AssignRequest] = []
 
     async def fake_assign(_session: object, _device_id: str, req: AssignRequest) -> object:

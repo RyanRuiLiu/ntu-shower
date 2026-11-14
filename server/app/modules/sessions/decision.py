@@ -43,7 +43,7 @@ class TaskSpec:
     enabled_key: str
     students_key: str
     """名单在配置里、三份各自独立——同一个人可以只开其中一个功能。名单是"允许对谁动手"的
-    唯一出处：不在名单里就什么都不做；凭证也跟着这份名单走（见 [roster]）。"""
+    唯一出处：不在名单里就什么都不做；凭证也跟着这份名单走（见 [students]）。"""
     threshold_key: str
     states: tuple[DoorState, ...]
     """哪些状态下这个任务适用。"""
@@ -133,7 +133,7 @@ class Trigger:
     threshold_s: int
 
 
-def roster(config: JsonObject, key: str) -> dict[str, str]:
+def students_of(config: JsonObject, key: str) -> dict[str, str]:
     """取一份名单：`学号 → 密码`。
 
     **凭证跟着名单走**——三份名单各自完整，所以"在名单里"与"有凭证"是同一件事：不可能
@@ -153,7 +153,7 @@ def roster(config: JsonObject, key: str) -> dict[str, str]:
 
 def password_of(config: JsonObject, task: str, cert_no: str) -> str:
     """这个功能那份名单里，这个学号的凭证；不在名单里就是空的，动作不会下发。"""
-    return roster(config, TASKS_BY_KEY[task].students_key).get(cert_no, "")
+    return students_of(config, TASKS_BY_KEY[task].students_key).get(cert_no, "")
 
 
 def decide(candidate: Candidate, config: JsonObject, now: str) -> Trigger | None:
@@ -167,7 +167,7 @@ def decide(candidate: Candidate, config: JsonObject, now: str) -> Trigger | None
     for spec in TASKS:
         if not config.get(spec.enabled_key):
             continue
-        if candidate.cert_no not in roster(config, spec.students_key):
+        if candidate.cert_no not in students_of(config, spec.students_key):
             continue
         started = _started_at(candidate, spec, config, now)
         if started is None:
@@ -234,6 +234,6 @@ def still_allowed(cert_no: str, task: str, config: JsonObject) -> str | None:
     spec = TASKS_BY_KEY[task]
     if not config.get(spec.enabled_key):
         return "功能已关"
-    if cert_no not in roster(config, spec.students_key):
+    if cert_no not in students_of(config, spec.students_key):
         return "不在名单里"
     return None

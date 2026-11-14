@@ -38,13 +38,13 @@ def background_tasks_status(session: Session = Depends(get_db)) -> schemas.Backg
     config = config_store.global_effective(session)
     tasks = []
     for spec in TASKS:
-        roster = config[spec.students_key]
+        students = config[spec.students_key]
         tasks.append(
             schemas.BackgroundTaskStatus(
                 key=spec.key,
                 title=spec.label,
                 enabled=bool(config[spec.enabled_key]),
-                roster=len(roster) if isinstance(roster, dict) else 0,
+                students_count=len(students) if isinstance(students, dict) else 0,
             )
         )
     return schemas.BackgroundTasksStatus(

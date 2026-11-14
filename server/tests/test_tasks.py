@@ -79,7 +79,7 @@ def test_status_reports_tasks_extending_and_scheduled(
         "auto_settle",
         "extend_hours",
     ]
-    assert all(task["enabled"] is False and task["roster"] == 0 for task in data["tasks"])
+    assert all(task["enabled"] is False and task["students_count"] == 0 for task in data["tasks"])
     assert data["extending"] == []
     assert data["scheduled"] == []
 
