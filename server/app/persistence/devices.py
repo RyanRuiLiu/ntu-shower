@@ -14,14 +14,15 @@ from __future__ import annotations
 import re
 from datetime import datetime
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from ..contracts import DeviceRecord
 from ..core.clock import format_rfc3339
+from ..core.tokens import generate_token, hash_token
+from ..db.base import utcnow
+from ..models.device import Device, DeviceCredential, DeviceLinkEvent, DeviceLog
 from ..models.enums import DeviceLogKind, LinkEvent
-from ..models.identity import Device
-from ..models.ops import DeviceLinkEvent, DeviceLog
 
 LOG_KEEP = 5
 
@@ -236,16 +237,104 @@ __all__: list[str] = [
     "LOG_KEEP",
     "append_device_log",
     "as_record",
+    "authenticate_device",
     "get",
     "get_clock_skew",
     "insert_link_event",
+    "issue",
     "latest_device_log",
     "link_events",
     "list_all",
+    "list_for_device",
     "register",
+    "revoke",
+    "revoke_all",
     "set_clock_skew",
     "set_name",
     "set_order",
     "set_trusted",
     "touch_seen",
 ]
+
+
+def issue(
+    session: Session,
+    device_id: str,
+    label: str = "",
+) -> str | None:
+    """签发一枚令牌，返回明文（只返回这一次）。设备不存在时返回 None。"""
+    if session.get(Device, device_id) is None:
+        return None
+    token = generate_token()
+    session.add(
+        DeviceCredential(
+            device_id=device_id,
+            token_hash=hash_token(token),
+            label=label,
+        )
+    )
+    session.commit()
+    return token
+
+
+def list_for_device(session: Session, device_id: str) -> list[dict[str, object]]:
+    """列出某设备的凭据元数据；明文不存库，所以这里没有 token 字段。"""
+    rows = session.scalars(
+        select(DeviceCredential)
+        .where(DeviceCredential.device_id == device_id, DeviceCredential.revoked_at.is_(None))
+        .order_by(DeviceCredential.id)
+    ).all()
+    return [
+        {
+            "id": int(row.id),
+            "label": row.label,
+            "created_at": row.created_at,
+        }
+        for row in rows
+    ]
+
+
+def revoke_all(session: Session, device_id: str, now: datetime | None = None) -> int:
+    """吊销该设备全部有效凭据，返回吊销条数。轮换前先调用它。"""
+    stamp = now or utcnow()
+    active_ids = session.scalars(
+        select(DeviceCredential.id).where(
+            DeviceCredential.device_id == device_id,
+            DeviceCredential.revoked_at.is_(None),
+        )
+    ).all()
+    if active_ids:
+        session.execute(update(DeviceCredential).where(DeviceCredential.id.in_(active_ids)).values(revoked_at=stamp))
+        session.commit()
+    return len(active_ids)
+
+
+def revoke(session: Session, token: str, now: datetime | None = None) -> bool:
+    """按令牌吊销（运维手里只有明文，没有行 id）。"""
+    row = session.scalars(
+        select(DeviceCredential).where(DeviceCredential.token_hash == hash_token(token))
+    ).one_or_none()
+    if row is None or row.revoked_at is not None:
+        return False
+    row.revoked_at = now or utcnow()
+    session.commit()
+    return True
+
+
+def authenticate_device(session: Session, token: str) -> str | None:
+    """令牌有效则返回设备业务标识，否则 None。
+
+    校验两件事：摘要存在、未吊销。凭据没有过期语义——生命周期就是
+    签发→吊销（enroll 轮换即吊销重发），不存在"到点失效"的第三态。
+    """
+    row = session.execute(
+        select(DeviceCredential, Device.id)
+        .join(Device, DeviceCredential.device_id == Device.id)
+        .where(DeviceCredential.token_hash == hash_token(token))
+    ).first()
+    if row is None:
+        return None
+    credential, business_id = row
+    if credential.revoked_at is not None:
+        return None
+    return str(business_id)

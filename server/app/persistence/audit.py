@@ -17,7 +17,7 @@ from ..contracts import CommandAuditRecord, JobRun
 from ..core import outcomes, reason_codes
 from ..core.clock import format_rfc3339
 from ..db.base import utcnow
-from ..models.enums import ActorKind, CommandStatus, JobOutcome
+from ..models.enums import ActorKind, ApiCallKind, CommandStatus, JobOutcome
 from ..models.ops import ApiCall, CommandAudit
 from ..models.ops import JobRun as JobRunRow
 
@@ -182,7 +182,7 @@ __all__: list[str] = [
 def insert_api_call(
     session: Session,
     *,
-    kind: str,
+    kind: ApiCallKind,
     method: str,
     path: str,
     status_code: int,

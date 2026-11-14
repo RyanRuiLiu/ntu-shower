@@ -31,6 +31,7 @@ from starlette.responses import Response, StreamingResponse
 from app.core.config import settings
 from app.core.logging import log_event, request_id_var, trace_id_var
 from app.db.session import session_scope
+from app.models.enums import ApiCallKind
 from app.persistence import api_calls
 
 #: 需要审计的路径前缀 = 版本化对外面的全部域（/api/v1，见 main.py 的模块注释）。
@@ -99,7 +100,7 @@ def record_gateway(device_id: str, event: str, client_ip: str = "") -> None:
     with session_scope() as session:
         audit_store.insert_api_call(
             session,
-            kind="gateway",
+            kind=ApiCallKind.GATEWAY,
             method="WS",
             path="/gateway/device",
             status_code=status_code,

@@ -918,7 +918,7 @@ def test_tick_clears_the_shift_row_of_a_delisted_device(fresh_db: str, monkeypat
     with session_scope() as session:
         from sqlalchemy import delete
 
-        from app.models.identity import Device
+        from app.models.device import Device
 
         session.execute(delete(Device).where(Device.id == "dev-gone"))
         session.commit()
