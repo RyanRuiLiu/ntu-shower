@@ -217,7 +217,7 @@ def _device_pk() -> int | None:
     from app.models.identity import Device
 
     with session_scope() as session:
-        return session.scalar(select(Device.id).where(Device.device_id == "dev-1"))
+        return session.scalar(select(Device.id).where(Device.id == "dev-1"))
 
 
 def _seed() -> None:

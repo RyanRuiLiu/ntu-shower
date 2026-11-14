@@ -20,7 +20,7 @@ from ..models.settings import ClockShift
 
 
 def _device(session: Session, device_id: str) -> Device | None:
-    return session.scalars(select(Device).where(Device.device_id == device_id)).one_or_none()
+    return session.scalars(select(Device).where(Device.id == device_id)).one_or_none()
 
 
 def record(
@@ -46,18 +46,13 @@ def get(session: Session, device_id: str) -> dict[str, Any] | None:
     if device is None:
         return None
     row = session.scalars(select(ClockShift).where(ClockShift.device_id == device.id)).one_or_none()
-    return as_view(row, device.device_id) if row is not None else None
+    return as_view(row, device.id) if row is not None else None
 
 
 def list_shifted(session: Session) -> list[dict[str, Any]]:
-    """全部还偏着的设备，按拨钟时刻升序。
-
-    关联设备表取回业务标识：外部只认设备上报的字符串，整数主键是本层内部的事。
-    """
+    """全部还偏着的设备，按拨钟时刻升序。"""
     rows = session.execute(
-        select(ClockShift, Device.device_id)
-        .join(Device, ClockShift.device_id == Device.id)
-        .order_by(ClockShift.shifted_at)
+        select(ClockShift, Device.id).join(Device, ClockShift.device_id == Device.id).order_by(ClockShift.shifted_at)
     ).all()
     return [as_view(row, business_id) for row, business_id in rows]
 

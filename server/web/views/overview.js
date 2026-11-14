@@ -392,7 +392,7 @@ function renderTaskBoard(data) {
   const scheduledByTask = {}
   for (const row of data.scheduled) (scheduledByTask[row.task] ||= []).push(row)
 
-  const taskSections = data.tasks.map((task) => {
+  const taskSections = data.jobs.map((task) => {
     const rows = scheduledByTask[task.key] || []
     const nextAt = rows.length ? rows.map((row) => row.at).sort()[0] : ''
     const head = `

@@ -74,7 +74,7 @@ class JobsStatus(TypedDict):
     `extend_hours` 的落库状态，已排定是调度器内存里的定时器。
     """
 
-    tasks: list[JobStatus]
+    jobs: list[JobStatus]
     extending: list[ExtendingDevice]
     scheduled: list[ScheduledAction]
 

@@ -164,20 +164,31 @@ def test_derived_segment_and_touch_branches(session: Session) -> None:
     assert doors.run_started_at(session, "dev-a", 3, "c3", 300).endswith("Z")
 
 
-def test_missing_device_is_a_noop(session: Session) -> None:
+def test_missing_device_reads_are_empty(session: Session) -> None:
+    """未登记设备的读操作一律空结果；写操作被外键拒绝（不变量落在存储层）。"""
+    import pytest
+    from sqlalchemy.exc import IntegrityError
+
     assert doors.get_all_live(session, "missing") == {}
     assert doors.get_door_live(session, "missing", 1) is None
     assert doors.get_occupied_by_cert(session, "missing", "c") is None
-    doors.upsert_door_live(session, "missing", 1, DoorState.FREE, reported_at=T0)
-    assert doors.insert_snapshot(session, "missing", "s", None, doors_service.SOURCE_STARTUP, T0, "", T0, []) is False
-    assert doors.insert_event(session, T0, "missing", 1, DoorState.FREE, DoorState.FREE, 0, "", 0) == 0
-    assert doors.open_session(session, "missing", 1, 0, "", T0, "observed") == 0
     assert doors.get_session(session, 9999) is None
     assert doors.list_open_sessions_of(session, "missing") == []
     assert doors.run_started_at(session, "missing", 1, "", 300) == ""
     assert doors.get_open_segment(session, "missing", 1) is None
     assert doors.latest_segment_opened_at(session, "missing", 1) == ""
-    assert doors.open_segment(session, 1, "missing", 1, T0, "") == 0
-    assert doors.add_derived_segment(session, 1, "missing", 1, T0, T0, 0, "") == 0
     assert doors.latest_usage_by_door(session) == {}
     assert doors.list_doors(session) == []
+
+    with pytest.raises(IntegrityError):
+        doors.upsert_door_live(session, "missing", 1, DoorState.FREE, reported_at=T0)
+    session.rollback()
+    with pytest.raises(IntegrityError):
+        doors.insert_event(session, T0, "missing", 1, DoorState.FREE, DoorState.FREE, 0, "", 0)
+    session.rollback()
+    with pytest.raises(IntegrityError):
+        doors.open_session(session, "missing", 1, 0, "", T0, "observed")
+    session.rollback()
+    with pytest.raises(IntegrityError):
+        doors.insert_snapshot(session, "missing", "s", None, doors_service.SOURCE_STARTUP, T0, "", T0, [])
+    session.rollback()
