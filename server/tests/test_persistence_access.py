@@ -45,13 +45,13 @@ def test_put_updates_without_touching_kind_or_created_at(session: Session) -> No
         session,
         "web-002",
         IdentityKind.OPENID,
-        ["admin", "stats"],
+        ["admin"],
         label="b",
         device_scope=["dev-1"],
     )
     assert second["kind"] is IdentityKind.WEB
     assert second["created_at"] == first["created_at"]
-    assert second["capabilities"] == ["admin", "stats"]
+    assert second["capabilities"] == ["admin"]
     assert second["device_scope"] == ["dev-1"]
     assert second["label"] == "b"
 

@@ -12,8 +12,6 @@ URL 只表达资源，不表达权限——谁能调用由能力位守卫决定�
 - /api/v1/identities                 身份域：名单与签发/编辑/撤销 admin；`/identities/me`
                                       是自己的记录（凭 Bearer 凭据）
 - /api/v1/tasks                      后台任务登记：按 tasks 能力位增删某个学号的登记
-- /api/v1/stats                      浴室统计：按 stats 能力位读一台设备的聚合、某一天的
-                                     状态序列（客户端本地重放）、个人的跨设备统计
 - /api/v1/ota、/ota/manifest         发布域：清单与下载公开，发布/下架/重推 admin；
                                       manifest 为设备硬编码契约（无前缀，路径冻结）
 - /api/v1/audit                      审计域（admin）
@@ -62,7 +60,6 @@ from .modules.ota.routes import device_router as ota_device_router
 from .modules.ota.routes import router as ota_router
 from .modules.sessions import scheduler as sessions_scheduler
 from .modules.sessions.routes import router as sessions_router
-from .modules.stats.routes import router as stats_router
 from .modules.status_line import service as status_line_service
 from .modules.tasks.routes import admin_router as tasks_admin_router
 from .modules.tasks.routes import router as tasks_router
@@ -164,7 +161,6 @@ def create_app() -> FastAPI:
     app.include_router(identities_admin_router)
     app.include_router(tasks_router)
     app.include_router(tasks_admin_router)
-    app.include_router(stats_router)
     app.include_router(voice_router)
     app.include_router(water_router)
     app.include_router(voice_admin_router)

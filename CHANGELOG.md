@@ -33,6 +33,9 @@
 
 ### Removed
 
+- 小程序统计功能全链删除（业主裁定 2026-11-14，功能早已下线）：`/api/v1/stats/*` 三条
+  路由、stats 模块（1710 行）、`stats` 能力位、persistence 层 4 个 stats 专属取数函数；
+  ADR-0004 标 Deprecated 留档。
 - 无消费者的死面整体移除：`ui.scroll` 动作三端全链（含唯一配置键 `ui_swipe_duration_ms`）、
   `power.schedule` HTTP 端点（动作保留，延长服务在用）、`DELETE /devices/{id}/config` 全链、
   `SOURCE_IMPORT`、`SnapshotSource` 枚举、`adhoc_problem`、v1 遗留裸 sqlite3 层 `core/db.py`。
