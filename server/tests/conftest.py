@@ -185,7 +185,7 @@ def fresh_db(
 
 @pytest.fixture
 def admin_headers(fresh_db: str) -> dict[str, str]:
-    """管理台调用方：全权密钥（*）——面板即操作台，代操作全部动作。"""
+    """管理台调用方：全部权限密钥（*）——面板即操作台，代操作全部动作。"""
     from app.auth import crud
     from app.db.session import Database
 

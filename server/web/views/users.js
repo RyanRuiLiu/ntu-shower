@@ -57,18 +57,33 @@ function readScopeChecks(container) {
   return [...container.querySelectorAll('input[data-scope]:checked')].map((input) => input.dataset.scope)
 }
 
-/** 权限勾选组（登记与编辑密钥共用；`*` 全权也列出，签发时二次确认——全权钥只给自己人）。 */
+/** 权限勾选组（登记与编辑密钥共用）。勾「全部权限」即禁用并清空具体项，取消后恢复——GitHub 同款互斥。 */
 function scopeChecksHtml(selected) {
   const checks = scopes
     .map((item) => {
       const on = selected.includes(item.scope)
+      const wildcard = item.scope === '*' ? ' data-wildcard="1"' : ' data-specific="1"'
       return `<label class="field-row">
-          <input type="checkbox" data-scope="${esc(item.scope)}" ${on ? 'checked' : ''}>
+          <input type="checkbox" data-scope="${esc(item.scope)}"${wildcard} ${on ? 'checked' : ''}>
           <span>${esc(item.label)}</span>
         </label>`
     })
     .join('')
   return `<div class="btn-row">${checks}</div>`
+}
+
+/** 通配与具体权限的互斥绑定：渲染勾选组之后调一次。 */
+function bindWildcardToggle(container) {
+  const wildcard = container.querySelector('input[data-wildcard]')
+  const specifics = [...container.querySelectorAll('input[data-specific]')]
+  const apply = () => {
+    specifics.forEach((input) => {
+      input.disabled = wildcard.checked
+      if (wildcard.checked) input.checked = false
+    })
+  }
+  wildcard.addEventListener('change', apply)
+  apply()
 }
 
 function render() {
@@ -247,16 +262,18 @@ async function submitUserForm() {
  * 签发（POST）与编辑（PUT）密钥：权限与设备作用域都附在这枚钥上。
  *
  * 签发的明文只在本次响应出现一次；编辑不碰令牌，保存即生效。权限至少一个；
- * 勾选 `*` 全权时二次确认。成功后刷新该用户的密钥列表。
+ * 勾选「全部权限」时二次确认并规范化为 ["*"]。成功后刷新该用户的密钥列表。
  */
 async function submitKeyForm() {
   if (keysUser === null) return
-  const selected = readScopeChecks($('keyScopeBox'))
-  if (selected.length === 0) {
+  const checked = readScopeChecks($('keyScopeBox'))
+  if (checked.length === 0) {
     report('keyResult', '失败 · 至少选择一个权限', 'err')
     return
   }
-  if (selected.includes('*') && !window.confirm('签发全权密钥？它将包含现在与未来的一切权限，只应发给自己的脚本与内部工具。')) {
+  // 通配归一：勾了 * 就只存 *，混着具体权限是两份语义
+  const selected = checked.includes('*') ? ['*'] : checked
+  if (selected[0] === '*' && !window.confirm('签发「全部权限」密钥？它将包含现在与未来新增的一切权限，只应发给自己的脚本与内部工具。')) {
     return
   }
   const deviceScope = readScopeEditor($('keyFormScope'))
@@ -315,6 +332,7 @@ function applyKeyFormMode() {
 function fillKeyForm(key) {
   $('inKeyName').value = key.name || ''
   $('keyScopeBox').innerHTML = scopeChecksHtml(key.scopes || [])
+  bindWildcardToggle($('keyScopeBox'))
   $('keyFormScope').innerHTML = scopeEditorHtml(store.devices, key.device_scope || [])
   $('editingKeyValue').textContent = `#${key.id}（${key.token_hint}）`
 }
@@ -323,6 +341,7 @@ function fillKeyForm(key) {
 function clearKeyForm() {
   $('inKeyName').value = ''
   $('keyScopeBox').innerHTML = scopeChecksHtml([])
+  bindWildcardToggle($('keyScopeBox'))
   $('keyFormScope').innerHTML = scopeEditorHtml(store.devices, ['*'])
 }
 
@@ -464,6 +483,7 @@ export const usersView = {
           keysUser = username
           keys = (await api.userKeys(username)).keys
           $('keyScopeBox').innerHTML = scopeChecksHtml([])
+          bindWildcardToggle($('keyScopeBox'))
           $('keyFormScope').innerHTML = scopeEditorHtml(store.devices, ['*'])
           render()
           return
