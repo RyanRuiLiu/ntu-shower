@@ -5,6 +5,11 @@ on:
     branches: [main]
     tags: ["v*"]
   pull_request:
+    # 镜像内容只有 server/ 与 compose
+    paths:
+      - "server/**"
+      - "compose.yaml"
+      - ".github/workflows/docker.yml"
 
 jobs:
   docker:
