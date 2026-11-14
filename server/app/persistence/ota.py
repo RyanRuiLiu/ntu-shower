@@ -21,7 +21,7 @@ from ..models.ota import OtaRelease, OtaReleaseInstall
 
 
 def _device(session: Session, device_id: str) -> Device | None:
-    return session.scalars(select(Device).where(Device.device_id == device_id)).one_or_none()
+    return session.scalars(select(Device).where(Device.id == device_id)).one_or_none()
 
 
 def _targets(release: OtaRelease, device_id: str) -> bool:
@@ -70,7 +70,7 @@ def latest_for(session: Session, device_id: str, current_version_code: int) -> J
             select(OtaRelease.version)
             .join(OtaReleaseInstall, OtaReleaseInstall.release_id == OtaRelease.id)
             .join(Device, OtaReleaseInstall.device_id == Device.id)
-            .where(Device.device_id == device_id)
+            .where(Device.id == device_id)
         ).all()
     )
     for release in releases:
@@ -109,7 +109,7 @@ def is_installed(session: Session, device_id: str, version: str) -> bool:
         select(OtaReleaseInstall.release_id)
         .join(OtaRelease, OtaReleaseInstall.release_id == OtaRelease.id)
         .join(Device, OtaReleaseInstall.device_id == Device.id)
-        .where(OtaRelease.version == version, Device.device_id == device_id)
+        .where(OtaRelease.version == version, Device.id == device_id)
     ).first()
     return row is not None
 

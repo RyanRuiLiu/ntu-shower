@@ -207,7 +207,7 @@ def test_corrupt_capabilities_are_read_as_empty(fresh_db: str) -> None:
     device_link.register_device_raw("dev-bad-cap", capabilities={"not": "a list"}, ip="x")
 
     with device_link.db() as session:
-        session.execute(text("UPDATE devices SET capabilities = '[\"x\"]' WHERE device_id = :d"), {"d": DEVICE_ID})
+        session.execute(text("UPDATE devices SET capabilities = '[\"x\"]' WHERE id = :d"), {"d": DEVICE_ID})
         session.commit()
         assert devices_store.get(session, DEVICE_ID)["capabilities"] == ["x"]
         assert devices_store.get(session, "dev-bad-cap")["capabilities"] == []
@@ -554,7 +554,7 @@ def test_devices_fall_back_to_natural_name_order_when_sort_orders_tie(
         with device_link.db() as session:
             assert devices_store.set_name(session, device_id, name)
             # 全部设备同序 → 落回自然序（新表）
-            session.execute(text("UPDATE devices SET sort_order = 0 WHERE device_id = :d"), {"d": device_id})
+            session.execute(text("UPDATE devices SET sort_order = 0 WHERE id = :d"), {"d": device_id})
             session.commit()
 
     body = client.get("/api/v1/devices", headers=admin_headers).json()
@@ -631,7 +631,7 @@ def test_link_events_record_the_reasons(client: TestClient, admin_headers: dict[
                 session.execute(
                     select(DeviceLinkEvent.event, DeviceLinkEvent.reason)
                     .join(Device, Device.id == DeviceLinkEvent.device_id)
-                    .where(Device.device_id == device_id)
+                    .where(Device.id == device_id)
                     .order_by(DeviceLinkEvent.id)
                 )
             )
@@ -650,7 +650,7 @@ def test_link_events_record_the_reasons(client: TestClient, admin_headers: dict[
                 session.execute(
                     select(DeviceLinkEvent.event, DeviceLinkEvent.reason)
                     .join(Device, Device.id == DeviceLinkEvent.device_id)
-                    .where(Device.device_id == device_id)
+                    .where(Device.id == device_id)
                     .order_by(DeviceLinkEvent.id)
                 )
             )

@@ -11,7 +11,6 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models.identity import Device
 from ..models.settings import AppSettings, DeviceConfig
 
 GLOBAL_ROW_ID = 1
@@ -38,19 +37,18 @@ def put_global(session: Session, revision: int, values: dict[str, Any]) -> None:
 
 
 def get_device(session: Session, device_id: str) -> tuple[int, dict[str, Any]] | None:
-    row = session.scalars(select(DeviceConfig).where(DeviceConfig.device_key == device_id)).one_or_none()
+    row = session.scalars(select(DeviceConfig).where(DeviceConfig.device_id == device_id)).one_or_none()
     if row is None:
         return None
     return (int(row.revision), dict(row.config))
 
 
 def put_device(session: Session, device_id: str, revision: int, values: dict[str, Any]) -> None:
-    row = session.scalars(select(DeviceConfig).where(DeviceConfig.device_key == device_id)).one_or_none()
+    row = session.scalars(select(DeviceConfig).where(DeviceConfig.device_id == device_id)).one_or_none()
     if row is None:
         session.add(
             DeviceConfig(
-                device_id=session.scalar(select(Device.id).where(Device.device_id == device_id)),
-                device_key=device_id,
+                device_id=device_id,
                 revision=revision,
                 config=values,
             )

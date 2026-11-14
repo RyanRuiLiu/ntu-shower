@@ -72,11 +72,7 @@ class VoiceDelivery(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     event_key: Mapped[str] = mapped_column(String(128), unique=True)
     rule_id: Mapped[int] = mapped_column(ForeignKey("voice_rules.id", ondelete="RESTRICT"))
-    device_id: Mapped[int | None] = mapped_column(
-        ForeignKey("devices.id", ondelete="CASCADE"), default=None, index=True
-    )
-    #: 调用目标的文本业务键留底：投递记录的事实性不依赖设备是否在册
-    device_key: Mapped[str] = mapped_column(String(64), default="")
+    device_id: Mapped[str | None] = mapped_column(String(64), default=None, index=True)
     door_no: Mapped[int] = mapped_column(Integer)
     cert_no: Mapped[str] = mapped_column(String(32))
     event: Mapped[str] = mapped_column(String(32))

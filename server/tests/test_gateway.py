@@ -510,7 +510,7 @@ def test_link_events_record_connect_and_disconnect(client: TestClient, fresh_db:
                 session.scalars(
                     select(DeviceLinkEvent.event)
                     .join(Device, Device.id == DeviceLinkEvent.device_id)
-                    .where(Device.device_id == device_id)
+                    .where(Device.id == device_id)
                     .order_by(DeviceLinkEvent.id)
                 )
             )
@@ -543,7 +543,7 @@ def test_reconnect_does_not_record_a_false_offline(client: TestClient, fresh_db:
             session.scalars(
                 select(DeviceLinkEvent.event)
                 .join(Device, Device.id == DeviceLinkEvent.device_id)
-                .where(Device.device_id == device_id)
+                .where(Device.id == device_id)
                 .order_by(DeviceLinkEvent.id)
             )
         )
@@ -689,7 +689,7 @@ def test_device_log_upload_keeps_only_recent_per_kind(
             select(func.count())
             .select_from(DeviceLog)
             .join(Device, Device.id == DeviceLog.device_id)
-            .where(Device.device_id == "dev-log-trim", DeviceLog.kind == DeviceLogKind.DEVICE)
+            .where(Device.id == "dev-log-trim", DeviceLog.kind == DeviceLogKind.DEVICE)
         )
     assert logs_n == 5
 
