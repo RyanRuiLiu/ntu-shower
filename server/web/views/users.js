@@ -22,6 +22,7 @@
  */
 import { api } from '../core/api.js'
 import { copyText } from '../core/clipboard.js'
+import { fmtFullDateTime } from '../core/clock.js'
 import { codeCell } from '../core/cells.js'
 import { problemText, report } from '../core/outcome.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
@@ -36,6 +37,8 @@ let editingUser = null
 /** 密钥面板当前展开的用户；null 即收起。 */
 let keysUser = null
 let keys = []
+/** 密钥编辑态：正在编辑的密钥 id；null 即签发模式。 */
+let editingKeyId = null
 
 function scopeText(scope) {
   if (!scope || scope.length === 0) return PLACEHOLDER
@@ -54,10 +57,9 @@ function readScopeChecks(container) {
   return [...container.querySelectorAll('input[data-scope]:checked')].map((input) => input.dataset.scope)
 }
 
-/** 权限勾选组（签发密钥用；`*` 全权不给表单项——Stripe 对无限制密钥的立场）。 */
+/** 权限勾选组（登记与编辑密钥共用；`*` 全权也列出，签发时二次确认——全权钥只给自己人）。 */
 function scopeChecksHtml(selected) {
   const checks = scopes
-    .filter((item) => item.scope !== '*')
     .map((item) => {
       const on = selected.includes(item.scope)
       return `<label class="field-row">
@@ -86,7 +88,7 @@ function render() {
         <td>${esc(item.name || PLACEHOLDER)}</td>
         <td>${state}</td>
         <td>${item.has_password ? '可登录' : '<span class="muted">仅密钥</span>'}</td>
-        <td>${esc(item.last_login_at || PLACEHOLDER)}</td>
+        <td>${fmtFullDateTime(item.last_login_at)}</td>
         <td class="col-actions">
           <div class="btn-row">
             <button type="button" class="btn btn-ghost btn-sm" data-act="edit">编辑</button>
@@ -118,10 +120,17 @@ function render() {
         <td>${scopeBadges(key.scopes)}</td>
         <td title="${esc((key.device_scope || []).join(', '))}">${esc(scopeText(key.device_scope))}</td>
         <td>${codeCell(key.token_hint)}</td>
-        <td>${esc(key.last_used_at || PLACEHOLDER)}</td>
+        <td>${fmtFullDateTime(key.last_used_at)}</td>
         <td>${state}</td>
         <td class="col-actions">
-          ${key.revoked_at ? '' : `<button type="button" class="btn btn-danger btn-sm" data-act="revoke" data-key="${key.id}">吊销</button>`}
+          ${
+            key.revoked_at
+              ? ''
+              : `<div class="btn-row">
+                  <button type="button" class="btn btn-ghost btn-sm" data-act="edit-key" data-key="${key.id}">编辑</button>
+                  <button type="button" class="btn btn-danger btn-sm" data-act="revoke" data-key="${key.id}">吊销</button>
+                </div>`
+          }
         </td>
       </tr>`
     })
@@ -235,9 +244,10 @@ async function submitUserForm() {
 }
 
 /**
- * 签发密钥：权限与设备作用域都附在这枚钥上，明文只在本次响应出现一次。
+ * 签发（POST）与编辑（PUT）密钥：权限与设备作用域都附在这枚钥上。
  *
- * 权限至少一个；指定设备作用域至少一台。签发成功后刷新该用户的密钥列表。
+ * 签发的明文只在本次响应出现一次；编辑不碰令牌，保存即生效。权限至少一个；
+ * 勾选 `*` 全权时二次确认。成功后刷新该用户的密钥列表。
  */
 async function submitKeyForm() {
   if (keysUser === null) return
@@ -246,18 +256,30 @@ async function submitKeyForm() {
     report('keyResult', '失败 · 至少选择一个权限', 'err')
     return
   }
+  if (selected.includes('*') && !window.confirm('签发全权密钥？它将包含现在与未来的一切权限，只应发给自己的脚本与内部工具。')) {
+    return
+  }
   const deviceScope = readScopeEditor($('keyFormScope'))
   if (deviceScope === null) {
     report('keyResult', '失败 · 设备作用域至少选择一台设备，或选择全部设备', 'err')
     return
   }
+  const payload = { name: $('inKeyName').value.trim(), scopes: selected, device_scope: deviceScope }
+  if (editingKeyId !== null) {
+    report('keyResult', '正在保存…', 'info')
+    try {
+      await api.updateKey(keysUser, editingKeyId, payload)
+      report('keyResult', '已保存', 'ok')
+      exitKeyEdit()
+      await reload()
+    } catch (error) {
+      report('keyResult', problemText(error), 'err')
+    }
+    return
+  }
   report('keyResult', '正在签发…', 'info')
   try {
-    const issued = await api.createKey(keysUser, {
-      name: $('inKeyName').value.trim(),
-      scopes: selected,
-      device_scope: deviceScope,
-    })
+    const issued = await api.createKey(keysUser, payload)
     showIssuedSecret(issued.token, '已签发：明文仅显示一次，请立即保存')
     $('inKeyName').value = ''
     await reload()
@@ -279,6 +301,35 @@ function showIssuedSecret(token, message) {
 
 function copyIssued() {
   copyText($('issuedValue').value, { fallbackInputId: 'issuedValue' })
+}
+
+/** 密钥表单双模式：签发（POST）与编辑（PUT，令牌不变）共用同一组控件。 */
+function applyKeyFormMode() {
+  const editing = editingKeyId !== null
+  $('btnIssueKey').textContent = editing ? '保存修改' : '签发密钥'
+  $('btnCancelKeyEdit').hidden = !editing
+  $('editingKeyRow').hidden = !editing
+}
+
+/** 把一枚密钥的值填入表单（编辑模式的控件内容）。 */
+function fillKeyForm(key) {
+  $('inKeyName').value = key.name || ''
+  $('keyScopeBox').innerHTML = scopeChecksHtml(key.scopes || [])
+  $('keyFormScope').innerHTML = scopeEditorHtml(store.devices, key.device_scope || [])
+  $('editingKeyValue').textContent = `#${key.id}（${key.token_hint}）`
+}
+
+/** 密钥表单回签发模式并清空。 */
+function clearKeyForm() {
+  $('inKeyName').value = ''
+  $('keyScopeBox').innerHTML = scopeChecksHtml([])
+  $('keyFormScope').innerHTML = scopeEditorHtml(store.devices, ['*'])
+}
+
+function exitKeyEdit() {
+  editingKeyId = null
+  applyKeyFormMode()
+  clearKeyForm()
 }
 
 let dispose = disposer()
@@ -344,6 +395,10 @@ export const usersView = {
         <div class="panel-body">
           <div id="keysBody"></div>
           <div id="keysForm" hidden>
+            <div class="field" id="editingKeyRow" hidden>
+              <span class="field-label">正在编辑（令牌不变，保存即生效）</span>
+              <code class="mono" id="editingKeyValue"></code>
+            </div>
             <div class="field">
               <label for="inKeyName">密钥名称（用途）</label>
               <input id="inKeyName" type="text">
@@ -358,6 +413,7 @@ export const usersView = {
             </div>
             <div class="btn-row">
               <button type="button" class="btn btn-sm" id="btnIssueKey">签发密钥</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnCancelKeyEdit" hidden>取消编辑</button>
             </div>
             <div class="field" id="issuedSecret" hidden>
               <label for="issuedValue">密钥（Authorization: Bearer 用；仅显示一次，确认保存后不再显示）</label>
@@ -380,6 +436,7 @@ export const usersView = {
     dispose.add(listen($('btnCreate'), 'click', submitUserForm))
     dispose.add(listen($('btnCancelEdit'), 'click', exitEdit))
     dispose.add(listen($('btnIssueKey'), 'click', submitKeyForm))
+    dispose.add(listen($('btnCancelKeyEdit'), 'click', () => { exitKeyEdit(); render() }))
     dispose.add(listen($('btnCopyIssued'), 'click', copyIssued))
     dispose.add(
       listen($('btnIssuedSaved'), 'click', () => {
@@ -424,15 +481,26 @@ export const usersView = {
       }),
     )
 
-    // 密钥表事件委托：吊销单枚
+    // 密钥表事件委托：编辑与吊销单枚
     dispose.add(
       listen($('keysBody'), 'click', async (event) => {
-        const button = event.target.closest('button[data-act="revoke"]')
+        const button = event.target.closest('button[data-act]')
         if (!button) return
+        if (button.dataset.act === 'edit-key') {
+          const key = keys.find((row) => row.id === Number(button.dataset.key))
+          if (!key) return
+          editingKeyId = key.id
+          applyKeyFormMode()
+          fillKeyForm(key)
+          report('keyResult', '', 'info')
+          return
+        }
+        if (button.dataset.act !== 'revoke') return
         if (!window.confirm('吊销这枚密钥？该枚下一次请求即失效，其他密钥不受影响。')) return
         try {
           await api.revokeKey(keysUser, button.dataset.key)
           toast('已吊销')
+          if (editingKeyId === Number(button.dataset.key)) exitKeyEdit()
           keys = (await api.userKeys(keysUser)).keys
           render()
         } catch (error) {
