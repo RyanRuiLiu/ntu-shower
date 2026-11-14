@@ -16,10 +16,11 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 from tests import frames
 
+from app.auth import crud
 from app.core.config import settings
 from app.db.session import Database
 from app.main import SESSION_COOKIE_NAME
-from app.persistence import devices, principals
+from app.persistence import devices
 
 USER = "admin-web"
 PASSWORD = "correct-horse-battery-staple"
@@ -30,7 +31,7 @@ def account(fresh_db: str) -> None:
     database = Database(settings.effective_database_url)
     try:
         with database.new_session() as session:
-            principals.create_account(session, USER, PASSWORD, ["admin", "session"], ["*"])
+            crud.create_user(session, USER, password=PASSWORD)
     finally:
         database.dispose()
 
@@ -45,13 +46,14 @@ def test_login_rejects_wrong_password(client: TestClient, account: None) -> None
 def test_login_sets_cookie_and_me_returns_account(client: TestClient, account: None) -> None:
     resp = client.post("/api/v1/auth/login", json={"username": USER, "password": PASSWORD})
     assert resp.status_code == 200
-    assert resp.json()["capabilities"] == ["admin", "session"]
+    assert resp.json()["username"] == USER
+    assert resp.json()["name"] == ""
     assert SESSION_COOKIE_NAME in resp.cookies
 
     me = client.get("/api/v1/auth/me")
     assert me.status_code == 200
     assert me.json()["username"] == USER
-    assert "password_hash" not in me.json()
+    assert "hashed_password" not in me.json()
 
 
 def test_logout_drops_the_session(client: TestClient, account: None) -> None:
@@ -84,7 +86,7 @@ def test_expired_token_is_rejected(client: TestClient, account: None, monkeypatc
     with monkeypatch.context() as m:
         m.setattr(
             "itsdangerous.timed.TimestampSigner.get_timestamp",
-            lambda _self: int(time.time()) - settings.session_ttl_seconds - 60,
+            lambda _self: int(time.time()) - settings.session_idle_seconds - 60,
         )
         # sign(bytes) 返回 bytes，与 SessionMiddleware 落 Cookie 前的 decode 一致
         stale = TimestampSigner(settings.session_secret).sign(payload).decode("ascii")
@@ -93,13 +95,31 @@ def test_expired_token_is_rejected(client: TestClient, account: None, monkeypatc
     assert client.get("/api/v1/auth/me").status_code == 401
 
 
-def test_session_cookie_grants_admin_capability(client: TestClient, account: None) -> None:
-    """会话身份走的是同一条守卫：能进管理端点，不需要另带 Bearer 凭据。"""
-    assert client.get("/api/v1/identities").status_code == 401
+def test_session_cookie_grants_operator_access(client: TestClient, account: None) -> None:
+    """会话通道是操作台：能进用户域端点（scopes 恒 *），不需要另带 Bearer 密钥。"""
+    assert client.get("/api/v1/users").status_code == 401
     client.post("/api/v1/auth/login", json={"username": USER, "password": PASSWORD})
-    resp = client.get("/api/v1/identities")
+    resp = client.get("/api/v1/users")
     assert resp.status_code == 200
-    assert "capabilities" in resp.json()
+    assert "users" in resp.json()
+
+    me = client.get("/api/v1/users/me")
+    assert me.status_code == 200
+    assert me.json()["scopes"] == ["*"]
+    assert me.json()["key_name"] is None
+
+
+def test_absolute_timeout_is_enforced_server_side(
+    client: TestClient, account: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OWASP absolute timeout：距 first_iat 超过 absolute 秒即失效，即使 Cookie 未过期。"""
+    client.post("/api/v1/auth/login", json={"username": USER, "password": PASSWORD})
+    client.get("/api/v1/auth/me")  # 补齐 first_iat（登录时已写入）
+
+    # 把会话字典里的 first_iat 拨回绝对上限之外：直接构造签名 Cookie 太绕，
+    # 用真实中间件语义在服务端验证——把 settings 的 absolute 收紧到已超过。
+    monkeypatch.setattr(settings, "session_absolute_seconds", 0)
+    assert client.get("/api/v1/auth/me").status_code == 401
 
 
 def test_disabled_account_cannot_keep_a_session(client: TestClient, account: None) -> None:
@@ -107,7 +127,7 @@ def test_disabled_account_cannot_keep_a_session(client: TestClient, account: Non
     database = Database(settings.effective_database_url)
     try:
         with database.new_session() as session:
-            assert principals.set_disabled(session, USER, True) is True
+            assert crud.update_user(session, USER, disabled=True) is not None
     finally:
         database.dispose()
     assert client.get("/api/v1/auth/me").status_code == 401

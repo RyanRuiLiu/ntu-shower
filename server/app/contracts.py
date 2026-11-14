@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing_extensions import TypedDict
 
 from .core.protocol import JsonObject
-from .models.enums import DoorState, IdentityKind
+from .models.enums import DoorState
 
 
 class CommandOutcome(TypedDict):
@@ -169,23 +169,57 @@ class ReleaseRecord(TypedDict):
     created_at: str
 
 
-class IdentityRecord(TypedDict):
-    """一条标识记录，登记、签发、名单、查询自身四处共用同一形状。"""
+class Caller(TypedDict):
+    """一次请求的调用方：守卫判定的唯一输入形状。
 
-    identity: str
-    kind: IdentityKind
-    capabilities: list[str]
+    会话通道（面板操作者）与密钥通道（外部调用方）各解析一次，产出同一个形状，
+    守卫逻辑不分叉。scopes 与 device_scope 会话通道恒 `["*"]`（面板即操作台），
+    密钥通道取该枚密钥上的值——权限附在密钥上，不附在身份上。
+    """
+
+    username: str
+    name: str
+    scopes: list[str]
     device_scope: list[str]
-    label: str
+    key_name: str | None
+    """本请求用的密钥名；会话通道为 None。"""
+
+
+class UserRecord(TypedDict):
+    """一行用户记录：名单、登录响应与密钥签发处共用同一形状。"""
+
+    id: int
+    username: str
+    name: str
+    disabled: bool
+    has_password: bool
+    last_login_at: str
     created_at: str
 
 
+class KeyRecord(TypedDict):
+    """一枚密钥的记录：签发、列表、解析三处共用同一形状。"""
+
+    id: int
+    user_id: int
+    name: str
+    scopes: list[str]
+    device_scope: list[str]
+    token_hint: str
+    """摘要前 12 位：与审计 actor 字段同值，密钥↔审计行按它对账。"""
+    last_used_at: str
+    created_at: str
+    revoked_at: str
+
+
 __all__: list[str] = [
+    "Caller",
     "CommandAuditRecord",
     "CommandOutcome",
     "DeviceRecord",
     "DoorView",
-    "IdentityRecord",
     "JobRun",
+    "KeyRecord",
     "ReleaseRecord",
+    "UserRecord",
 ]

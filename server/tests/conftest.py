@@ -20,8 +20,8 @@ from fastapi.testclient import TestClient
 
 from app.core import config as config_module
 
-ADMIN_IDENTITY = "admin-identity-0001"
-OPS_IDENTITY = "test-identity"
+ADMIN_USER = "admin"
+OPS_USER = "ops-user"
 TRUSTED_DEVICE_ID = "dev-test-0001"
 
 
@@ -118,6 +118,14 @@ def _schema_template(tmp_path_factory: pytest.TempPathFactory) -> str:
     return path
 
 
+@pytest.fixture(scope="session")
+def openapi_spec() -> dict:
+    """对外契约（/openapi.json）：test_permissions 以它对账字典与端点映射。"""
+    from app.main import app
+
+    return app.openapi()
+
+
 @pytest.fixture
 def fresh_db(
     tmp_path: Path,
@@ -160,41 +168,33 @@ def fresh_db(
 
 @pytest.fixture
 def admin_headers(fresh_db: str) -> dict[str, str]:
-    """管理台调用方：admin 之外还持 session/photo——管理台要代操作用户动作。"""
+    """管理台调用方：全权密钥（*）——面板即操作台，代操作全部动作。"""
+    from app.auth import crud
     from app.db.session import Database
-    from app.models.enums import IdentityKind
-    from app.persistence import principals as principals_store
 
     database = Database(f"sqlite:///{Path(fresh_db).as_posix()}")
     try:
         with database.new_session() as session:
-            principals_store.put(
-                session,
-                ADMIN_IDENTITY,
-                IdentityKind.WEB,
-                ["admin", "session", "photo"],
-                "测试管理员",
-                ["*"],
-            )
-            token = principals_store.issue_token(session, ADMIN_IDENTITY)
+            crud.create_user(session, ADMIN_USER, "测试管理员")
+            issued = crud.issue_key(session, ADMIN_USER, "测试密钥", ["*"], ["*"])
     finally:
         database.dispose()
-    assert token is not None
+    assert issued is not None
+    _, token = issued
     return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture
 def ops_headers(fresh_db: str) -> dict[str, str]:
-    """用户面调用方：session + photo 能力位，作用域通配。
+    """用户面调用方：sessions:write + devices:photo，作用域通配。
 
     同时登记一台已信任设备 dev-test-0001：用户面操作类接口的守卫链要求设备
     存在且已信任，需要现成目标的用例直接用常量 TRUSTED_DEVICE_ID。
     """
+    from app.auth import crud
     from app.db.base import utcnow
     from app.db.session import Database
-    from app.models.enums import IdentityKind
     from app.persistence import devices as devices_store
-    from app.persistence import principals as principals_store
 
     database = Database(f"sqlite:///{Path(fresh_db).as_posix()}")
     try:
@@ -211,11 +211,12 @@ def ops_headers(fresh_db: str) -> dict[str, str]:
                 seen_at=utcnow(),
             )
             devices_store.set_trusted(session, TRUSTED_DEVICE_ID, True)
-            principals_store.put(session, OPS_IDENTITY, IdentityKind.WEB, ["session", "photo"], "测试用", ["*"])
-            token = principals_store.issue_token(session, OPS_IDENTITY)
+            crud.create_user(session, OPS_USER, "测试用")
+            issued = crud.issue_key(session, OPS_USER, "测试密钥", ["sessions:write", "devices:photo"], ["*"])
     finally:
         database.dispose()
-    assert token is not None
+    assert issued is not None
+    _, token = issued
     return {"Authorization": f"Bearer {token}"}
 
 
