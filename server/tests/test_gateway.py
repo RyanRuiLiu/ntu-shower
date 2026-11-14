@@ -261,8 +261,7 @@ def test_trust_flow_and_device_listing(client: TestClient, admin_headers: dict[s
         assert ack["payload"]["trusted"] is True
 
         # 在线状态以内存连接表为准，须在连接保持期间查询
-        runtime = client.get("/api/v1/devices/runtime", headers=admin_headers).json()
-        listed = next(item for item in runtime if item["device_id"] == device_id)
+        listed = client.get(f"/api/v1/devices/{device_id}", headers=admin_headers).json()
         assert listed["trusted"] is True
         assert listed["online"] is True
 
