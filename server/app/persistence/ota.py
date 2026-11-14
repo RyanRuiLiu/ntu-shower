@@ -16,7 +16,7 @@ from app.core.protocol import JsonObject
 from ..contracts import ReleaseRecord
 from ..core.clock import format_rfc3339
 from ..db.base import utcnow
-from ..models.identity import Device
+from ..models.device import Device
 from ..models.ota import OtaRelease, OtaReleaseInstall
 
 

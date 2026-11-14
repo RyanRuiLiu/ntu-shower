@@ -9,7 +9,7 @@ app/audit_middleware.py。两张审计表（api_call 与 command_audit）的清�
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import cast
+from typing import Any, cast
 
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
@@ -18,7 +18,11 @@ from typing_extensions import TypedDict
 from ..core.logging import request_id_var, trace_id_var
 from ..db.base import utcnow
 from ..db.session import session_scope
-from ..models.ops import ApiCall, CommandAudit
+from ..models.device import DeviceLinkEvent
+from ..models.doors import DoorSnapshot
+from ..models.enums import ApiCallKind
+from ..models.ops import ApiCall, CommandAudit, JobRun
+from ..models.voice import VoiceDelivery
 from . import audit as audit_store
 
 
@@ -30,7 +34,7 @@ class ApiCallRecord(TypedDict):
     JSON 体原文，数据重型响应为占位说明（见 audit_middleware.store_body）。
     """
 
-    kind: str
+    kind: ApiCallKind
     requested_at: str
     request_id: str
     trace_id: str
@@ -67,7 +71,7 @@ def record(
     problem_type: str = "",
     detail: str = "",
 ) -> None:
-    """写一行 HTTP 审计（kind='http'）。关联字段取自中间件置位的 contextvar。
+    """写一行 HTTP 审计（kind=ApiCallKind.HTTP）。关联字段取自中间件置位的 contextvar。
 
     与命令审计以 trace_id 关联：本行与 command_audit 各带一份，查两边即得全链路。
     `query` 是请求的查询串；`request_body` 与 `response_body` 是 JSON 体原文；
@@ -76,7 +80,7 @@ def record(
     with session_scope() as session:
         audit_store.insert_api_call(
             session,
-            kind="http",
+            kind=ApiCallKind.HTTP,
             method=method,
             path=path,
             status_code=status_code,
@@ -111,16 +115,29 @@ def list_calls(
         )
 
 
-def prune(session: Session, retention_days: int) -> int:
-    """删除超过保留期的审计行（api_call 与 command_audit），返回删除行数。
+#: 各保留期表 → (时刻列, 保留天数)。天数与各表模型的 docstring 声明一致——
+#: 声明=实现，两边由 tests/test_retention.py 钉住。业务数据（喷头状态迁移、
+#: 使用会话）是运营历史，永久保留、不在此列。
+RETENTIONS: tuple[tuple[Any, Any, int], ...] = (
+    (ApiCall, ApiCall.requested_at, 90),
+    (CommandAudit, CommandAudit.created_at, 90),
+    (JobRun, JobRun.occurred_at, 180),
+    (DeviceLinkEvent, DeviceLinkEvent.occurred_at, 90),
+    (DoorSnapshot, DoorSnapshot.received_at, 30),
+    (VoiceDelivery, VoiceDelivery.occurred_at, 90),
+)
 
-    只动审计表：业务数据（喷头状态迁移、使用会话）是运营历史，永久保留；
-    库文件不复缩，页复用即可。两张表的 DELETE 共用一个事务：要么都清、
-    要么都不清，两边保留期才不会错开。
+
+def prune(session: Session, retention_days: int) -> int:
+    """删除超过各自保留期的行，返回删除总行数。
+
+    `retention_days` 是 api_call/command_audit 的可配期限（audit_retention_days）；
+    其余表用各自声明值，不随该配置变。全部 DELETE 共用一个事务：要么都清、
+    要么都不清，各表保留期才不会错开。库文件不复缩，页复用即可。
     """
-    cutoff = utcnow() - timedelta(days=retention_days)
     removed = 0
-    for table, column in ((ApiCall, ApiCall.requested_at), (CommandAudit, CommandAudit.created_at)):
+    for table, column, days in RETENTIONS:
+        cutoff = utcnow() - timedelta(days=days if table not in (ApiCall, CommandAudit) else retention_days)
         result = session.execute(delete(table).where(column < cutoff))
         removed += int(getattr(result, "rowcount", 0) or 0)
     session.commit()

@@ -14,10 +14,10 @@ from sqlalchemy.orm import Session
 
 from ..contracts import DoorView
 from ..core.clock import format_rfc3339, parse_rfc3339, seconds_between
+from ..models.device import Device
 from ..models.doors import DoorSnapshot, DoorState, DoorStateEvent
 from ..models.enums import OCCUPIED_STATES, ObservedSpan, SegmentSource
 from ..models.enums import DoorState as DoorStateEnum
-from ..models.identity import Device
 from ..models.usage import UsageSegment, UsageSession
 
 _RUN_WALK_LIMIT = 50

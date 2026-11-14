@@ -10,6 +10,25 @@
 
 ### Changed
 
+- **设备域表归位**：设备相关 6 张表集中到 `models/device.py`（devices/credentials/
+  configs/logs/link_events/clock_shifts），`clock_shifts` 更名 `device_clock_shifts`
+  （设备表统一 `device_` 前缀）；`identity.py` 仅剩 Principal，`settings.py` 仅剩
+  AppSettings；`persistence/device_credentials.py` 并入 `devices.py`。
+- **凭据无过期语义**：`device_credentials.expires_at` 列删除（生命周期=签发→吊销，
+  enroll 轮换即吊销重发，无"到点失效"第三态）；authenticate 不再收 now 参数。
+- **保留期声明=实现**：清理任务从 2 张表扩到 6 张——api_calls/command_audits 90 天
+  （可配）、job_runs 180 天、device_link_events 90 天、door_snapshots 30 天、
+  voice_deliveries 90 天（天数与各表 docstring 声明一致，
+  tests/test_retention.py 钉住）；device_logs 声明修正为实际机制（每设备每类滚 5 份）。
+- **索引整备**：删 3 个被复合索引覆盖的冗余单列（door_states/door_snapshots/
+  usage_sessions 的 device_id）与 4 个无消费者索引（devices.last_seen_at、
+  api_calls.trace_id、usage_sessions.ended_at、voice_deliveries 的两个）；补
+  ota_release_installs.device_id 单列索引；`api_calls.kind` 闭集枚举化
+  （ApiCallKind，http/gateway）。
+- 看板信封键与前端消费统一 `jobs` 词根（#59 遗留的 `row.task` 静默 bug 一并修复）。
+
+### Changed
+
 - **设备双 ID 消灭**（业主裁定：全库实体标识统一，外键 `device_id` int 与业务键
   `device_id` str 同名异型的唯一漂移根除）：`devices` 表主键直接采用设备业务键
   （ANDROID_ID，ADR-0008 的设备身份），12 张子表外键改 str 直引；审计三表

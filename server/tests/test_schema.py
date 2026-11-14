@@ -23,7 +23,7 @@ EXPECTED_TABLES: set[str] = {
     "api_calls",
     "app_settings",
     "job_runs",
-    "clock_shifts",
+    "device_clock_shifts",
     "command_audits",
     "device_configs",
     "device_credentials",

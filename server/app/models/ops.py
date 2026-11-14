@@ -13,7 +13,7 @@ from sqlalchemy import JSON, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db.base import Base, UtcDateTime, enum_column, utcnow
-from .enums import ActorKind, CommandStatus, DeviceLogKind, JobOutcome, LinkEvent
+from .enums import ActorKind, ApiCallKind, CommandStatus, JobOutcome
 
 
 class ApiCall(Base):
@@ -23,7 +23,7 @@ class ApiCall(Base):
     __table_args__ = (Index("ix_api_calls_device_id_requested_at", "device_id", "requested_at"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    kind: Mapped[str] = mapped_column(String(32))
+    kind: Mapped[ApiCallKind] = mapped_column(enum_column(ApiCallKind, "api_call_kind"))
     requested_at: Mapped[datetime] = mapped_column(UtcDateTime, index=True)
     request_id: Mapped[str] = mapped_column(String(64), default="")
     trace_id: Mapped[str] = mapped_column(String(64), default="", index=True)
@@ -67,34 +67,6 @@ class CommandAudit(Base):
     result: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
 
 
-class DeviceLog(Base):
-    """设备上送的日志，保留 30 天。"""
-
-    __tablename__ = "device_logs"
-    __table_args__ = (Index("ix_device_logs_device_id_kind_uploaded_at", "device_id", "kind", "uploaded_at"),)
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    device_id: Mapped[str] = mapped_column(String(64))
-    kind: Mapped[DeviceLogKind] = mapped_column(enum_column(DeviceLogKind, "device_log_kind"))
-    content: Mapped[str] = mapped_column(Text)
-    uploaded_at: Mapped[datetime] = mapped_column(UtcDateTime)
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
-
-
-class DeviceLinkEvent(Base):
-    """设备上下线事件，保留 90 天。"""
-
-    __tablename__ = "device_link_events"
-    __table_args__ = (Index("ix_device_link_events_device_id_occurred_at", "device_id", "occurred_at"),)
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    device_id: Mapped[str] = mapped_column(String(64))
-    occurred_at: Mapped[datetime] = mapped_column(UtcDateTime, index=True)
-    event: Mapped[LinkEvent] = mapped_column(enum_column(LinkEvent, "link_event"))
-    reason: Mapped[str] = mapped_column(String(128), default="")
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
-
-
 class JobRun(Base):
     """后台任务的一次执行记录，保留 180 天。"""
 
@@ -118,7 +90,5 @@ class JobRun(Base):
 __all__: list[str] = [
     "ApiCall",
     "CommandAudit",
-    "DeviceLinkEvent",
-    "DeviceLog",
     "JobRun",
 ]

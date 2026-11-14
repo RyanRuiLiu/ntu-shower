@@ -112,6 +112,13 @@ class JobOutcome(StrEnum):
     NOT_APPLICABLE = "not-applicable"
 
 
+class ApiCallKind(StrEnum):
+    """api_call 的两类来源：HTTP 请求与设备网关生命周期。"""
+
+    HTTP = "http"
+    GATEWAY = "gateway"
+
+
 class CommandStatus(StrEnum):
     """命令结果状态，与 core.outcomes.VALUES 必须完全一致。
 
@@ -129,6 +136,7 @@ __all__: list[str] = [
     "ASSIGNABLE_STATES",
     "OCCUPIED_STATES",
     "ActorKind",
+    "ApiCallKind",
     "AssignedSource",
     "CommandStatus",
     "DeviceLogKind",

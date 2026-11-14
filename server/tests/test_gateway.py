@@ -19,10 +19,9 @@ from tests import apk, device_link, frames
 from app.core import events
 from app.core.clock import now_rfc3339, rfc3339_ago
 from app.db.session import session_scope
+from app.models.device import Device, DeviceLinkEvent, DeviceLog
 from app.models.doors import DoorSnapshot
 from app.models.enums import DeviceLogKind
-from app.models.identity import Device
-from app.models.ops import DeviceLinkEvent, DeviceLog
 from app.modules.devices.schemas import LINK_OFFLINE, LINK_ONLINE
 from app.modules.doors import service as doors_service
 
