@@ -59,7 +59,7 @@ function renderTable() {
     )
     .join('')
   $('deviceTable').innerHTML = `<table class="table"><thead><tr>
-      <th>设备</th><th>应用版本</th><th>系统版本</th><th>状态</th><th>信任</th><th>能力位</th><th>顺序</th><th class="col-actions">操作</th>
+      <th>设备</th><th>应用版本</th><th>系统版本</th><th>状态</th><th>信任</th><th>设备动作</th><th>顺序</th><th class="col-actions">操作</th>
     </tr></thead><tbody>${rows}</tbody></table>`
 }
 
