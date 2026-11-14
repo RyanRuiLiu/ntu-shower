@@ -14,7 +14,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.logging import log_event
-from app.persistence import voice as repository
+from app.modules.voice import crud as repository
 
 from . import time_windows as time_rules
 from .priority import rule_priority

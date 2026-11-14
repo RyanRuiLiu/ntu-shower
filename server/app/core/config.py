@@ -54,9 +54,13 @@ class Settings(BaseSettings):
     # 「没配密钥」这个错误从启动时拖到第一次登录之后。这与 Flask（secret_key 未设
     # 即拒绝会话）、Django（SECRET_KEY 缺失即 ImproperlyConfigured）同一语义。
     session_secret: str = ""
-    # 会话有效期（秒），即 SessionMiddleware 的 max_age：到期由浏览器弃 Cookie，
-    # 签名端在 unsign 时同样拒绝超龄令牌。
-    session_ttl_seconds: int = 12 * 60 * 60
+    # 会话空闲超时（秒）：即 SessionMiddleware 的 max_age。活跃使用中每过
+    # RENEW_AFTER_S（见 auth.dependencies）重签一次 Cookie，所以它只惩罚"连续
+    # 这么久没用"，不影响活跃用户——OWASP Session CS 的 idle timeout + renewal。
+    session_idle_seconds: int = 30 * 24 * 60 * 60
+    # 会话绝对超时（秒）：距首次登录超过它即失效，服务端按会话里的 first_iat
+    # 强制（OWASP absolute timeout）。自用面板按风险取宽值，两个数值都可调。
+    session_absolute_seconds: int = 90 * 24 * 60 * 60
     # 设备接入令牌校验默认强制开启。只在测试夹具里显式关闭——生产不留
     # 「不带凭据也能连」的旁路，这是安全默认值而不是长期双轨。
     require_device_token: bool = True

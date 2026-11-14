@@ -4,8 +4,9 @@
 同一套字段，前端只写一套渲染。
 """
 
+from app.contracts import DoorState
+
 from ...contracts import DoorView as DoorView
-from ...models.enums import DoorState
 
 #: 状态取值 → 界面中文名。**这是唯一的数据源。**
 #:

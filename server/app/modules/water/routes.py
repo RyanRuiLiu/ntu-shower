@@ -20,16 +20,17 @@
 
 ## 守卫
 
-全部 admin：手动直控能绕过会话与计费，先只给管理员。设备须已信任在线（`device_action`）。
+`water:write`（直控能绕过会话与计费，只给管理面）；状态读是 `water:read`。
+对单台设备均做对象级 device_scope 检查；设备须已信任在线（`device_action`）。
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Security
 from sqlalchemy.orm import Session
 
+from app.auth.dependencies import caller, device_scope_guard
 from app.contracts import CommandOutcome
 from app.core import actions
 from app.db.deps import get_db
-from app.modules.access.dependencies import require_admin
 from app.modules.devices.dependencies import device_action
 
 from .schemas import WaterDoorRequest
@@ -39,10 +40,12 @@ from .schemas import WaterDoorRequest
 #: 超时只说明板子没回，不是"等设备慢慢做"。
 WATER_ACTION_TIMEOUT_S = 8.0
 
-router = APIRouter(prefix="/api/v1/devices", dependencies=[Depends(require_admin)], tags=["water"])
+router = APIRouter(prefix="/api/v1/devices", tags=["water"])
 
 
-@router.post("/{device_id}/water/open")
+@router.post(
+    "/{device_id}/water/open", dependencies=[Security(caller, scopes=["water:write"]), Depends(device_scope_guard)]
+)
 async def open_valve(device_id: str, req: WaterDoorRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """授权出水：置指定喷头的授权位；**不直接出水**，真正出水仍需现场按电磁阀。"""
     return await device_action(
@@ -54,7 +57,9 @@ async def open_valve(device_id: str, req: WaterDoorRequest, session: Session = D
     )
 
 
-@router.post("/{device_id}/water/close")
+@router.post(
+    "/{device_id}/water/close", dependencies=[Security(caller, scopes=["water:write"]), Depends(device_scope_guard)]
+)
 async def close_valve(device_id: str, req: WaterDoorRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """断水：清授权位与出水位；不清按钮位。"""
     return await device_action(
@@ -66,7 +71,9 @@ async def close_valve(device_id: str, req: WaterDoorRequest, session: Session = 
     )
 
 
-@router.post("/{device_id}/water/status")
+@router.post(
+    "/{device_id}/water/status", dependencies=[Security(caller, scopes=["water:read"]), Depends(device_scope_guard)]
+)
 async def read_status(device_id: str, session: Session = Depends(get_db)) -> CommandOutcome:
     """读该设备 waterList 里每块板的配置与状态。
 

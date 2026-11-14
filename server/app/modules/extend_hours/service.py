@@ -86,10 +86,10 @@ from app.modules.config.schemas import ConfigValues
 from app.modules.devices import actions as device_actions
 from app.modules.devices import service as devices_service
 from app.modules.doors import service as doors_service
+from app.modules.extend_hours import crud as repository
 from app.modules.sessions import service as sessions_service
 from app.modules.sessions.decision import students_of
 from app.modules.sessions.schemas import AssignRequest
-from app.persistence import extend_hours as repository
 
 
 #: 拨钟拨走的时长按 `extend_shift_minutes` 现算（秒）：落点必须跨过午夜，才能一次
