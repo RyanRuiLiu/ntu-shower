@@ -26,6 +26,10 @@
   `persistence/api_calls.py`；令牌与口令哈希工具从 auth 下沉 `core/tokens.py`/`core/passwords.py`。
 - `semgrep` 文档引用规则封堵三种真实逃逸形态（裸文件名、反引号分隔、书名号章节、行号），
   现存文档清单补全。
+- 语音素材上传只接受 **44.1kHz 单声道 MP3**（设备端拼流的硬性要求），时长/采样率/声道
+  由 mutagen 校验；服务端不再转码，ffmpeg 与 ffprobe 移出运行时镜像（其静态层约占镜像
+  六成），转换收敛到上传方（`ffmpeg -i in.wav -ac 1 -ar 44100 -b:a 128k out.mp3`）。
+  `GET /voice/status` 不再返回 `ffmpeg_available` 字段。
 
 ### Removed
 
