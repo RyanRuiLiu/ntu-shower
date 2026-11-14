@@ -119,7 +119,7 @@ def record_gateway(device_id: str, event: str, client_ip: str = "") -> None:
 #: 各保留期表 → (时刻列, 保留天数)。天数与各表模型的 docstring 声明一致——
 #: 声明=实现，两边由 tests/test_retention.py 钉住。业务数据（喷头状态迁移、
 #: 使用会话）是运营历史，永久保留、不在此列。清单住在 app 根：它横跨各域的表，
-#: 持久化层不得反向 import 各域模型（见 api_calls.prune）。
+#: 持久化层不得反向 import 各域模型。
 RETENTIONS: tuple[tuple[Any, Any, int], ...] = (
     (ApiCall, ApiCall.requested_at, 90),
     (CommandAudit, CommandAudit.created_at, 90),
