@@ -159,6 +159,47 @@ def test_editing_user_does_not_rotate_keys(client: TestClient, admin_headers: di
     assert client.get("/api/v1/jobs/status", headers=identity.bearer(token)).status_code == 200
 
 
+def test_update_key_takes_effect_immediately(client: TestClient, admin_headers: dict[str, str], dorm_user: str) -> None:
+    """编辑密钥：令牌不变，权限改动下一次请求即生效（Stripe RAK 形态）。"""
+    key = client.post(KEY_PATH, headers=admin_headers, json={"name": "k", "scopes": ["jobs:read"]}).json()
+    headers = identity.bearer(key["token"])
+    assert client.get("/api/v1/jobs/status", headers=headers).status_code == 200
+
+    edited = client.put(f"{KEY_PATH}/{key['id']}", headers=admin_headers, json={"scopes": ["audit:read"]})
+    assert edited.status_code == 200
+    assert edited.json()["scopes"] == ["audit:read"]
+    assert edited.json()["token_hint"] == key["token_hint"]  # 令牌不变：摘要前缀相同
+
+    assert client.get("/api/v1/jobs/status", headers=headers).status_code == 403
+    assert client.get("/api/v1/audit/calls", headers=headers).status_code == 200
+
+
+def test_revoked_key_cannot_be_edited(client: TestClient, admin_headers: dict[str, str], dorm_user: str) -> None:
+    """吊销即终态：已吊销的密钥拒绝编辑，要改就发新枚。"""
+    key = client.post(KEY_PATH, headers=admin_headers, json={"name": "k", "scopes": ["jobs:read"]}).json()
+    assert client.delete(f"{KEY_PATH}/{key['id']}", headers=admin_headers).status_code == 204
+
+    edited = client.put(f"{KEY_PATH}/{key['id']}", headers=admin_headers, json={"name": "x"})
+    assert edited.status_code == 422
+
+
+def test_update_key_unknown_scope_is_rejected(
+    client: TestClient, admin_headers: dict[str, str], dorm_user: str
+) -> None:
+    key = client.post(KEY_PATH, headers=admin_headers, json={"name": "k", "scopes": ["jobs:read"]}).json()
+    r = client.put(f"{KEY_PATH}/{key['id']}", headers=admin_headers, json={"scopes": ["nope"]})
+
+    assert r.status_code == 422
+    assert r.json()["type"].endswith("/problems/unknown-scope")
+
+
+def test_update_missing_key_is_not_found(client: TestClient, admin_headers: dict[str, str], dorm_user: str) -> None:
+    r = client.put(f"{KEY_PATH}/999", headers=admin_headers, json={"name": "x"})
+
+    assert r.status_code == 404
+    assert r.json()["type"].endswith("/problems/key-not-found")
+
+
 def test_multiple_keys_coexist(client: TestClient, admin_headers: dict[str, str], dorm_user: str) -> None:
     """多枚共存：Stripe 官方 "Create as many RAKs as you want"，轮换的重叠窗口由此而来。"""
     client.post(KEY_PATH, headers=admin_headers, json={"name": "a", "scopes": ["jobs:read"]})
