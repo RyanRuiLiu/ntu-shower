@@ -19,10 +19,11 @@ import contextlib
 import uuid
 from typing import cast
 
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Security, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
+from app.auth.dependencies import caller, device_scope_guard, require_trusted_online_device
 from app.core import actions, outcomes, protocol, reason_codes
 from app.core.connections import manager
 from app.core.logging import log_event
@@ -31,7 +32,6 @@ from app.db.base import utcnow
 from app.db.deps import get_db
 from app.db.session import Database
 from app.models.enums import CommandStatus
-from app.modules.access.dependencies import require_admin, require_trusted_online_device
 from app.modules.bridge.schemas import BridgeClosed, BridgeOpened, BridgeStatus
 from app.modules.config import store as config_store
 from app.persistence import audit as command_audit
@@ -47,7 +47,12 @@ router = APIRouter(tags=["bridge"])
 
 # 桥的管理面（开/关/查状态）是网页端调用的 HTTP 端点，随对外 HTTP 面统一挂
 # /api/v1；/gateway/bridge 是设备拨入的 WS，归 /gateway/ 硬编码契约，不加前缀。
-admin_router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_admin)], tags=["bridge"])
+# 三条端点都指向一台设备：bridge:write + 对象级 device_scope 检查。
+admin_router = APIRouter(
+    prefix="/api/v1",
+    dependencies=[Security(caller, scopes=["bridge:write"]), Depends(device_scope_guard)],
+    tags=["bridge"],
+)
 
 #: 隧道结束时的命令审计标记。它不是设备动作（设备端不执行它），故不进 actions
 #: 登记表——那张表与设备端 SupportedActions 对账，只收双端共有的动作名。

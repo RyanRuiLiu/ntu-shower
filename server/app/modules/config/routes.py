@@ -7,15 +7,15 @@
 错误若下发到设备，后果是设备侧行为异常（例如心跳间隔为 0 会导致心跳风暴）。
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Security
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.auth.dependencies import caller, device_scope_guard, require_trusted_online_device
 from app.core.connections import manager
 from app.core.logging import log_event
 from app.core.problems import INVALID_CONFIG, ApiProblemError
 from app.db.deps import get_db
-from app.modules.access.dependencies import require_admin, require_trusted_online_device
 
 from . import notifier, store
 from .schemas import (
@@ -29,7 +29,7 @@ from .schemas import (
 )
 from .spec import GROUPS, SECTIONS, SERVER, SPECS_BY_KEY
 
-admin_router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_admin)], tags=["config"])
+admin_router = APIRouter(prefix="/api/v1", tags=["config"])
 
 
 class ConfigUpdateRequest(BaseModel):
@@ -66,7 +66,7 @@ def _validated_device_overrides(values: ConfigValues) -> ConfigValues:
     return checked
 
 
-@admin_router.get("/config/spec")
+@admin_router.get("/config/spec", dependencies=[Security(caller, scopes=["config:read"])])
 def get_config_spec() -> ConfigSpecCatalog:
     """配置登记表：每个键的类型、范围、默认值、归属、分组与说明。
 
@@ -79,14 +79,14 @@ def get_config_spec() -> ConfigSpecCatalog:
     }
 
 
-@admin_router.get("/config")
+@admin_router.get("/config", dependencies=[Security(caller, scopes=["config:read"])])
 def get_global_config(session: Session = Depends(get_db)) -> GlobalConfigView:
     """全局配置的当前有效值（默认值叠加全局覆盖）。"""
     revision, _overrides = store.get_global_overrides(session)
     return {"revision": revision, "config": store.global_effective(session)}
 
 
-@admin_router.put("/config")
+@admin_router.put("/config", dependencies=[Security(caller, scopes=["config:write"])])
 async def put_global_config(req: ConfigUpdateRequest, session: Session = Depends(get_db)) -> GlobalConfigUpdateReport:
     """更新全局覆盖，并把新的有效配置推送给所有在线设备。"""
     _before_revision, before = store.get_global_overrides(session)
@@ -112,7 +112,10 @@ async def put_global_config(req: ConfigUpdateRequest, session: Session = Depends
     return {"revision": revision, "config": store.global_effective(session), "notified": notified}
 
 
-@admin_router.get("/devices/{device_id}/config")
+@admin_router.get(
+    "/devices/{device_id}/config",
+    dependencies=[Security(caller, scopes=["config:read"]), Depends(device_scope_guard)],
+)
 def get_device_config(device_id: str, session: Session = Depends(get_db)) -> DeviceConfigView:
     """该设备的有效配置与它自己的覆盖项（区分"被特殊设置过"与"跟随全局"）。
 
@@ -127,7 +130,10 @@ def get_device_config(device_id: str, session: Session = Depends(get_db)) -> Dev
     }
 
 
-@admin_router.put("/devices/{device_id}/config")
+@admin_router.put(
+    "/devices/{device_id}/config",
+    dependencies=[Security(caller, scopes=["config:write"]), Depends(device_scope_guard)],
+)
 async def put_device_config(
     device_id: str, req: ConfigUpdateRequest, session: Session = Depends(get_db)
 ) -> DeviceConfigUpdateReport:
