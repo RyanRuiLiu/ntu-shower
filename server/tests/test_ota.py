@@ -346,11 +346,11 @@ def test_rearm_endpoint_clears_install_confirmation(client: TestClient, admin_he
     _publish("0.3.1", 8)
     _repo("mark_installed_upto", "dev-rearm-1", 8)
 
-    armed = client.post("/api/v1/ota/releases/0.3.1/rearm/dev-rearm-1", headers=admin_headers)
+    armed = client.post("/api/v1/ota/releases/0.3.1/rearm", headers=admin_headers, json={"device_id": "dev-rearm-1"})
     assert armed.status_code == 200
     assert armed.json()["rearmed"] is True
 
-    again = client.post("/api/v1/ota/releases/0.3.1/rearm/dev-rearm-1", headers=admin_headers)
+    again = client.post("/api/v1/ota/releases/0.3.1/rearm", headers=admin_headers, json={"device_id": "dev-rearm-1"})
     assert again.json()["rearmed"] is False
 
 
