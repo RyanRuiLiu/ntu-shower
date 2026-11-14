@@ -581,65 +581,9 @@ def list_snapshots(session: Session, device_id: str) -> list[dict[str, Any]]:
     ]
 
 
-# ── 统计读 ──
-# 统计层（modules/stats）是这些表的主要读方。窗口条件在这里换算成 datetime，
-# 出去的行仍经统一视图（时刻是 RFC 3339 文本），统计层不碰存储形状。
-
-
-def sessions_in_window(session: Session, device_id: str, since: str, until: str) -> list[dict[str, Any]]:
-    """这台设备在 [since, until) 分配的会话，按分配时刻升序。"""
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return []
-    low, high = _parse_moment(since), _parse_moment(until)
-    rows = session.scalars(
-        select(UsageSession)
-        .where(
-            UsageSession.device_id == device_pk,
-            UsageSession.assigned_at >= low,
-            UsageSession.assigned_at < high,
-        )
-        .order_by(UsageSession.assigned_at)
-    ).all()
-    return [_session_view(row, device_id) for row in rows]
-
-
-def sessions_of_cert(session: Session, cert_no: str, since: str, until: str) -> list[dict[str, Any]]:
-    """这个学号在窗口内分配的会话（跨设备），按分配时刻升序。"""
-    low, high = _parse_moment(since), _parse_moment(until)
-    rows = session.scalars(
-        select(UsageSession)
-        .where(UsageSession.cert_no == cert_no, UsageSession.assigned_at >= low, UsageSession.assigned_at < high)
-        .order_by(UsageSession.assigned_at)
-    ).all()
-    result: list[dict[str, Any]] = []
-    for row in rows:
-        business_id = session.scalar(select(Device.device_id).where(Device.id == row.device_id)) or ""
-        result.append(_session_view(row, str(business_id)))
-    return result
-
-
-def segments_in_session_window(session: Session, device_id: str, since: str, until: str) -> list[dict[str, Any]]:
-    """窗口内会话的段（联会话取窗口），按会话 id 与开阀时刻升序——一次取全，调用方分组。"""
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return []
-    low, high = _parse_moment(since), _parse_moment(until)
-    rows = (
-        session.execute(
-            select(UsageSegment)
-            .join(UsageSession, UsageSession.id == UsageSegment.session_id)
-            .where(
-                UsageSession.device_id == device_pk,
-                UsageSession.assigned_at >= low,
-                UsageSession.assigned_at < high,
-            )
-            .order_by(UsageSegment.session_id, UsageSegment.opened_at)
-        )
-        .scalars()
-        .all()
-    )
-    return [_segment_view(row, device_id) for row in rows]
+# ── 窗口读 ──
+# 窗口条件在这里换算成 datetime，出去的行仍经统一视图（时刻是 RFC 3339 文本），
+# 调用方不碰存储形状。
 
 
 def door_count(session: Session, device_id: str) -> int:
@@ -663,51 +607,6 @@ def door_count_in_state(session: Session, device_id: str, state: str) -> int:
         )
         or 0
     )
-
-
-def average_flow_by_cert(session: Session, since: str, until: str, exclude_cert: str | None = None) -> dict[str, float]:
-    """窗口内每个人的平均出水秒数（只算出过水的），整段聚合、不拉行。"""
-    low, high = _parse_moment(since), _parse_moment(until)
-    statement = (
-        select(UsageSession.cert_no, func.avg(UsageSession.flow_s))
-        .where(
-            UsageSession.assigned_at >= low,
-            UsageSession.assigned_at < high,
-            UsageSession.cert_no != "",
-            UsageSession.flow_s > 0,
-        )
-        .group_by(UsageSession.cert_no)
-    )
-    if exclude_cert:
-        statement = statement.where(UsageSession.cert_no != exclude_cert)
-    return {str(cert): float(average) for cert, average in session.execute(statement).all()}
-
-
-def events_in_window(session: Session, device_id: str, start: str, end: str) -> list[dict[str, Any]]:
-    """这台设备在 [start, end) 的状态迁移，按发生时刻升序。"""
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return []
-    low, high = _parse_moment(start), _parse_moment(end)
-    rows = session.scalars(
-        select(DoorStateEvent)
-        .where(
-            DoorStateEvent.device_id == device_pk, DoorStateEvent.occurred_at >= low, DoorStateEvent.occurred_at < high
-        )
-        .order_by(DoorStateEvent.occurred_at)
-    ).all()
-    return [
-        {
-            "door_no": int(row.door_no),
-            "from_state": str(row.from_state),
-            "to_state": str(row.to_state),
-            "card_no": int(row.card_no),
-            "cert_no": str(row.cert_no),
-            "bath_time_s": int(row.bath_time_s),
-            "occurred_at": _ts(row.occurred_at),
-        }
-        for row in rows
-    ]
 
 
 def last_closed_by_door(session: Session, device_id: str, before: str) -> list[dict[str, Any]]:
@@ -804,10 +703,7 @@ __all__: list[str] = [
     "open_segment",
     "open_session",
     "run_started_at",
-    "segments_in_session_window",
     "segments_of_session",
-    "sessions_in_window",
-    "sessions_of_cert",
     "touch_session",
     "upsert_door_live",
 ]
