@@ -37,7 +37,7 @@ class ActorKind(StrEnum):
     """调用方类型，与 api_calls.actor_kind 对应。
 
     token 与 session 是第一批认证标准化引入的两类（Bearer 凭据与会话 Cookie）；
-    identity 留给名单制调用方（X-Identity 时代的历史取值，转换工具会搬进来）。
+    identity 留给名单制调用方（已删除的自定身份头时代的历史取值，转换工具会搬进来）。
     """
 
     DEVICE = "device"
