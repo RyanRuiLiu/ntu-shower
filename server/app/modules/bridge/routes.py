@@ -100,25 +100,29 @@ async def _drain_and_close(ws: WebSocket, code: int) -> None:
         await asyncio.wait_for(ws.receive(), timeout=2)
 
 
-@router.websocket("/gateway/bridge")
-async def device_bridge(ws: WebSocket) -> None:
+@router.websocket("/gateway/bridge/{device_id}")
+async def device_bridge(ws: WebSocket, device_id: str) -> None:
     """设备二进制桥接端点：接管一条已建立的桥，然后双向搬运字节。
 
-    它不建桥。注册表里没有该设备的桥，或 nonce 对不上，都说明这次连接不属于任何
-    现役会话（旧世代的残留、重放、或桥已被关），一律拒绝。桥只能由 `bridge/open` 建立。
+    它不建桥。配对凭据不进 URL（security.md「身份标识不放入 URL 查询参数」）：
+    nonce 由设备经 `Sec-WebSocket-Protocol` 头在握手期携带，服务端 **accept 之前**
+    校验——无效即 4401 关闭，OkHttp 侧表现为握手失败。注册表里没有该设备的桥、
+    nonce 对不上，都说明这次连接不属于任何现役会话（旧世代的残留、重放、或桥已
+    被关），一律拒绝。桥只能由 `bridge/open` 建立。
     """
-    device_id = ws.query_params.get("device_id") or ""
-    nonce = ws.query_params.get("nonce") or ""
-    await ws.accept()
-
+    nonce = ws.headers.get("sec-websocket-protocol", "")
     lifetime_s, pair_s = await run_in_threadpool(_read_bridge_timeouts, ws)
     loop = asyncio.get_running_loop()
 
     bridge = registry.get(device_id)
-    if bridge is None or not bridge.accept_device(ws, nonce, loop.time(), pair_s):
-        # 先排水再关：立即 close 会与客户端 close 握手竞态挂死事件循环
-        await _drain_and_close(ws, code=4401)
+    generation = registry.consume_nonce(device_id, nonce, loop.time(), pair_s) if bridge and nonce else None
+    if bridge is None or generation is None:
+        # accept 之前直接关闭：客户端看到的是握手失败，而非建立后被拒
+        await ws.close(code=4401)
         return
+
+    await ws.accept(subprotocol=nonce)
+    bridge.bind_device(ws)
 
     # 冲缓冲：pending_to_device 是"发往设备"的字节（TCP 先收、设备 WS 未就绪）
     if bridge.pending_to_device:
