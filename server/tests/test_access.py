@@ -15,10 +15,8 @@ from tests import device_link
 from tests.conftest import ADMIN_IDENTITY
 from tests.identity import bearer
 
-from app.core.problems import CAPABILITY_DENIED, ApiProblemError
 from app.models.enums import IdentityKind
-from app.modules.access.capabilities import ALL_CAPABILITIES, DEVICE_SCOPED, Capability, user_actions
-from app.modules.access.dependencies import require_capability
+from app.modules.access.capabilities import ALL_CAPABILITIES, user_actions
 from app.modules.access.schemas import IdentityRecord
 from app.persistence import principals as principals_store
 
@@ -73,36 +71,6 @@ def _identity(capabilities: list[str], device_scope: list[str] | None = None) ->
     }
 
 
-def test_require_capability_rejects_device_scoped_capabilities() -> None:
-    """拿它去判有设备维度的能力必须当场报错。
-
-    它没有作用域这一维，拿它判 `session` 等于绕开作用域——而作用域正是这套判定存在的
-    理由之一。报错让误用者第一个请求就炸，而不是静默放开一个洞。
-    """
-    caller = _identity([cap.value for cap in Capability])
-
-    for capability in DEVICE_SCOPED:
-        with pytest.raises(ValueError, match="有设备维度"):
-            require_capability(caller, capability)
-
-
-def test_require_capability_denies_without_the_capability() -> None:
-    """没有这个位就是 403 capability-denied，与 enforce 同一形状。"""
-    with pytest.raises(ApiProblemError) as excinfo:
-        require_capability(_identity(["session"]), Capability.TASKS)
-
-    assert excinfo.value.problem is CAPABILITY_DENIED
-
-
-def test_require_capability_passes_with_the_capability() -> None:
-    """有这个位就放行，**且完全不看设备作用域**——作用域为空照样通过。
-
-    这就是"没有设备维度"与"作用域为 `*`"的分野：名单是 SERVER scope、不分设备，
-    "对哪些设备做"这一问对它不成立，所以作用域填什么都不该影响判定。
-    """
-    require_capability(_identity(["tasks"], device_scope=[]), Capability.TASKS)
-
-
 def test_admin_surface_without_identity_is_unauthenticated(client: TestClient) -> None:
     r = client.get("/api/v1/identities")
 
@@ -133,7 +101,7 @@ def test_identities_returns_domain_read_model(client: TestClient, admin_headers:
     body = r.json()
     assert set(body) == {"capabilities", "identities"}
     caps = {item["key"]: item["label"] for item in body["capabilities"]}
-    assert set(caps) == set(ALL_CAPABILITIES) == {"session", "photo", "admin", "tasks"}
+    assert set(caps) == set(ALL_CAPABILITIES) == {"session", "photo", "admin"}
     assert all(caps.values())
     admin = next(item for item in body["identities"] if item["identity"] == "admin-identity-0001")
     assert admin["kind"] == "web"

@@ -11,17 +11,14 @@
 - `require_admin`：管理端点守卫（admin 能力位，作用域恒 *）。
 - `enforce`：能力位 × 设备作用域的一体化判定。操作端点先取调用方再在函数体内
   调它（目标设备随请求而定，函数体内调意图最直接）。
-- `require_capability`：只问能力位，专给**没有设备维度**的能力（`tasks`）。它用的仍是
-  同一份能力位集合，所以那不是第二个判据，只是作用域这一维不参与。
 
 失败各有明确的问题类型：没带凭据（unauthenticated，仅要求身份的端点）、凭据
 无效（unknown-identity）、缺能力位或设备不在作用域（capability-denied）。
 
 ## 设备作用域
 
-能力回答"能做什么"，作用域回答"对哪些设备做"，两者缺一不可。**当一件事没有设备维度时
-（见 capabilities.DEVICE_SCOPED），作用域这一维不参与**，判定走 [require_capability]。
-判定集中在 [device_allowed] 一处，除 [enforce] 与 [require_capability] 外任何代码不自行判定。
+能力回答"能做什么"，作用域回答"对哪些设备做"，两者缺一不可。
+判定集中在 [device_allowed] 一处，除 [enforce] 外任何代码不自行判定。
 """
 
 from typing import Any
@@ -48,7 +45,7 @@ from app.persistence import principals as principals_store
 
 from ...models.enums import IdentityKind
 from . import service
-from .capabilities import DEVICE_SCOPED, Capability
+from .capabilities import Capability
 from .schemas import IdentityRecord
 
 
@@ -129,22 +126,6 @@ def enforce(caller: IdentityRecord, capability: Capability, device_id: str) -> N
         raise ApiProblemError(CAPABILITY_DENIED, f"缺少能力：{capability.value}")
     if not device_allowed(caller, device_id):
         raise ApiProblemError(CAPABILITY_DENIED, f"作用域不含设备：{device_id}")
-
-
-def require_capability(caller: IdentityRecord, capability: Capability) -> None:
-    """只按能力位判定，不涉及设备作用域——**专给没有设备维度的能力**。
-
-    哪些能力没有设备维度由 [DEVICE_SCOPED] 登记。拿它去判有设备维度的能力等于绕开
-    作用域，所以这里当场报错：误用者第一个请求就炸，而不是静默放开一个洞。
-
-    "没有设备维度"不是"作用域为 `*`"：`*_students` 名单是 SERVER scope、不分设备，
-    "对哪些设备做"这一问对它不成立，而不是它的答案是"全部"。
-    """
-    if capability in DEVICE_SCOPED:
-        message = f"{capability.value} 有设备维度，判定必须经 enforce"
-        raise ValueError(message)
-    if capability.value not in caller["capabilities"]:
-        raise ApiProblemError(CAPABILITY_DENIED, f"缺少能力：{capability.value}")
 
 
 def require_admin(caller: IdentityRecord = Depends(require_identity)) -> IdentityRecord:
