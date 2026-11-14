@@ -199,7 +199,7 @@ def test_device_of_resolves_path_segment_then_query() -> None:
 def test_data_heavy_paths_are_excluded_from_response_storage() -> None:
     """截图、拍照、UI 节点树端点的响应不落库（数据重型且可重取）。"""
     assert audit_middleware._DATA_HEAVY_PATH.search("/api/v1/devices/dev-1/capture")
-    assert audit_middleware._DATA_HEAVY_PATH.search("/api/v1/devices/dev-1/dump")
+    assert audit_middleware._DATA_HEAVY_PATH.search("/api/v1/devices/dev-1/ui-dump")
     assert audit_middleware._DATA_HEAVY_PATH.search("/api/v1/devices/dev-1/photo")
     assert audit_middleware._DATA_HEAVY_PATH.search("/api/v1/devices/dev-1/exec") is None
     assert audit_middleware._DATA_HEAVY_PATH.search("/ota/manifest") is None

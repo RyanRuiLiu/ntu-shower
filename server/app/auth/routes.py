@@ -27,7 +27,7 @@ import time
 from fastapi import APIRouter, Depends, Request, Response, Security
 from sqlalchemy.orm import Session
 
-from app.contracts import Caller, UserRecord
+from app.contracts import Caller
 from app.modules.devices import crud as devices_store
 
 from ..core.logging import log_event
@@ -41,10 +41,9 @@ from ..core.problems import (
 )
 from ..db.deps import get_db
 from . import crud
-from .dependencies import caller, current_user
+from .dependencies import caller
 from .permissions import ALL_SCOPES, SCOPE_LABELS
 from .schemas import (
-    AccountView,
     KeyCreate,
     KeyIssued,
     KeyUpdate,
@@ -73,9 +72,9 @@ admin_router = APIRouter(
 )
 
 
-@router.post("/login", response_model=AccountView)
-def login(request: Request, body: LoginRequest, session: Session = Depends(get_db)) -> AccountView:
-    """口令校验通过即签发会话。
+@router.post("/login", status_code=204)
+def login(request: Request, body: LoginRequest, session: Session = Depends(get_db)) -> Response:
+    """口令校验通过即签发会话（204 无体：账号事实由 GET /users/me 提供）。
 
     用户不存在与口令错误返回同一个问题类型，避免接口变成账号枚举器。会话字典
     记 `first_iat`（绝对超时的锚点）与 `iat`（滑动续期的锚点）。
@@ -87,21 +86,13 @@ def login(request: Request, body: LoginRequest, session: Session = Depends(get_d
     request.session["u"] = str(user["username"])
     request.session["first_iat"] = now
     request.session["iat"] = now
-    return AccountView(username=str(user["username"]), name=str(user["name"]))
+    return Response(status_code=204)
 
 
 @router.post("/logout", status_code=204)
 def logout(request: Request) -> None:
     """注销即清空会话：SessionMiddleware 把置空后的会话下发成一条过期 Cookie。"""
     request.session.clear()
-
-
-@router.get("/me", response_model=AccountView)
-def me(user: UserRecord | None = Depends(current_user)) -> AccountView:
-    """当前会话对应的账号；无有效会话返回 401。"""
-    if user is None:
-        raise ApiProblemError(UNAUTHENTICATED, "需要有效会话")
-    return AccountView(username=str(user["username"]), name=str(user["name"]))
 
 
 @identity_router.get("/me", response_model=MeView)
