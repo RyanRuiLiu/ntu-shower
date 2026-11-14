@@ -13,7 +13,7 @@ from sqlalchemy import JSON, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db.base import Base, UtcDateTime, enum_column, utcnow
-from .enums import ActorKind, BackgroundOutcome, CommandStatus, DeviceLogKind, LinkEvent
+from .enums import ActorKind, CommandStatus, DeviceLogKind, JobOutcome, LinkEvent
 
 
 class ApiCall(Base):
@@ -99,11 +99,11 @@ class DeviceLinkEvent(Base):
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
 
 
-class BackgroundTaskRun(Base):
+class JobRun(Base):
     """后台任务的一次执行记录，保留 180 天。"""
 
-    __tablename__ = "background_task_runs"
-    __table_args__ = (Index("ix_background_task_runs_device_id_occurred_at", "device_id", "occurred_at"),)
+    __tablename__ = "job_runs"
+    __table_args__ = (Index("ix_job_runs_device_id_occurred_at", "device_id", "occurred_at"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     occurred_at: Mapped[datetime] = mapped_column(UtcDateTime, index=True)
@@ -113,9 +113,9 @@ class BackgroundTaskRun(Base):
     door_no: Mapped[int] = mapped_column(Integer)
     session_id: Mapped[int | None] = mapped_column(ForeignKey("usage_sessions.id", ondelete="SET NULL"), default=None)
     cert_no: Mapped[str] = mapped_column(String(32), default="")
-    task: Mapped[str] = mapped_column(String(32))
+    job: Mapped[str] = mapped_column(String(32))
     action: Mapped[str | None] = mapped_column(String(32), default=None)
-    outcome: Mapped[BackgroundOutcome] = mapped_column(enum_column(BackgroundOutcome, "background_outcome"))
+    outcome: Mapped[JobOutcome] = mapped_column(enum_column(JobOutcome, "job_outcome"))
     reason: Mapped[str | None] = mapped_column(String(128), default=None)
     threshold_s: Mapped[int | None] = mapped_column(Integer, default=None)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
@@ -123,8 +123,8 @@ class BackgroundTaskRun(Base):
 
 __all__: list[str] = [
     "ApiCall",
-    "BackgroundTaskRun",
     "CommandAudit",
     "DeviceLinkEvent",
     "DeviceLog",
+    "JobRun",
 ]

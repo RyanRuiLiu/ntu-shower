@@ -1,7 +1,7 @@
 """审计域 API：三类审计的只读出口（admin）。
 
 api_call（HTTP 与网关生命周期）的写入在 core/audit；command_audit（命令级）与
-background_task_run（后台任务的自动动作）的写入在各自的动作方经
+job_run（后台任务的自动动作）的写入在各自的动作方经
 modules/audit.repository。这里只暴露查询，查询本身也照常被审计。
 前两表以 trace_id 关联，命令与维护记录以 command_id 关联，查两边即得全链路。
 """
@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.db.deps import get_db
 from app.modules.access.dependencies import require_admin
-from app.modules.audit.schemas import BackgroundTaskRun, CommandAuditRecord
+from app.modules.audit.schemas import CommandAuditRecord, JobRun
 from app.persistence import audit as command_audit
 from app.persistence.api_calls import ApiCallRecord, list_calls
 
@@ -41,11 +41,11 @@ def list_commands_endpoint(
     return command_audit.list_commands(session, device_id=device_id, limit=limit)
 
 
-@admin_router.get("/audit/background-task-runs")
-def list_background_task_runs_endpoint(
+@admin_router.get("/audit/job-runs")
+def list_job_runs_endpoint(
     device_id: Annotated[str | None, Query(description="按设备过滤")] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
     session: Session = Depends(get_db),
-) -> list[BackgroundTaskRun]:
+) -> list[JobRun]:
     """后台任务审计：配置好的任务自动替谁做了什么、为什么（与 commands 按时间对照）。"""
-    return command_audit.list_background_task_runs(session, device_id=device_id, limit=limit)
+    return command_audit.list_job_runs(session, device_id=device_id, limit=limit)

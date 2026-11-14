@@ -1,5 +1,5 @@
 /**
- * 审计：接口调用（api_calls）、命令流水（command_audits）、后台任务（background_task_runs）。
+ * 审计：接口调用（api_calls）、命令流水（command_audits）、后台任务（job_runs）。
  *
  * 三种审计结构不同，页面骨架却是同一个：一张关键列表 + 右侧全部字段。所以**差异只写在
  * [TABS] 里**（标题、取数、列头、每格怎么显示、时间取哪一列），渲染只有一份——加第四种
@@ -12,7 +12,7 @@
  * 行组只有一个 Tab 停靠点，行内用方向键移动、Enter 或空格查看详情。
  *
  * 动作名、原因码、功能名、结果名一律**照原样显示**：这是开发者页面，读它的人要拿这些值
- * 去日志里搜（`background-task.settled`、`task=renew_wait`），翻译成中文反而搜不到。
+ * 去日志里搜（`job.settled`、`job=renew_wait`），翻译成中文反而搜不到。
  */
 import { api } from '../core/api.js'
 import { copyText } from '../core/clipboard.js'
@@ -106,17 +106,17 @@ const TABS = {
       mono(row.finished_at ? `${new Date(row.finished_at) - new Date(row.created_at)} ms` : PLACEHOLDER),
     ],
   },
-  task: {
+  job: {
     label: '后台任务',
     title: '配置好的后台任务自动替谁做了什么、为什么（时间与命令流水对照即知发了哪条命令）',
-    kind: 'background-task-runs',
+    kind: 'job-runs',
     time: (row) => row.occurred_at,
     headers: ['设备', '喷头', '学号', '功能', '动作', '结果', '阈值', '原因'],
     cells: (row) => [
       deviceCell(row.device_id),
       mono(row.door_no),
       codeCell(row.cert_no),
-      mono(row.task),
+      mono(row.job),
       mono(row.action),
       mono(row.outcome),
       row.threshold_s === null ? PLACEHOLDER : mono(`${row.threshold_s} 秒`),

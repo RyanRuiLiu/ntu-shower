@@ -22,7 +22,7 @@ from app.models.enums import CommandStatus
 EXPECTED_TABLES: set[str] = {
     "api_calls",
     "app_settings",
-    "background_task_runs",
+    "job_runs",
     "clock_shifts",
     "command_audits",
     "device_configs",

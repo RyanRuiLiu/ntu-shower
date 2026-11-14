@@ -87,7 +87,7 @@ from app.modules.devices import actions as device_actions
 from app.modules.devices import service as devices_service
 from app.modules.doors import service as doors_service
 from app.modules.sessions import service as sessions_service
-from app.modules.sessions.decision import roster
+from app.modules.sessions.decision import students_of
 from app.modules.sessions.schemas import AssignRequest
 from app.persistence import extend_hours as repository
 
@@ -415,7 +415,7 @@ async def _maybe_shift(session: Session, device_id: str) -> None:
         return
     if repository.get(session, device_id) is not None:
         return  # 已经在延长中
-    students = roster(config, "extend_hours_students")
+    students = students_of(config, "extend_hours_students")
     if not students:
         return
     if not _reached(
@@ -486,7 +486,7 @@ def on_frame(device_id: str) -> None:
             return
         if _reassign_tasks:
             return
-        students = roster(config_store.effective(session, device_id), "extend_hours_students")
+        students = students_of(config_store.effective(session, device_id), "extend_hours_students")
     if not students:
         return
     task = asyncio.create_task(_reassign_task(shift, students))
@@ -531,7 +531,7 @@ async def _reassign(session: Session, shift: Shift, students: dict[str, str]) ->
     for door_no, cert_no in shift.assignments:
         password = students.get(cert_no)
         if password is None:
-            log_event("INFO", "extend-hours.roster-changed", "他不在名单里了，不分配", device_id=device_id)
+            log_event("INFO", "extend-hours.students-changed", "他不在名单里了，不分配", device_id=device_id)
             continue
         if (device_id, cert_no) in _reassigned or (device_id, cert_no) in _reassign_failed:
             continue
@@ -623,7 +623,7 @@ async def _advance(session: Session, shift: Shift, config: ConfigValues) -> None
     last = _last_roll_at.get(shift.device_id)
     if last is None or time.monotonic() - last >= ROLL_REARM_INTERVAL_S:
         await _roll_power(session, shift.device_id, config, pre_shift=False)
-    students = roster(config, "extend_hours_students")
+    students = students_of(config, "extend_hours_students")
     if students:
         await _reassign(session, shift, students)
     if _restore_due(session, shift, config):

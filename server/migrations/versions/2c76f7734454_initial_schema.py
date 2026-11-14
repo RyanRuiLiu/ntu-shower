@@ -1,8 +1,8 @@
 """initial schema
 
-Revision ID: 005d56b1c684
+Revision ID: 2c76f7734454
 Revises: 
-Create Date: 2026-11-08 22:44:51.131426
+Create Date: 2026-11-14 18:33:24.930684
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from app.db.base import UtcDateTime
 
 # revision identifiers, used by Alembic.
-revision: str = '005d56b1c684'
+revision: str = '2c76f7734454'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -356,7 +356,7 @@ def upgrade() -> None:
     with op.batch_alter_table('voice_units', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_voice_units_asset_id'), ['asset_id'], unique=False)
 
-    op.create_table('background_task_runs',
+    op.create_table('job_runs',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('occurred_at', UtcDateTime(), nullable=False),
     sa.Column('device_id', sa.Integer(), nullable=True),
@@ -364,19 +364,19 @@ def upgrade() -> None:
     sa.Column('door_no', sa.Integer(), nullable=False),
     sa.Column('session_id', sa.Integer(), nullable=True),
     sa.Column('cert_no', sa.String(length=32), nullable=False),
-    sa.Column('feature', sa.String(length=32), nullable=False),
+    sa.Column('job', sa.String(length=32), nullable=False),
     sa.Column('action', sa.String(length=32), nullable=True),
-    sa.Column('outcome', sa.Enum('settled', 'assigned', 'settle-failed', 'assign-waiting', 'assign-failed', 'assign-expired', 'skipped', 'failed', 'rejected', 'no-password', 'not-applicable', name='background_outcome', native_enum=False, create_constraint=True, length=32), nullable=False),
+    sa.Column('outcome', sa.Enum('settled', 'assigned', 'settle-failed', 'assign-waiting', 'assign-failed', 'assign-expired', 'skipped', 'failed', 'rejected', 'no-password', 'not-applicable', name='job_outcome', native_enum=False, create_constraint=True, length=32), nullable=False),
     sa.Column('reason', sa.String(length=128), nullable=True),
     sa.Column('threshold_s', sa.Integer(), nullable=True),
     sa.Column('created_at', UtcDateTime(), nullable=False),
-    sa.ForeignKeyConstraint(['device_id'], ['devices.id'], name=op.f('fk_background_task_runs_device_id_devices'), ondelete='CASCADE'),
-    sa.ForeignKeyConstraint(['session_id'], ['usage_sessions.id'], name=op.f('fk_background_task_runs_session_id_usage_sessions'), ondelete='SET NULL'),
-    sa.PrimaryKeyConstraint('id', name=op.f('pk_background_task_runs'))
+    sa.ForeignKeyConstraint(['device_id'], ['devices.id'], name=op.f('fk_job_runs_device_id_devices'), ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['session_id'], ['usage_sessions.id'], name=op.f('fk_job_runs_session_id_usage_sessions'), ondelete='SET NULL'),
+    sa.PrimaryKeyConstraint('id', name=op.f('pk_job_runs'))
     )
-    with op.batch_alter_table('background_task_runs', schema=None) as batch_op:
-        batch_op.create_index('ix_background_task_runs_device_id_occurred_at', ['device_id', 'occurred_at'], unique=False)
-        batch_op.create_index(batch_op.f('ix_background_task_runs_occurred_at'), ['occurred_at'], unique=False)
+    with op.batch_alter_table('job_runs', schema=None) as batch_op:
+        batch_op.create_index('ix_job_runs_device_id_occurred_at', ['device_id', 'occurred_at'], unique=False)
+        batch_op.create_index(batch_op.f('ix_job_runs_occurred_at'), ['occurred_at'], unique=False)
 
     op.create_table('usage_segments',
     sa.Column('id', sa.Integer(), nullable=False),
@@ -409,11 +409,11 @@ def downgrade() -> None:
         batch_op.drop_index('ix_usage_segments_device_id_door_no_opened_at')
 
     op.drop_table('usage_segments')
-    with op.batch_alter_table('background_task_runs', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_background_task_runs_occurred_at'))
-        batch_op.drop_index('ix_background_task_runs_device_id_occurred_at')
+    with op.batch_alter_table('job_runs', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_job_runs_occurred_at'))
+        batch_op.drop_index('ix_job_runs_device_id_occurred_at')
 
-    op.drop_table('background_task_runs')
+    op.drop_table('job_runs')
     with op.batch_alter_table('voice_units', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_voice_units_asset_id'))
 
