@@ -10,10 +10,10 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.contracts import DeviceLogKind, LinkEvent
+from app.db.base import Base
 from app.db.session import Database
-from app.models import Base
-from app.models.enums import DeviceLogKind, LinkEvent
-from app.persistence import devices
+from app.modules.devices import crud as devices
 
 NOW = datetime(2026, 11, 7, 12, 0, 0, tzinfo=UTC)
 

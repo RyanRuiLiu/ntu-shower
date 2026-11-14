@@ -36,7 +36,7 @@ class DeviceSummary(TypedDict):
 class DeviceListItem(DeviceSummary):
     """`GET /devices` 的一行：精简视图 + 该调用方可执行的用户动作。
 
-    actions 由 access.user_actions 按调用方能力位与设备作用域算出（服务端唯一
+    actions 由 auth.allowed_actions 按调用方权限与设备作用域算出（服务端唯一
     判定，客户端不复制规则）；匿名调用恒为空数组——字段仍然存在，客户端不必判键。
     """
 

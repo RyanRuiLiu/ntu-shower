@@ -3,8 +3,8 @@
  *
  * 视图模块不得直接 `fetch`：路径、鉴权头、错误解包各写一份，改一处就会漏三处。
  *
- * 服务端是单一资源树（路径即资源，权限由能力位守卫决定，见 docs/architecture.md），
- * 这里按域分组封装；管理台身份需持有 admin 与它代操作所需的 session/photo 能力位。
+ * 服务端是单一资源树（路径即资源，权限由 scope 守卫决定，见 docs/architecture.md），
+ * 这里按域分组封装；会话通道是操作台（权限视为全权），无需另配密钥。
  *
  * ## 错误
  *
@@ -168,11 +168,15 @@ export const api = {
   renameVoiceAsset: (id, name) => send(`${API_V1}/voice/assets/${id}`, patch({ name })),
   deleteVoiceAsset: (id) => send(`${API_V1}/voice/assets/${id}`, del()),
 
-  // ── 身份 ──（admin；名单响应含能力位枚举，身份页一次装载）
-  identities: () => send(`${API_V1}/identities`),
-  createIdentity: (value) => send(`${API_V1}/identities`, post(value)),
-  updateIdentity: (identity, value) => send(`${API_V1}/identities/${encodeURIComponent(identity)}`, put(value)),
-  deleteIdentity: (id) => send(`${API_V1}/identities/${encodeURIComponent(id)}`, del()),
+  // ── 用户与密钥 ──（users:write；名单响应含权限字典，用户页一次装载）
+  users: () => send(`${API_V1}/users`),
+  createUser: (value) => send(`${API_V1}/users`, post(value)),
+  updateUser: (username, value) => send(`${API_V1}/users/${encodeURIComponent(username)}`, put(value)),
+  deleteUser: (username) => send(`${API_V1}/users/${encodeURIComponent(username)}`, del()),
+  userKeys: (username) => send(`${API_V1}/users/${encodeURIComponent(username)}/keys`),
+  createKey: (username, value) => send(`${API_V1}/users/${encodeURIComponent(username)}/keys`, post(value)),
+  revokeKey: (username, keyId) =>
+    send(`${API_V1}/users/${encodeURIComponent(username)}/keys/${encodeURIComponent(keyId)}`, del()),
 
   // ── 发布 ──（读公开；写 admin）
   releases: () => send(`${API_V1}/ota/releases`),

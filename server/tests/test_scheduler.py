@@ -20,13 +20,12 @@ import pytest
 from fastapi.testclient import TestClient
 from tests import device_link, door_link
 
-from app.contracts import CommandOutcome
+from app.contracts import CommandOutcome, DoorState
 from app.core import device_clock, outcomes, problems
 from app.core.clock import now_rfc3339, parse_rfc3339, rfc3339_ago, shift_rfc3339
 from app.core.problems import ApiProblemError, Problem
 from app.core.protocol import JsonObject
 from app.db.session import session_scope
-from app.models.enums import DoorState
 from app.modules.devices import actions as device_actions
 from app.modules.sessions import scheduler
 from app.modules.sessions.decision import (
@@ -113,7 +112,7 @@ def _seed_session(candidate: Candidate) -> None:
     from sqlalchemy import text
     from sqlalchemy.exc import OperationalError
 
-    from app.models.usage import UsageSession
+    from app.persistence.usage import UsageSession
 
     with session_scope() as session:
         try:

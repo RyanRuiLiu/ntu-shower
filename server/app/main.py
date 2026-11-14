@@ -3,17 +3,18 @@
 ## 接口组织（版本化的统一资源树）
 
 对外 HTTP 面统一挂 `/api/v1` 前缀（路径版本化，对外契约的破坏性变更升 v2）；
-URL 只表达资源，不表达权限——谁能调用由能力位守卫决定（统一身份制，
-标准 Bearer 凭据）：
+URL 只表达资源，不表达权限——谁能调用由 scope 守卫决定（RFC 6749 scope 语义，
+标准 Bearer 凭据或会话 Cookie，见 auth/dependencies）：
 
 - /api/v1/devices、/api/v1/doors     设备域：精简清单公开；runtime 档案与远程
-                                      操作 admin；分配/结算/拍照按 session/photo 能力位
-- /api/v1/config                     配置域（admin）
-- /api/v1/identities                 身份域：名单与签发/编辑/撤销 admin；`/identities/me`
-                                      是自己的记录（凭 Bearer 凭据）
-- /api/v1/ota、/ota/manifest         发布域：清单与下载公开，发布/下架/重推 admin；
+                                      操作 devices:write；分配/结算/拍照按
+                                      sessions:write / devices:photo
+- /api/v1/config                     配置域（config:read / config:write）
+- /api/v1/users                      用户域：名单与登记/编辑/撤销、密钥签发/吊销
+                                      （users:write）；`/users/me` 是自己的记录
+- /api/v1/ota、/ota/manifest         发布域：清单与下载公开，发布/下架/重推 ota:write；
                                       manifest 为设备硬编码契约（无前缀，路径冻结）
-- /api/v1/audit                      审计域（admin）
+- /api/v1/audit                      审计域（audit:read）
 - /api/v1/stream                     实时推送（公开，可按 device_id 过滤）
 - /gateway/device                    设备 WS 网关（设备硬编码契约，路径冻结）
 - /voice/assets/{id}.mp3             语音素材下载（设备硬编码契约，路径冻结）
@@ -34,6 +35,8 @@ from starlette.middleware.sessions import SessionMiddleware
 from typing_extensions import TypedDict
 
 from . import audit_middleware
+from .auth.routes import admin_router as users_admin_router
+from .auth.routes import identity_router as users_identity_router
 from .auth.routes import router as auth_router
 from .core.background import Background
 from .core.config import settings
@@ -42,19 +45,19 @@ from .core.logging import configure_logging, log_event
 from .core.version import APP_VERSION
 from .db.base import utcnow
 from .db.session import Database
-from .modules.access.routes import admin_router as identities_admin_router
-from .modules.access.routes import router as identity_router
+from .gateway.routes import router as gateway_router
 from .modules.audit.routes import admin_router as audit_admin_router
 from .modules.bridge.routes import admin_router as bridge_admin_router
 from .modules.bridge.routes import router as bridge_router
 from .modules.config import notifier as config_notifier
 from .modules.config.routes import admin_router as config_admin_router
 from .modules.devices.routes import admin_router as devices_admin_router
+from .modules.devices.routes import device_read_router as devices_device_read_router
+from .modules.devices.routes import device_router as devices_device_router
 from .modules.devices.routes import router as devices_router
 from .modules.doors.routes import router as doors_router
 from .modules.extend_hours import service as extend_hours_service
 from .modules.freelist.routes import router as freelist_router
-from .modules.gateway.routes import router as gateway_router
 from .modules.jobs.routes import admin_router as jobs_admin_router
 from .modules.ota.routes import device_router as ota_device_router
 from .modules.ota.routes import router as ota_router
@@ -134,7 +137,9 @@ def create_app() -> FastAPI:
         await background.stop()
         _app.state.database.dispose()
 
-    app = FastAPI(title="NTU Shower", version=APP_VERSION, lifespan=lifespan)
+    # 调试 UI（/docs、/redoc）不对外：对外契约是 /openapi.json（外部调用方拿它
+    # 生成客户端），调试面没有消费方，暴露它只是白送接口拓扑（OWASP API8）。
+    app = FastAPI(title="NTU Shower", version=APP_VERSION, lifespan=lifespan, docs_url=None, redoc_url=None)
     install_error_handlers(app)
     audit_middleware.install_audit(app)
     # 配置保存 → 定时器重算 + 设备推送：组合根装配（写侧不 import sessions，见
@@ -146,6 +151,8 @@ def create_app() -> FastAPI:
     app.include_router(sessions_router)
     app.include_router(devices_router)
     app.include_router(devices_admin_router)
+    app.include_router(devices_device_router)
+    app.include_router(devices_device_read_router)
     app.include_router(freelist_router)
     app.include_router(config_admin_router)
     app.include_router(ota_router)
@@ -153,10 +160,10 @@ def create_app() -> FastAPI:
     app.include_router(bridge_router)
     app.include_router(bridge_admin_router)
     app.include_router(audit_admin_router)
-    # identity_router 必须排在 identities_admin_router 之前：后者挂着 `require_admin`，
-    # 将来它的 `/identities/{identity}` 若加上 GET，会把这个 `/identities/me` 抢走。
-    app.include_router(identity_router)
-    app.include_router(identities_admin_router)
+    # users_identity_router 必须排在 users_admin_router 之前：后者要求 users:write，
+    # 将来它的 `/users/{username}` 若加上 GET，会把这个 `/users/me` 抢走。
+    app.include_router(users_identity_router)
+    app.include_router(users_admin_router)
     app.include_router(jobs_admin_router)
     app.include_router(voice_router)
     app.include_router(water_router)
@@ -194,7 +201,7 @@ def create_app() -> FastAPI:
         SessionMiddleware,
         secret_key=settings.session_secret,
         session_cookie=SESSION_COOKIE_NAME,
-        max_age=settings.session_ttl_seconds,
+        max_age=settings.session_idle_seconds,
         same_site="lax",
         https_only=_cookie_secure(),
     )

@@ -1,4 +1,4 @@
-"""审计域 API：三类审计的只读出口（admin）。
+"""审计域 API：三类审计的只读出口（`audit:read`）。
 
 api_call（HTTP 与网关生命周期）的写入在 core/audit；command_audit（命令级）与
 job_run（后台任务的自动动作）的写入在各自的动作方经
@@ -8,16 +8,16 @@ modules/audit.repository。这里只暴露查询，查询本身也照常被审�
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Security
 from sqlalchemy.orm import Session
 
+from app.auth.dependencies import caller
 from app.db.deps import get_db
-from app.modules.access.dependencies import require_admin
 from app.modules.audit.schemas import CommandAuditRecord, JobRun
 from app.persistence import audit as command_audit
 from app.persistence.api_calls import ApiCallRecord, list_calls
 
-admin_router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_admin)], tags=["audit"])
+admin_router = APIRouter(prefix="/api/v1", dependencies=[Security(caller, scopes=["audit:read"])], tags=["audit"])
 
 
 @admin_router.get("/audit/calls")

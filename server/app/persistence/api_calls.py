@@ -15,15 +15,13 @@ from sqlalchemy import delete
 from sqlalchemy.orm import Session
 from typing_extensions import TypedDict
 
+from app.contracts import ApiCallKind
+from app.db.base import utcnow
+
 from ..core.logging import request_id_var, trace_id_var
-from ..db.base import utcnow
 from ..db.session import session_scope
-from ..models.device import DeviceLinkEvent
-from ..models.doors import DoorSnapshot
-from ..models.enums import ApiCallKind
-from ..models.ops import ApiCall, CommandAudit, JobRun
-from ..models.voice import VoiceDelivery
 from . import audit as audit_store
+from .audit import ApiCall, CommandAudit
 
 
 class ApiCallRecord(TypedDict):
@@ -115,28 +113,18 @@ def list_calls(
         )
 
 
-#: 各保留期表 → (时刻列, 保留天数)。天数与各表模型的 docstring 声明一致——
-#: 声明=实现，两边由 tests/test_retention.py 钉住。业务数据（喷头状态迁移、
-#: 使用会话）是运营历史，永久保留、不在此列。
-RETENTIONS: tuple[tuple[Any, Any, int], ...] = (
-    (ApiCall, ApiCall.requested_at, 90),
-    (CommandAudit, CommandAudit.created_at, 90),
-    (JobRun, JobRun.occurred_at, 180),
-    (DeviceLinkEvent, DeviceLinkEvent.occurred_at, 90),
-    (DoorSnapshot, DoorSnapshot.received_at, 30),
-    (VoiceDelivery, VoiceDelivery.occurred_at, 90),
-)
-
-
-def prune(session: Session, retention_days: int) -> int:
+def prune(session: Session, retention_days: int, retentions: tuple[tuple[Any, Any, int], ...]) -> int:
     """删除超过各自保留期的行，返回删除总行数。
 
     `retention_days` 是 api_call/command_audit 的可配期限（audit_retention_days）；
     其余表用各自声明值，不随该配置变。全部 DELETE 共用一个事务：要么都清、
     要么都不清，各表保留期才不会错开。库文件不复缩，页复用即可。
+
+    `retentions` 由调用方（app 根的 audit_middleware）传入：保留期清单横跨各域的
+    表，持久化层不得反向 import 各域模型，清单住在装配侧。
     """
     removed = 0
-    for table, column, days in RETENTIONS:
+    for table, column, days in retentions:
         cutoff = utcnow() - timedelta(days=days if table not in (ApiCall, CommandAudit) else retention_days)
         result = session.execute(delete(table).where(column < cutoff))
         removed += int(getattr(result, "rowcount", 0) or 0)

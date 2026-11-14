@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy import JSON, Integer
 from sqlalchemy.orm import Mapped, mapped_column
 
-from ..db.base import Base, UtcDateTime, utcnow
+from app.db.base import Base, UtcDateTime, utcnow
 
 
 class AppSettings(Base):
