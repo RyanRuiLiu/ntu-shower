@@ -37,7 +37,7 @@ class ConfigSpecView(TypedDict):
 
 
 class ConfigSectionOption(TypedDict):
-    """配置页的一个大区（服务端业务 / 设备下发）。"""
+    """配置页的一个大区（后台任务 / 设备下发）。"""
 
     key: str
     title: str

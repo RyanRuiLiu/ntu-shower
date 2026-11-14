@@ -8,6 +8,19 @@
 
 ## [Unreleased]
 
+### Changed
+
+- 后台任务域全链更名为 **jobs**（业主裁定全新重写式整改，旧名不作为锚点）：模块
+  `tasks`→`jobs`、接口 `/api/v1/jobs/status`、数据库表 `background_task_runs`→`job_runs`
+  （列 `feature`→`task`→`job`）、日志事件 `background-task.*`→`job.*`、审计端点
+  `/audit/job-runs`、契约模型 `Job*`、管理台字段与页签。迁移方式为**基线重置**：
+  迁移链回归单一初始 schema（与模型零漂移），生产库由一次性脚本原地改名并盖版本戳
+  （脚本用后即删，不进仓库）；旧迁移链（含 task 中间态）不再保留。
+- 名单读取函数 `roster`→`students_of`、看板字段 `roster`→`students_count`、事件
+  `roster-changed`→`students-changed`：roster/students 双词并存指同一份名单，统一到
+  `students` 词根（freelist 对外契约已在用）；配置键 `*_students` 不动。
+- 看板响应模型 BaseModel→TypedDict，对齐项目"响应用 TypedDict、请求用 Pydantic"分工。
+
 ### Added
 
 - import-linter 契约扩到 5 条：业务模块全族禁环（acyclic_siblings）、核心层零向上依赖、

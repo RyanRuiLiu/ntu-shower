@@ -55,12 +55,12 @@ from .modules.doors.routes import router as doors_router
 from .modules.extend_hours import service as extend_hours_service
 from .modules.freelist.routes import router as freelist_router
 from .modules.gateway.routes import router as gateway_router
+from .modules.jobs.routes import admin_router as jobs_admin_router
 from .modules.ota.routes import device_router as ota_device_router
 from .modules.ota.routes import router as ota_router
 from .modules.sessions import scheduler as sessions_scheduler
 from .modules.sessions.routes import router as sessions_router
 from .modules.status_line import service as status_line_service
-from .modules.tasks.routes import admin_router as tasks_admin_router
 from .modules.voice.routes import admin_router as voice_admin_router
 from .modules.voice.routes import router as voice_router
 from .modules.water.routes import router as water_router
@@ -157,7 +157,7 @@ def create_app() -> FastAPI:
     # 将来它的 `/identities/{identity}` 若加上 GET，会把这个 `/identities/me` 抢走。
     app.include_router(identity_router)
     app.include_router(identities_admin_router)
-    app.include_router(tasks_admin_router)
+    app.include_router(jobs_admin_router)
     app.include_router(voice_router)
     app.include_router(water_router)
     app.include_router(voice_admin_router)

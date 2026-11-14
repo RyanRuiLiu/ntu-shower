@@ -92,10 +92,10 @@ class SegmentSource(StrEnum):
     DERIVED = "derived"
 
 
-class BackgroundOutcome(StrEnum):
+class JobOutcome(StrEnum):
     """后台任务的执行结果。
 
-    取值与 scheduler 的日志事件名后缀同一套（`background-task.<它>`）：
+    取值与 scheduler 的日志事件名后缀同一套（`job.<它>`）：
     日志与审计表两边不分叉。
     """
 
@@ -130,11 +130,11 @@ __all__: list[str] = [
     "OCCUPIED_STATES",
     "ActorKind",
     "AssignedSource",
-    "BackgroundOutcome",
     "CommandStatus",
     "DeviceLogKind",
     "DoorState",
     "IdentityKind",
+    "JobOutcome",
     "LinkEvent",
     "ObservedSpan",
     "SegmentSource",
