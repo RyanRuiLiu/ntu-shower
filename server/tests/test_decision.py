@@ -8,16 +8,16 @@ from dataclasses import replace
 
 from app.models.enums import DoorState
 from app.modules.sessions.decision import (
-    FEATURE_AUTO_SETTLE,
-    FEATURE_RENEW_SESSION,
-    FEATURE_RENEW_WAIT,
+    JOB_AUTO_SETTLE,
+    JOB_RENEW_SESSION,
+    JOB_RENEW_WAIT,
     Candidate,
     Trigger,
     decide,
     password_of,
     recheck,
-    roster,
     still_allowed,
+    students_of,
 )
 
 #: 基准时刻：判据的全部时刻都是服务端轴的 RFC 3339。
@@ -60,16 +60,16 @@ def test_roster_reads_the_map_and_trims_the_id_only() -> None:
 
     配置页那侧两个都 trim 过了，所以这里只兜住"直接调接口"的情形。
     """
-    assert roster({"k": {"1001": "pw"}}, "k") == {"1001": "pw"}
-    assert roster({"k": {" 1001 ": "pw"}}, "k") == {"1001": "pw"}
-    assert roster({"k": {}}, "k") == {}
-    assert roster({}, "k") == {}
+    assert students_of({"k": {"1001": "pw"}}, "k") == {"1001": "pw"}
+    assert students_of({"k": {" 1001 ": "pw"}}, "k") == {"1001": "pw"}
+    assert students_of({"k": {}}, "k") == {}
+    assert students_of({}, "k") == {}
 
 
 def test_roster_tolerates_a_wrong_shape() -> None:
     """名单是配置值，人手改错了不该让整个功能抛异常。"""
-    assert roster({"k": "1001,pw"}, "k") == {}
-    assert roster({"k": ["1001"]}, "k") == {}
+    assert students_of({"k": "1001,pw"}, "k") == {}
+    assert students_of({"k": ["1001"]}, "k") == {}
 
 
 def test_password_of_comes_from_that_tasks_own_roster() -> None:
@@ -78,11 +78,11 @@ def test_password_of_comes_from_that_tasks_own_roster() -> None:
     所以不存在"名单里有他、却没有他的密码"那种静默不执行——代价是同一个学号开两个功能
     要在两份名单里各写一遍。
     """
-    assert password_of(BASE_CONFIG, FEATURE_RENEW_WAIT, "2026000001") == "000000"
-    assert password_of(BASE_CONFIG, FEATURE_RENEW_WAIT, "2026000002") == "111111"
+    assert password_of(BASE_CONFIG, JOB_RENEW_WAIT, "2026000001") == "000000"
+    assert password_of(BASE_CONFIG, JOB_RENEW_WAIT, "2026000002") == "111111"
     # 2026000002 只开了预约续期，所以会话续期那份名单里没有他
-    assert password_of(BASE_CONFIG, FEATURE_RENEW_SESSION, "2026000002") == ""
-    assert password_of(BASE_CONFIG, FEATURE_AUTO_SETTLE, "9999") == ""
+    assert password_of(BASE_CONFIG, JOB_RENEW_SESSION, "2026000002") == ""
+    assert password_of(BASE_CONFIG, JOB_AUTO_SETTLE, "9999") == ""
 
 
 # ── 预约续期 ──
@@ -95,7 +95,7 @@ def test_renew_wait_counts_from_assignment_not_from_valve() -> None:
     """
     trigger = decide(candidate(), BASE_CONFIG, NOW)
 
-    assert trigger == Trigger(FEATURE_RENEW_WAIT, delay_s=-30.0, threshold_s=270)
+    assert trigger == Trigger(JOB_RENEW_WAIT, delay_s=-30.0, threshold_s=270)
 
 
 def test_renew_wait_fires_past_due_with_negative_delay() -> None:
@@ -139,7 +139,7 @@ def test_renew_session_applies_only_while_bathing() -> None:
         assert decide(candidate(state=state), only_renew_session, NOW) is None
 
     trigger = decide(candidate(state=DoorState.BATHING, assigned_at="2026-10-05T11:41:30.000Z"), BASE_CONFIG, NOW)
-    assert trigger == Trigger(FEATURE_RENEW_SESSION, delay_s=30.0, threshold_s=1140)
+    assert trigger == Trigger(JOB_RENEW_SESSION, delay_s=30.0, threshold_s=1140)
 
 
 def test_renew_session_has_no_duration_cap() -> None:
@@ -149,7 +149,7 @@ def test_renew_session_has_no_duration_cap() -> None:
     trigger = decide(long_run, BASE_CONFIG, NOW)
 
     assert trigger is not None
-    assert trigger.task == FEATURE_RENEW_SESSION
+    assert trigger.job == JOB_RENEW_SESSION
 
 
 # ── 自动结算 ──
@@ -159,7 +159,7 @@ def test_auto_settle_counts_from_valve_close_not_from_assignment() -> None:
     """暂停从关阀那一刻起算：分配时刻早在几十分钟前，拿它算等于立刻结算。"""
     trigger = decide(candidate(state=DoorState.PAUSED, paused_at="2026-10-05T11:59:30.000Z"), BASE_CONFIG, NOW)
 
-    assert trigger == Trigger(FEATURE_AUTO_SETTLE, delay_s=30.0, threshold_s=60)
+    assert trigger == Trigger(JOB_AUTO_SETTLE, delay_s=30.0, threshold_s=60)
 
 
 def test_auto_settle_needs_a_close_time() -> None:
@@ -188,7 +188,7 @@ def test_earliest_trigger_wins() -> None:
     # 分配 11:55、现在 12:00：会话续期还有 840 秒才到点（1140 − 300）
     trigger = decide(candidate(state=DoorState.BATHING), BASE_CONFIG, NOW)
 
-    assert trigger == Trigger(FEATURE_RENEW_SESSION, delay_s=840.0, threshold_s=1140)
+    assert trigger == Trigger(JOB_RENEW_SESSION, delay_s=840.0, threshold_s=1140)
 
 
 def test_paused_belongs_to_auto_settle_alone() -> None:
@@ -199,7 +199,7 @@ def test_paused_belongs_to_auto_settle_alone() -> None:
     """
     trigger = decide(candidate(state=DoorState.PAUSED, paused_at="2026-10-05T11:59:00.000Z"), BASE_CONFIG, NOW)
 
-    assert trigger == Trigger(FEATURE_AUTO_SETTLE, delay_s=0.0, threshold_s=60)
+    assert trigger == Trigger(JOB_AUTO_SETTLE, delay_s=0.0, threshold_s=60)
 
 
 def test_a_session_nearly_full_that_just_closed_the_valve_still_settles() -> None:
@@ -216,7 +216,7 @@ def test_a_session_nearly_full_that_just_closed_the_valve_still_settles() -> Non
         paused_at="2026-10-05T11:59:50.000Z",  # 结算还要 50 秒
     )
 
-    assert decide(just_closed, BASE_CONFIG, NOW) == Trigger(FEATURE_AUTO_SETTLE, delay_s=50.0, threshold_s=60)
+    assert decide(just_closed, BASE_CONFIG, NOW) == Trigger(JOB_AUTO_SETTLE, delay_s=50.0, threshold_s=60)
 
 
 # ── 到点复查 ──
@@ -224,7 +224,7 @@ def test_a_session_nearly_full_that_just_closed_the_valve_still_settles() -> Non
 
 def test_recheck_passes_when_nothing_moved() -> None:
     expected = candidate()
-    trigger = Trigger(FEATURE_RENEW_WAIT, delay_s=0.0, threshold_s=270)
+    trigger = Trigger(JOB_RENEW_WAIT, delay_s=0.0, threshold_s=270)
 
     assert recheck(expected, expected, trigger, BASE_CONFIG, NOW) is None
 
@@ -237,7 +237,7 @@ def test_recheck_refuses_when_the_duration_cap_ran_out_while_the_timer_waited() 
     （它不在现态的字段里），所以到点要把适用性整条重算。
     """
     armed = candidate(run_started_at="2026-10-05T11:41:00.000Z")  # 12:01:00 才到 1200 秒
-    trigger = Trigger(FEATURE_RENEW_WAIT, delay_s=60.0, threshold_s=270)
+    trigger = Trigger(JOB_RENEW_WAIT, delay_s=60.0, threshold_s=270)
     fired_late = "2026-10-05T12:05:00.000Z"  # 到点了，而这一串已经跑了 24 分钟
 
     assert recheck(armed, armed, trigger, BASE_CONFIG, NOW) is None
@@ -246,7 +246,7 @@ def test_recheck_refuses_when_the_duration_cap_ran_out_while_the_timer_waited() 
 
 def test_recheck_reports_every_kind_of_change() -> None:
     expected = candidate()
-    trigger = Trigger(FEATURE_RENEW_WAIT, delay_s=0.0, threshold_s=270)
+    trigger = Trigger(JOB_RENEW_WAIT, delay_s=0.0, threshold_s=270)
 
     assert recheck(None, expected, trigger, BASE_CONFIG, NOW) == "会话已结束"
     assert recheck(candidate(session_id=8), expected, trigger, BASE_CONFIG, NOW) == "换了会话"
@@ -260,6 +260,6 @@ def test_recheck_reports_every_kind_of_change() -> None:
 
 def test_still_allowed_is_the_same_question_asked_before_sending() -> None:
     """复查到下单之间隔着一次取数与一次排队，所以下单前要再问一次。"""
-    assert still_allowed("2026000001", FEATURE_RENEW_WAIT, BASE_CONFIG) is None
-    assert still_allowed("2026000001", FEATURE_AUTO_SETTLE, BASE_CONFIG) is None
-    assert still_allowed("9999", FEATURE_RENEW_WAIT, BASE_CONFIG) == "不在名单里"
+    assert still_allowed("2026000001", JOB_RENEW_WAIT, BASE_CONFIG) is None
+    assert still_allowed("2026000001", JOB_AUTO_SETTLE, BASE_CONFIG) is None
+    assert still_allowed("9999", JOB_RENEW_WAIT, BASE_CONFIG) == "不在名单里"

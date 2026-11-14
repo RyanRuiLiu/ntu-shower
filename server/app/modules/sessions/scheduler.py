@@ -65,7 +65,7 @@ from app.core.problems import ApiProblemError
 from app.core.protocol import as_int
 from app.db.base import utcnow
 from app.db.session import session_scope
-from app.models.enums import BackgroundOutcome, DoorState
+from app.models.enums import DoorState, JobOutcome
 from app.modules.config import store as config_store
 from app.modules.config.schemas import ConfigPushNotice
 from app.modules.devices import actions as device_actions
@@ -73,7 +73,7 @@ from app.modules.doors import service as doors_service
 
 from . import service as sessions_service
 from .decision import (
-    TASKS_BY_KEY,
+    JOBS_BY_KEY,
     Candidate,
     Trigger,
     decide,
@@ -119,7 +119,7 @@ class _Auditable(Protocol):
     def cert_no(self) -> str: ...
 
     @property
-    def task(self) -> str: ...
+    def job(self) -> str: ...
 
     @property
     def session_id(self) -> int: ...
@@ -136,7 +136,7 @@ class _SettleJob:
     """一次结算。续期类功能在结算成功之后还要补一次分配。"""
 
     candidate: Candidate
-    task: str
+    job: str
     threshold_s: int
 
     # 与 _AssignJob 暴露同一套只读字段：审计那一行要的东西两处一样，
@@ -170,7 +170,7 @@ class _AssignJob:
     door_no: int
     cert_no: str
     password: str
-    task: str
+    job: str
     session_id: int
     threshold_s: int
 
@@ -187,7 +187,7 @@ class _PendingAssign:
     door_no: int
     cert_no: str
     password: str
-    task: str
+    job: str
     session_id: int
     threshold_s: int
     expires_at: float
@@ -249,33 +249,33 @@ def _record(
     """一次后台任务的终局：**日志与审计表在同一条路上写**。
 
     收口成一处，是因为每个终局都要发生两次——散在各处写迟早出现"记了日志、没落表"，
-    而落表才是这张表存在的理由。`outcome` 用的是日志事件名的后缀（`background-task.<它>`），
+    而落表才是这张表存在的理由。`outcome` 用的是日志事件名的后缀（`job.<它>`），
     两边同一套说法；`extra` 只进日志（状态码、设备原话这类给人看的细节）。
 
-    待办的字段就是这一行要的字段（见 [_Auditable]）：`task` / `action` / `session_id`
+    待办的字段就是这一行要的字段（见 [_Auditable]）：`job` / `action` / `session_id`
     / `threshold_s` 都是落库的列，所以这里一处按类型或按功能的分叉都没有。
     """
     log_event(
         level,
-        f"background-task.{outcome}",
+        f"job.{outcome}",
         message,
         device_id=subject.device_id,
         door_no=subject.door_no,
-        task=subject.task,
+        job=subject.job,
         **extra,
     )
     from app.db.session import session_scope
     from app.persistence import audit as audit_store
 
     with session_scope() as session:
-        audit_store.insert_background_task_run(
+        audit_store.insert_job_run(
             session,
             occurred_at=utcnow(),
             device_id=subject.device_id,
             door_no=subject.door_no,
             cert_no=subject.cert_no,
-            task=subject.task,
-            outcome=BackgroundOutcome(outcome),
+            job=subject.job,
+            outcome=JobOutcome(outcome),
             action=subject.action,
             session_id=subject.session_id,
             reason=reason,
@@ -339,7 +339,7 @@ def _plan(session: Session, device_id: str) -> dict[int, tuple[float, Candidate,
         trigger = decide(candidate, config, now)
         if trigger is None:
             continue
-        if (candidate.device_id, candidate.session_id, trigger.task) in _attempted:
+        if (candidate.device_id, candidate.session_id, trigger.job) in _attempted:
             continue  # 这个会话这个功能已经动过手，不再排
         at = _now_s() + trigger.delay_s
         current = planned.get(candidate.door_no)
@@ -458,7 +458,7 @@ def snapshot(session: Session) -> list[dict[str, object]]:
     )
     rows: list[dict[str, object]] = []
     for at, device_id, door_no, candidate, trigger in entries:
-        spec = TASKS_BY_KEY[trigger.task]
+        spec = JOBS_BY_KEY[trigger.job]
         started = candidate.assigned_at if spec.start == "assigned_at" else candidate.paused_at
         # 本轮链的用量上限随功能而定（预约续期有、其余没有）；连同起算时刻一起给，
         # 面板才能回答"这一轮什么时候到头"。
@@ -469,7 +469,7 @@ def snapshot(session: Session) -> list[dict[str, object]]:
                 "device_id": device_id,
                 "door_no": door_no,
                 "cert_no": candidate.cert_no,
-                "task": trigger.task,
+                "job": trigger.job,
                 "at": shift_rfc3339(now_rfc3339(), at - now),
                 "state": candidate.state.value,
                 "session_id": candidate.session_id,
@@ -497,22 +497,22 @@ def _fire(device_id: str, candidate: Candidate, trigger: Trigger) -> None:
         _record(
             "skipped",
             "到点复查未通过，放弃这一次",
-            _SettleJob(candidate=candidate, task=trigger.task, threshold_s=trigger.threshold_s),
+            _SettleJob(candidate=candidate, job=trigger.job, threshold_s=trigger.threshold_s),
             reason=reason,
         )
         reschedule(device_id)
         return
 
-    _enqueue_settle(fresh or candidate, trigger.task, trigger.threshold_s)
+    _enqueue_settle(fresh or candidate, trigger.job, trigger.threshold_s)
 
 
-def _enqueue_settle(candidate: Candidate, task: str, threshold_s: int) -> None:
+def _enqueue_settle(candidate: Candidate, job: str, threshold_s: int) -> None:
     """把一次结算排进该设备的队列。同一喷头已在途就不再排。"""
     worker = _worker(candidate.device_id)
     if candidate.door_no in worker.busy:
         return
     worker.busy.add(candidate.door_no)
-    worker.queue.put_nowait(_SettleJob(candidate=candidate, task=task, threshold_s=threshold_s))
+    worker.queue.put_nowait(_SettleJob(candidate=candidate, job=job, threshold_s=threshold_s))
     _ensure_worker_task(candidate.device_id)
 
 
@@ -561,17 +561,17 @@ async def _perform_settle(job: _SettleJob) -> None:
     它自带前置检查；在这里另写一份就等于同一个判据有两个出处。
     """
     candidate = job.candidate
-    task = job.task
-    _attempted.add((candidate.device_id, candidate.session_id, task))
+    job_name = job.job
+    _attempted.add((candidate.device_id, candidate.session_id, job_name))
 
     with session_scope() as session:
         config = config_store.effective(session, candidate.device_id)
-    still = still_allowed(candidate.cert_no, task, config)
+    still = still_allowed(candidate.cert_no, job_name, config)
     if still is not None:
         _record("skipped", "下单前复查未通过，放弃这一次", job, reason=still)
         return
 
-    password = password_of(config, task, candidate.cert_no)
+    password = password_of(config, job_name, candidate.cert_no)
     if not password:
         # 名单里有他、却没有他的凭证：动作发不出去。属于配置漏项，要人看见。
         _record("no-password", "名单里有这个学号，但没有他的凭证", job, level="ERROR")
@@ -592,10 +592,10 @@ async def _perform_settle(job: _SettleJob) -> None:
 
     _record(
         "settled",
-        "续期已结算，等门空闲后补分配" if TASKS_BY_KEY[task].two_step else "自动结算已下发",
+        "续期已结算，等门空闲后补分配" if JOBS_BY_KEY[job_name].two_step else "自动结算已下发",
         job,
     )
-    if not TASKS_BY_KEY[task].two_step:
+    if not JOBS_BY_KEY[job_name].two_step:
         return
 
     # 分配的前置是服务端**先看见门空了**——`perform_assign` 自己要去读 door_live。门被释放
@@ -605,7 +605,7 @@ async def _perform_settle(job: _SettleJob) -> None:
         door_no=candidate.door_no,
         cert_no=candidate.cert_no,
         password=password,
-        task=task,
+        job=job.job,
         session_id=candidate.session_id,
         threshold_s=job.threshold_s,
         expires_at=_now_s() + ASSIGN_PENDING_TIMEOUT_S,
@@ -704,7 +704,7 @@ def _flush_pending_assign(device_id: str) -> None:
                 door_no=waiting.door_no,
                 cert_no=waiting.cert_no,
                 password=waiting.password,
-                task=waiting.task,
+                job=waiting.job,
                 session_id=waiting.session_id,
                 threshold_s=waiting.threshold_s,
             )
@@ -717,7 +717,7 @@ def _flush_pending_assign(device_id: str) -> None:
 def start() -> None:
     global _running
     _running = True
-    log_event("INFO", "background-task.started", "后台任务已启动")
+    log_event("INFO", "job.started", "后台任务已启动")
 
 
 async def stop() -> None:
@@ -737,4 +737,4 @@ async def stop() -> None:
     _attempted.clear()
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
-    log_event("INFO", "background-task.stopped", "后台任务已停止")
+    log_event("INFO", "job.stopped", "后台任务已停止")

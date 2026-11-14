@@ -22,9 +22,9 @@ from app.models.enums import DoorState
 from app.modules.devices import actions as device_actions
 from app.modules.sessions import scheduler
 from app.modules.sessions.decision import (
-    FEATURE_AUTO_SETTLE,
-    FEATURE_RENEW_SESSION,
-    FEATURE_RENEW_WAIT,
+    JOB_AUTO_SETTLE,
+    JOB_RENEW_SESSION,
+    JOB_RENEW_WAIT,
     Candidate,
     decide,
 )
@@ -371,7 +371,7 @@ def test_decide_on_a_real_never_watered_session() -> None:
     )
 
     assert trigger is not None
-    assert trigger.task == FEATURE_RENEW_WAIT
+    assert trigger.job == JOB_RENEW_WAIT
     assert trigger.delay_s == 210.0  # 270 − 已经过去 60 秒
 
 
@@ -384,7 +384,7 @@ def test_decide_on_a_real_two_segment_session() -> None:
     )
 
     assert trigger is not None
-    assert trigger.task == FEATURE_RENEW_SESSION
+    assert trigger.job == JOB_RENEW_SESSION
     assert trigger.delay_s == 898.0  # 1140 − 242（`seconds_between` 截断）
 
 
@@ -397,7 +397,7 @@ def test_decide_on_a_real_paused_session() -> None:
     )
 
     assert trigger is not None
-    assert trigger.task == FEATURE_AUTO_SETTLE
+    assert trigger.job == JOB_AUTO_SETTLE
     assert trigger.delay_s == pytest.approx(-3.0, abs=0.01)  # 关阀后 63 秒，阈值 60
 
 
