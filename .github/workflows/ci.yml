@@ -100,14 +100,15 @@ jobs:
         working-directory: .
         if: needs.changes.outputs.docs == 'true'
         run: npx --yes markdownlint-cli2@0.20.0 "*.md" "docs/*.md" "docs/adr/*.md" "deploy/*.md" ".github/*.md" --config .markdownlint.json
-      - name: Stylelint
-        working-directory: .
+      - name: Web (tsc + eslint + vitest)
+        working-directory: server/web
         if: needs.changes.outputs.web == 'true'
-        run: npx --yes stylelint@16 "server/web/style/*.css" --config server/web/.stylelintrc.json
-      - name: ESLint
-        working-directory: .
-        if: needs.changes.outputs.web == 'true'
-        run: npx --yes eslint@9 --config server/web/eslint.config.mjs "server/web/app.js" "server/web/views/*.js" "server/web/core/*.js"
+        run: |
+          corepack enable pnpm
+          pnpm install --frozen-lockfile
+          pnpm exec tsc -b
+          pnpm exec eslint src --config eslint.config.mjs
+          pnpm exec vitest run
 
   semgrep:
     needs: changes

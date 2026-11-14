@@ -11,7 +11,6 @@ Starlette 按注册顺序匹配。`mount("/")` 若排在路由之前，这些前
 
 import pytest
 from fastapi.testclient import TestClient
-from starlette.routing import Mount
 
 from app.main import app
 
@@ -27,12 +26,12 @@ def _one_real_path_per_prefix() -> tuple[str, ...]:
     return tuple(picked)
 
 
-def test_root_mount_is_registered_last() -> None:
-    """静态挂载必须是最后一条路由，否则排在它后面的路径永远匹配不到。"""
-    mount_at = [index for index, route in enumerate(app.routes) if isinstance(route, Mount)]
-    assert mount_at, "根静态挂载不存在"
-    trailing = [type(route).__name__ for route in app.routes[max(mount_at) + 1 :]]
-    assert not trailing, f"静态挂载之后还有路由 {trailing}，它们会被静态文件查找挡住"
+def test_spa_fallback_is_registered_last() -> None:
+    """SPA 入口路由必须是最后一条路由，否则排在它后面的路径永远匹配不到。"""
+    fallback_at = [index for index, route in enumerate(app.routes) if getattr(route, "name", "") == "spa_fallback"]
+    assert fallback_at, "SPA 入口路由不存在"
+    trailing = [type(route).__name__ for route in app.routes[max(fallback_at) + 1 :]]
+    assert not trailing, f"SPA 入口之后还有路由 {trailing}，它们会被 fallback 挡住"
 
 
 @pytest.mark.parametrize("path", _one_real_path_per_prefix())
