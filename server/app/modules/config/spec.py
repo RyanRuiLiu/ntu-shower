@@ -128,7 +128,7 @@ class GroupSpec:
 #: 由 `tests/test_config_spec.py` 强制，不允许一组混两种。
 #: 服务端在前：后台任务是这个软件存在的目的，设备侧的九块是支撑它长期跑着的地基。
 SECTIONS: tuple[tuple[str, str], ...] = (
-    ("server", "服务端业务"),
+    ("server", "后台任务"),
     ("device", "设备下发"),
 )
 

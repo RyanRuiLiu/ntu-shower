@@ -371,7 +371,7 @@ def test_decide_on_a_real_never_watered_session() -> None:
     )
 
     assert trigger is not None
-    assert trigger.feature == FEATURE_RENEW_WAIT
+    assert trigger.task == FEATURE_RENEW_WAIT
     assert trigger.delay_s == 210.0  # 270 − 已经过去 60 秒
 
 
@@ -384,7 +384,7 @@ def test_decide_on_a_real_two_segment_session() -> None:
     )
 
     assert trigger is not None
-    assert trigger.feature == FEATURE_RENEW_SESSION
+    assert trigger.task == FEATURE_RENEW_SESSION
     assert trigger.delay_s == 898.0  # 1140 − 242（`seconds_between` 截断）
 
 
@@ -397,7 +397,7 @@ def test_decide_on_a_real_paused_session() -> None:
     )
 
     assert trigger is not None
-    assert trigger.feature == FEATURE_AUTO_SETTLE
+    assert trigger.task == FEATURE_AUTO_SETTLE
     assert trigger.delay_s == pytest.approx(-3.0, abs=0.01)  # 关阀后 63 秒，阈值 60
 
 

@@ -1,8 +1,8 @@
-"""后台任务看板域的 API 契约（admin，GET /background-tasks/status）。"""
+"""后台任务看板域的 API 契约（admin，GET /tasks/status）。"""
 
 from pydantic import BaseModel
 
-# ── 当前态看板（admin，GET /background-tasks/status）──────────────────────
+# ── 当前态看板（admin，GET /tasks/status）──────────────────────
 
 
 class BackgroundTaskStatus(BaseModel):
@@ -52,7 +52,7 @@ class ScheduledAction(BaseModel):
     device_id: str
     door_no: int
     cert_no: str
-    feature: str
+    task: str
     at: str
     state: str
     session_id: int

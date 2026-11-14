@@ -12,7 +12,7 @@
  * 行组只有一个 Tab 停靠点，行内用方向键移动、Enter 或空格查看详情。
  *
  * 动作名、原因码、功能名、结果名一律**照原样显示**：这是开发者页面，读它的人要拿这些值
- * 去日志里搜（`background-task.settled`、`feature=renew_wait`），翻译成中文反而搜不到。
+ * 去日志里搜（`background-task.settled`、`task=renew_wait`），翻译成中文反而搜不到。
  */
 import { api } from '../core/api.js'
 import { copyText } from '../core/clipboard.js'
@@ -116,7 +116,7 @@ const TABS = {
       deviceCell(row.device_id),
       mono(row.door_no),
       codeCell(row.cert_no),
-      mono(row.feature),
+      mono(row.task),
       mono(row.action),
       mono(row.outcome),
       row.threshold_s === null ? PLACEHOLDER : mono(`${row.threshold_s} 秒`),
