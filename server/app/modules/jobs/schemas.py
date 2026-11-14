@@ -1,27 +1,32 @@
-"""后台任务看板域的 API 契约（admin，GET /tasks/status）。"""
+"""后台任务看板域的 API 契约（admin，GET /jobs/status）。
 
-from pydantic import BaseModel
+响应用 TypedDict：响应不需要运行时校验，零开销，与项目"请求用 Pydantic、
+响应用 TypedDict"的分工一致（见 sessions/schemas.py 的模块注释）。
 
-# ── 当前态看板（admin，GET /tasks/status）──────────────────────
+行的形状由来源模块（extend_hours.current_shifts、scheduler.snapshot）与
+本文件共同钉住，tests/test_jobs.py 断言字段。
+"""
+
+from typing_extensions import TypedDict
 
 
-class BackgroundTaskStatus(BaseModel):
-    """一个后台任务的开关与名单规模。"""
+class JobStatus(TypedDict):
+    """一个后台任务的开关与名单人数（students_count）。"""
 
     key: str
     title: str
     enabled: bool
-    roster: int
+    students_count: int
 
 
-class DoorAssignment(BaseModel):
+class DoorAssignment(TypedDict):
     """延长服务记下的"谁在哪个喷头"。"""
 
     door_no: int
     cert_no: str
 
 
-class ExtendingDevice(BaseModel):
+class ExtendingDevice(TypedDict):
     """正在延长服务中的设备：拨快幅度、拨快时刻、MCU 武装的截止与恢复条件。
 
     恢复条件两项（`past_midnight` 真实时间过午夜、`idle` 喷头全部空闲）逐项给出：
@@ -41,7 +46,7 @@ class ExtendingDevice(BaseModel):
     past_midnight: bool
 
 
-class ScheduledAction(BaseModel):
+class ScheduledAction(TypedDict):
     """调度器已排定的下一次动作：在等谁、等到什么时候、为什么是这一刻。
 
     `state` 是门现态，`started_at` 是这条判据的起算时刻（分配时刻或关阀时刻，随功能
@@ -52,7 +57,7 @@ class ScheduledAction(BaseModel):
     device_id: str
     door_no: int
     cert_no: str
-    task: str
+    job: str
     at: str
     state: str
     session_id: int
@@ -62,13 +67,22 @@ class ScheduledAction(BaseModel):
     max_duration_s: int | None
 
 
-class BackgroundTasksStatus(BaseModel):
+class JobsStatus(TypedDict):
     """后台任务的当前态（概览页看板）。
 
     纯只读的组合，三个部分各自来自自己的域：开关与名单是全局配置，延长中是
     `extend_hours` 的落库状态，已排定是调度器内存里的定时器。
     """
 
-    tasks: list[BackgroundTaskStatus]
+    tasks: list[JobStatus]
     extending: list[ExtendingDevice]
     scheduled: list[ScheduledAction]
+
+
+__all__: list[str] = [
+    "DoorAssignment",
+    "ExtendingDevice",
+    "JobStatus",
+    "JobsStatus",
+    "ScheduledAction",
+]
