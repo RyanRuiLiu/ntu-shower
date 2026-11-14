@@ -76,6 +76,14 @@ class KeyCreate(BaseModel):
     )
 
 
+class KeyUpdate(BaseModel):
+    """编辑密钥：只改传了的字段，令牌不变；已吊销的密钥拒绝编辑。"""
+
+    name: str | None = Field(default=None, max_length=64)
+    scopes: list[str] | None = None
+    device_scope: list[str] | None = None
+
+
 class KeyView(BaseModel):
     id: int
     user_id: int
@@ -122,6 +130,7 @@ __all__: list[str] = [
     "Caller",
     "KeyCreate",
     "KeyIssued",
+    "KeyUpdate",
     "KeyView",
     "LoginRequest",
     "MeView",
