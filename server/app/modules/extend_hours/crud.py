@@ -14,9 +14,9 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..core.clock import format_rfc3339
-from ..models.device import Device
-from ..models.device import DeviceClockShift as ClockShift
+from app.core.clock import format_rfc3339
+from app.modules.devices.models import Device
+from app.modules.devices.models import DeviceClockShift as ClockShift
 
 
 def _device(session: Session, device_id: str) -> Device | None:

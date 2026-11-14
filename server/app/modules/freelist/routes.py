@@ -1,4 +1,4 @@
-"""免费名单域：读设备上那份名单、整份写回（admin）。
+"""免费名单域：读设备上那份名单、整份写回（`freelist:write`）。
 
 ## 端点
 
@@ -15,19 +15,23 @@
 下发——中间没有任何一处做第二次转换。
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Security
 from sqlalchemy.orm import Session
 
+from app.auth.dependencies import caller, device_scope_guard
 from app.contracts import CommandOutcome
 from app.core import actions, outcomes
 from app.db.deps import get_db
-from app.modules.access.dependencies import require_admin
 from app.modules.devices.dependencies import DEVICE_ACTION_TIMEOUT_S, device_action
 
 from .schemas import FreelistRead, FreelistRequest
 from .service import parse, render
 
-router = APIRouter(prefix="/api/v1/devices", dependencies=[Depends(require_admin)], tags=["freelist"])
+router = APIRouter(
+    prefix="/api/v1/devices",
+    dependencies=[Security(caller, scopes=["freelist:write"]), Depends(device_scope_guard)],
+    tags=["freelist"],
+)
 
 
 @router.get("/{device_id}/freelist")

@@ -17,8 +17,8 @@
 
 前端是 `server/web/` 下的零构建静态文件，由本进程挂在根路径
 （`/api/v1`、`/ota`、`/gateway` 与 `/healthz` 的路由注册在前，不会被静态文件抢走）。
-用户面接口无需凭据即可查询状态，操作类需 `Authorization: Bearer` 凭据（或管理台
-签名会话 Cookie）+ 能力位，见 modules/access 的守卫。
+用户面接口无需凭据即可查询状态，操作类需 `Authorization: Bearer` 密钥（或管理台
+签名会话 Cookie）+ scope，见 auth 的守卫。
 
 ## 已定稿的传输层事实（2026-09 真机实测）
 
@@ -36,7 +36,7 @@
 ## 服务端平面
 
 **版本化的单一资源树**：对外 HTTP 面统一挂 `/api/v1` 前缀（路径版本化，破坏性
-变更升 v2）；URL 只表达资源，不表达权限，谁能调用由能力位守卫决定。模块按
+变更升 v2）；URL 只表达资源，不表达权限，谁能调用由 scope 守卫决定。模块按
 领域划分，`/devices/*` 由 devices、sessions、bridge、config 各域按资源归属提供
 端点。
 
@@ -48,7 +48,7 @@
 | sessions | 会话操作，目标设备在路径里 |
 | config | 全局配置、登记表、单台覆盖 |
 | voice | 固定音频素材库 / 分段规则 / 事件投递记录 / 素材下载；设备面 `/voice/assets/{id}.mp3` |
-| identities | 身份域读模型与签发/编辑/撤销 |
+| users | 用户域读模型与登记/编辑/撤销、密钥签发/吊销 |
 | ota | 版本清单 / 下载 / 发布管理 |
 | audit | 接口调用与命令级审计，以 trace_id 关联 |
 | jobs | 后台任务看板：四份名单的开关与规模、延长中的设备、调度器计划（admin） |
@@ -61,24 +61,26 @@
 `APIRouter` 前缀加上装饰器），前端那一侧由 `tests/test_api_contract.py` 守着。在文档里再抄
 一份只会多一个无人守的副本。
 
-### 鉴权模型（modules/access）
+### 鉴权模型（auth）
 
-**统一身份制。** URL 不出现权限词；能力位是唯一权限模型。身份通道：
-管理台走签名会话 Cookie（`/api/v1/auth/login`），其余调用方走
-`Authorization: Bearer` 凭据（登记主体时签发，只存哈希，见 `persistence/principals`）。
+**凭据与权限分离。** URL 不出现权限词；scope 是唯一权限模型（RFC 6749 语义，
+`resource:action` 命名）。凭据通道：管理台走签名会话 Cookie（`/api/v1/auth/login`），
+其余调用方走 `Authorization: Bearer` 密钥（`ntushower_` 前缀，签发时一次性返回
+明文，只存哈希，见 `auth/crud`）。
 
 | 端点类别 | 能做什么 | 凭证 |
 |---|---|---|
 | 公开 | 设备与喷头查看、实时推送、发布清单与下载 | 无需凭据 |
-| 用户操作 | 分配 / 结算（`session`）、拍照（`photo`），设备须在作用域内 | Bearer 凭据 + 能力位 × 设备作用域 |
-| 管理 | 运维档案、远程调试、配置、名单、发布写、审计 | Bearer 凭据 + `admin` 能力位 |
+| 用户操作 | 分配 / 结算（`sessions:write`）、拍照（`devices:photo`），设备须在密钥作用域内 | Bearer 密钥 + scope × 设备作用域 |
+| 管理 | 运维档案、远程调试、配置、用户与密钥、发布写、审计 | Bearer 密钥 + 各域 scope（或会话通道全权） |
 
-**为什么是统一身份制、能力位为什么是唯一的权限模型、以及"无注册流程"与"密码不落库"的
-理由，见 [ADR-0008](adr/0008-identity.md)。** 这里只留它长什么样：
+**为什么是用户与密钥分离、scope 为什么是唯一权限模型、密钥为什么长期不过期，见
+[ADR-0023](adr/0023-permission-rewrite.md)。** 这里只留它长什么样：
 
-- 管理台身份持有 `["admin","session","photo"]`，代用户操作时走与用户**同一条**路径，
+- 会话通道（面板操作者）视为全权，代用户操作时走与用户**同一条**路径，
   审计 actor 即其身份——不存在特权通道。
-- `/api/v1/devices` 的 `actions` 由服务端按调用方算出（access 唯一判定），客户端不复制作用域规则。
+- `/api/v1/devices` 的 `actions` 由服务端按调用方算出（auth 唯一判定），客户端不复制作用域规则。
+- `/openapi.json` 渲染 securitySchemes 与每个操作的 scopes，即外部调用方的对接文档。
 
 ### HTTP 错误响应
 

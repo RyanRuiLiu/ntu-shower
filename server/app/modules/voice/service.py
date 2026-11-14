@@ -36,7 +36,7 @@ from app.modules.config import store as config_store
 from app.modules.devices import actions as device_actions
 from app.modules.devices import service as devices_service
 from app.modules.doors.events import DoorEvent, DoorEventKind
-from app.persistence import voice as repository
+from app.modules.voice import crud as repository
 
 from . import audio, matching, numbers, schemas
 from . import time_windows as time_rules

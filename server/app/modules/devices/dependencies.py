@@ -8,9 +8,9 @@ sessions 的写路径也要过同一道闸，放这里会与 devices → config 
 
 from sqlalchemy.orm import Session
 
+from app.auth.dependencies import require_trusted_online_device
 from app.contracts import CommandOutcome
 from app.core.protocol import JsonObject
-from app.modules.access.dependencies import require_trusted_online_device
 
 from . import actions
 

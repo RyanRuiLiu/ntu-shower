@@ -8,9 +8,9 @@ import pytest
 from fastapi.testclient import TestClient
 from tests import device_link, door_link, frames
 
+from app.contracts import DoorState
 from app.core import device_clock
 from app.core.clock import rfc3339_after
-from app.models.enums import DoorState
 from app.modules.doors import service
 
 
@@ -626,7 +626,7 @@ def test_raw_insert_failure_propagates_for_the_gateway_to_withhold_the_ack(
     def boom(*_args: object, **_kwargs: object) -> object:
         raise failure
 
-    monkeypatch.setattr("app.persistence.doors.insert_snapshot", boom)
+    monkeypatch.setattr("app.modules.doors.crud.insert_snapshot", boom)
 
     with pytest.raises(RuntimeError, match="disk full"):
         door_link.feed("dev-raw-fail", _snapshot([_door(1)]))

@@ -8,23 +8,26 @@
 ## 两种表示，各自一个端点
 
 - `GET /devices`：精简视图（id、名称、在线、actions）——查看语义，公开；
-  `actions` 由 access.user_actions 按调用方能力位与作用域算出，客户端不复制
+  `actions` 由 auth.allowed_actions 按调用方权限与作用域算出，客户端不复制
   判定规则。
 - `GET /devices/runtime`：运维档案（版本、信任、IP、时钟偏差等诊断字段），
   admin 专属，管理台设备表专用。
 
 ## 守卫
 
-admin 端点统一挂 require_admin；下发命令的端点额外要求设备已信任且在线
-（require_trusted_online_device）——把命令发给离线设备只会白等超时。
+管理面要求 `devices:write`；对单台设备的端点额外做对象级 device_scope 检查，
+下发命令的端点还要求设备已信任且在线（require_trusted_online_device）——把命令
+发给离线设备只会白等超时。
 """
 
 import hmac
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Security
 from sqlalchemy.orm import Session
 
-from app.contracts import CommandOutcome
+from app.auth.dependencies import caller, device_scope_guard, optional_caller
+from app.auth.permissions import allowed_actions
+from app.contracts import Caller, CommandOutcome
 from app.core import actions
 from app.core.clock import now_rfc3339
 from app.core.config import settings
@@ -41,11 +44,8 @@ from app.core.protocol import as_int
 from app.core.tokens import extract_bearer, hash_token
 from app.db.base import utcnow
 from app.db.deps import get_db
-from app.modules.access.capabilities import user_actions
-from app.modules.access.dependencies import optional_identity, require_admin
-from app.modules.access.schemas import IdentityRecord
 from app.modules.config import store as config_store
-from app.persistence import devices as devices_store
+from app.modules.devices import crud as devices_store
 
 from . import schemas, service
 from .dependencies import DEVICE_ACTION_TIMEOUT_S, device_action
@@ -103,7 +103,24 @@ def enroll_device(
     return schemas.DeviceEnrollResult(device_id=req.device_id, token=token)
 
 
-admin_router = APIRouter(prefix="/api/v1/devices", dependencies=[Depends(require_admin)], tags=["devices-admin"])
+#: 设备管理面分两个 router：对设备集合的（runtime、order）只要求权限；对单台设备的
+#: 全部端点额外做对象级 device_scope 检查（OWASP IDOR）——路由级依赖取路径参数，
+#: 所以按"路径里有没有 {device_id}"划分。
+admin_router = APIRouter(
+    prefix="/api/v1/devices",
+    dependencies=[Security(caller, scopes=["devices:write"])],
+    tags=["devices-admin"],
+)
+device_router = APIRouter(
+    prefix="/api/v1/devices",
+    dependencies=[Security(caller, scopes=["devices:write"]), Depends(device_scope_guard)],
+    tags=["devices-admin"],
+)
+device_read_router = APIRouter(
+    prefix="/api/v1/devices",
+    dependencies=[Security(caller, scopes=["devices:read"]), Depends(device_scope_guard)],
+    tags=["devices-admin"],
+)
 
 #: 可查看/上送的三份设备日志。
 LOG_KINDS = ("device", "crash", "ota")
@@ -126,29 +143,29 @@ def _ui_timeout_s(session: Session, device_id: str) -> float:
 
 @router.get("/devices")
 def list_devices(
-    caller: IdentityRecord | None = Depends(optional_identity), session: Session = Depends(get_db)
+    identity: Caller | None = Depends(optional_caller), session: Session = Depends(get_db)
 ) -> list[DeviceListItem]:
     """精简设备清单：id、名称、在线，以及该调用方对每台可执行的用户动作。
 
-    匿名调用 actions 恒为空；判定经 access 的唯一实现，客户端不复制作用域规则。
+    匿名调用 actions 恒为空；判定经 auth 的唯一实现，客户端不复制作用域规则。
     """
     items: list[DeviceListItem] = []
-    # 能力位在循环外取一次：匿名调用没有身份，取不到就是空表，actions 随后由作用域否决
-    capabilities = caller["capabilities"] if caller is not None else []
+    # 权限在循环外取一次：匿名调用没有身份，取不到就是空表，actions 随后由作用域否决
+    scopes = identity["scopes"] if identity is not None else []
     for record in service.list_devices(session):
-        in_scope = caller is not None and (
-            "*" in caller["device_scope"] or record["device_id"] in caller["device_scope"]
+        in_scope = identity is not None and (
+            "*" in identity["device_scope"] or record["device_id"] in identity["device_scope"]
         )
         items.append(
             {
                 **service.to_summary(record),
-                "actions": user_actions(capabilities) if in_scope else [],
+                "actions": allowed_actions(scopes) if in_scope else [],
             }
         )
     return items
 
 
-@admin_router.get("/{device_id}/logs")
+@device_read_router.get("/{device_id}/logs")
 def get_device_logs(device_id: str, kind: str = "device", session: Session = Depends(get_db)) -> schemas.DeviceLogView:
     """该设备最近一次上送的日志（kind=device / crash / ota）。
 
@@ -164,7 +181,7 @@ def get_device_logs(device_id: str, kind: str = "device", session: Session = Dep
     return schemas.DeviceLogView.model_validate(latest)
 
 
-@admin_router.get("/{device_id}/logs/live")
+@device_read_router.get("/{device_id}/logs/live")
 async def get_live_device_log(
     device_id: str,
     kind: str = "device",
@@ -204,7 +221,7 @@ async def get_live_device_log(
     )
 
 
-@admin_router.get("/runtime")
+@router.get("/devices/runtime", dependencies=[Security(caller, scopes=["devices:read"])])
 def list_runtime(session: Session = Depends(get_db)) -> list[DeviceRecord]:
     """全部设备的运维档案（版本、信任、来源 IP、时钟偏差等诊断字段）。"""
     return service.list_devices(session)
@@ -223,7 +240,7 @@ def put_device_order(req: DeviceOrderRequest, session: Session = Depends(get_db)
     return schemas.DeviceOrderResponse(order=[str(record["device_id"]) for record in service.list_devices(session)])
 
 
-@admin_router.patch("/{device_id}")
+@device_router.patch("/{device_id}")
 async def patch_device(device_id: str, req: DevicePatchRequest, session: Session = Depends(get_db)) -> DeviceRecord:
     """改设备档案：改名、改信任位，只改传了的字段。
 
@@ -248,7 +265,7 @@ async def patch_device(device_id: str, req: DevicePatchRequest, session: Session
 # ── 远程动作 ──
 
 
-@admin_router.post("/{device_id}/exec")
+@device_router.post("/{device_id}/exec")
 async def exec_command(device_id: str, req: DeviceExecRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """远程调试：在设备上以 root 执行 shell 命令并取回输出（审计留痕）。"""
     return await device_action(
@@ -256,7 +273,7 @@ async def exec_command(device_id: str, req: DeviceExecRequest, session: Session 
     )
 
 
-@admin_router.post("/{device_id}/capture")
+@device_router.post("/{device_id}/capture")
 async def capture_screen(device_id: str, session: Session = Depends(get_db)) -> CommandOutcome:
     """抓取设备全屏画面，结果在 data.image_base64（JPEG，NO_WRAP）。
 
@@ -266,13 +283,13 @@ async def capture_screen(device_id: str, session: Session = Depends(get_db)) -> 
     return await device_action(session, device_id, actions.SCREEN_CAPTURE, {}, DEVICE_ACTION_TIMEOUT_S)
 
 
-@admin_router.post("/{device_id}/app/restart")
+@device_router.post("/{device_id}/app/restart")
 async def restart_app(device_id: str, session: Session = Depends(get_db)) -> CommandOutcome:
     """重启 NTU Shower 进程（不重启整机，也不动浴室 APP）。"""
     return await device_action(session, device_id, actions.APP_RESTART, {}, DEVICE_ACTION_TIMEOUT_S)
 
 
-@admin_router.post("/{device_id}/clock/set")
+@device_router.post("/{device_id}/clock/set")
 async def set_clock(device_id: str, req: DeviceClockSetRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """设置设备系统时钟（datetime 为设备本地墙钟时间）。浴室 App 的每日开关机计划依赖它。"""
     return await device_action(
@@ -280,13 +297,13 @@ async def set_clock(device_id: str, req: DeviceClockSetRequest, session: Session
     )
 
 
-@admin_router.post("/{device_id}/bath/restart")
+@device_router.post("/{device_id}/bath/restart")
 async def restart_bath_app(device_id: str, session: Session = Depends(get_db)) -> CommandOutcome:
     """重启浴室 App：先强停再冷启动。排障用——延长服务流程已改用 power.schedule。"""
     return await device_action(session, device_id, actions.BATH_RESTART, {}, DEVICE_ACTION_TIMEOUT_S)
 
 
-@admin_router.post("/{device_id}/reboot")
+@device_router.post("/{device_id}/reboot")
 async def reboot_device(device_id: str, session: Session = Depends(get_db)) -> CommandOutcome:
     """重启整机。设备重启后 agent 随之重来，会话与喷头现态由重连后的全貌帧重建。"""
     return await device_action(session, device_id, actions.DEVICE_REBOOT, {}, DEVICE_ACTION_TIMEOUT_S)
@@ -297,7 +314,7 @@ async def reboot_device(device_id: str, session: Session = Depends(get_db)) -> C
 # 给动作，与 capture（一张图）互补。排查"设备卡在某个弹窗"时节点树比截图有用。
 
 
-@admin_router.post("/{device_id}/dump")
+@device_router.post("/{device_id}/dump")
 async def dump_ui_tree(device_id: str, session: Session = Depends(get_db)) -> CommandOutcome:
     """导出设备当前界面的节点树，结果在 data.xml。
 
@@ -306,7 +323,7 @@ async def dump_ui_tree(device_id: str, session: Session = Depends(get_db)) -> Co
     return await device_action(session, device_id, actions.UI_DUMP, {}, _ui_timeout_s(session, device_id))
 
 
-@admin_router.post("/{device_id}/touch")
+@device_router.post("/{device_id}/touch")
 async def touch(device_id: str, req: DeviceUiTouchRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """按屏幕坐标点击或滑动：不给 to_x/to_y 是点击，给了是滑动。
 
@@ -321,13 +338,13 @@ async def touch(device_id: str, req: DeviceUiTouchRequest, session: Session = De
     return await device_action(session, device_id, actions.UI_TOUCH, params, _ui_timeout_s(session, device_id))
 
 
-@admin_router.post("/{device_id}/key")
+@device_router.post("/{device_id}/key")
 async def send_key(device_id: str, req: DeviceUiKeyRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """发送系统按键（闭集，路由层 422 挡下非法值）。"""
     return await device_action(session, device_id, actions.UI_KEY, {"key": req.key}, _ui_timeout_s(session, device_id))
 
 
-@admin_router.post("/{device_id}/input")
+@device_router.post("/{device_id}/input")
 async def input_text(device_id: str, req: DeviceUiTextRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """向当前焦点控件输入文本；channel 在两条并列通路中显式选择。"""
     return await device_action(

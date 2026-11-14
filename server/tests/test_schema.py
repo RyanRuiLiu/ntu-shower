@@ -14,10 +14,10 @@ from pathlib import Path
 
 from sqlalchemy import Engine
 
+from app.contracts import CommandStatus
 from app.core import outcomes
+from app.db.base import Base
 from app.db.engine import create_db_engine
-from app.models import Base
-from app.models.enums import CommandStatus
 
 EXPECTED_TABLES: set[str] = {
     "api_calls",
@@ -33,7 +33,8 @@ EXPECTED_TABLES: set[str] = {
     "door_snapshots",
     "door_state_events",
     "door_states",
-    "principals",
+    "api_keys",
+    "users",
     "ota_release_installs",
     "ota_releases",
     "usage_segments",
@@ -100,7 +101,7 @@ def test_database_roundtrip_keeps_timezone(tmp_path: Path) -> None:
     from sqlalchemy import select
 
     from app.db.session import Database
-    from app.models import Device
+    from app.modules.devices.models import Device
 
     db = Database(f"sqlite:///{tmp_path / 'roundtrip.db'}")
     Base.metadata.create_all(db.engine)

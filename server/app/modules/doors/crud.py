@@ -12,13 +12,12 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..contracts import DoorView
-from ..core.clock import format_rfc3339, parse_rfc3339, seconds_between
-from ..models.device import Device
-from ..models.doors import DoorSnapshot, DoorState, DoorStateEvent
-from ..models.enums import OCCUPIED_STATES, ObservedSpan, SegmentSource
-from ..models.enums import DoorState as DoorStateEnum
-from ..models.usage import UsageSegment, UsageSession
+from app.contracts import OCCUPIED_STATES, DoorView, ObservedSpan, SegmentSource
+from app.contracts import DoorState as DoorStateEnum
+from app.core.clock import format_rfc3339, parse_rfc3339, seconds_between
+from app.modules.devices.models import Device
+from app.modules.doors.models import DoorSnapshot, DoorState, DoorStateEvent
+from app.persistence.usage import UsageSegment, UsageSession
 
 _RUN_WALK_LIMIT = 50
 

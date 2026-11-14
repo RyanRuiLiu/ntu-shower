@@ -16,14 +16,14 @@ from starlette.testclient import WebSocketTestSession
 from starlette.websockets import WebSocketDisconnect
 from tests import apk, device_link, frames
 
+from app.contracts import DeviceLogKind
 from app.core import events
 from app.core.clock import now_rfc3339, rfc3339_ago
 from app.db.session import session_scope
-from app.models.device import Device, DeviceLinkEvent, DeviceLog
-from app.models.doors import DoorSnapshot
-from app.models.enums import DeviceLogKind
+from app.modules.devices.models import Device, DeviceLinkEvent, DeviceLog
 from app.modules.devices.schemas import LINK_OFFLINE, LINK_ONLINE
 from app.modules.doors import service as doors_service
+from app.modules.doors.models import DoorSnapshot
 
 
 def test_first_frame_must_be_hello(client: TestClient, fresh_db: str) -> None:
@@ -160,7 +160,7 @@ def test_ota_progress_is_received_not_rejected(
     服务端没有分支，每帧进度都收到错误帧。修复后只记日志——进度是一次性中间态，
     "装到没有"由 hello 的 version_code 回答。
     """
-    from app.modules.gateway import routes as gateway_routes
+    from app.gateway import routes as gateway_routes
 
     seen: list[dict[str, str]] = []
 
@@ -323,7 +323,7 @@ def test_heartbeat_refreshes_last_seen(client: TestClient, fresh_db: str) -> Non
 
         from datetime import UTC, datetime
 
-        from app.persistence import devices as devices_store
+        from app.modules.devices import crud as devices_store
 
         with _svc_session() as session:
             devices_store.touch_seen(session, device_id, datetime(2020, 1, 1, tzinfo=UTC))
@@ -357,7 +357,7 @@ def test_device_update_push_is_trimmed_summary(fresh_db: str) -> None:
     """device.update 推送是精简档案：IP、版本、时钟偏差等运维字段不进公开推送。"""
 
     from app.db.base import utcnow
-    from app.persistence import devices as devices_store
+    from app.modules.devices import crud as devices_store
 
     with device_link.db() as session:
         devices_store.register(
@@ -429,7 +429,7 @@ def test_unexpected_frame_error_is_logged(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """帧处理里的未预期异常必须留痕后重新抛出；断开是常态不按异常处理。"""
-    from app.modules.gateway import routes as gateway_routes
+    from app.gateway import routes as gateway_routes
 
     records: list[dict[str, Any]] = []
 
@@ -704,7 +704,7 @@ def _svc_session() -> "AbstractContextManager[Session]":
 
 def _ota_call(name: str, *args: object) -> object:
     """OTA 持久化直调：短会话。"""
-    from app.persistence import ota as ota_store
+    from app.modules.ota import crud as ota_store
 
     fn = getattr(ota_store, name)
     with _svc_session() as session:
@@ -713,7 +713,7 @@ def _ota_call(name: str, *args: object) -> object:
 
 def _skew(device_id: str) -> float:
     """读设备的持久化钟偏差。"""
-    from app.persistence import devices as devices_store
+    from app.modules.devices import crud as devices_store
 
     with _svc_session() as session:
         return devices_store.get_clock_skew(session, device_id)

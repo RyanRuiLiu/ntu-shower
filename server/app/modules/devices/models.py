@@ -12,8 +12,8 @@ from typing import Any
 from sqlalchemy import JSON, Boolean, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from ..db.base import Base, UtcDateTime, enum_column, utcnow
-from .enums import DeviceLogKind, LinkEvent
+from app.contracts import DeviceLogKind, LinkEvent
+from app.db.base import Base, UtcDateTime, enum_column, utcnow
 
 
 class Device(Base):

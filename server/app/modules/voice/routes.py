@@ -10,39 +10,39 @@
 import re
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Security, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
+from app.auth.dependencies import caller
 from app.core.problems import INVALID_VOICE_ASSET, INVALID_VOICE_RULE, VOICE_ASSET_NOT_FOUND, ApiProblemError
 from app.db.deps import get_db
-from app.modules.access.dependencies import require_admin
 
 from . import schemas, service
 
-admin_router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_admin)], tags=["voice"])
+admin_router = APIRouter(prefix="/api/v1", tags=["voice"])
 router = APIRouter(tags=["voice"])
 
 _ASSET_ID = re.compile(r"[0-9a-f]{64}")
 
 
-@admin_router.get("/voice/spec")
+@admin_router.get("/voice/spec", dependencies=[Security(caller, scopes=["voice:read"])])
 def get_spec(session: Session = Depends(get_db)) -> schemas.VoiceSpecView:
     return service.spec(session)
 
 
-@admin_router.get("/voice/status")
+@admin_router.get("/voice/status", dependencies=[Security(caller, scopes=["voice:read"])])
 def get_status(session: Session = Depends(get_db)) -> schemas.VoiceStatusView:
     return service.status(session)
 
 
-@admin_router.get("/voice/assets")
+@admin_router.get("/voice/assets", dependencies=[Security(caller, scopes=["voice:read"])])
 def list_assets(session: Session = Depends(get_db)) -> list[schemas.VoiceAssetView]:
     return service.list_assets(session)
 
 
-@admin_router.post("/voice/assets")
+@admin_router.post("/voice/assets", dependencies=[Security(caller, scopes=["voice:write"])])
 async def create_asset(
     name: Annotated[str, Form()],
     file: Annotated[UploadFile, File()],
@@ -65,7 +65,7 @@ async def create_asset(
         raise ApiProblemError(INVALID_VOICE_ASSET, str(exc)) from exc
 
 
-@admin_router.patch("/voice/assets/{asset_id}")
+@admin_router.patch("/voice/assets/{asset_id}", dependencies=[Security(caller, scopes=["voice:write"])])
 async def rename_asset(
     asset_id: str, req: schemas.VoiceAssetRename, session: Session = Depends(get_db)
 ) -> schemas.VoiceAssetView:
@@ -75,7 +75,9 @@ async def rename_asset(
         raise ApiProblemError(INVALID_VOICE_ASSET, str(exc)) from exc
 
 
-@admin_router.delete("/voice/assets/{asset_id}", status_code=204)
+@admin_router.delete(
+    "/voice/assets/{asset_id}", status_code=204, dependencies=[Security(caller, scopes=["voice:write"])]
+)
 def delete_asset(asset_id: str, session: Session = Depends(get_db)) -> None:
     service.delete_asset(session, asset_id)
 
@@ -92,12 +94,12 @@ def download_asset(asset_id: str, session: Session = Depends(get_db)) -> FileRes
     )
 
 
-@admin_router.get("/voice/rules")
+@admin_router.get("/voice/rules", dependencies=[Security(caller, scopes=["voice:read"])])
 def list_rules(session: Session = Depends(get_db)) -> list[schemas.VoiceRuleView]:
     return service.list_rules(session)
 
 
-@admin_router.post("/voice/rules")
+@admin_router.post("/voice/rules", dependencies=[Security(caller, scopes=["voice:write"])])
 async def create_rule(req: schemas.VoiceRuleBody, session: Session = Depends(get_db)) -> schemas.VoiceRuleView:
     try:
         view = await run_in_threadpool(service.create_rule, session, req)
@@ -107,7 +109,7 @@ async def create_rule(req: schemas.VoiceRuleBody, session: Session = Depends(get
     return view
 
 
-@admin_router.put("/voice/rules/{rule_id}")
+@admin_router.put("/voice/rules/{rule_id}", dependencies=[Security(caller, scopes=["voice:write"])])
 async def update_rule(
     rule_id: int, req: schemas.VoiceRuleBody, session: Session = Depends(get_db)
 ) -> schemas.VoiceRuleView:
@@ -119,7 +121,7 @@ async def update_rule(
     return view
 
 
-@admin_router.patch("/voice/rules/{rule_id}")
+@admin_router.patch("/voice/rules/{rule_id}", dependencies=[Security(caller, scopes=["voice:write"])])
 async def patch_rule(
     rule_id: int, req: schemas.VoiceRuleEnabledPatch, session: Session = Depends(get_db)
 ) -> schemas.VoiceRuleView:
@@ -128,12 +130,12 @@ async def patch_rule(
     return view
 
 
-@admin_router.delete("/voice/rules/{rule_id}", status_code=204)
+@admin_router.delete("/voice/rules/{rule_id}", status_code=204, dependencies=[Security(caller, scopes=["voice:write"])])
 def delete_rule(rule_id: int, session: Session = Depends(get_db)) -> None:
     service.delete_rule(session, rule_id)
 
 
-@admin_router.post("/voice/preview")
+@admin_router.post("/voice/preview", dependencies=[Security(caller, scopes=["voice:write"])])
 async def preview(req: schemas.VoicePreviewRequest, session: Session = Depends(get_db)) -> schemas.VoicePreviewView:
     try:
         return await run_in_threadpool(service.preview, session, req)
@@ -141,14 +143,14 @@ async def preview(req: schemas.VoicePreviewRequest, session: Session = Depends(g
         raise ApiProblemError(INVALID_VOICE_RULE, str(exc)) from exc
 
 
-@admin_router.post("/voice/rules/{rule_id}/push")
+@admin_router.post("/voice/rules/{rule_id}/push", dependencies=[Security(caller, scopes=["voice:write"])])
 async def push_rule(
     rule_id: int, req: schemas.VoicePushRequest, session: Session = Depends(get_db)
 ) -> schemas.VoicePushView:
     return await service.push_to_device(session, rule_id, req.device_id)
 
 
-@admin_router.get("/voice/deliveries")
+@admin_router.get("/voice/deliveries", dependencies=[Security(caller, scopes=["voice:read"])])
 def list_deliveries(
     limit: int = Query(default=50, ge=1, le=200), session: Session = Depends(get_db)
 ) -> list[schemas.VoiceDeliveryView]:

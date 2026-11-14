@@ -16,25 +16,25 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
-from ... import audit_middleware
-from ...core import protocol, reason_codes
-from ...core.clock import now_rfc3339, rfc3339_ago
-from ...core.config import settings
-from ...core.connections import manager
-from ...core.logging import log_event
-from ...core.protocol import JsonObject, as_int, list_of, payload_of, text_of
-from ...core.tokens import extract_bearer
-from ...db.session import Database
-from ...persistence import devices as devices_store
-from ...persistence import ota as ota_store
-from ..config import store as config_store
-from ..devices import actions as device_actions
-from ..devices import service as devices_service
-from ..devices.schemas import LINK_OFFLINE, LINK_ONLINE
-from ..doors import service as doors_service
-from ..extend_hours import service as extend_hours_service
-from ..sessions import scheduler as sessions_scheduler
-from ..voice import service as voice_service
+from app import audit_middleware
+from app.core import protocol, reason_codes
+from app.core.clock import now_rfc3339, rfc3339_ago
+from app.core.config import settings
+from app.core.connections import manager
+from app.core.logging import log_event
+from app.core.protocol import JsonObject, as_int, list_of, payload_of, text_of
+from app.core.tokens import extract_bearer
+from app.db.session import Database
+from app.modules.config import store as config_store
+from app.modules.devices import actions as device_actions
+from app.modules.devices import crud as devices_store
+from app.modules.devices import service as devices_service
+from app.modules.devices.schemas import LINK_OFFLINE, LINK_ONLINE
+from app.modules.doors import service as doors_service
+from app.modules.extend_hours import service as extend_hours_service
+from app.modules.ota import crud as ota_store
+from app.modules.sessions import scheduler as sessions_scheduler
+from app.modules.voice import service as voice_service
 
 router = APIRouter()
 

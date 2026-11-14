@@ -35,15 +35,19 @@ OTA_APK_MISMATCH = Problem("ota-apk-mismatch", 422, "APK 内容版本与发布�
 UNTRUSTED_DEVICE = Problem("untrusted-device", 403, "设备尚未被信任")
 INVALID_DEVICE_CLAIM = Problem("invalid-device-claim", 401, "设备注册令牌无效")
 DUPLICATE_SESSION = Problem("duplicate-session", 409, "该学号已有进行中的会话")
+USER_NOT_FOUND = Problem("user-not-found", 404, "找不到用户")
 
 # ── 后台任务 ──
 TASK_NOT_FOUND = Problem("task-not-found", 404, "找不到后台任务")
 
 # ── 访问授权 ──
+# 失败码对齐 RFC 6750 §3.1 的 error code：凭据无效 invalid-token、权限不足
+# insufficient-scope（scope 是 OAuth2 对权限的官方称谓，与守卫的 WWW-Authenticate
+# 头同一词汇）。unauthenticated 不是 Bearer 语义（还没带凭据），不属 RFC 6750。
 UNAUTHENTICATED = Problem("unauthenticated", 401, "需要身份")
-UNKNOWN_IDENTITY = Problem("unknown-identity", 401, "该身份尚未被授权")
-CAPABILITY_DENIED = Problem("capability-denied", 403, "权限不足")
-UNKNOWN_CAPABILITY = Problem("unknown-capability", 422, "未知的权限名")
+INVALID_TOKEN = Problem("invalid-token", 401, "凭据无效")
+INSUFFICIENT_SCOPE = Problem("insufficient-scope", 403, "权限不足")
+UNKNOWN_SCOPE = Problem("unknown-scope", 422, "未知的权限名")
 
 # ── 远程配置 ──
 INVALID_CONFIG = Problem("invalid-config", 422, "配置值不合法")
@@ -74,11 +78,12 @@ REGISTRY: tuple[Problem, ...] = (
     UNTRUSTED_DEVICE,
     INVALID_DEVICE_CLAIM,
     DUPLICATE_SESSION,
+    USER_NOT_FOUND,
     TASK_NOT_FOUND,
     UNAUTHENTICATED,
-    UNKNOWN_IDENTITY,
-    CAPABILITY_DENIED,
-    UNKNOWN_CAPABILITY,
+    INVALID_TOKEN,
+    INSUFFICIENT_SCOPE,
+    UNKNOWN_SCOPE,
     INVALID_CONFIG,
     VOICE_RULE_NOT_FOUND,
     INVALID_VOICE_RULE,

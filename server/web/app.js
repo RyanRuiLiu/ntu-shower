@@ -38,10 +38,10 @@ import {
 import { auditView } from './views/audit.js'
 import { configView } from './views/config.js'
 import { devicesView } from './views/devices.js'
-import { identitiesView } from './views/identities.js'
 import { inspectorView } from './views/inspector.js'
 import { overviewView } from './views/overview.js'
 import { releasesView } from './views/releases.js'
+import { usersView } from './views/users.js'
 import { voiceView } from './views/voice.js'
 
 /**
@@ -64,7 +64,7 @@ const VIEWS = [
   devicesView,
   configView,
   voiceView,
-  identitiesView,
+  usersView,
   releasesView,
   auditView,
 ]
@@ -81,7 +81,7 @@ const VIEWS = [
  */
 const NAV_GROUPS = [
   ['overview', 'devices', 'inspector'],
-  ['config', 'voice', 'identities', 'releases', 'audit'],
+  ['config', 'voice', 'users', 'releases', 'audit'],
 ]
 
 let active = null
