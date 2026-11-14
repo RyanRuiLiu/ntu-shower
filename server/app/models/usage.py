@@ -47,7 +47,7 @@ class UsageSession(Base):
     #: 段之和与 `device_flow_s` 是否相等，结束时定稿。**有 `derived` 段时恒为假**——
     #: 那段的长度就是从设备那个值推出来的，等式必然成立，拿它自证是循环论证。
     segments_complete: Mapped[bool] = mapped_column(Boolean, default=False)
-    ended_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None, index=True)
+    ended_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
     last_seen_at: Mapped[datetime] = mapped_column(UtcDateTime)
     flow_s: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)

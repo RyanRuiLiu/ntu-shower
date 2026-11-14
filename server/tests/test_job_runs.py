@@ -214,7 +214,7 @@ def _moment(text: str) -> datetime:
 def _device_pk() -> int | None:
     from sqlalchemy import select
 
-    from app.models.identity import Device
+    from app.models.device import Device
 
     with session_scope() as session:
         return session.scalar(select(Device.id).where(Device.id == "dev-1"))

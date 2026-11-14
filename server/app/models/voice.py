@@ -67,7 +67,7 @@ class VoiceDelivery(Base):
     """
 
     __tablename__ = "voice_deliveries"
-    __table_args__ = (Index("ix_voice_deliveries_status_occurred_at", "status", "occurred_at"),)
+    __table_args__ = (Index("ix_voice_deliveries_occurred_at", "occurred_at"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     event_key: Mapped[str] = mapped_column(String(128), unique=True)
@@ -87,7 +87,7 @@ class VoiceDelivery(Base):
     status: Mapped[str] = mapped_column(String(32))
     detail: Mapped[str] = mapped_column(Text, default="")
     trace_id: Mapped[str] = mapped_column(String(64), default="")
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime, index=True, default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
 
 
 __all__: list[str] = ["VoiceAsset", "VoiceDelivery", "VoiceRule", "VoiceUnit"]
