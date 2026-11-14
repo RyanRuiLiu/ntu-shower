@@ -96,7 +96,7 @@ export const api = {
   // ── 喷头 ──（公开；带 device_id 即单设备视图）
   doors: (deviceId) => send(`${API_V1}/doors${query({ device_id: deviceId })}`),
 
-  // ── 会话操作 ──（session/photo 能力位；管理台身份持有它们代操作）
+  // ── 会话操作 ──（sessions:write / devices:photo 权限；会话通道全权，代操作直接过）
   assign: (deviceId, value) => send(devicePath(deviceId, '/assign'), post(value)),
   settle: (deviceId, value) => send(devicePath(deviceId, '/settle'), post(value)),
   photo: (deviceId) => send(devicePath(deviceId, '/photo'), post()),
