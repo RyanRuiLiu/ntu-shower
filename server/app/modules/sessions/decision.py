@@ -32,7 +32,7 @@ FEATURE_AUTO_SETTLE = "auto_settle"
 
 
 @dataclass(frozen=True)
-class FeatureSpec:
+class TaskSpec:
     """一个后台任务的全部参数。**三个功能的差异只有这些**——判据本身是同一个。
 
     写成数据而不是在每个功能上各判一次，是因为下一个功能（如果真有）只该是加一条登记，
@@ -57,8 +57,8 @@ class FeatureSpec:
 
 #: 三个功能的状态互不相交，所以登记顺序不决定任何胜负；保留这个顺序只是为了让"读这份表
 #: 就看得见有哪几个功能"。
-FEATURES: tuple[FeatureSpec, ...] = (
-    FeatureSpec(
+TASKS: tuple[TaskSpec, ...] = (
+    TaskSpec(
         key=FEATURE_RENEW_WAIT,
         enabled_key="renew_wait_enabled",
         students_key="renew_wait_students",
@@ -68,7 +68,7 @@ FEATURES: tuple[FeatureSpec, ...] = (
         max_duration_key="renew_wait_max_duration_s",
         two_step=True,
     ),
-    FeatureSpec(
+    TaskSpec(
         key=FEATURE_RENEW_SESSION,
         enabled_key="renew_session_enabled",
         students_key="renew_session_students",
@@ -78,7 +78,7 @@ FEATURES: tuple[FeatureSpec, ...] = (
         max_duration_key=None,
         two_step=True,
     ),
-    FeatureSpec(
+    TaskSpec(
         key=FEATURE_AUTO_SETTLE,
         enabled_key="auto_settle_enabled",
         students_key="auto_settle_students",
@@ -90,7 +90,7 @@ FEATURES: tuple[FeatureSpec, ...] = (
     ),
 )
 
-FEATURES_BY_KEY: dict[str, FeatureSpec] = {spec.key: spec for spec in FEATURES}
+TASKS_BY_KEY: dict[str, TaskSpec] = {spec.key: spec for spec in TASKS}
 
 
 @dataclass(frozen=True)
@@ -128,7 +128,7 @@ class Trigger:
     阈值多少"是查不到的，而那一行要能自己说清"为什么是这一刻"。
     """
 
-    feature: str
+    task: str
     delay_s: float
     threshold_s: int
 
@@ -151,9 +151,9 @@ def roster(config: JsonObject, key: str) -> dict[str, str]:
     return {str(item).strip(): str(password).strip() for item, password in value.items()}
 
 
-def password_of(config: JsonObject, feature: str, cert_no: str) -> str:
+def password_of(config: JsonObject, task: str, cert_no: str) -> str:
     """这个功能那份名单里，这个学号的凭证；不在名单里就是空的，动作不会下发。"""
-    return roster(config, FEATURES_BY_KEY[feature].students_key).get(cert_no, "")
+    return roster(config, TASKS_BY_KEY[task].students_key).get(cert_no, "")
 
 
 def decide(candidate: Candidate, config: JsonObject, now: str) -> Trigger | None:
@@ -164,7 +164,7 @@ def decide(candidate: Candidate, config: JsonObject, now: str) -> Trigger | None
     """
     hits: list[Trigger] = []
 
-    for spec in FEATURES:
+    for spec in TASKS:
         if not config.get(spec.enabled_key):
             continue
         if candidate.cert_no not in roster(config, spec.students_key):
@@ -173,17 +173,17 @@ def decide(candidate: Candidate, config: JsonObject, now: str) -> Trigger | None
         if started is None:
             continue
         threshold = as_int(config[spec.threshold_key])
-        hits.append(Trigger(feature=spec.key, delay_s=threshold - seconds_between(started, now), threshold_s=threshold))
+        hits.append(Trigger(task=spec.key, delay_s=threshold - seconds_between(started, now), threshold_s=threshold))
 
     if not hits:
         return None
     return min(hits, key=lambda hit: hit.delay_s)
 
 
-def _started_at(candidate: Candidate, spec: FeatureSpec, config: JsonObject, now: str) -> str | None:
+def _started_at(candidate: Candidate, spec: TaskSpec, config: JsonObject, now: str) -> str | None:
     """这条判据从哪一刻起算；状态对不上或时长用尽就返回 None（不适用）。
 
-    **三个功能的差异全在 [FeatureSpec] 里**，所以这里一处按功能的分叉都没有：适用状态、
+    **三个功能的差异全在 [TaskSpec] 里**，所以这里一处按功能的分叉都没有：适用状态、
     起算点、上限都是数据。起算点为空（已暂停却拿不到关阀时刻）就是判不了，返回 None。
 
     时长上限比的是 [Candidate.run_started_at] 到此刻的距离，也就是"他这一次从头到现在
@@ -221,17 +221,17 @@ def recheck(fresh: Candidate | None, expected: Candidate, trigger: Trigger, conf
         return "换了人"
     if fresh.state is not expected.state:
         return f"状态已变（{expected.state.value} → {fresh.state.value}）"
-    if _started_at(fresh, FEATURES_BY_KEY[trigger.feature], config, now) is None:
+    if _started_at(fresh, TASKS_BY_KEY[trigger.task], config, now) is None:
         return "判据已不适用（起算点为空或时长上限用尽）"
-    return still_allowed(fresh.cert_no, trigger.feature, config)
+    return still_allowed(fresh.cert_no, trigger.task, config)
 
 
-def still_allowed(cert_no: str, feature: str, config: JsonObject) -> str | None:
+def still_allowed(cert_no: str, task: str, config: JsonObject) -> str | None:
     """名单与开关是不是还允许对这个学号做这个功能。
 
     下单之前还要再问一次：复查到下单之间隔着一次取数与一次排队，名单可能刚被改。
     """
-    spec = FEATURES_BY_KEY[feature]
+    spec = TASKS_BY_KEY[task]
     if not config.get(spec.enabled_key):
         return "功能已关"
     if cert_no not in roster(config, spec.students_key):

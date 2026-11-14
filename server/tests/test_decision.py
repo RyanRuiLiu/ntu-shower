@@ -72,7 +72,7 @@ def test_roster_tolerates_a_wrong_shape() -> None:
     assert roster({"k": ["1001"]}, "k") == {}
 
 
-def test_password_of_comes_from_that_features_own_roster() -> None:
+def test_password_of_comes_from_that_tasks_own_roster() -> None:
     """凭证跟着名单走：同一份名单里"在不在"与"有没有密码"是同一件事。
 
     所以不存在"名单里有他、却没有他的密码"那种静默不执行——代价是同一个学号开两个功能
@@ -149,7 +149,7 @@ def test_renew_session_has_no_duration_cap() -> None:
     trigger = decide(long_run, BASE_CONFIG, NOW)
 
     assert trigger is not None
-    assert trigger.feature == FEATURE_RENEW_SESSION
+    assert trigger.task == FEATURE_RENEW_SESSION
 
 
 # ── 自动结算 ──
@@ -177,7 +177,7 @@ def test_other_students_are_untouched() -> None:
     assert decide(candidate(cert_no="2026000006"), BASE_CONFIG, NOW) is None
 
 
-def test_disabled_feature_is_not_considered() -> None:
+def test_disabled_task_is_not_considered() -> None:
     config = {**BASE_CONFIG, "renew_wait_enabled": False}
 
     assert decide(candidate(), config, NOW) is None
