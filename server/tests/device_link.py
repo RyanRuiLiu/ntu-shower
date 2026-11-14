@@ -16,7 +16,7 @@ def register_trusted_device(device_id: str, capabilities: list[str] | None = Non
     """在设备档案里登记并信任一台设备（默认无能力声明，即未声明态）。"""
     from app.db.base import utcnow
     from app.db.session import session_scope
-    from app.persistence import devices as devices_store
+    from app.modules.devices import crud as devices_store
 
     with session_scope() as session:
         devices_store.register(
@@ -104,7 +104,7 @@ def register_device_raw(
 ) -> None:
     """按旧测试的参数形状登记设备（capabilities 允许传非法形状，读取按未声明态处理）。"""
     from app.db.base import utcnow
-    from app.persistence import devices as devices_store
+    from app.modules.devices import crud as devices_store
 
     with db() as session:
         devices_store.register(

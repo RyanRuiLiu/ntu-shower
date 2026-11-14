@@ -14,8 +14,8 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.auth import crud
+from app.db.base import Base
 from app.db.session import Database
-from app.models import Base
 
 NOW = datetime(2026, 11, 15, 12, 0, 0, tzinfo=UTC)
 

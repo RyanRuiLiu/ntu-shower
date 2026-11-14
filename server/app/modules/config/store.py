@@ -14,7 +14,7 @@ from typing import NoReturn
 
 from sqlalchemy.orm import Session
 
-from app.persistence import config as config_store_persistence
+from app.modules.config import crud as config_store_persistence
 
 from .schemas import ConfigSpecView, ConfigValues
 from .spec import (

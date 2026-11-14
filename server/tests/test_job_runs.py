@@ -15,10 +15,10 @@ import pytest
 from fastapi.testclient import TestClient
 from tests import device_link, door_link
 
+from app.contracts import DoorState
 from app.core import device_clock, outcomes
 from app.core.clock import now_rfc3339, seconds_between
 from app.db.session import session_scope
-from app.models.enums import DoorState
 from app.modules.devices import actions as device_actions
 from app.modules.sessions import scheduler
 from app.modules.sessions.decision import (
@@ -214,7 +214,7 @@ def _moment(text: str) -> datetime:
 def _device_pk() -> int | None:
     from sqlalchemy import select
 
-    from app.models.device import Device
+    from app.modules.devices.models import Device
 
     with session_scope() as session:
         return session.scalar(select(Device.id).where(Device.id == "dev-1"))
@@ -222,7 +222,7 @@ def _device_pk() -> int | None:
 
 def _seed() -> None:
     """把上面这些真实行原样插进库。段通过 (设备, 喷头, 学号) 认领它所属的那一场会话。"""
-    from app.models.usage import UsageSegment, UsageSession
+    from app.persistence.usage import UsageSegment, UsageSession
 
     pk = _device_pk()
     ids_by_key: dict[tuple[int, str], int] = {}
@@ -338,7 +338,7 @@ def test_run_started_at_on_the_real_consecutive_run(real_rows: None) -> None:
     差别只在间隔量级——我们自己的续期是秒级，真人走了再回来是分钟级；而这里隔了 92 秒，
     仍落在 300 秒那条线以内。
     """
-    from app.persistence import doors as doors_store
+    from app.modules.doors import crud as doors_store
 
     with session_scope() as session:
         # 同一喷头同一学号：间隔 92 秒仍落在 300 秒那条线以内，起点是最早那场
@@ -419,7 +419,7 @@ def test_snapshots_walks_real_rows_and_the_live_view(real_rows: None) -> None:
     帧按真实形状给：**本机无卡，占用是靠 `acc_no` 判出来的**（`card_no` 恒为 0），
     只给 `cert_no` 会被判成空闲——这是真实帧里才看得到的事。
     """
-    from app.models.usage import UsageSession
+    from app.persistence.usage import UsageSession
 
     with session_scope() as session:
         session.add(

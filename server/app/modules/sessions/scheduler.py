@@ -57,7 +57,7 @@ from typing import Protocol
 
 from sqlalchemy.orm import Session
 
-from app.contracts import CommandOutcome
+from app.contracts import CommandOutcome, DoorState, JobOutcome
 from app.core import actions, outcomes, problems
 from app.core.clock import now_rfc3339, shift_rfc3339
 from app.core.logging import log_event
@@ -65,7 +65,6 @@ from app.core.problems import ApiProblemError
 from app.core.protocol import as_int
 from app.db.base import utcnow
 from app.db.session import session_scope
-from app.models.enums import DoorState, JobOutcome
 from app.modules.config import store as config_store
 from app.modules.config.schemas import ConfigPushNotice
 from app.modules.devices import actions as device_actions
