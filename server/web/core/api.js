@@ -4,7 +4,7 @@
  * 视图模块不得直接 `fetch`：路径、鉴权头、错误解包各写一份，改一处就会漏三处。
  *
  * 服务端是单一资源树（路径即资源，权限由 scope 守卫决定，见 docs/architecture.md），
- * 这里按域分组封装；会话通道是操作台（权限视为全权），无需另配密钥。
+ * 这里按域分组封装；会话通道是操作台（权限视为全部权限），无需另配密钥。
  *
  * ## 错误
  *
@@ -96,7 +96,7 @@ export const api = {
   // ── 喷头 ──（公开；带 device_id 即单设备视图）
   doors: (deviceId) => send(`${API_V1}/doors${query({ device_id: deviceId })}`),
 
-  // ── 会话操作 ──（sessions:write / devices:photo 权限；会话通道全权，代操作直接过）
+  // ── 会话操作 ──（sessions:write / devices:photo 权限；会话通道持全部权限，代操作直接过）
   assign: (deviceId, value) => send(devicePath(deviceId, '/assign'), post(value)),
   settle: (deviceId, value) => send(devicePath(deviceId, '/settle'), post(value)),
   photo: (deviceId) => send(devicePath(deviceId, '/photo'), post()),
