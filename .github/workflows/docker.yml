@@ -1,15 +1,17 @@
 name: docker
 
+# docker / build 是分支保护的 required check：PR 上必须每次都报告（GitHub 官方对
+# required check 的要求），不能做 paths 过滤——整个 workflow 被跳过时没有 check run，
+# 保护即无法满足。提速靠并发取消。
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [main]
     tags: ["v*"]
   pull_request:
-    # 镜像内容只有 server/ 与 compose
-    paths:
-      - "server/**"
-      - "compose.yaml"
-      - ".github/workflows/docker.yml"
 
 jobs:
   docker:
