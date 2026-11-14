@@ -17,6 +17,8 @@ jobs:
   # android/server 清单里：门禁逻辑的变更也要全量验证。
   changes:
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
     outputs:
       android: ${{ steps.filter.outputs.android }}
       server: ${{ steps.filter.outputs.server }}
