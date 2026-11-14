@@ -65,7 +65,7 @@ class Scope(StrEnum):
     """审计查询（调用、命令、任务记录）。"""
 
     WILDCARD = "*"
-    """全权。只授予面板与内部脚本主体，不对外的密钥发放。"""
+    """全部权限（AWS IAM 对 `*` 的官方称谓 all actions）。只授予面板与内部脚本主体，不对外的密钥发放。"""
 
 
 ALL_SCOPES: frozenset[str] = frozenset(scope.value for scope in Scope)
@@ -88,7 +88,7 @@ SCOPE_LABELS: dict[str, str] = {
     Scope.JOBS_READ: "后台任务看板",
     Scope.USERS_WRITE: "用户与密钥管理",
     Scope.AUDIT_READ: "审计查询",
-    Scope.WILDCARD: "全权",
+    Scope.WILDCARD: "全部权限",
 }
 
 #: scope → 用户面动作（GET /devices 的 actions 字段唯一来源）。
