@@ -2,10 +2,13 @@
 
 import asyncio
 import socket
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.testclient import WebSocketTestSession
 from starlette.websockets import WebSocketDisconnect
 from tests import device_link
 
@@ -22,6 +25,26 @@ def _register_online(monkeypatch: pytest.MonkeyPatch, device_id: str = DEVICE_ID
     fake = device_link.FakeGatewayWS()
     monkeypatch.setattr(manager, "_connections", {device_id: fake})
     return fake
+
+
+@contextmanager
+def _connect_bridge(client: TestClient, device_id: str, nonce: str) -> Iterator[WebSocketTestSession]:
+    """新握手契约：nonce 经 Sec-WebSocket-Protocol 头在握手期携带，URL 只有路径。"""
+    with client.websocket_connect(f"/gateway/bridge/{device_id}", subprotocols=[nonce]) as ws:
+        yield ws
+
+
+@contextmanager
+def _connect_and_expect_reject(
+    client: TestClient, device_id: str, nonce: str
+) -> Iterator[pytest.ExceptionInfo[WebSocketDisconnect]]:
+    """连入（握手期校验）+ 等服务端 4401 关闭。"""
+    with (
+        pytest.raises(WebSocketDisconnect) as rejected,
+        client.websocket_connect(f"/gateway/bridge/{device_id}", subprotocols=[nonce]),
+    ):
+        pass
+    yield rejected
 
 
 def test_bridge_requires_trusted_online_admin(
@@ -59,16 +82,13 @@ def test_bridge_lifecycle_with_nonce_and_tcp_roundtrip(
     assert status["ssh_target"]
 
     # 错误 nonce 被拒（4401），且不拆掉已建好的桥
-    with (
-        pytest.raises(WebSocketDisconnect) as rejected,
-        client.websocket_connect(f"/gateway/bridge?device_id={DEVICE_ID}&nonce=wrong") as ws,
-    ):
-        ws.receive_bytes()
+    with _connect_and_expect_reject(client, DEVICE_ID, "wrong") as rejected:
+        pass
     assert rejected.value.code == 4401
     assert registry.get(DEVICE_ID) is not None
 
     # 真实往返：本地 TCP ↔ 设备 WS 字节透传
-    with client.websocket_connect(f"/gateway/bridge?device_id={DEVICE_ID}&nonce={nonce}") as device_ws:
+    with _connect_bridge(client, DEVICE_ID, nonce) as device_ws:
         with socket.create_connection(("127.0.0.1", body["port"]), timeout=5) as tcp:
             tcp.settimeout(5)
             tcp.sendall(b"host-hello")
@@ -102,7 +122,7 @@ def test_bridge_buffers_until_both_halves_arrive(
     fake_first = _register_online(monkeypatch, "dev-bridge-devfirst")
     opened = client.post("/api/v1/devices/dev-bridge-devfirst/bridge/open", headers=admin_headers).json()
     nonce_first = fake_first.last_frame()["payload"]["nonce"]
-    with client.websocket_connect(f"/gateway/bridge?device_id=dev-bridge-devfirst&nonce={nonce_first}") as device_ws:
+    with _connect_bridge(client, "dev-bridge-devfirst", nonce_first) as device_ws:
         device_ws.send_bytes(b"early-device-bytes")
         # 不等待固定时长：TCP 端有 5 秒读超时，字节无论此刻已入缓冲还是稍后到达都能收到
         with socket.create_connection(("127.0.0.1", opened["port"]), timeout=5) as tcp:
@@ -117,9 +137,7 @@ def test_bridge_buffers_until_both_halves_arrive(
         tcp.settimeout(5)
         tcp.sendall(b"early-host-bytes")
         nonce_second = fake_second.last_frame()["payload"]["nonce"]
-        with client.websocket_connect(
-            f"/gateway/bridge?device_id=dev-bridge-tcpfirst&nonce={nonce_second}"
-        ) as device_ws:
+        with _connect_bridge(client, "dev-bridge-tcpfirst", nonce_second) as device_ws:
             assert device_ws.receive_bytes() == b"early-host-bytes"
     client.post("/api/v1/devices/dev-bridge-tcpfirst/bridge/close", headers=admin_headers)
 
@@ -225,12 +243,12 @@ def test_nonce_is_consumed_on_first_use(
     client.post(f"/api/v1/devices/{DEVICE_ID}/bridge/open", headers=admin_headers)
     nonce = fake.last_frame()["payload"]["nonce"]
 
-    with client.websocket_connect(f"/gateway/bridge?device_id={DEVICE_ID}&nonce={nonce}"):
+    with _connect_bridge(client, DEVICE_ID, nonce):
         pass  # 配对成功即消费；连接随即断开，整桥回收
 
     with (
         pytest.raises(WebSocketDisconnect) as replayed,
-        client.websocket_connect(f"/gateway/bridge?device_id={DEVICE_ID}&nonce={nonce}") as ws,
+        _connect_bridge(client, DEVICE_ID, nonce) as ws,
     ):
         ws.receive_bytes()
     assert replayed.value.code == 4401
