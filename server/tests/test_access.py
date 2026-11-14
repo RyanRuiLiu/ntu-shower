@@ -133,7 +133,7 @@ def test_identities_returns_domain_read_model(client: TestClient, admin_headers:
     body = r.json()
     assert set(body) == {"capabilities", "identities"}
     caps = {item["key"]: item["label"] for item in body["capabilities"]}
-    assert set(caps) == set(ALL_CAPABILITIES) == {"session", "photo", "admin", "tasks", "stats"}
+    assert set(caps) == set(ALL_CAPABILITIES) == {"session", "photo", "admin", "tasks"}
     assert all(caps.values())
     admin = next(item for item in body["identities"] if item["identity"] == "admin-identity-0001")
     assert admin["kind"] == "web"

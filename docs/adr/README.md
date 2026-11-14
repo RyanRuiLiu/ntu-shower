@@ -7,7 +7,7 @@
 | [ADR-0001](0001-overall-direction.md) | 总体取向 | Accepted |
 | [ADR-0002](0002-time-axis.md) | 时间轴：两条铁律 | Accepted |
 | [ADR-0003](0003-data-layering.md) | 数据分层：五张表 | Accepted |
-| [ADR-0004](0004-stats.md) | 统计层：口径与数据集 | Accepted |
+| [ADR-0004](0004-stats.md) | 统计层：口径与数据集 | Deprecated（统计功能 2026-11-14 下线删除） |
 | [ADR-0005](0005-architecture.md) | 架构与模块 | Accepted（其中「设备影子」一条 Deprecated，见文内后记） |
 | [ADR-0006](0006-protocol-contract.md) | 协议与契约 | Accepted |
 | [ADR-0007](0007-device.md) | 设备端 | Accepted |
