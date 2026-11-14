@@ -22,7 +22,7 @@ from . import schemas
 from .spec import TASKS
 
 admin_router = APIRouter(
-    prefix="/api/v1/background-tasks",
+    prefix="/api/v1/tasks",
     tags=["tasks"],
     dependencies=[Depends(require_admin)],
 )

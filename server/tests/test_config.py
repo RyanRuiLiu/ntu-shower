@@ -364,7 +364,7 @@ def test_config_spec_rendering_contract(client: TestClient, admin_headers: dict[
 
     # 两个页签按"这个键去哪"分：服务端的键在服务器上跑、不下发；设备的键会推到设备。
     assert [s["key"] for s in spec["sections"]] == ["server", "device"]
-    assert [s["title"] for s in spec["sections"]] == ["服务端业务", "设备下发"]
+    assert [s["title"] for s in spec["sections"]] == ["后台任务", "设备下发"]
     groups = {g["key"]: g for g in spec["groups"]}
     assert groups["gateway"]["section"] == "device"
     assert groups["renew_wait"]["section"] == "server"

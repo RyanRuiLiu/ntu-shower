@@ -113,7 +113,7 @@ class BackgroundTaskRun(Base):
     door_no: Mapped[int] = mapped_column(Integer)
     session_id: Mapped[int | None] = mapped_column(ForeignKey("usage_sessions.id", ondelete="SET NULL"), default=None)
     cert_no: Mapped[str] = mapped_column(String(32), default="")
-    feature: Mapped[str] = mapped_column(String(32))
+    task: Mapped[str] = mapped_column(String(32))
     action: Mapped[str | None] = mapped_column(String(32), default=None)
     outcome: Mapped[BackgroundOutcome] = mapped_column(enum_column(BackgroundOutcome, "background_outcome"))
     reason: Mapped[str | None] = mapped_column(String(128), default=None)
