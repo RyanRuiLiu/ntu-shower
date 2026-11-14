@@ -12,6 +12,10 @@ sqlalchemy==2.1.8
 alembic==1.20.1
 # 口令哈希：Argon2id 是当前密码哈希的推荐算法（RFC 9106）
 argon2-cffi==25.1.0
+# 语音素材校验：只接受 44.1kHz 单声道 MP3（设备端拼流的硬性要求），mutagen 读
+# 采样率/声道/时长。转码收敛到上传方（ffmpeg -i in -ac 1 -ar 44100 out.mp3），
+# ffmpeg 因此不进运行时镜像（其静态层占镜像约六成）。
+mutagen==1.48.1
 # 会话签名：Starlette SessionMiddleware 的签名机制建立在 itsdangerous 上
 # （Flask 的会话同样用它），是 Python Web 生态里签名令牌的标准实现
 itsdangerous==2.2.0
