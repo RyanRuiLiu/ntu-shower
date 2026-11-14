@@ -44,8 +44,7 @@ def test_enroll_creates_device_and_returns_working_credential(
     assert body["device_id"] == ENROLL_BODY["device_id"]
     assert body["token"]
 
-    records = client.get("/api/v1/devices/runtime", headers=admin_headers).json()
-    record = next(item for item in records if item["device_id"] == ENROLL_BODY["device_id"])
+    record = client.get(f"/api/v1/devices/{ENROLL_BODY['device_id']}", headers=admin_headers).json()
     assert record["trusted"] is False  # 注册不等于信任
 
     # 凭据真的能用：带它完成设备 WS 握手
@@ -128,8 +127,7 @@ def test_enroll_preserves_the_trusted_bit(
     r = _enroll(client, {**ENROLL_BODY, "device_id": "dev-trusted-enroll"})
     assert r.status_code == 200
 
-    records = client.get("/api/v1/devices/runtime", headers=admin_headers).json()
-    record = next(item for item in records if item["device_id"] == "dev-trusted-enroll")
+    record = client.get("/api/v1/devices/dev-trusted-enroll", headers=admin_headers).json()
     assert record["trusted"] is True
 
 

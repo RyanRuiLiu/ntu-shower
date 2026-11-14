@@ -5,6 +5,7 @@
 把这些字段声明为可选，客户端才知道必须先判断 `up_to_date` 再取它们。
 """
 
+from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
 from app.contracts import ReleaseRecord as ReleaseRecord
@@ -37,6 +38,12 @@ class ReleasePublished(TypedDict):
     sha256: str
     size: int
     notified_devices: list[str]
+
+
+class ReleaseRearmRequest(BaseModel):
+    """重推目标设备：force 发布对该设备重新生效。"""
+
+    device_id: str = Field(min_length=1)
 
 
 class ReleaseRearmed(TypedDict):
