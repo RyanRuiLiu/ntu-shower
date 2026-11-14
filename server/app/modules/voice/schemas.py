@@ -146,7 +146,6 @@ class VoiceStatusView(BaseModel):
     asset_count: int
     digits: list[int]
     units: list[str]
-    ffmpeg_available: bool
 
 
 # ── 规则 ──
