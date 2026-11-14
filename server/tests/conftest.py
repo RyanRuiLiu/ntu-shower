@@ -18,9 +18,8 @@ os.environ.setdefault("SESSION_SECRET", "test-session-secret")
 import pytest
 from fastapi.testclient import TestClient
 
-# 完整 metadata：表模型分散在各域目录，任何 Base.metadata.create_all 之前必须全部
-# 导入，否则跨域外键（job_runs→usage_sessions 等）解析不到目标表。与 migrations/env.py
-# 是同一份清单；缺表会当场炸（no such table），漏模型由 tests/test_schema.py 钉住。
+# 表模型分散在各域目录：create_all 前必须全部导入，否则跨域外键解析不到目标表。
+# 与 migrations/env.py 同一份清单，漏模型由 tests/test_schema.py 钉住。
 from app.auth.models import ApiKey, User  # noqa: F401
 from app.core import config as config_module
 from app.modules.config.models import AppSettings  # noqa: F401
