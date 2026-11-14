@@ -95,17 +95,9 @@ class AdbBridge:
         """adb 客户端（TCP 半边）已接入。"""
         return self.tcp_writer is not None
 
-    def accept_device(self, ws: WebSocket, nonce: str, now: float, pair_timeout_s: float) -> bool:
-        """把一个设备 WS 接到这条桥上；不属于本桥的返回 False。
-
-        判据只有一次性 nonce：旧世代重放拿到的是已消费的 nonce，通不过，无需再比
-        世代号。世代比较与"桥不在册现建一条"都不在此做，后者会造成没有监听套接字、
-        无人可回收的桥。
-        """
-        if not registry.consume_nonce(self.device_id, nonce, now, pair_timeout_s):
-            return False
+    def bind_device(self, ws: WebSocket) -> None:
+        """把已通过配对校验的设备 WS 接到这条桥上（nonce 消费在路由侧完成）。"""
         self.device_ws = ws
-        return True
 
     def attach_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> bool:
         """接入一个 adb 客户端；已有客户端时拒绝。

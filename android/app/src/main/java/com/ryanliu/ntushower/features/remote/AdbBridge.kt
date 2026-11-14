@@ -54,7 +54,10 @@ class AdbBridge(
             }
             adbSocket = adb
             val request = Request.Builder()
-                .url("wss://$serverDomain/gateway/bridge?device_id=$deviceId&nonce=$nonce")
+                .url("wss://$serverDomain/gateway/bridge/$deviceId")
+                // 配对凭据不进 URL（会落 nginx 访问日志）：握手期经子协议头携带，
+                // 服务端在 accept 前校验，无效即握手失败
+                .header("Sec-WebSocket-Protocol", nonce)
                 .build()
             client.newWebSocket(request, listener)
         }, "adb-bridge").start()
