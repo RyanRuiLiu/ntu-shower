@@ -390,7 +390,7 @@ function refreshTaskCountdowns() {
  */
 function renderTaskBoard(data) {
   const scheduledByTask = {}
-  for (const row of data.scheduled) (scheduledByTask[row.task] ||= []).push(row)
+  for (const row of data.scheduled) (scheduledByTask[row.job] ||= []).push(row)
 
   const taskSections = data.jobs.map((task) => {
     const rows = scheduledByTask[task.key] || []
