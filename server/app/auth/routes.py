@@ -32,6 +32,7 @@ from app.modules.devices import crud as devices_store
 
 from ..core.logging import log_event
 from ..core.problems import (
+    KEY_NOT_FOUND,
     UNAUTHENTICATED,
     UNKNOWN_SCOPE,
     USER_NOT_FOUND,
@@ -46,6 +47,7 @@ from .schemas import (
     AccountView,
     KeyCreate,
     KeyIssued,
+    KeyUpdate,
     KeyView,
     LoginRequest,
     MeView,
@@ -157,13 +159,8 @@ def delete_user(username: str, caller: Caller = Depends(caller), session: Sessio
 @admin_router.post("/{username}/keys", response_model=KeyIssued)
 def issue_key(username: str, req: KeyCreate, session: Session = Depends(get_db)) -> KeyIssued:
     """给用户签发一枚密钥：权限集 + 设备作用域都附在密钥上，明文只此一次。"""
-    unknown = sorted(set(req.scopes) - ALL_SCOPES)
-    if unknown:
-        raise ApiProblemError(UNKNOWN_SCOPE, f"未知权限：{unknown}")
-    known = {record["device_id"] for record in devices_store.list_all(session)}
-    unknown_devices = sorted(set(req.device_scope) - known - {"*"})
-    if unknown_devices:
-        raise ApiProblemError(VALIDATION_FAILED, f"作用域含未知设备：{unknown_devices}")
+    _validated_scopes(req.scopes)
+    _validated_device_scope(session, req.device_scope)
     issued = crud.issue_key(session, username, req.name, req.scopes, req.device_scope)
     if issued is None:
         raise ApiProblemError(USER_NOT_FOUND, username)
@@ -180,11 +177,47 @@ def list_keys(username: str, session: Session = Depends(get_db)) -> UserKeys:
     return UserKeys(keys=[KeyView(**key) for key in crud.list_keys(session, username)])
 
 
+@admin_router.put("/{username}/keys/{key_id}", response_model=KeyView)
+def update_key(username: str, key_id: int, req: KeyUpdate, session: Session = Depends(get_db)) -> KeyView:
+    """编辑密钥：名称、权限集与设备作用域，令牌不变，下一次请求即生效（Stripe RAK 形态）。"""
+    if req.scopes is not None:
+        _validated_scopes(req.scopes)
+    if req.device_scope is not None:
+        _validated_device_scope(session, req.device_scope)
+    key = crud.find_key(session, username, key_id)
+    if key is None:
+        raise ApiProblemError(KEY_NOT_FOUND, f"{username}/{key_id}")
+    if key["revoked_at"]:
+        raise ApiProblemError(VALIDATION_FAILED, "已吊销的密钥不能编辑")
+    updated = crud.update_key(session, username, key_id, req.name, req.scopes, req.device_scope)
+    if updated is None:  # 预检后被并发吊销：同一条"不能编辑"的语义
+        raise ApiProblemError(VALIDATION_FAILED, "已吊销的密钥不能编辑")
+    log_event("INFO", "auth.key-updated", "密钥已更新", username=username, key_id=key_id)
+    return KeyView(**updated)
+
+
 @admin_router.delete("/{username}/keys/{key_id}", status_code=204)
 def revoke_key(username: str, key_id: int, session: Session = Depends(get_db)) -> Response:
     """吊销单枚密钥：该枚下一次请求即 401，同用户其他密钥不受影响。幂等。"""
     crud.revoke_key(session, username, key_id)
     return Response(status_code=204)
+
+
+def _validated_scopes(scopes: list[str]) -> None:
+    """权限集必须在字典里，且不能为空（空集与未授权没有区别）。"""
+    if not scopes:
+        raise ApiProblemError(VALIDATION_FAILED, "至少选择一个权限")
+    unknown = sorted(set(scopes) - ALL_SCOPES)
+    if unknown:
+        raise ApiProblemError(UNKNOWN_SCOPE, f"未知权限：{unknown}")
+
+
+def _validated_device_scope(session: Session, device_scope: list[str]) -> None:
+    """作用域里的设备必须真实存在：写错的授权永远执行不了。"""
+    known = {record["device_id"] for record in devices_store.list_all(session)}
+    unknown = sorted(set(device_scope) - known - {"*"})
+    if unknown:
+        raise ApiProblemError(VALIDATION_FAILED, f"作用域含未知设备：{unknown}")
 
 
 __all__: list[str] = ["admin_router", "identity_router", "router"]
