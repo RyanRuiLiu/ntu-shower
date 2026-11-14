@@ -29,8 +29,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from sqlalchemy import text
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 from typing_extensions import TypedDict
 
@@ -175,9 +176,21 @@ def create_app() -> FastAPI:
         return {"status": "ok", "name": "ntu-shower", "version": APP_VERSION}
 
     # 网页端挂在根路径：它就是这个服务唯一的人机界面，而 API 路由已在前注册。
-    # 必须放在最后注册：Starlette 按注册顺序匹配，mount("/") 排在最后。
+    # history 路由的 SPA fallback 用 catch-all 路由（FastAPI 社区主流写法）：
+    # - API/网关/健康检查前缀的未匹配路径回 404 problem+json——接口错误绝不能
+    #   伪装成 200 的 HTML；
+    # - 其余未匹配路径：dist 里真实存在的文件（assets、favicon）按文件回，
+    #   否则回 index.html，让 /devices 等前端路由刷新时落到应用入口。
     web_dir = Path(__file__).resolve().parent.parent / "web"
-    app.mount("/", StaticFiles(directory=str(web_dir), html=True), name="web")
+
+    @app.get("/{spa_path:path}", include_in_schema=False)
+    async def spa_fallback(spa_path: str) -> Response:
+        if spa_path.startswith(("api/", "gateway/", "ota/", "healthz", "problems/")):
+            raise StarletteHTTPException(status_code=404)
+        candidate = web_dir / spa_path
+        if "." in Path(spa_path).name and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(web_dir / "index.html")
 
     # 前端资源要求浏览器每次都回来验一遍：no-cache 不是"不缓存"，而是带 ETag
     # 协商，没变 304，变了才重新下载。实时状态 API 则一律 no-store：不带任何缓存
