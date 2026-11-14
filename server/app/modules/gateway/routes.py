@@ -25,7 +25,7 @@ from ...core.logging import log_event
 from ...core.protocol import JsonObject, as_int, list_of, payload_of, text_of
 from ...core.tokens import extract_bearer
 from ...db.session import Database
-from ...persistence import device_credentials
+from ...persistence import devices as devices_store
 from ...persistence import ota as ota_store
 from ..config import store as config_store
 from ..devices import actions as device_actions
@@ -161,7 +161,7 @@ async def _verify_device_token(ws: WebSocket) -> tuple[bool, str | None]:
     token_device_id: str | None = None
     if token is not None:
         with ws.app.state.database.new_session() as auth_session:
-            token_device_id = device_credentials.authenticate_device(auth_session, token)
+            token_device_id = devices_store.authenticate_device(auth_session, token)
     if token_device_id is None:
         log_event("WARNING", "gateway.device-token-rejected", "设备令牌无效，连接被拒")
         await ws.close(code=1008)

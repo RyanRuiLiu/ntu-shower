@@ -45,7 +45,6 @@ from app.modules.access.capabilities import user_actions
 from app.modules.access.dependencies import optional_identity, require_admin
 from app.modules.access.schemas import IdentityRecord
 from app.modules.config import store as config_store
-from app.persistence import device_credentials
 from app.persistence import devices as devices_store
 
 from . import schemas, service
@@ -97,8 +96,8 @@ def enroll_device(
         booted_at=utcnow(),
         seen_at=utcnow(),
     )
-    device_credentials.revoke_all(session, req.device_id)
-    token = device_credentials.issue(session, req.device_id, label="自注册")
+    devices_store.revoke_all(session, req.device_id)
+    token = devices_store.issue(session, req.device_id, label="自注册")
     if token is None:  # register 刚确保了行存在，到这里为 None 只可能是并发除档
         raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {req.device_id} 刚被除档")
     return schemas.DeviceEnrollResult(device_id=req.device_id, token=token)

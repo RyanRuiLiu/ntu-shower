@@ -8,55 +8,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String
+from sqlalchemy import JSON, Boolean, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db.base import Base, UtcDateTime, enum_column, utcnow
 from ..models.enums import IdentityKind
-
-
-class Device(Base):
-    """一台中控设备。"""
-
-    __tablename__ = "devices"
-
-    #: 主键即设备业务标识（Android ID 一类的稳定串，ADR-0008）：稳定唯一，故
-    #: 不设代理键——全库「每表 id 主键 + <实体>_id 外键，同名同型同义」。
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    name: Mapped[str] = mapped_column(String(64), default="")
-    #: 是否已建立信任关系；只有可信设备能执行特权帧
-    trusted: Mapped[bool] = mapped_column(Boolean, default=False)
-    app_version: Mapped[str] = mapped_column(String(32), default="")
-    version_code: Mapped[int] = mapped_column(Integer, default=0)
-    os_version: Mapped[str] = mapped_column(String(32), default="")
-    capabilities: Mapped[list[str]] = mapped_column(JSON, default=list)
-    last_seen_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None, index=True)
-    last_ip: Mapped[str | None] = mapped_column(String(45), default=None)
-    booted_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
-    #: 设备钟与服务端钟的偏差（秒），用于判断设备时间是否被改过
-    clock_skew_s: Mapped[float] = mapped_column(default=0.0)
-    sort_order: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow, onupdate=utcnow)
-
-
-class DeviceCredential(Base):
-    """设备接入凭证。
-
-    只存哈希，不存明文：数据库泄露不等于设备被接管。
-    轮换 = 新增一行并给旧的写 `revoked_at`，不做原地更新，保留审计轨迹。
-    """
-
-    __tablename__ = "device_credentials"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    device_id: Mapped[str] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"), index=True)
-    #: SHA-256(token)；token 本身是 32 字节随机串，熵足够，不需要慢哈希
-    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
-    label: Mapped[str] = mapped_column(String(64), default="")
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
-    expires_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
-    revoked_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
 
 
 class Principal(Base):
@@ -91,4 +47,4 @@ class Principal(Base):
     updated_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow, onupdate=utcnow)
 
 
-__all__: list[str] = ["Device", "DeviceCredential", "Principal"]
+__all__: list[str] = ["Principal"]
