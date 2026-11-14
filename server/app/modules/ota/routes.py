@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import caller, device_scope_guard
+from app.contracts import Caller
 from app.core.config import settings
 from app.core.logging import log_event
 from app.core.problems import (
@@ -30,6 +31,7 @@ from app.modules.ota.schemas import (
     OtaManifest,
     ReleasePublished,
     ReleaseRearmed,
+    ReleaseRearmRequest,
     ReleaseRecord,
     ReleaseRemoved,
 )
@@ -89,12 +91,13 @@ def download(version: ReleaseVersion) -> FileResponse:
     )
 
 
-@router.post(
-    "/releases/{version}/rearm/{device_id}",
-    dependencies=[Security(caller, scopes=["ota:write"]), Depends(device_scope_guard)],
-)
-def rearm_release(version: str, device_id: str, session: Session = Depends(get_db)) -> ReleaseRearmed:
-    """清除安装确认：force 发布对该设备重新生效（调试重推）。"""
+@router.post("/releases/{version}/rearm", dependencies=[Security(caller, scopes=["ota:write"])])
+def rearm_release(
+    version: str, req: ReleaseRearmRequest, caller: Caller = Depends(caller), session: Session = Depends(get_db)
+) -> ReleaseRearmed:
+    """清除安装确认：force 发布对该设备重新生效（调试重推）。目标设备在请求体里。"""
+    device_id = req.device_id
+    device_scope_guard(device_id, caller)
     return {"version": version, "device_id": device_id, "rearmed": repository.rearm(session, device_id, version)}
 
 

@@ -221,17 +221,17 @@ async def get_live_device_log(
     )
 
 
-@router.get("/devices/runtime", dependencies=[Security(caller, scopes=["devices:read"])])
-def list_runtime(session: Session = Depends(get_db)) -> list[DeviceRecord]:
-    """全部设备的运维档案（版本、信任、来源 IP、时钟偏差等诊断字段）。"""
-    return service.list_devices(session)
+@device_read_router.get("/{device_id}")
+def get_device(device_id: str, session: Session = Depends(get_db)) -> DeviceRecord:
+    """单台设备的运维档案（版本、信任、来源 IP、时钟偏差等诊断字段）。
+
+    列表（GET /devices）是公开摘要；单项完整档案是管理面（devices:read）。
+    """
+    return _require_device(session, device_id)
 
 
-# ── 档案 ──
-
-
-@admin_router.put("/order", response_model=schemas.DeviceOrderResponse)
-def put_device_order(req: DeviceOrderRequest, session: Session = Depends(get_db)) -> schemas.DeviceOrderResponse:
+@admin_router.patch("", response_model=schemas.DeviceOrderResponse)
+def patch_device_order(req: DeviceOrderRequest, session: Session = Depends(get_db)) -> schemas.DeviceOrderResponse:
     """按给定顺序重排设备：设备下拉、管理台设备表、统计接口全部照此排列。
 
     清单必须完整（漏掉的设备保持原位），出现未知设备整体拒绝。
@@ -283,13 +283,13 @@ async def capture_screen(device_id: str, session: Session = Depends(get_db)) -> 
     return await device_action(session, device_id, actions.SCREEN_CAPTURE, {}, DEVICE_ACTION_TIMEOUT_S)
 
 
-@device_router.post("/{device_id}/app/restart")
+@device_router.post("/{device_id}/restart-app")
 async def restart_app(device_id: str, session: Session = Depends(get_db)) -> CommandOutcome:
     """重启 NTU Shower 进程（不重启整机，也不动浴室 APP）。"""
     return await device_action(session, device_id, actions.APP_RESTART, {}, DEVICE_ACTION_TIMEOUT_S)
 
 
-@device_router.post("/{device_id}/clock/set")
+@device_router.post("/{device_id}/clock-set")
 async def set_clock(device_id: str, req: DeviceClockSetRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """设置设备系统时钟（datetime 为设备本地墙钟时间）。浴室 App 的每日开关机计划依赖它。"""
     return await device_action(
@@ -297,7 +297,7 @@ async def set_clock(device_id: str, req: DeviceClockSetRequest, session: Session
     )
 
 
-@device_router.post("/{device_id}/bath/restart")
+@device_router.post("/{device_id}/restart-bath")
 async def restart_bath_app(device_id: str, session: Session = Depends(get_db)) -> CommandOutcome:
     """重启浴室 App：先强停再冷启动。排障用——延长服务流程已改用 power.schedule。"""
     return await device_action(session, device_id, actions.BATH_RESTART, {}, DEVICE_ACTION_TIMEOUT_S)
@@ -314,7 +314,7 @@ async def reboot_device(device_id: str, session: Session = Depends(get_db)) -> C
 # 给动作，与 capture（一张图）互补。排查"设备卡在某个弹窗"时节点树比截图有用。
 
 
-@device_router.post("/{device_id}/dump")
+@device_router.post("/{device_id}/ui-dump")
 async def dump_ui_tree(device_id: str, session: Session = Depends(get_db)) -> CommandOutcome:
     """导出设备当前界面的节点树，结果在 data.xml。
 
@@ -323,7 +323,7 @@ async def dump_ui_tree(device_id: str, session: Session = Depends(get_db)) -> Co
     return await device_action(session, device_id, actions.UI_DUMP, {}, _ui_timeout_s(session, device_id))
 
 
-@device_router.post("/{device_id}/touch")
+@device_router.post("/{device_id}/ui-touch")
 async def touch(device_id: str, req: DeviceUiTouchRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """按屏幕坐标点击或滑动：不给 to_x/to_y 是点击，给了是滑动。
 
@@ -338,13 +338,13 @@ async def touch(device_id: str, req: DeviceUiTouchRequest, session: Session = De
     return await device_action(session, device_id, actions.UI_TOUCH, params, _ui_timeout_s(session, device_id))
 
 
-@device_router.post("/{device_id}/key")
+@device_router.post("/{device_id}/ui-key")
 async def send_key(device_id: str, req: DeviceUiKeyRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """发送系统按键（闭集，路由层 422 挡下非法值）。"""
     return await device_action(session, device_id, actions.UI_KEY, {"key": req.key}, _ui_timeout_s(session, device_id))
 
 
-@device_router.post("/{device_id}/input")
+@device_router.post("/{device_id}/ui-input")
 async def input_text(device_id: str, req: DeviceUiTextRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """向当前焦点控件输入文本；channel 在两条并列通路中显式选择。"""
     return await device_action(
