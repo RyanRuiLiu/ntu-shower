@@ -6,7 +6,7 @@
 
 from dataclasses import replace
 
-from app.models.enums import DoorState
+from app.contracts import DoorState
 from app.modules.sessions.decision import (
     JOB_AUTO_SETTLE,
     JOB_RENEW_SESSION,

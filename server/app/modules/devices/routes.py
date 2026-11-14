@@ -45,7 +45,7 @@ from app.core.tokens import extract_bearer, hash_token
 from app.db.base import utcnow
 from app.db.deps import get_db
 from app.modules.config import store as config_store
-from app.persistence import devices as devices_store
+from app.modules.devices import crud as devices_store
 
 from . import schemas, service
 from .dependencies import DEVICE_ACTION_TIMEOUT_S, device_action

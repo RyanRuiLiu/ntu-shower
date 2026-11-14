@@ -10,9 +10,9 @@ from tests import device_link
 
 from app.core import config as config_module
 from app.db.session import session_scope
+from app.modules.config import crud as config_store_persistence
 from app.modules.config import store
 from app.modules.config.spec import CONFIG_SPECS
-from app.persistence import config as config_store_persistence
 
 # ── 存储层：默认值、覆盖、只存差异 ──
 

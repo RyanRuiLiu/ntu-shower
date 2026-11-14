@@ -13,8 +13,8 @@ from pathlib import Path
 
 from tools.convert_v1_to_v2 import issue_device_tokens
 
+from app.db.base import Base
 from app.db.engine import create_db_engine
-from app.models import Base
 
 
 def test_issue_writes_only_digests_and_plaintext_goes_to_file() -> None:

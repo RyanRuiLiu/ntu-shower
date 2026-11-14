@@ -90,8 +90,8 @@ def test_status_includes_the_extending_device(client: TestClient, admin_headers:
     from datetime import UTC, datetime
 
     from app.db.session import session_scope
-    from app.persistence import devices as devices_store
-    from app.persistence import extend_hours as extend_repository
+    from app.modules.devices import crud as devices_store
+    from app.modules.extend_hours import crud as extend_repository
 
     shifted_at = datetime(2026, 10, 5, 15, 49, 30, tzinfo=UTC)
     with session_scope() as session:

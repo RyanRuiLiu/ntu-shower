@@ -11,8 +11,8 @@ from datetime import datetime
 from sqlalchemy import Boolean, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from ..db.base import Base, UtcDateTime, enum_column, utcnow
-from .enums import AssignedSource, ObservedSpan, SegmentSource
+from app.contracts import AssignedSource, ObservedSpan, SegmentSource
+from app.db.base import Base, UtcDateTime, enum_column, utcnow
 
 
 class UsageSession(Base):

@@ -28,9 +28,9 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from app.contracts import DoorState
 from app.core import clock
 from app.core.protocol import as_int
-from app.models.enums import DoorState
 from app.modules.doors.service import RAW_STATUS_DISABLED, RAW_STATUS_REPAIR, derive_state
 
 pytestmark = pytest.mark.timeout(60)

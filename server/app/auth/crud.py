@@ -12,11 +12,12 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..contracts import KeyRecord, UserRecord
-from ..core.clock import format_rfc3339
+from app.contracts import KeyRecord, UserRecord
+from app.core.clock import format_rfc3339
+from app.core.tokens import generate_token, hash_token
+from app.db.base import utcnow
+
 from ..core.passwords import hash_password, needs_rehash, verify_password
-from ..core.tokens import generate_token, hash_token
-from ..db.base import utcnow
 from .models import ApiKey, User
 
 #: 密钥前缀：完整密钥 = 前缀 + 43 字符 URL-safe 随机串。GitHub 官方的

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from ..contracts import Caller
+from app.contracts import Caller
 
 
 class LoginRequest(BaseModel):

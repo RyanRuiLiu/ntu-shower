@@ -15,9 +15,25 @@ from logging.config import fileConfig
 
 from alembic import context
 
-from app.db.base import UtcDateTime
+# 表模型分散在各域目录（models 包已解散）：这里逐个导入，metadata 才完整——
+# 漏一个模型，自动生成的迁移就会包含一条「删表」。
+from app.auth.models import ApiKey, User  # noqa: F401
+from app.db.base import Base, UtcDateTime
 from app.db.engine import create_db_engine
-from app.models import Base
+from app.modules.config.models import AppSettings  # noqa: F401
+from app.modules.devices.models import (  # noqa: F401
+    Device,
+    DeviceClockShift,
+    DeviceConfig,
+    DeviceCredential,
+    DeviceLinkEvent,
+    DeviceLog,
+)
+from app.modules.doors.models import DoorSnapshot, DoorStateEvent  # noqa: F401
+from app.modules.ota.models import OtaRelease, OtaReleaseInstall  # noqa: F401
+from app.modules.voice.models import VoiceAsset, VoiceDelivery, VoiceRule, VoiceUnit  # noqa: F401
+from app.persistence.audit import ApiCall, CommandAudit, JobRun  # noqa: F401
+from app.persistence.usage import UsageSegment, UsageSession  # noqa: F401
 
 config = context.config
 
