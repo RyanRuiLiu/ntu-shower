@@ -13,8 +13,8 @@ from typing import Any
 from sqlalchemy import JSON, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from ..db.base import Base, UtcDateTime, enum_column, utcnow
-from .enums import DoorState as DoorStateEnum
+from app.contracts import DoorState as DoorStateEnum
+from app.db.base import Base, UtcDateTime, enum_column, utcnow
 
 
 class DoorState(Base):

@@ -21,11 +21,11 @@
 
 ```bash
 # ① HTTP/网关审计（谁、何时、调了什么、结果）：本机直连后端。
-#    管理面凭 Bearer 凭据（运维签发，服务端只存哈希）
-curl -s -H "Authorization: Bearer <admin凭据>"   "http://127.0.0.1:8110/api/v1/audit/calls?device_id=<设备>&limit=100"
+#    管理面凭 Bearer 密钥（管理台用户页签发，服务端只存哈希）
+curl -s -H "Authorization: Bearer <ntushower_密钥>"   "http://127.0.0.1:8110/api/v1/audit/calls?device_id=<设备>&limit=100"
 
 # ② 命令级审计（trace_id 与 ① 互通）
-curl -s -H "Authorization: Bearer <admin凭据>" "http://127.0.0.1:8110/api/v1/audit/commands?device_id=<设备>"
+curl -s -H "Authorization: Bearer <ntushower_密钥>" "http://127.0.0.1:8110/api/v1/audit/commands?device_id=<设备>"
 
 # ③ 设备端命令痕迹（与 ② 同一 command_id 呼应）
 #    经管理台设备页的命令执行，或 bridge shell：
@@ -116,7 +116,7 @@ ssh root@iseekdream.com 'cd /opt/ntu-shower && NTU_SHOWER_TAG=<上一个tag> doc
 
 - 凭据校验在 `accept()` 之后，无效凭据以 RFC 6455 1008 关闭帧拒绝；设备端收到 1008 清凭据后走 claim 自注册换真凭据（决策见 `docs/adr/`）
 - `DEVICE_ENROLL_TOKEN` 在 `/etc/ntu-shower/ntu-shower.env`，值与 APK 构建期的 `deviceEnrollToken` 一致；留空即注册通道关闭，装了 APK 的设备会收到 401
-- 管理台以账号口令认证（`POST /api/v1/auth/login` 下发签名会话 Cookie）或 Bearer 凭据访问 API；凭据由运维签发、服务端只存哈希，明文不入库不入档
+- 管理台以账号口令认证（`POST /api/v1/auth/login` 下发签名会话 Cookie）或 Bearer 密钥访问 API；密钥在管理台用户页签发（`ntushower_` 前缀），服务端只存哈希，明文不入库不入档
 - OTA 只保留稳定回滚点与当前版本；带缺陷的过渡版按 `DELETE /api/v1/ota/releases/{version}` 下架，发布记录与 APK 文件一起删
 
 ### 应急回滚到 v1（切换窗口留存的资产）
@@ -162,7 +162,7 @@ ssh root@iseekdream.com 'cd /opt/ntu-shower && NTU_SHOWER_TAG=<上一个tag> doc
 # 本机把任意音频转成合格素材（服务端会校验采样率/声道/时长/体积）
 ffmpeg -i in.wav -ac 1 -ar 44100 -b:a 128k out.mp3
 # 就绪状态与数字素材齐备性走接口看
-ssh root@iseekdream.com 'curl -sS -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/v1/voice/status'
+ssh root@iseekdream.com 'curl -sS -H "Authorization: Bearer <ntushower_密钥>" http://127.0.0.1:8110/api/v1/voice/status'
 ```
 
 `digits` 列出已标记的 0–9 数字素材，含数字变量的规则要求 0–9 齐全。素材文件在
@@ -253,7 +253,7 @@ print("install:", con.execute("SELECT * FROM ota_release_installs").fetchall())
 PY'
 
 # 止损：下架该发布（最直接）
-curl -X DELETE -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/v1/ota/releases/<版本>
+curl -X DELETE -H "Authorization: Bearer <ntushower_密钥>" http://127.0.0.1:8110/api/v1/ota/releases/<版本>
 ```
 
 **预防**：`mark_installed_upto` 已在设备 hello 时调用（且早于 `latest_for`），
@@ -275,13 +275,13 @@ ssh root@iseekdream.com 'docker ps -a --filter name=ntu-shower --format "{{.Stat
 **排查**：若某命令被拒且 `reason_code=device.unsupported_action`，先看设备声明里有没有它：
 
 ```bash
-ssh root@iseekdream.com 'curl -s -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/v1/devices/runtime | python3 -m json.tool'
+ssh root@iseekdream.com 'curl -s -H "Authorization: Bearer <ntushower_密钥>" http://127.0.0.1:8110/api/v1/devices/runtime | python3 -m json.tool'
 ```
 
 ### 设备离线
 
 ```bash
-ssh root@iseekdream.com 'curl -s -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/v1/devices/runtime'
+ssh root@iseekdream.com 'curl -s -H "Authorization: Bearer <ntushower_密钥>" http://127.0.0.1:8110/api/v1/devices/runtime'
 ```
 
 注意 `online` 字段是**最后一次上报值**，与内存中的活动连接分开判断；
@@ -321,15 +321,15 @@ ssh root@iseekdream.com 'curl -s -H "Authorization: Bearer <admin凭据>" http:/
 
 ```bash
 # 打开（设备侧会 root 开启 adbd）
-curl -X POST -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/v1/devices/<id>/bridge/open
+curl -X POST -H "Authorization: Bearer <ntushower_密钥>" http://127.0.0.1:8110/api/v1/devices/<id>/bridge/open
 # 本地隧道 + adb
 ssh -N -L 15655:127.0.0.1:15655 root@iseekdream.com &
 adb connect 127.0.0.1:15655 && adb devices
 
 # 查看状态：含 expires_in_s（距寿命到点还有多久）
-curl -s -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/v1/devices/<id>/bridge
+curl -s -H "Authorization: Bearer <ntushower_密钥>" http://127.0.0.1:8110/api/v1/devices/<id>/bridge
 # 用毕关闭
-curl -X POST -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/v1/devices/<id>/bridge/close
+curl -X POST -H "Authorization: Bearer <ntushower_密钥>" http://127.0.0.1:8110/api/v1/devices/<id>/bridge/close
 ```
 
 两个上限都可配（`bridge_pair_timeout_s`——点开桥后建隧道的最长时间；
@@ -349,7 +349,7 @@ curl -X POST -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/
 ### 发布新 APK
 
 ```powershell
-.\deploy\publish_apk.ps1 -Token <admin 的 API Bearer 凭据>
+.\deploy\publish_apk.ps1 -Token <ntushower_密钥>
 ```
 
 脚本自己从 `android/app/build.gradle.kts` 读版本号、跑门禁、构建、上传（带 `-SkipBuild`

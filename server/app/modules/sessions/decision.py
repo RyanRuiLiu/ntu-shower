@@ -22,9 +22,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from app.contracts import DoorState
 from app.core.clock import seconds_between
 from app.core.protocol import JsonObject, as_int
-from app.models.enums import DoorState
 
 JOB_RENEW_WAIT = "renew_wait"
 JOB_RENEW_SESSION = "renew_session"

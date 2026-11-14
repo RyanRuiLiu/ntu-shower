@@ -6,6 +6,27 @@
 > 0.6.3 直接升到 0.6.5（提交 d9e29d2），该节原为一次记档性条目。其内容已并入
 > 下方 0.6.5 的 Fixed；不保留一个没有对应版本状态的版本号。
 
+## [0.7.2] - 2026-11-15
+
+### Added
+
+- **用户与密钥管理域**（ADR-0023）：`/api/v1/users` 登记用户、签发/列表/吊销 API 密钥（`ntushower_` 前缀，明文一次性下发）；权限与设备作用域都附在密钥上，密钥默认永不过期、多枚共存；管理台新增「用户」页。
+- **对外业务调用**：外部系统凭最小权限密钥即可调分配/结算/拍照（`sessions:write` / `devices:photo` × 设备作用域）；`/openapi.json` 渲染 securitySchemes 与每操作 scopes，即对接文档。
+
+### Changed
+
+- **权限模型重写**：`principals` 改名 `users`（删除 kind——账户不分类），权限从三个能力位改为 `resource:action` scopes 字典（16+1 项，`*` 通配）；守卫走 FastAPI 官方 SecurityScopes，失败码对齐 RFC 6750（`invalid-token` / `insufficient-scope`）。
+- **会话生命周期**：12 小时固定过期改为 30 天滑动 + 90 天绝对（OWASP Session CS），管理台不再每天重登。
+- **限速按调用方分桶**（nginx）：持钥按密钥一桶、匿名按 IP 一桶，登录端点专用 1 r/s；`/docs` `/redoc` 调试面关闭。
+
+### Removed
+
+- `principals` 表与 `X-Identity` 后的旧凭据形态：一次性迁移脚本把旧凭据摘要原样搬入 `api_keys`（旧令牌不断手），身份 kind、主体级能力位删除。
+
+### Security
+
+- 登录限速、按凭据分桶限速（OWASP API4）、调试面关闭（OWASP API8）；决策与备选见 `docs/adr/0023-permission-rewrite.md`。
+
 ## [0.7.1] - 2026-11-14
 
 ### Changed

@@ -10,10 +10,11 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, Path, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Path, Security, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
+from app.auth.dependencies import caller, device_scope_guard
 from app.core.config import settings
 from app.core.logging import log_event
 from app.core.problems import (
@@ -23,8 +24,8 @@ from app.core.problems import (
     ApiProblemError,
 )
 from app.db.deps import get_db
-from app.modules.access.dependencies import require_admin
 from app.modules.ota import apk_manifest, service
+from app.modules.ota import crud as repository
 from app.modules.ota.schemas import (
     OtaManifest,
     ReleasePublished,
@@ -33,7 +34,6 @@ from app.modules.ota.schemas import (
     ReleaseRemoved,
 )
 from app.modules.ota.service import VERSION_PATTERN
-from app.persistence import ota as repository
 
 router = APIRouter(prefix="/api/v1/ota", tags=["ota"])
 
@@ -89,13 +89,16 @@ def download(version: ReleaseVersion) -> FileResponse:
     )
 
 
-@router.post("/releases/{version}/rearm/{device_id}", dependencies=[Depends(require_admin)])
+@router.post(
+    "/releases/{version}/rearm/{device_id}",
+    dependencies=[Security(caller, scopes=["ota:write"]), Depends(device_scope_guard)],
+)
 def rearm_release(version: str, device_id: str, session: Session = Depends(get_db)) -> ReleaseRearmed:
     """清除安装确认：force 发布对该设备重新生效（调试重推）。"""
     return {"version": version, "device_id": device_id, "rearmed": repository.rearm(session, device_id, version)}
 
 
-@router.delete("/releases/{version}", dependencies=[Depends(require_admin)])
+@router.delete("/releases/{version}", dependencies=[Security(caller, scopes=["ota:write"])])
 def delete_release(version: str, session: Session = Depends(get_db)) -> ReleaseRemoved:
     """下架发布（紧急止损，如终止 OTA 循环）。注册行与 APK 文件一起删。"""
     deleted = repository.delete_release(session, version)
@@ -105,7 +108,7 @@ def delete_release(version: str, session: Session = Depends(get_db)) -> ReleaseR
     return {"version": version, "deleted": deleted}
 
 
-@router.post("/releases", dependencies=[Depends(require_admin)])
+@router.post("/releases", dependencies=[Security(caller, scopes=["ota:write"])])
 async def upload_release(
     version: ReleaseVersionForm,
     version_code: Annotated[int, Form()],

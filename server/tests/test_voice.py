@@ -24,7 +24,7 @@ from app.modules.devices import actions as device_actions
 from app.modules.devices import service as devices_service
 from app.modules.doors.events import DoorEvent, DoorEventKind
 from app.modules.voice import audio, matching, schemas, service
-from app.persistence import voice as repository
+from app.modules.voice import crud as repository
 
 
 def _match(device_id: str, cert_no: str, event: str, local: datetime) -> list[dict[str, Any]]:

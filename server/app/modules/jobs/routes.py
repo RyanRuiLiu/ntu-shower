@@ -1,4 +1,4 @@
-"""后台任务看板域的 API：概览页的后台任务当前态（admin，只读）。
+"""后台任务看板域的 API：概览页的后台任务当前态（`jobs:read`，只读）。
 
 名单的登记入口只有管理台配置页，本域不设登记端点；四份名单的增删由管理员在
 配置页对 `*_students` 键直接操作，写后同样触发 `sessions_scheduler.reload()`
@@ -11,11 +11,11 @@
 
 from typing import cast
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Security
 from sqlalchemy.orm import Session
 
+from app.auth.dependencies import caller
 from app.db.deps import get_db
-from app.modules.access.dependencies import require_admin
 from app.modules.config import store as config_store
 from app.modules.extend_hours import service as extend_hours_service
 from app.modules.sessions import scheduler as sessions_scheduler
@@ -26,7 +26,7 @@ from .spec import _TITLES, JOBS
 admin_router = APIRouter(
     prefix="/api/v1/jobs",
     tags=["tasks"],
-    dependencies=[Depends(require_admin)],
+    dependencies=[Security(caller, scopes=["jobs:read"])],
 )
 
 

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from tests import apk, frames
 
 from app import audit_middleware
+from app import audit_middleware as api_calls_record
 from app.db.base import utcnow
 from app.persistence import api_calls
 from app.persistence import audit as command_audit
@@ -37,7 +38,7 @@ def test_every_domain_is_audited(client: TestClient, admin_headers: dict[str, st
         ("/api/v1/devices", None),
         ("/api/v1/doors", None),
         ("/api/v1/config", None),
-        ("/api/v1/identities", None),
+        ("/api/v1/users", None),
         ("/api/v1/ota/releases", None),
         ("/api/v1/audit/commands", None),
     ]
@@ -208,7 +209,7 @@ def test_prune_removes_only_expired_rows(client: TestClient, admin_headers: dict
     """保留期之内必须留，之外的可删（NIST SP 800-92）；清理幂等。"""
     assert client.get("/api/v1/ota/releases", headers=admin_headers).status_code == 200
     with _svc() as session:
-        assert api_calls.prune(session, 90) == 0
+        assert api_calls.prune(session, 90, api_calls_record.RETENTIONS) == 0
     assert len(_calls(client, admin_headers, limit=500)) == 1
 
     # 中间件仍写旧表（audit 域随第二批切换）；保留期语义对新表直接造数据验证
@@ -217,7 +218,7 @@ def test_prune_removes_only_expired_rows(client: TestClient, admin_headers: dict
     from sqlalchemy import select
 
     from app.db.base import utcnow
-    from app.models.ops import ApiCall
+    from app.persistence.audit import ApiCall
 
     with _svc() as session:
         stale = ApiCall(
@@ -241,13 +242,13 @@ def test_prune_removes_only_expired_rows(client: TestClient, admin_headers: dict
         session.add(stale)
         session.add(fresh)
         session.commit()
-        assert api_calls.prune(session, 90) == 1
+        assert api_calls.prune(session, 90, api_calls_record.RETENTIONS) == 1
         remaining = session.scalars(select(ApiCall.id)).all()
         # 过期的那行删掉；中间件记下的与刚造的保留期内各行都留
         assert stale.id not in remaining
         assert fresh.id in remaining
     with _svc() as session:
-        assert api_calls.prune(session, 90) == 0
+        assert api_calls.prune(session, 90, api_calls_record.RETENTIONS) == 0
 
 
 def test_store_body_replaces_oversize_payload() -> None:

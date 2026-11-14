@@ -13,15 +13,15 @@ device.update 的 payload 是精简档案（DeviceSummary）：版本、来源 I
 
 from sqlalchemy.orm import Session
 
+from app.contracts import DeviceLogKind, LinkEvent
 from app.core import device_clock, events
 from app.core.clock import now_rfc3339, parse_rfc3339
 from app.core.connections import manager
 from app.core.problems import DEVICE_NOT_FOUND, ApiProblemError
 from app.core.protocol import as_int
 from app.db.base import utcnow
-from app.models.enums import DeviceLogKind, LinkEvent
 from app.modules.config import store as config_store
-from app.persistence import devices as repository
+from app.modules.devices import crud as repository
 
 from .schemas import DeviceRecord, DeviceSummary
 

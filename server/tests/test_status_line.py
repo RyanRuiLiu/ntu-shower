@@ -42,7 +42,7 @@ def _report(device_id: str, doors: list[dict[str, Any]]) -> None:
 
 def _register(device_id: str, name: str, *, trusted: bool = True) -> None:
     from app.db.base import utcnow
-    from app.persistence import devices as devices_store
+    from app.modules.devices import crud as devices_store
 
     with device_link.db() as session:
         devices_store.register(

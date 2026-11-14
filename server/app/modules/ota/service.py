@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.core import protocol
 from app.core.config import settings
 from app.core.connections import manager
-from app.persistence import ota as repository
+from app.modules.ota import crud as repository
 
 # 发布版本号格式：SemVer 三段数字的严格子集。
 # 该约束同时承担安全职责——版本号最终拼入文件路径，字符集必须排除

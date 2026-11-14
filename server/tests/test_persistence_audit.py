@@ -9,10 +9,11 @@ from pathlib import Path
 import pytest
 from sqlalchemy.orm import Session
 
+from app.contracts import CommandStatus, JobOutcome
+from app.db.base import Base
 from app.db.session import Database
-from app.models import Base
-from app.models.enums import CommandStatus, JobOutcome
-from app.persistence import audit, devices
+from app.modules.devices import crud as devices
+from app.persistence import audit
 
 NOW = datetime(2026, 11, 7, 12, 0, 0, tzinfo=UTC)
 

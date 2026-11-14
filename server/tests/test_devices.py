@@ -12,20 +12,17 @@ from app.core import actions
 from app.core.clock import now_rfc3339
 from app.core.connections import manager
 from app.db.session import session_scope
-from app.models.device import Device, DeviceLinkEvent
 from app.modules.devices import actions as device_actions
+from app.modules.devices.models import Device, DeviceLinkEvent
 
 DEVICE_ID = "dev-debug-1"
 
 
-def _put_identity(device_id: str, identity: str, capabilities: list[str], scope: list[str]) -> dict[str, str]:
-    """登记一个身份并返回其请求头。"""
-    from tests.identity import bearer
-    from tests.identity import register as register_identity
+def _put_key(username: str, scopes: list[str], device_scope: list[str]) -> dict[str, str]:
+    """登记一个用户并签发密钥，返回其请求头。"""
+    from tests.identity import bearer, register_key
 
-    from app.models.enums import IdentityKind
-
-    token = register_identity(identity, IdentityKind.WEB, capabilities, "测试", device_scope=scope)
+    token = register_key(username, scopes, device_scope=device_scope)
     return bearer(token)
 
 
@@ -43,7 +40,7 @@ def test_device_list_is_public_and_anonymous_actions_are_empty(client: TestClien
 
 
 def test_device_list_actions_follow_capabilities(client: TestClient, admin_headers: dict[str, str]) -> None:
-    """带身份时 actions 按 USER_ACTIONS 算：session→assign/settle，photo→photo。"""
+    """带身份时 actions 按 SCOPE_ACTIONS 算：sessions:write→assign/settle，devices:photo→photo。"""
     device_link.register_trusted_device(DEVICE_ID)
 
     r = client.get("/api/v1/devices", headers=admin_headers)
@@ -56,7 +53,7 @@ def test_device_list_actions_empty_outside_scope(client: TestClient, fresh_db: s
     """作用域列表外的设备 actions 恒为空：作用域裁剪发生在服务端。"""
     device_link.register_trusted_device("dev-in-scope-1")
     device_link.register_trusted_device("dev-out-scope-1")
-    headers = _put_identity("dev-in-scope-1", "scoped-dev-0001", ["session", "photo"], ["dev-in-scope-1"])
+    headers = _put_key("scoped-dev-0001", ["sessions:write", "devices:photo"], ["dev-in-scope-1"])
 
     items = {item["device_id"]: item for item in client.get("/api/v1/devices", headers=headers).json()}
 
@@ -65,11 +62,11 @@ def test_device_list_actions_empty_outside_scope(client: TestClient, fresh_db: s
 
 
 def test_device_list_unknown_identity_is_rejected(client: TestClient) -> None:
-    """公开端点带了不在名单的标识同样 401：视图按调用方裁剪，先要认识调用方。"""
+    """公开端点带了无效凭据同样 401（invalid-token）：视图按调用方裁剪，先要认识调用方。"""
     r = client.get("/api/v1/devices", headers=bearer("not-a-valid-token"))
 
     assert r.status_code == 401
-    assert r.json()["type"].endswith("/problems/unknown-identity")
+    assert r.json()["type"].endswith("/problems/invalid-token")
 
 
 def test_device_list_reports_online_flag(
@@ -86,13 +83,13 @@ def test_device_list_reports_online_flag(
     assert listed["online"] is True
 
 
-def test_runtime_requires_admin(client: TestClient, ops_headers: dict[str, str]) -> None:
-    """运维档案 admin 专属：无身份 401，非 admin 403 capability-denied。"""
+def test_runtime_requires_devices_write(client: TestClient, ops_headers: dict[str, str]) -> None:
+    """运维档案 devices:write 专属：无凭据 401，缺权限 403 insufficient-scope。"""
     assert client.get("/api/v1/devices/runtime").status_code == 401
 
     r = client.get("/api/v1/devices/runtime", headers=ops_headers)
     assert r.status_code == 403
-    assert r.json()["type"].endswith("/problems/capability-denied")
+    assert r.json()["type"].endswith("/problems/insufficient-scope")
 
 
 def test_runtime_returns_full_record(client: TestClient, admin_headers: dict[str, str]) -> None:
@@ -186,7 +183,7 @@ def test_patch_publishes_trimmed_device_update(
 
 
 def test_set_name_unknown_device_returns_false(fresh_db: str) -> None:
-    from app.persistence import devices as devices_store
+    from app.modules.devices import crud as devices_store
 
     with device_link.db() as session:
         assert devices_store.set_name(session, "ghost", "n") is False
@@ -200,7 +197,7 @@ def test_corrupt_capabilities_are_read_as_empty(fresh_db: str) -> None:
     """
     from sqlalchemy import text
 
-    from app.persistence import devices as devices_store
+    from app.modules.devices import crud as devices_store
 
     device_link.register_device_raw(DEVICE_ID)
     device_link.register_device_raw("dev-bad-cap", capabilities={"not": "a list"}, ip="x")
@@ -239,7 +236,7 @@ def ready(
 
 def test_device_action_endpoints_reject_unusable_devices(client: TestClient, admin_headers: dict[str, str]) -> None:
     """设备不存在 404、未信任 403、离线 409：守卫先于命令下发。"""
-    from app.persistence import devices as devices_store
+    from app.modules.devices import crud as devices_store
 
     assert (
         client.post("/api/v1/devices/dev-ghost-1/exec", headers=admin_headers, json={"command": "id"}).status_code
@@ -260,7 +257,7 @@ def test_device_action_endpoints_reject_unusable_devices(client: TestClient, adm
     )
 
 
-def test_device_action_endpoints_require_admin(client: TestClient) -> None:
+def test_device_action_endpoints_require_devices_write(client: TestClient) -> None:
     assert client.post(f"/api/v1/devices/{DEVICE_ID}/exec", json={"command": "id"}).status_code == 401
 
 
@@ -545,7 +542,7 @@ def test_devices_fall_back_to_natural_name_order_when_sort_orders_tie(
     """
     from sqlalchemy import text
 
-    from app.persistence import devices as devices_store
+    from app.modules.devices import crud as devices_store
 
     for name in ("10F浴室", "2F浴室", "1F浴室"):
         device_id = f"dev-{name}"
@@ -583,7 +580,7 @@ def test_device_order_is_manual_and_covers_every_listing(
     同 sort_order 回落到名字的自然排序（新设备都在 0 时就是字母序），调整后以
     管理员的顺序为准。
     """
-    from app.persistence import devices as devices_store
+    from app.modules.devices import crud as devices_store
 
     for name in ("1F浴室", "2F浴室", "3F浴室"):
         device_id = f"dev-{name}"
