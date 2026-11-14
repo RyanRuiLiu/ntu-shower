@@ -197,8 +197,8 @@ function renderDeviceInfo() {
         ['信任', diag ? (diag.trusted ? '已信任' : '未信任') : PLACEHOLDER],
         ['应用版本', diag ? `${diag.app_version}（版本号 ${diag.version_code}）` : PLACEHOLDER],
         ['系统版本', diag ? diag.os_version || PLACEHOLDER : PLACEHOLDER],
-        // 空数组是"设备未声明能力集"（升级前的旧版本设备），不是"没有能力"，措辞要分开
-        ['能力位', caps ? (caps.length > 0 ? `${caps.length} 项` : '未声明') : PLACEHOLDER],
+        // 空数组是"设备未声明动作集"（升级前的旧版本设备），不是"没有动作"，措辞要分开
+        ['设备动作', caps ? (caps.length > 0 ? `${caps.length} 项` : '未声明') : PLACEHOLDER],
         ['已运行', diag ? fmtUptime(diag.booted_at) : PLACEHOLDER],
         ['设备时间', diag ? deviceTimeText(diag) : PLACEHOLDER],
         ['最后上报', diag ? fmtDateTime(diag.last_seen_at) : PLACEHOLDER],
@@ -214,7 +214,7 @@ function renderDeviceInfo() {
       // 只报数量不够排障："命令被 device.unsupported_action 拒绝"时要对着设备声明逐项核对。
       // 动作名照原样显示，与审计页同一原则——翻译成中文反而搜不到
       const capsHtml =
-        key === '能力位' && caps && caps.length > 0
+        key === '设备动作' && caps && caps.length > 0
           ? `<div class="info-caps">${caps.map((cap) => `<span class="badge">${esc(cap)}</span>`).join('')}</div>`
           : ''
       return `<div class="kv"><span class="k">${esc(key)}</span><span class="v"${live}${ticking}>${esc(value)}</span></div>${capsHtml}`
