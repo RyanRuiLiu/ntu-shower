@@ -15,8 +15,6 @@
 中文名不另写：与 `config/spec.py` 的 `GROUPS` 同名同义，直接取那份的标题。
 `tests/test_tasks.py` 把这几处的对应关系钉住。
 
-名单的登记入口只有管理台配置页：用户自助登记接口已随小程序统计一同删除
-（业主裁定 2026-11-14），原先为它服务的用户面文案模板与占位符取值随之移除。
 """
 
 from dataclasses import dataclass
@@ -30,7 +28,7 @@ _GROUP_TITLES: dict[str, str] = {group.key: group.title for group in GROUPS}
 
 @dataclass(frozen=True)
 class TaskSpec:
-    """一个可由用户自助登记的后台任务。"""
+    """一条看板登记行：看板与配置页共用的任务元数据。"""
 
     key: str
     """任务标识。与 `config/spec.py` 的 `GROUPS` 同名，也是它那两份配置键的前缀。"""
@@ -42,7 +40,7 @@ class TaskSpec:
     """全局开关。**用户碰不到它**——它决定这个功能现在到底跑不跑。"""
 
     students_key: str
-    """名单。登记就是往里加一行 `学号=密码`，取消登记就是删掉那一行。"""
+    """名单键。内容是 `学号=浴室口令` 的映射，在管理台配置页编辑。"""
 
 
 #: [extend_hours] 不在 `FEATURES` 里，所以它的三个键只有这一处。

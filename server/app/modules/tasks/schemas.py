@@ -1,8 +1,4 @@
-"""后台任务看板域的 API 契约（admin，GET /background-tasks/status）。
-
-名单的登记入口只有管理台配置页；用户面的 TaskView/登记请求已随小程序自助登记
-接口一同删除（业主裁定 2026-11-14）。
-"""
+"""后台任务看板域的 API 契约（admin，GET /background-tasks/status）。"""
 
 from pydantic import BaseModel
 
