@@ -6,6 +6,18 @@
 > 0.6.3 直接升到 0.6.5（提交 d9e29d2），该节原为一次记档性条目。其内容已并入
 > 下方 0.6.5 的 Fixed；不保留一个没有对应版本状态的版本号。
 
+## [0.7.3] - 2026-11-15
+
+### Added
+
+- **管理端全部重写**：Vite 8 + React 19 + TypeScript + HeroUI 3.2.7（毛玻璃暗色设计体系）+ TanStack Query + React Router history 模式；9 视图全功能；TS 契约类型对账；Vitest 冒烟；ESLint 10 + typescript-eslint 8 接入门禁与 CI web job。
+- **HTTP 契约重排（12 处）**：单设备资源 `GET /devices/{id}` 取代 `/devices/runtime`；集合重排 `PATCH /devices` 取代 `PUT /devices/order`；动作端点扁平化（clock-set / restart-app / restart-bath / ui-dump / ui-touch / ui-key / ui-input）；`water/status` 改 GET `water-status`；ota rearm 目标设备入请求体；删除与 `/users/me` 重复的 `/auth/me`（login 改 204）。
+- **SPA fallback**：非 API 未登记路径回应用入口（history 路由刷新）；API/网关/OTA/健康检查前缀保持 problem+json 404。
+
+### Removed
+
+- 旧前端（零构建 JS）与配套门禁三件套（test_web_layout / test_web_api_surface / test_water_terms），由 TS 严格类型 + eslint + vitest 承接。
+
 ## [0.7.2] - 2026-11-15
 
 ### Added
