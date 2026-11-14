@@ -920,7 +920,7 @@ def test_tick_clears_the_shift_row_of_a_delisted_device(fresh_db: str, monkeypat
 
         from app.models.identity import Device
 
-        session.execute(delete(Device).where(Device.device_id == "dev-gone"))
+        session.execute(delete(Device).where(Device.id == "dev-gone"))
         session.commit()
 
     _tick()

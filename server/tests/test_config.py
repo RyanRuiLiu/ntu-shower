@@ -158,6 +158,7 @@ def test_device_overrides_drop_server_keys(fresh_db: str) -> None:
     与 `global_effective()` **构造上**给出同一个值：后台任务按前者判、接口按后者报状态，
     一旦分叉，表现是"开关明明开着却没生效"，而库里看不出任何异常。
     """
+    device_link.register_device_raw("dev-A")
     with session_scope() as session:
         # 走持久化层直接落库，绕过 store 的写入口校验——它本来就该拒掉服务端键
         config_store_persistence.put_device(
@@ -175,6 +176,8 @@ def test_device_overrides_drop_server_keys(fresh_db: str) -> None:
 
 def test_default_change_reaches_devices_with_overrides(fresh_db: str) -> None:
     """设备覆盖不得冻结全局变更：默认值改了，有覆盖与无覆盖的设备都要跟上。"""
+    device_link.register_device_raw("dev-A")
+    device_link.register_device_raw("dev-B")
     with session_scope() as session:
         store.put_device_overrides(session, "dev-A", {"overlay_enabled": False})
         store.put_global_overrides(session, {"heartbeat_interval_s": 20})
@@ -185,6 +188,7 @@ def test_default_change_reaches_devices_with_overrides(fresh_db: str) -> None:
 
 
 def test_device_override_wins_over_global(fresh_db: str) -> None:
+    device_link.register_device_raw("dev-1")
     with session_scope() as session:
         store.put_global_overrides(session, {"heartbeat_interval_s": 15})
         store.put_device_overrides(session, "dev-1", {"heartbeat_interval_s": 10})
@@ -194,6 +198,7 @@ def test_device_override_wins_over_global(fresh_db: str) -> None:
 
 
 def test_device_override_leaves_other_keys_following_global(fresh_db: str) -> None:
+    device_link.register_device_raw("dev-1")
     with session_scope() as session:
         store.put_global_overrides(session, {"ota_check_interval_s": 7200})
         store.put_device_overrides(session, "dev-1", {"heartbeat_interval_s": 10})
@@ -234,6 +239,7 @@ def test_unknown_keys_in_stored_overrides_are_ignored(fresh_db: str) -> None:
 
 
 def test_put_device_override_bumps_revision(fresh_db: str) -> None:
+    device_link.register_device_raw("dev-1")
     with session_scope() as session:
         rev1, _ = store.put_device_overrides(session, "dev-1", {"heartbeat_interval_s": 10})
         rev2, _ = store.put_device_overrides(session, "dev-1", {"heartbeat_interval_s": 11})
