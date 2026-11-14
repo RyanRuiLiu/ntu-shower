@@ -33,6 +33,10 @@
 
 ### Removed
 
+- 小程序自助登记接口删除（业主裁定 2026-11-14：名单配置的唯一入口是管理台）：
+  GET /tasks、PUT /tasks/{task}、用户面文案模板与取值机器、`tasks` 能力位与
+  require_capability/DEVICE_SCOPED 守卫机制（最后一个消费者消失后随之移除）；
+  概览页后台任务看板保留，ADR 不涉及。
 - 小程序统计功能全链删除（业主裁定 2026-11-14，功能早已下线）：`/api/v1/stats/*` 三条
   路由、stats 模块（1710 行）、`stats` 能力位、persistence 层 4 个 stats 专属取数函数；
   ADR-0004 标 Deprecated 留档。
