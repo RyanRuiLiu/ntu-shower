@@ -13,14 +13,14 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..contracts import BackgroundTaskRun, CommandAuditRecord
+from ..contracts import CommandAuditRecord, JobRun
 from ..core import outcomes, reason_codes
 from ..core.clock import format_rfc3339
 from ..db.base import utcnow
-from ..models.enums import ActorKind, BackgroundOutcome, CommandStatus
+from ..models.enums import ActorKind, CommandStatus, JobOutcome
 from ..models.identity import Device
 from ..models.ops import ApiCall, CommandAudit
-from ..models.ops import BackgroundTaskRun as BackgroundTaskRunRow
+from ..models.ops import JobRun as JobRunRow
 
 
 def _device_pk(session: Session, device_id: str) -> int | None:
@@ -112,13 +112,13 @@ def list_commands(session: Session, device_id: str | None = None, limit: int = 5
     return records
 
 
-def insert_background_task_run(
+def insert_job_run(
     session: Session,
     device_id: str,
     door_no: int,
     cert_no: str,
-    task: str,
-    outcome: BackgroundOutcome,
+    job: str,
+    outcome: JobOutcome,
     occurred_at: datetime,
     *,
     action: str | None = None,
@@ -127,14 +127,14 @@ def insert_background_task_run(
     threshold_s: int | None = None,
 ) -> None:
     session.add(
-        BackgroundTaskRunRow(
+        JobRunRow(
             occurred_at=occurred_at,
             device_id=_device_pk(session, device_id),
             device_key=device_id,
             door_no=door_no,
             session_id=session_id,
             cert_no=cert_no,
-            task=task,
+            job=job,
             action=action,
             outcome=outcome,
             reason=reason or None,
@@ -144,13 +144,11 @@ def insert_background_task_run(
     session.commit()
 
 
-def list_background_task_runs(
-    session: Session, device_id: str | None = None, limit: int = 50
-) -> list[BackgroundTaskRun]:
-    statement = select(BackgroundTaskRunRow).order_by(BackgroundTaskRunRow.id.desc()).limit(limit)
+def list_job_runs(session: Session, device_id: str | None = None, limit: int = 50) -> list[JobRun]:
+    statement = select(JobRunRow).order_by(JobRunRow.id.desc()).limit(limit)
     if device_id:
-        statement = statement.where(BackgroundTaskRunRow.device_key == device_id)
-    records: list[BackgroundTaskRun] = []
+        statement = statement.where(JobRunRow.device_key == device_id)
+    records: list[JobRun] = []
     for row in session.scalars(statement).all():
         records.append(
             {
@@ -160,7 +158,7 @@ def list_background_task_runs(
                 "door_no": int(row.door_no),
                 "session_id": row.session_id,
                 "cert_no": row.cert_no,
-                "task": row.task,
+                "job": row.job,
                 "action": row.action,
                 "outcome": str(row.outcome),
                 "reason": row.reason,
@@ -180,11 +178,11 @@ __all__: list[str] = [
     "count_pending",
     "finish",
     "insert_api_call",
-    "insert_background_task_run",
     "insert_command",
+    "insert_job_run",
     "list_api_calls",
-    "list_background_task_runs",
     "list_commands",
+    "list_job_runs",
 ]
 
 

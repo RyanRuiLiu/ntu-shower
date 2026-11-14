@@ -399,7 +399,7 @@ function renderTaskBoard(data) {
       <div class="task-head">
         <span class="task-name">${esc(task.title)}</span>
         <span class="task-chip ${task.enabled ? 'on' : 'off'}">${task.enabled ? '启用' : '停用'}</span>
-        <span class="task-meta">名单 ${task.roster} 人</span>
+        <span class="task-meta">名单 ${task.students_count} 人</span>
         ${nextAt ? `<span class="task-next">下次执行 <span data-at="${esc(nextAt)}">${esc(countdownText(nextAt))}</span></span>` : ''}
       </div>`
 
@@ -477,7 +477,7 @@ function renderTaskBoard(data) {
 
 async function refreshTaskBoard() {
   try {
-    const data = await api.tasksStatus()
+    const data = await api.jobsStatus()
     $('taskBoard').innerHTML = renderTaskBoard(data)
   } catch (error) {
     $('taskBoard').innerHTML = `<div class="empty">${esc(problemText(error))}</div>`

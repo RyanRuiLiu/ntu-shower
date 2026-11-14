@@ -32,7 +32,7 @@ import { toast } from '../core/toast.js'
 
 let groups = []
 let specs = []
-/** 分区清单（服务端业务/设备下发），来自服务端登记表。 */
+/** 分区清单（后台任务/设备下发），来自服务端登记表。 */
 let SECTIONS = []
 /** 当前页签的分区键；空串表示登记表还没到位。 */
 let section = ''

@@ -138,7 +138,7 @@ SECTIONS: tuple[tuple[str, str], ...] = (
 #: `server_bridge` / `server_clock`），不与设备侧的同名组混在一起——同一个名字只能指一件事。
 #: 分组元数据只在这里一份，前端据此分卡片渲染，不在各处硬编码键表。
 GROUPS: tuple[GroupSpec, ...] = (
-    # ── 服务端业务：在服务器上运行，不下发设备 ──
+    # ── 后台任务：在服务器上运行，不下发设备 ──
     GroupSpec("renew_wait", "预约续期", "server"),
     GroupSpec("renew_session", "会话续期", "server"),
     GroupSpec("auto_settle", "自动结算", "server"),

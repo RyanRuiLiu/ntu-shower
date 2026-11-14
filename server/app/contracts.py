@@ -47,7 +47,7 @@ class CommandAuditRecord(TypedDict):
     data: str | None
 
 
-class BackgroundTaskRun(TypedDict):
+class JobRun(TypedDict):
     """一行后台任务记录：配置好的任务自动替谁做了什么、为什么。
 
     `reason` 是没动手时的中文原因（"不在名单里"这类）；`threshold_s` 是当时生效的
@@ -61,7 +61,7 @@ class BackgroundTaskRun(TypedDict):
     door_no: int
     session_id: int | None
     cert_no: str
-    task: str
+    job: str
     action: str | None
     outcome: str
     reason: str | None
@@ -181,11 +181,11 @@ class IdentityRecord(TypedDict):
 
 
 __all__: list[str] = [
-    "BackgroundTaskRun",
     "CommandAuditRecord",
     "CommandOutcome",
     "DeviceRecord",
     "DoorView",
     "IdentityRecord",
+    "JobRun",
     "ReleaseRecord",
 ]

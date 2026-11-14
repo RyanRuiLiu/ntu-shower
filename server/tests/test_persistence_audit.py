@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import Database
 from app.models import Base
-from app.models.enums import BackgroundOutcome, CommandStatus
+from app.models.enums import CommandStatus, JobOutcome
 from app.persistence import audit, devices
 
 NOW = datetime(2026, 11, 7, 12, 0, 0, tzinfo=UTC)
@@ -71,14 +71,14 @@ def test_abort_pending_closes_leftovers(session: Session) -> None:
     assert all(item["status"] == "failed" for item in audit.list_commands(session))
 
 
-def test_background_task_runs_are_ordered_and_filtered(session: Session) -> None:
+def test_job_runs_are_ordered_and_filtered(session: Session) -> None:
     _device(session, "dev-a")
     _device(session, "dev-b")
-    audit.insert_background_task_run(session, "dev-a", 1, "c1", "assign", BackgroundOutcome.ASSIGNED, NOW)
-    audit.insert_background_task_run(session, "dev-b", 2, "c2", "settle", BackgroundOutcome.SETTLED, NOW)
-    every = audit.list_background_task_runs(session)
+    audit.insert_job_run(session, "dev-a", 1, "c1", "assign", JobOutcome.ASSIGNED, NOW)
+    audit.insert_job_run(session, "dev-b", 2, "c2", "settle", JobOutcome.SETTLED, NOW)
+    every = audit.list_job_runs(session)
     assert [item["device_id"] for item in every] == ["dev-b", "dev-a"]
-    only_a = audit.list_background_task_runs(session, "dev-a")
+    only_a = audit.list_job_runs(session, "dev-a")
     assert len(only_a) == 1
     assert only_a[0]["outcome"] == "assigned"
 
