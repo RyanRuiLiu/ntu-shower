@@ -175,6 +175,8 @@ export const api = {
   deleteUser: (username) => send(`${API_V1}/users/${encodeURIComponent(username)}`, del()),
   userKeys: (username) => send(`${API_V1}/users/${encodeURIComponent(username)}/keys`),
   createKey: (username, value) => send(`${API_V1}/users/${encodeURIComponent(username)}/keys`, post(value)),
+  updateKey: (username, keyId, value) =>
+    send(`${API_V1}/users/${encodeURIComponent(username)}/keys/${encodeURIComponent(keyId)}`, put(value)),
   revokeKey: (username, keyId) =>
     send(`${API_V1}/users/${encodeURIComponent(username)}/keys/${encodeURIComponent(keyId)}`, del()),
 
