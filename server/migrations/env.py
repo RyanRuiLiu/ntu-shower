@@ -15,8 +15,8 @@ from logging.config import fileConfig
 
 from alembic import context
 
-# 表模型分散在各域目录（models 包已解散）：这里逐个导入，metadata 才完整——
-# 漏一个模型，自动生成的迁移就会包含一条「删表」。
+# 表模型分散在各域目录：这里逐个导入，metadata 才完整——漏一个模型，
+# 自动生成的迁移就会包含一条「删表」。
 from app.auth.models import ApiKey, User  # noqa: F401
 from app.db.base import Base, UtcDateTime
 from app.db.engine import create_db_engine

@@ -13,9 +13,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # 路径过滤用行业标准动作 dorny/paths-filter（v3.0.2，SHA 钉死）：PR 按改动面
-  # 分发检查面，push 到 main 一律全量（主线安全网，`|| github.event_name != 'pull_request'`）。
-  # ci.yml 自身列入 android 与 server 的过滤清单——门禁逻辑的变更也要全量验证。
+  # PR 按改动面分发检查面；push 到 main 一律全量（主线安全网）。ci.yml 自身在
+  # android/server 清单里：门禁逻辑的变更也要全量验证。
   changes:
     runs-on: ubuntu-latest
     outputs:
