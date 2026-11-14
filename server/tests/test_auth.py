@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core import passwords, tokens
 from app.db.session import Database
 from app.models import Base
-from app.persistence import device_credentials, devices, principals
+from app.persistence import devices, principals
 
 NOW = datetime(2026, 11, 7, 12, 0, 0, tzinfo=UTC)
 
@@ -76,17 +76,24 @@ def test_device_credential_lifecycle(session: Session) -> None:
         booted_at=NOW,
         seen_at=NOW,
     )
-    token = device_credentials.issue(session, "dev-a", label="首发")
+    token = devices.issue(session, "dev-a", label="首发")
     assert token is not None
-    assert device_credentials.authenticate_device(session, token, now=NOW) == "dev-a"
-    assert device_credentials.authenticate_device(session, "bogus", now=NOW) is None
+    assert devices.authenticate_device(session, token) == "dev-a"
+    assert devices.authenticate_device(session, "bogus") is None
 
-    assert device_credentials.revoke(session, token, now=NOW) is True
-    assert device_credentials.authenticate_device(session, token, now=NOW) is None
-    assert device_credentials.revoke(session, token, now=NOW) is False
+    assert devices.revoke(session, token, now=NOW) is True
+    assert devices.authenticate_device(session, token) is None
+    assert devices.revoke(session, token, now=NOW) is False
 
 
-def test_expired_credential_is_rejected(session: Session) -> None:
+def test_issue_takes_no_expiry_argument(session: Session) -> None:
+    """凭据没有过期语义：签发→吊销两态，不存在第三态。
+
+    旧设计有 expires_at（生产从未使用）；删除后签名上也不该再有它——
+    这条防止它在调用侧以任何形式复活。
+    """
+    import pytest
+
     devices.register(
         session,
         device_id="dev-b",
@@ -98,11 +105,14 @@ def test_expired_credential_is_rejected(session: Session) -> None:
         booted_at=NOW,
         seen_at=NOW,
     )
-    token = device_credentials.issue(session, "dev-b", expires_at=NOW + timedelta(days=1))
+    token = devices.issue(session, "dev-b")
     assert token is not None
-    assert device_credentials.authenticate_device(session, token, now=NOW) == "dev-b"
-    assert device_credentials.authenticate_device(session, token, now=NOW + timedelta(days=2)) is None
+    assert devices.authenticate_device(session, token) == "dev-b"
+    assert devices.revoke(session, token) is True
+    assert devices.authenticate_device(session, token) is None
+    with pytest.raises(TypeError):
+        devices.issue(session, "dev-b", expires_at=NOW + timedelta(days=1))
 
 
 def test_issue_for_missing_device_returns_none(session: Session) -> None:
-    assert device_credentials.issue(session, "missing") is None
+    assert devices.issue(session, "missing") is None

@@ -19,7 +19,7 @@ from tests import frames
 from app.core.config import settings
 from app.db.session import Database
 from app.main import SESSION_COOKIE_NAME
-from app.persistence import device_credentials, devices, principals
+from app.persistence import devices, principals
 
 USER = "admin-web"
 PASSWORD = "correct-horse-battery-staple"
@@ -132,7 +132,7 @@ def test_device_token_required(client: TestClient, fresh_db: str, monkeypatch: p
                 booted_at=datetime.now(UTC),
                 seen_at=datetime.now(UTC),
             )
-            token = device_credentials.issue(session, device_id)
+            token = devices.issue(session, device_id)
     finally:
         database.dispose()
     assert token is not None

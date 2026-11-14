@@ -12,8 +12,7 @@ from app.core import actions
 from app.core.clock import now_rfc3339
 from app.core.connections import manager
 from app.db.session import session_scope
-from app.models.identity import Device
-from app.models.ops import DeviceLinkEvent
+from app.models.device import Device, DeviceLinkEvent
 from app.modules.devices import actions as device_actions
 
 DEVICE_ID = "dev-debug-1"

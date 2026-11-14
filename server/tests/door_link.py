@@ -20,7 +20,7 @@ def feed(device_id: str, payload: dict[str, Any]) -> object:
     设备不在册时先登记：线上帧只来自已握手在册的设备，直喂的测试补齐同一前提。
     已在册的不动——信任位等档案字段归测试自己管（有「未信任设备」的场景）。
     """
-    from app.models.identity import Device
+    from app.models.device import Device
     from app.modules.doors import service
 
     from . import device_link
@@ -57,8 +57,8 @@ def clear_live(device_id: str) -> None:
     """清掉这台设备的现态行：模拟「会话还在、门的现态却没了」这类残缺现场。"""
     from sqlalchemy import delete
 
+    from app.models.device import Device
     from app.models.doors import DoorState as DoorStateRow
-    from app.models.identity import Device
 
     with session_scope() as session:
         device_pk = session.scalar(select(Device.id).where(Device.id == device_id))
