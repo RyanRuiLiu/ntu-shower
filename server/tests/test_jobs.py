@@ -4,6 +4,8 @@
 不再有登记端点。
 """
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from app.modules.config.spec import SPECS_BY_KEY, ConfigKind, ConfigScope
@@ -58,6 +60,17 @@ def test_extend_hours_is_not_in_the_decision_table() -> None:
     assert "extend_hours" not in {spec.key for spec in decision.JOBS}
     entries = {key: (enabled, students) for key, enabled, students in JOBS}
     assert entries["extend_hours"] == ("extend_hours_enabled", "extend_hours_students")
+
+
+def test_frontend_groups_scheduled_rows_by_the_job_field() -> None:
+    """概览页看板按 `job` 字段分组排定动作（ScheduledAction.job）。
+
+    jobs 改名时服务端字段从 task/feature 定为 job，前端漏改的表现是四个任务段
+    永远显示"当前没有排定的动作"——静默且无人报错，这里钉住消费的字段名。
+    """
+    source = (Path(__file__).resolve().parents[1] / "web" / "views" / "overview.js").read_text(encoding="utf-8")
+    assert "scheduledByTask[row.job]" in source
+    assert "row.task" not in source
 
 
 # ── 当前态看板（admin）──
