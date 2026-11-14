@@ -210,7 +210,7 @@ async function submitUserForm() {
       const payload = { name: $('inName').value.trim(), disabled: $('inDisabled').checked }
       if (password) payload.password = password
       await api.updateUser(editingUser, payload)
-      toast('已保存')
+      report('userResult', '已保存', 'ok')
       exitEdit()
       await reload()
     } catch (error) {
@@ -226,7 +226,7 @@ async function submitUserForm() {
   report('userResult', '正在登记…', 'info')
   try {
     await api.createUser({ username, name: $('inName').value.trim(), password: password || undefined })
-    toast('已登记')
+    report('userResult', '已登记', 'ok')
     clearForm()
     await reload()
   } catch (error) {
