@@ -18,13 +18,8 @@ from ..core import outcomes, reason_codes
 from ..core.clock import format_rfc3339
 from ..db.base import utcnow
 from ..models.enums import ActorKind, CommandStatus, JobOutcome
-from ..models.identity import Device
 from ..models.ops import ApiCall, CommandAudit
 from ..models.ops import JobRun as JobRunRow
-
-
-def _device_pk(session: Session, device_id: str) -> int | None:
-    return session.scalar(select(Device.id).where(Device.device_id == device_id))
 
 
 def _dumps(value: dict[str, Any] | None) -> str | None:
@@ -45,8 +40,7 @@ def insert_command(
     session.add(
         CommandAudit(
             command_id=command_id,
-            device_id=_device_pk(session, device_id),
-            device_key=device_id,
+            device_id=device_id or None,
             action=action,
             created_at=created_at,
             trace_id=trace_id,
@@ -91,13 +85,13 @@ def abort_pending(session: Session, now: datetime) -> int:
 def list_commands(session: Session, device_id: str | None = None, limit: int = 50) -> list[CommandAuditRecord]:
     statement = select(CommandAudit).order_by(CommandAudit.id.desc()).limit(limit)
     if device_id:
-        statement = statement.where(CommandAudit.device_key == device_id)
+        statement = statement.where(CommandAudit.device_id == device_id)
     records: list[CommandAuditRecord] = []
     for row in session.scalars(statement).all():
         records.append(
             {
                 "command_id": row.command_id,
-                "device_id": row.device_key,
+                "device_id": row.device_id,
                 "action": row.action,
                 "params": _dumps(row.params),
                 "created_at": format_rfc3339(row.created_at),
@@ -129,8 +123,7 @@ def insert_job_run(
     session.add(
         JobRunRow(
             occurred_at=occurred_at,
-            device_id=_device_pk(session, device_id),
-            device_key=device_id,
+            device_id=device_id or None,
             door_no=door_no,
             session_id=session_id,
             cert_no=cert_no,
@@ -147,14 +140,14 @@ def insert_job_run(
 def list_job_runs(session: Session, device_id: str | None = None, limit: int = 50) -> list[JobRun]:
     statement = select(JobRunRow).order_by(JobRunRow.id.desc()).limit(limit)
     if device_id:
-        statement = statement.where(JobRunRow.device_key == device_id)
+        statement = statement.where(JobRunRow.device_id == device_id)
     records: list[JobRun] = []
     for row in session.scalars(statement).all():
         records.append(
             {
                 "id": int(row.id),
                 "occurred_at": format_rfc3339(row.occurred_at),
-                "device_id": row.device_key,
+                "device_id": row.device_id,
                 "door_no": int(row.door_no),
                 "session_id": row.session_id,
                 "cert_no": row.cert_no,
@@ -212,7 +205,6 @@ def insert_api_call(
     device_id 是文本业务键，这里转整数外键；设备不在册时行仍要落（审计先于档案），
     外键列留空。
     """
-    device_pk = _device_pk(session, device_id) if device_id else None
     requested_at = utcnow()
     session.add(
         ApiCall(
@@ -221,8 +213,7 @@ def insert_api_call(
             path=path,
             status_code=status_code,
             duration_ms=duration_ms,
-            device_id=device_pk,
-            device_key=device_id,
+            device_id=device_id or None,
             actor_kind=ActorKind(actor_kind) if actor_kind else ActorKind.ANONYMOUS,
             actor=actor,
             client_ip=client_ip,
@@ -255,7 +246,7 @@ def list_api_calls(
     """
     stmt = select(ApiCall).order_by(ApiCall.id.desc()).limit(limit)
     if device_id:
-        stmt = stmt.where(ApiCall.device_key == device_id)
+        stmt = stmt.where(ApiCall.device_id == device_id)
     if actor_kind:
         stmt = stmt.where(ApiCall.actor_kind == actor_kind)
     if kind:
@@ -279,7 +270,7 @@ def list_api_calls(
                 "request_body": row.request_body,
                 "status_code": row.status_code,
                 "duration_ms": row.duration_ms,
-                "device_id": row.device_key,
+                "device_id": row.device_id,
                 "problem_type": row.problem_type,
                 "detail": row.detail,
                 "response_body": row.response_body,

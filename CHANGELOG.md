@@ -10,6 +10,18 @@
 
 ### Changed
 
+- **设备双 ID 消灭**（业主裁定：全库实体标识统一，外键 `device_id` int 与业务键
+  `device_id` str 同名异型的唯一漂移根除）：`devices` 表主键直接采用设备业务键
+  （ANDROID_ID，ADR-0008 的设备身份），12 张子表外键改 str 直引；审计三表
+  （api_calls/command_audits/job_runs）与 voice_deliveries 的 `device_id` 改为
+  无外键的业务键留底（审计事实不因设备除档失联），`device_key` 冗余列全部删除；
+  persistence 层 `_device_pk` 换算层整片移除。对外契约（API 字段、协议 payload、
+  三端代码）**零改动**——`device_id` 名称与值不变。未登记设备的状态/配置写入由
+  外键当场拒绝（原静默跳过），存储层落不变量。迁移为基线再重置 + 一次性脚本
+  （子表 int→str 经 join 值改写，仓库外，用后即删）。
+
+### Changed
+
 - 后台任务域全链更名为 **jobs**（业主裁定全新重写式整改，旧名不作为锚点）：模块
   `tasks`→`jobs`、接口 `/api/v1/jobs/status`、数据库表 `background_task_runs`→`job_runs`
   （列 `feature`→`task`→`job`）、日志事件 `background-task.*`→`job.*`、审计端点

@@ -29,7 +29,7 @@ class UsageSession(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    device_id: Mapped[int] = mapped_column(ForeignKey("devices.id", ondelete="RESTRICT"), index=True)
+    device_id: Mapped[str] = mapped_column(ForeignKey("devices.id", ondelete="RESTRICT"), index=True)
     door_no: Mapped[int] = mapped_column(Integer)
     card_no: Mapped[int] = mapped_column(Integer, default=0)
     cert_no: Mapped[str] = mapped_column(String(32), default="", index=True)
@@ -69,7 +69,7 @@ class UsageSegment(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     session_id: Mapped[int] = mapped_column(ForeignKey("usage_sessions.id", ondelete="CASCADE"), index=True)
-    device_id: Mapped[int] = mapped_column(ForeignKey("devices.id", ondelete="RESTRICT"))
+    device_id: Mapped[str] = mapped_column(ForeignKey("devices.id", ondelete="RESTRICT"))
     door_no: Mapped[int] = mapped_column(Integer)
     opened_at: Mapped[datetime] = mapped_column(UtcDateTime)
     closed_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)

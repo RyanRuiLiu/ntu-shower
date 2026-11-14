@@ -16,10 +16,6 @@ from ..db.base import utcnow
 from ..models.identity import Device, DeviceCredential
 
 
-def _device_pk(session: Session, device_id: str) -> int | None:
-    return session.scalar(select(Device.id).where(Device.device_id == device_id))
-
-
 def issue(
     session: Session,
     device_id: str,
@@ -27,13 +23,12 @@ def issue(
     expires_at: datetime | None = None,
 ) -> str | None:
     """签发一枚令牌，返回明文（只返回这一次）。设备不存在时返回 None。"""
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
+    if session.get(Device, device_id) is None:
         return None
     token = generate_token()
     session.add(
         DeviceCredential(
-            device_id=device_pk,
+            device_id=device_id,
             token_hash=hash_token(token),
             label=label,
             expires_at=expires_at,
@@ -45,12 +40,9 @@ def issue(
 
 def list_for_device(session: Session, device_id: str) -> list[dict[str, object]]:
     """列出某设备的凭据元数据；明文不存库，所以这里没有 token 字段。"""
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return []
     rows = session.scalars(
         select(DeviceCredential)
-        .where(DeviceCredential.device_id == device_pk, DeviceCredential.revoked_at.is_(None))
+        .where(DeviceCredential.device_id == device_id, DeviceCredential.revoked_at.is_(None))
         .order_by(DeviceCredential.id)
     ).all()
     return [
@@ -66,13 +58,10 @@ def list_for_device(session: Session, device_id: str) -> list[dict[str, object]]
 
 def revoke_all(session: Session, device_id: str, now: datetime | None = None) -> int:
     """吊销该设备全部有效凭据，返回吊销条数。轮换前先调用它。"""
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return 0
     stamp = now or utcnow()
     active_ids = session.scalars(
         select(DeviceCredential.id).where(
-            DeviceCredential.device_id == device_pk,
+            DeviceCredential.device_id == device_id,
             DeviceCredential.revoked_at.is_(None),
         )
     ).all()
@@ -102,7 +91,7 @@ def authenticate_device(session: Session, token: str, now: datetime | None = Non
     """
     moment = now or utcnow()
     row = session.execute(
-        select(DeviceCredential, Device.device_id)
+        select(DeviceCredential, Device.id)
         .join(Device, DeviceCredential.device_id == Device.id)
         .where(DeviceCredential.token_hash == hash_token(token))
     ).first()

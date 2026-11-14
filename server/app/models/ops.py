@@ -38,9 +38,7 @@ class ApiCall(Base):
     request_body: Mapped[str | None] = mapped_column(Text, default=None)
     status_code: Mapped[int] = mapped_column(Integer)
     duration_ms: Mapped[int] = mapped_column(Integer)
-    device_id: Mapped[int | None] = mapped_column(ForeignKey("devices.id", ondelete="SET NULL"), default=None)
-    #: 调用目标的文本业务键留底：设备可能未登记或后来被拆除，审计的事实性不依赖主数据
-    device_key: Mapped[str] = mapped_column(String(64), default="")
+    device_id: Mapped[str | None] = mapped_column(String(64), default=None)
     problem_type: Mapped[str | None] = mapped_column(String(64), default=None)
     detail: Mapped[str | None] = mapped_column(Text, default=None)
     response_body: Mapped[str | None] = mapped_column(Text, default=None)
@@ -56,9 +54,7 @@ class CommandAudit(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     #: 端到端幂等身份，重投不会产生第二条
     command_id: Mapped[str] = mapped_column(String(64), unique=True)
-    device_id: Mapped[int | None] = mapped_column(ForeignKey("devices.id", ondelete="SET NULL"), default=None)
-    #: 调用目标的文本业务键留底：审计的事实性不依赖设备是否在册
-    device_key: Mapped[str] = mapped_column(String(64), default="")
+    device_id: Mapped[str | None] = mapped_column(String(64), default=None)
     action: Mapped[str] = mapped_column(String(64))
     params: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, index=True, default=utcnow)
@@ -78,7 +74,7 @@ class DeviceLog(Base):
     __table_args__ = (Index("ix_device_logs_device_id_kind_uploaded_at", "device_id", "kind", "uploaded_at"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    device_id: Mapped[int] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"))
+    device_id: Mapped[str] = mapped_column(String(64))
     kind: Mapped[DeviceLogKind] = mapped_column(enum_column(DeviceLogKind, "device_log_kind"))
     content: Mapped[str] = mapped_column(Text)
     uploaded_at: Mapped[datetime] = mapped_column(UtcDateTime)
@@ -92,7 +88,7 @@ class DeviceLinkEvent(Base):
     __table_args__ = (Index("ix_device_link_events_device_id_occurred_at", "device_id", "occurred_at"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    device_id: Mapped[int] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"))
+    device_id: Mapped[str] = mapped_column(String(64))
     occurred_at: Mapped[datetime] = mapped_column(UtcDateTime, index=True)
     event: Mapped[LinkEvent] = mapped_column(enum_column(LinkEvent, "link_event"))
     reason: Mapped[str] = mapped_column(String(128), default="")
@@ -107,9 +103,7 @@ class JobRun(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     occurred_at: Mapped[datetime] = mapped_column(UtcDateTime, index=True)
-    device_id: Mapped[int | None] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"), default=None)
-    #: 调用目标的文本业务键留底：审计的事实性不依赖设备是否在册
-    device_key: Mapped[str] = mapped_column(String(64), default="")
+    device_id: Mapped[str | None] = mapped_column(String(64), default=None)
     door_no: Mapped[int] = mapped_column(Integer)
     session_id: Mapped[int | None] = mapped_column(ForeignKey("usage_sessions.id", ondelete="SET NULL"), default=None)
     cert_no: Mapped[str] = mapped_column(String(32), default="")

@@ -57,11 +57,17 @@ def test_device_override_roundtrip(session: Session) -> None:
     assert config.get_device(session, "dev-a") == (2, {"voice.volume": 4})
 
 
-def test_missing_device_keeps_its_row_by_text_key(session: Session) -> None:
-    """未登记设备的覆盖照写：`device_key` 文本键留底，历史不因设备除档而失联。
+def test_missing_device_config_is_rejected(session: Session) -> None:
+    """未登记设备的配置写入被外键拒绝。
 
-    与审计三表同一模式：外键置空、业务键保留。读侧按文本键取回，与登记与否无关。
+    配置是每台设备的运行状态（FK CASCADE）：设备除档后配置随之消失，不存在
+    "未登记也照写"的形态。与审计事实表（无外键、事实保留）刻意不同。
     """
+    import pytest
+    from sqlalchemy.exc import IntegrityError
+
     assert config.get_device(session, "missing") is None
-    config.put_device(session, "missing", 1, {"x": 1})
-    assert config.get_device(session, "missing") == (1, {"x": 1})
+    with pytest.raises(IntegrityError):
+        config.put_device(session, "missing", 1, {"x": 1})
+    session.rollback()
+    assert config.get_device(session, "missing") is None

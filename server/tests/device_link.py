@@ -123,7 +123,7 @@ def register_device_raw(
             import json as _json
 
             session.execute(
-                text("UPDATE devices SET capabilities = :caps WHERE device_id = :did"),
+                text("UPDATE devices SET capabilities = :caps WHERE id = :did"),
                 {"caps": _json.dumps(capabilities), "did": device_id},
             )
             session.commit()
