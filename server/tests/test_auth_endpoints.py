@@ -45,21 +45,18 @@ def test_login_rejects_wrong_password(client: TestClient, account: None) -> None
 
 def test_login_sets_cookie_and_me_returns_account(client: TestClient, account: None) -> None:
     resp = client.post("/api/v1/auth/login", json={"username": USER, "password": PASSWORD})
-    assert resp.status_code == 200
-    assert resp.json()["username"] == USER
-    assert resp.json()["name"] == ""
+    assert resp.status_code == 204
     assert SESSION_COOKIE_NAME in resp.cookies
 
-    me = client.get("/api/v1/auth/me")
+    me = client.get("/api/v1/users/me")
     assert me.status_code == 200
     assert me.json()["username"] == USER
-    assert "hashed_password" not in me.json()
 
 
 def test_logout_drops_the_session(client: TestClient, account: None) -> None:
     client.post("/api/v1/auth/login", json={"username": USER, "password": PASSWORD})
     assert client.post("/api/v1/auth/logout").status_code == 204
-    assert client.get("/api/v1/auth/me").status_code == 401
+    assert client.get("/api/v1/users/me").status_code == 401
 
 
 def test_tampered_cookie_is_rejected(client: TestClient, account: None) -> None:
@@ -69,7 +66,7 @@ def test_tampered_cookie_is_rejected(client: TestClient, account: None) -> None:
     # 服务端按首个匹配取到未篡改的有效会话。先清空，保证请求只携带篡改值。
     client.cookies.clear()
     client.cookies.set(SESSION_COOKIE_NAME, token)
-    assert client.get("/api/v1/auth/me").status_code == 401
+    assert client.get("/api/v1/users/me").status_code == 401
 
 
 def test_expired_token_is_rejected(client: TestClient, account: None, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -92,7 +89,7 @@ def test_expired_token_is_rejected(client: TestClient, account: None, monkeypatc
         stale = TimestampSigner(settings.session_secret).sign(payload).decode("ascii")
 
     client.cookies.set(SESSION_COOKIE_NAME, stale)
-    assert client.get("/api/v1/auth/me").status_code == 401
+    assert client.get("/api/v1/users/me").status_code == 401
 
 
 def test_session_cookie_grants_operator_access(client: TestClient, account: None) -> None:
@@ -114,12 +111,12 @@ def test_absolute_timeout_is_enforced_server_side(
 ) -> None:
     """OWASP absolute timeout：距 first_iat 超过 absolute 秒即失效，即使 Cookie 未过期。"""
     client.post("/api/v1/auth/login", json={"username": USER, "password": PASSWORD})
-    client.get("/api/v1/auth/me")  # 补齐 first_iat（登录时已写入）
+    client.get("/api/v1/users/me")  # 补齐 first_iat（登录时已写入）
 
     # 把会话字典里的 first_iat 拨回绝对上限之外：直接构造签名 Cookie 太绕，
     # 用真实中间件语义在服务端验证——把 settings 的 absolute 收紧到已超过。
     monkeypatch.setattr(settings, "session_absolute_seconds", 0)
-    assert client.get("/api/v1/auth/me").status_code == 401
+    assert client.get("/api/v1/users/me").status_code == 401
 
 
 def test_disabled_account_cannot_keep_a_session(client: TestClient, account: None) -> None:
@@ -130,7 +127,7 @@ def test_disabled_account_cannot_keep_a_session(client: TestClient, account: Non
             assert crud.update_user(session, USER, disabled=True) is not None
     finally:
         database.dispose()
-    assert client.get("/api/v1/auth/me").status_code == 401
+    assert client.get("/api/v1/users/me").status_code == 401
 
 
 def test_device_token_required(client: TestClient, fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:

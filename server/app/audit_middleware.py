@@ -86,7 +86,7 @@ def _actor_of(request: Request) -> tuple[str, str]:
 BODY_MAX_BYTES = 256 * 1024
 
 #: 响应体不落库的路径：数据重型且可重取的截图、拍照、UI 节点树三个端点。
-_DATA_HEAVY_PATH = re.compile(r"/(capture|dump|photo)$")
+_DATA_HEAVY_PATH = re.compile(r"/(capture|ui-dump|photo)$")
 
 
 def store_body(body: str) -> str:
