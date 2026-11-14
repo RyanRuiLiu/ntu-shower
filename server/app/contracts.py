@@ -35,7 +35,7 @@ class CommandAuditRecord(TypedDict):
     """
 
     command_id: str
-    device_id: str
+    device_id: str | None
     action: str
     params: str | None
     created_at: str
@@ -57,7 +57,7 @@ class JobRun(TypedDict):
 
     id: int
     occurred_at: str
-    device_id: str
+    device_id: str | None
     door_no: int
     session_id: int | None
     cert_no: str

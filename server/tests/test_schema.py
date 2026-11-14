@@ -106,12 +106,12 @@ def test_database_roundtrip_keeps_timezone(tmp_path: Path) -> None:
     Base.metadata.create_all(db.engine)
 
     with db.new_session() as session:
-        session.add(Device(device_id="dev-0001", capabilities=["session"]))
+        session.add(Device(id="dev-0001", capabilities=["session"]))
         session.commit()
 
     with db.new_session() as session:
         device = session.scalars(select(Device)).one()
-        assert device.device_id == "dev-0001"
+        assert device.id == "dev-0001"
         assert device.capabilities == ["session"]
         assert device.created_at.tzinfo is not None
         assert device.created_at.utcoffset() is not None

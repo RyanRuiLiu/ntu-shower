@@ -114,7 +114,6 @@ def _seed_session(candidate: Candidate) -> None:
     from sqlalchemy.exc import OperationalError
 
     from app.models.usage import UsageSession
-    from app.persistence import doors as doors_store
 
     with session_scope() as session:
         try:
@@ -128,7 +127,7 @@ def _seed_session(candidate: Candidate) -> None:
             session.add(
                 UsageSession(
                     id=candidate.session_id,
-                    device_id=doors_store._device_pk(session, candidate.device_id),
+                    device_id=candidate.device_id,
                     door_no=candidate.door_no,
                     cert_no=candidate.cert_no,
                     assigned_at=assigned,

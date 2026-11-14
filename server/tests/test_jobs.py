@@ -73,13 +73,13 @@ def test_status_reports_tasks_extending_and_scheduled(
 
     assert resp.status_code == 200
     data = resp.json()
-    assert [task["key"] for task in data["tasks"]] == [
+    assert [task["key"] for task in data["jobs"]] == [
         "renew_wait",
         "renew_session",
         "auto_settle",
         "extend_hours",
     ]
-    assert all(task["enabled"] is False and task["students_count"] == 0 for task in data["tasks"])
+    assert all(task["enabled"] is False and task["students_count"] == 0 for task in data["jobs"])
     assert data["extending"] == []
     assert data["scheduled"] == []
 

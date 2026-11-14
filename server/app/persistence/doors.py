@@ -23,17 +23,13 @@ from ..models.usage import UsageSegment, UsageSession
 _RUN_WALK_LIMIT = 50
 
 
-def _device_pk(session: Session, device_id: str) -> int | None:
-    return session.scalar(select(Device.id).where(Device.device_id == device_id))
-
-
 def _ts(value: datetime | None) -> str:
     return format_rfc3339(value) if value is not None else ""
 
 
-def _live_view(row: DoorState, business_id: str) -> dict[str, Any]:
+def _live_view(row: DoorState, device_id: str) -> dict[str, Any]:
     return {
-        "device_id": business_id,
+        "device_id": device_id,
         "door_no": int(row.door_no),
         "state": str(row.state),
         "card_no": int(row.card_no),
@@ -48,10 +44,10 @@ def _live_view(row: DoorState, business_id: str) -> dict[str, Any]:
     }
 
 
-def _session_view(row: UsageSession, business_id: str) -> dict[str, Any]:
+def _session_view(row: UsageSession, device_id: str) -> dict[str, Any]:
     return {
         "id": int(row.id),
-        "device_id": business_id,
+        "device_id": device_id,
         "door_no": int(row.door_no),
         "card_no": int(row.card_no),
         "cert_no": row.cert_no,
@@ -66,11 +62,11 @@ def _session_view(row: UsageSession, business_id: str) -> dict[str, Any]:
     }
 
 
-def _segment_view(row: UsageSegment, business_id: str) -> dict[str, Any]:
+def _segment_view(row: UsageSegment, device_id: str) -> dict[str, Any]:
     return {
         "id": int(row.id),
         "session_id": int(row.session_id),
-        "device_id": business_id,
+        "device_id": device_id,
         "door_no": int(row.door_no),
         "opened_at": _ts(row.opened_at),
         "closed_at": _ts(row.closed_at) if row.closed_at else "",
@@ -85,32 +81,23 @@ def _segment_view(row: UsageSegment, business_id: str) -> dict[str, Any]:
 
 
 def get_all_live(session: Session, device_id: str) -> dict[int, dict[str, Any]]:
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return {}
-    rows = session.scalars(select(DoorState).where(DoorState.device_id == device_pk)).all()
+    rows = session.scalars(select(DoorState).where(DoorState.device_id == device_id)).all()
     return {int(row.door_no): _live_view(row, device_id) for row in rows}
 
 
 def get_door_live(session: Session, device_id: str, door_no: int) -> dict[str, Any] | None:
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return None
     row = session.scalars(
-        select(DoorState).where(DoorState.device_id == device_pk, DoorState.door_no == door_no)
+        select(DoorState).where(DoorState.device_id == device_id, DoorState.door_no == door_no)
     ).one_or_none()
     return _live_view(row, device_id) if row is not None else None
 
 
 def get_occupied_by_cert(session: Session, device_id: str, cert_no: str) -> dict[str, Any] | None:
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return None
     occupied = [DoorStateEnum(name) for name in OCCUPIED_STATES]
     row = session.scalars(
         select(DoorState)
         .where(
-            DoorState.device_id == device_pk,
+            DoorState.device_id == device_id,
             DoorState.cert_no == cert_no,
             DoorState.state.in_(occupied),
         )
@@ -136,14 +123,11 @@ def upsert_door_live(
     reported_at: datetime,
 ) -> None:
     """写下这个门的现态。时间字段一律是服务端轴的换算结果。"""
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return
     row = session.scalars(
-        select(DoorState).where(DoorState.device_id == device_pk, DoorState.door_no == door_no)
+        select(DoorState).where(DoorState.device_id == device_id, DoorState.door_no == door_no)
     ).one_or_none()
     if row is None:
-        row = DoorState(device_id=device_pk, door_no=door_no)
+        row = DoorState(device_id=device_id, door_no=door_no)
         session.add(row)
     row.state = state
     row.card_no = card_no
@@ -178,17 +162,14 @@ def insert_snapshot(
     前会重发同一条，重发与首投对回执是同一件事，照常让设备清发件箱。False 只留给
     「帧没有落下去」一种情形——设备不在册（外键落不了行），调用方据此扣下回执。
     """
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return False
     exists = session.scalars(
-        select(DoorSnapshot.id).where(DoorSnapshot.device_id == device_pk, DoorSnapshot.snapshot_id == snapshot_id)
+        select(DoorSnapshot.id).where(DoorSnapshot.device_id == device_id, DoorSnapshot.snapshot_id == snapshot_id)
     ).one_or_none()
     if exists is not None:
         return True
     session.add(
         DoorSnapshot(
-            device_id=device_pk,
+            device_id=device_id,
             snapshot_id=snapshot_id,
             seq=seq,
             source=source,
@@ -214,12 +195,9 @@ def insert_event(
     bath_time_s: int,
 ) -> int:
     """记一次状态迁移，返回行 id（播报事件的幂等身份）。"""
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return 0
     row = DoorStateEvent(
         occurred_at=occurred_at,
-        device_id=device_pk,
+        device_id=device_id,
         door_no=door_no,
         from_state=from_state,
         to_state=to_state,
@@ -236,13 +214,10 @@ def insert_event(
 
 
 def get_open_session(session: Session, device_id: str, door_no: int) -> dict[str, Any] | None:
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return None
     row = session.scalars(
         select(UsageSession)
         .where(
-            UsageSession.device_id == device_pk,
+            UsageSession.device_id == device_id,
             UsageSession.door_no == door_no,
             UsageSession.ended_at.is_(None),
         )
@@ -256,8 +231,8 @@ def get_session(session: Session, session_id: int) -> dict[str, Any] | None:
     row = session.get(UsageSession, session_id)
     if row is None:
         return None
-    business_id = session.scalar(select(Device.device_id).where(Device.id == row.device_id)) or ""
-    return _session_view(row, str(business_id))
+    business = session.scalar(select(Device.id).where(Device.id == row.device_id))
+    return _session_view(row, business or "")
 
 
 def open_session(
@@ -269,11 +244,8 @@ def open_session(
     assigned_at: datetime,
     assigned_source: str,
 ) -> int:
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return 0
     row = UsageSession(
-        device_id=device_pk,
+        device_id=device_id,
         door_no=door_no,
         card_no=card_no,
         cert_no=cert_no,
@@ -319,13 +291,10 @@ def close_session(session: Session, session_id: int, ended_at: datetime, segment
 
 
 def get_active_by_cert(session: Session, device_id: str, cert_no: str) -> dict[str, Any] | None:
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return None
     row = session.scalars(
         select(UsageSession)
         .where(
-            UsageSession.device_id == device_pk,
+            UsageSession.device_id == device_id,
             UsageSession.cert_no == cert_no,
             UsageSession.ended_at.is_(None),
         )
@@ -336,12 +305,9 @@ def get_active_by_cert(session: Session, device_id: str, cert_no: str) -> dict[s
 
 
 def list_open_sessions_of(session: Session, device_id: str) -> list[dict[str, Any]]:
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return []
     rows = session.scalars(
         select(UsageSession)
-        .where(UsageSession.device_id == device_pk, UsageSession.ended_at.is_(None))
+        .where(UsageSession.device_id == device_id, UsageSession.ended_at.is_(None))
         .order_by(UsageSession.door_no)
     ).all()
     return [_session_view(row, device_id) for row in rows]
@@ -349,13 +315,10 @@ def list_open_sessions_of(session: Session, device_id: str) -> list[dict[str, An
 
 def run_started_at(session: Session, device_id: str, door_no: int, cert_no: str, gap_s: int) -> str:
     """这一串连续占用里最早那一场的分配时刻；没有则空串。"""
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return ""
     rows = session.scalars(
         select(UsageSession)
         .where(
-            UsageSession.device_id == device_pk,
+            UsageSession.device_id == device_id,
             UsageSession.door_no == door_no,
             UsageSession.cert_no == cert_no,
         )
@@ -381,13 +344,10 @@ def run_started_at(session: Session, device_id: str, door_no: int, cert_no: str,
 
 
 def get_open_segment(session: Session, device_id: str, door_no: int) -> dict[str, Any] | None:
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return None
     row = session.scalars(
         select(UsageSegment)
         .where(
-            UsageSegment.device_id == device_pk,
+            UsageSegment.device_id == device_id,
             UsageSegment.door_no == door_no,
             UsageSegment.closed_at.is_(None),
         )
@@ -399,14 +359,11 @@ def get_open_segment(session: Session, device_id: str, door_no: int) -> dict[str
 
 def latest_segment_opened_at(session: Session, device_id: str, door_no: int) -> str:
     """当前未结束会话里最近一段的开阀时刻；没有则空串。"""
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return ""
     value = session.scalar(
         select(UsageSegment.opened_at)
         .join(UsageSession, UsageSession.id == UsageSegment.session_id)
         .where(
-            UsageSession.device_id == device_pk,
+            UsageSession.device_id == device_id,
             UsageSegment.door_no == door_no,
             UsageSession.ended_at.is_(None),
         )
@@ -424,12 +381,9 @@ def open_segment(
     opened_at: datetime,
     opened_raw: str,
 ) -> int:
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return 0
     row = UsageSegment(
         session_id=session_id,
-        device_id=device_pk,
+        device_id=device_id,
         door_no=door_no,
         opened_at=opened_at,
         opened_raw=opened_raw,
@@ -468,12 +422,9 @@ def add_derived_segment(
     closed_raw: str,
 ) -> int:
     """记一段推出来的出水（冷启动接手用），`source` 固定为 `derived`。"""
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return 0
     row = UsageSegment(
         session_id=session_id,
-        device_id=device_pk,
+        device_id=device_id,
         door_no=door_no,
         opened_at=opened_at,
         closed_at=closed_at,
@@ -494,8 +445,7 @@ def segments_of_session(session: Session, session_id: int) -> list[dict[str, Any
     ).all()
     result: list[dict[str, Any]] = []
     for row in rows:
-        business_id = session.scalar(select(Device.device_id).where(Device.id == row.device_id)) or ""
-        result.append(_segment_view(row, str(business_id)))
+        result.append(_segment_view(row, str(row.device_id)))
     return result
 
 
@@ -508,40 +458,34 @@ def latest_usage_by_door(session: Session) -> dict[tuple[str, int], dict[str, An
         .scalar_subquery()
     )
     rows = session.execute(
-        select(UsageSegment, UsageSession.cert_no, Device.device_id)
+        select(UsageSegment, UsageSession.cert_no, Device.id)
         .join(UsageSession, UsageSession.id == UsageSegment.session_id)
         .join(Device, Device.id == UsageSegment.device_id)
         .where(UsageSegment.id.in_(latest_ids))
     ).all()
     return {
-        (str(business_id), int(segment.door_no)): {
-            "device_id": str(business_id),
+        (device_id, int(segment.door_no)): {
+            "device_id": device_id,
             "door_no": int(segment.door_no),
             "opened_at": _ts(segment.opened_at),
             "flow_s": int(segment.flow_s),
             "cert_no": cert_no,
         }
-        for segment, cert_no, business_id in rows
+        for segment, cert_no, device_id in rows
     }
 
 
 def list_sessions(session: Session, device_id: str) -> list[dict[str, Any]]:
     """这台设备的全部占用会话，按 id 升序（读模型与统计/核对共用）。"""
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return []
     rows = session.scalars(
-        select(UsageSession).where(UsageSession.device_id == device_pk).order_by(UsageSession.id)
+        select(UsageSession).where(UsageSession.device_id == device_id).order_by(UsageSession.id)
     ).all()
     return [_session_view(row, device_id) for row in rows]
 
 
 def list_events(session: Session, device_id: str, door_no: int | None = None) -> list[dict[str, Any]]:
     """这台设备（可再按门过滤）的状态迁移流水，按 id 升序。"""
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return []
-    statement = select(DoorStateEvent).where(DoorStateEvent.device_id == device_pk)
+    statement = select(DoorStateEvent).where(DoorStateEvent.device_id == device_id)
     if door_no is not None:
         statement = statement.where(DoorStateEvent.door_no == door_no)
     rows = session.scalars(statement.order_by(DoorStateEvent.id)).all()
@@ -561,11 +505,8 @@ def list_events(session: Session, device_id: str, door_no: int | None = None) ->
 
 def list_snapshots(session: Session, device_id: str) -> list[dict[str, Any]]:
     """这台设备的原始帧：设备说的原话按帧 id 留底，doors 是落库时的原样载荷。"""
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return []
     rows = session.scalars(
-        select(DoorSnapshot).where(DoorSnapshot.device_id == device_pk).order_by(DoorSnapshot.id)
+        select(DoorSnapshot).where(DoorSnapshot.device_id == device_id).order_by(DoorSnapshot.id)
     ).all()
     return [
         {
@@ -588,22 +529,16 @@ def list_snapshots(session: Session, device_id: str) -> list[dict[str, Any]]:
 
 def door_count(session: Session, device_id: str) -> int:
     """这台设备上报过现态的喷头数。"""
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return 0
-    return int(session.scalar(select(func.count()).select_from(DoorState).where(DoorState.device_id == device_pk)) or 0)
+    return int(session.scalar(select(func.count()).select_from(DoorState).where(DoorState.device_id == device_id)) or 0)
 
 
 def door_count_in_state(session: Session, device_id: str, state: str) -> int:
     """这台设备处于指定状态的喷头数。"""
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return 0
     return int(
         session.scalar(
             select(func.count())
             .select_from(DoorState)
-            .where(DoorState.device_id == device_pk, DoorState.state == state)
+            .where(DoorState.device_id == device_id, DoorState.state == state)
         )
         or 0
     )
@@ -611,9 +546,6 @@ def door_count_in_state(session: Session, device_id: str, state: str) -> int:
 
 def last_closed_by_door(session: Session, device_id: str, before: str) -> list[dict[str, Any]]:
     """每扇门在 `before` 之前的最后一次关阀（段联会话取占用者）。"""
-    device_pk = _device_pk(session, device_id)
-    if device_pk is None:
-        return []
     high = _parse_moment(before)
     ranked = (
         select(
@@ -625,7 +557,7 @@ def last_closed_by_door(session: Session, device_id: str, before: str) -> list[d
             .label("rn"),
         )
         .join(UsageSession, UsageSession.id == UsageSegment.session_id)
-        .where(UsageSegment.device_id == device_pk, UsageSegment.closed_at.is_not(None), UsageSegment.closed_at < high)
+        .where(UsageSegment.device_id == device_id, UsageSegment.closed_at.is_not(None), UsageSegment.closed_at < high)
         .subquery()
     )
     rows = session.execute(
@@ -650,15 +582,15 @@ def _parse_moment(value: str) -> datetime:
 
 def list_doors(session: Session, device_id: str | None = None) -> list[DoorView]:
     """喷头现态列表，带上次完整使用的时刻、时长与凭证。"""
-    statement = select(DoorState, Device.device_id).join(Device, Device.id == DoorState.device_id)
+    statement = select(DoorState, Device.id).join(Device, Device.id == DoorState.device_id)
     if device_id:
-        statement = statement.where(Device.device_id == device_id)
-    statement = statement.order_by(Device.device_id, DoorState.door_no)
+        statement = statement.where(Device.id == device_id)
+    statement = statement.order_by(Device.id, DoorState.door_no)
     usage = latest_usage_by_door(session)
     views: list[DoorView] = []
-    for row, business_id in session.execute(statement).all():
-        last = usage.get((str(business_id), int(row.door_no)))
-        live = _live_view(row, str(business_id))
+    for row, device_id in session.execute(statement).all():
+        last = usage.get((device_id, int(row.door_no)))
+        live = _live_view(row, device_id)
         view: DoorView = {
             "device_id": live["device_id"],
             "door_no": live["door_no"],

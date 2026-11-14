@@ -26,7 +26,7 @@ def feed(device_id: str, payload: dict[str, Any]) -> object:
     from . import device_link
 
     with session_scope() as session:
-        registered = session.scalar(select(Device.id).where(Device.device_id == device_id)) is not None
+        registered = session.scalar(select(Device.id).where(Device.id == device_id)) is not None
     if not registered:
         device_link.register_trusted_device(device_id)
     with session_scope() as session:
@@ -61,7 +61,7 @@ def clear_live(device_id: str) -> None:
     from app.models.identity import Device
 
     with session_scope() as session:
-        device_pk = session.scalar(select(Device.id).where(Device.device_id == device_id))
+        device_pk = session.scalar(select(Device.id).where(Device.id == device_id))
         if device_pk is not None:
             session.execute(delete(DoorStateRow).where(DoorStateRow.device_id == device_pk))
             session.commit()

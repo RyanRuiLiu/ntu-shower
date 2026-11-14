@@ -20,9 +20,9 @@ class Device(Base):
 
     __tablename__ = "devices"
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    #: 设备上报的原始标识（Android ID 一类的稳定串），业务唯一键
-    device_id: Mapped[str] = mapped_column(String(64), unique=True)
+    #: 主键即设备业务标识（Android ID 一类的稳定串，ADR-0008）：稳定唯一，故
+    #: 不设代理键——全库「每表 id 主键 + <实体>_id 外键，同名同型同义」。
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
     name: Mapped[str] = mapped_column(String(64), default="")
     #: 是否已建立信任关系；只有可信设备能执行特权帧
     trusted: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -50,7 +50,7 @@ class DeviceCredential(Base):
     __tablename__ = "device_credentials"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    device_id: Mapped[int] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"), index=True)
+    device_id: Mapped[str] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"), index=True)
     #: SHA-256(token)；token 本身是 32 字节随机串，熵足够，不需要慢哈希
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     label: Mapped[str] = mapped_column(String(64), default="")

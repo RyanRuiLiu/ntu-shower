@@ -51,7 +51,7 @@ def jobs_status(session: Session = Depends(get_db)) -> schemas.JobsStatus:
         )
     # 行的形状由来源模块保证（模块注释），这里只做类型收口；字段断言在看板测试
     return schemas.JobsStatus(
-        tasks=tasks,
+        jobs=tasks,
         extending=cast("list[schemas.ExtendingDevice]", extend_hours_service.current_shifts(session)),
         scheduled=cast("list[schemas.ScheduledAction]", sessions_scheduler.snapshot(session)),
     )

@@ -14,12 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.clock import format_rfc3339
-from ..models.identity import Device
 from ..models.voice import VoiceAsset, VoiceDelivery, VoiceRule, VoiceUnit
-
-
-def _device_pk(session: Session, device_id: str) -> int | None:
-    return session.scalars(select(Device.id).where(Device.device_id == device_id)).one_or_none()
 
 
 def _dumps(value: list[Any] | None) -> str | None:
@@ -61,7 +56,7 @@ def _delivery_view(row: VoiceDelivery) -> dict[str, Any]:
         "id": int(row.id),
         "event_key": row.event_key,
         "rule_id": int(row.rule_id),
-        "device_id": row.device_key,
+        "device_id": row.device_id,
         "cert_no": row.cert_no,
         "event": row.event,
         "door_no": int(row.door_no),
@@ -294,8 +289,7 @@ def claim_delivery(
         VoiceDelivery(
             event_key=event_key,
             rule_id=rule_id,
-            device_id=_device_pk(session, device_id),
-            device_key=device_id,
+            device_id=device_id,
             door_no=door_no,
             cert_no=cert_no,
             event=event,

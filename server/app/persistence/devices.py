@@ -34,7 +34,7 @@ def _natural_name_key(name: str) -> list[tuple[int, object]]:
 
 
 def _find(session: Session, device_id: str) -> Device | None:
-    return session.scalars(select(Device).where(Device.device_id == device_id)).one_or_none()
+    return session.scalars(select(Device).where(Device.id == device_id)).one_or_none()
 
 
 def get(session: Session, device_id: str) -> DeviceRecord | None:
@@ -69,7 +69,7 @@ def register(
     if row is None:
         highest = session.scalar(select(func.max(Device.sort_order)))
         row = Device(
-            device_id=device_id,
+            id=device_id,
             app_version=app_version,
             version_code=version_code,
             os_version=os_version,
@@ -215,7 +215,7 @@ def as_record(row: Device) -> DeviceRecord:
     # 一条查询崩掉——档案读取在守卫链上，读不出来等于设备完全不可用。
     caps = row.capabilities if isinstance(row.capabilities, list) else []
     record: DeviceRecord = {
-        "device_id": row.device_id,
+        "device_id": row.id,
         "name": row.name,
         "trusted": bool(row.trusted),
         "app_version": row.app_version,
