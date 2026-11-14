@@ -71,8 +71,9 @@ def test_users_returns_domain_read_model(client: TestClient, admin_headers: dict
 
 
 def test_legacy_identities_prefix_is_gone(client: TestClient, admin_headers: dict[str, str]) -> None:
-    """/identities 已随术语统一删除：一律 404（identities → users）。"""
-    for path in ("/api/v1/identities", "/api/v1/identity", "/identities/me"):
+    """API 面的 /identities 旧前缀已随术语统一删除：一律 404（identities → users）。
+    非 API 的 /identities/me 现在是前端路由（SPA 入口），不再断言 404。"""
+    for path in ("/api/v1/identities", "/api/v1/identity"):
         r = client.get(path, headers=admin_headers)
         assert r.status_code == 404, path
 
