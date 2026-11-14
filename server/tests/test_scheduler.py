@@ -229,7 +229,7 @@ def test_each_door_gets_exactly_one_timer(monkeypatch: pytest.MonkeyPatch) -> No
         assert list(handles) == [3]
         # 三个功能的状态互不相交，所以"已暂停"只有自动结算会认领
         with session_scope() as session:
-            assert next(iter(scheduler._plan(session, "dev-1").values()))[2].feature == FEATURE_AUTO_SETTLE
+            assert next(iter(scheduler._plan(session, "dev-1").values()))[2].task == FEATURE_AUTO_SETTLE
 
     asyncio.run(body())
 
@@ -311,9 +311,9 @@ def test_fire_enqueues_a_settle(monkeypatch: pytest.MonkeyPatch, fresh_db: str) 
 THRESHOLDS = {FEATURE_RENEW_WAIT: 270, FEATURE_RENEW_SESSION: 1140, FEATURE_AUTO_SETTLE: 60}
 
 
-def _settle_job(feature: str = FEATURE_RENEW_WAIT) -> scheduler._SettleJob:
+def _settle_job(task: str = FEATURE_RENEW_WAIT) -> scheduler._SettleJob:
     """`_record` 要的那套字段（见 `_Auditable`）——用结算待办当载体最省。"""
-    return scheduler._SettleJob(candidate=WAITING, feature=feature, threshold_s=THRESHOLDS[feature])
+    return scheduler._SettleJob(candidate=WAITING, task=task, threshold_s=THRESHOLDS[task])
 
 
 def _assign_job(door_no: int = 3) -> scheduler._AssignJob:
@@ -323,7 +323,7 @@ def _assign_job(door_no: int = 3) -> scheduler._AssignJob:
         door_no=door_no,
         cert_no="2026000001",
         password="000000",
-        feature=FEATURE_RENEW_WAIT,
+        task=FEATURE_RENEW_WAIT,
         session_id=WAITING.session_id,
         threshold_s=THRESHOLDS[FEATURE_RENEW_WAIT],
     )
@@ -360,7 +360,7 @@ def test_settle_lands_in_the_audit_table_with_its_own_fields(monkeypatch: pytest
         rows = audit_repository.list_background_task_runs(session)
     assert [row["outcome"] for row in rows] == ["settled"]
     row = rows[0]
-    assert row["feature"] == FEATURE_RENEW_WAIT
+    assert row["task"] == FEATURE_RENEW_WAIT
     assert row["action"] == "session.settle"
     assert row["session_id"] == WAITING.session_id
     assert row["cert_no"] == WAITING.cert_no
@@ -385,7 +385,7 @@ def test_a_rejected_settle_is_recorded_with_its_reason(monkeypatch: pytest.Monke
     with session_scope() as session:
         rows = audit_repository.list_background_task_runs(session)
     assert [row["outcome"] for row in rows] == ["not-applicable"]
-    assert rows[0]["feature"] == FEATURE_AUTO_SETTLE
+    assert rows[0]["task"] == FEATURE_AUTO_SETTLE
     assert rows[0]["action"] == "session.settle"
     assert rows[0]["threshold_s"] == THRESHOLDS[FEATURE_AUTO_SETTLE]
 
@@ -526,7 +526,7 @@ def _arm(monkeypatch: pytest.MonkeyPatch, **overrides: object) -> None:
         "door_no": 3,
         "cert_no": "2026000001",
         "password": "000000",
-        "feature": FEATURE_RENEW_WAIT,
+        "task": FEATURE_RENEW_WAIT,
         "session_id": WAITING.session_id,
         "threshold_s": THRESHOLDS[FEATURE_RENEW_WAIT],
         "expires_at": 1e9,
@@ -966,7 +966,7 @@ def test_snapshot_reports_scheduled_timers(fresh_db: str) -> None:
         paused_at="",
         run_started_at="2026-10-05T12:00:00.000Z",
     )
-    trigger = scheduler.Trigger(feature="renew_session", delay_s=5.0, threshold_s=1140)
+    trigger = scheduler.Trigger(task="renew_session", delay_s=5.0, threshold_s=1140)
 
     async def body() -> None:
         loop = asyncio.get_running_loop()
@@ -987,7 +987,7 @@ def test_snapshot_reports_scheduled_timers(fresh_db: str) -> None:
                 "device_id": "dev-snap-status",
                 "door_no": 3,
                 "cert_no": "2026000001",
-                "feature": "renew_session",
+                "task": "renew_session",
                 "at": rows[0]["at"],
                 "state": "bathing",
                 "session_id": 1,

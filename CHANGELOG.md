@@ -33,6 +33,10 @@
 
 ### Removed
 
+- 后台任务命名全链统一为 task（此前 task/feature/「服务端业务」三词并存）：判据表
+  FeatureSpec/FEATURES→TaskSpec/TASKS、`background_task_runs.feature` 列改名 `task`
+  （迁移，列值不变）、看板响应字段与配置页页签同步；接口收敛为 `/api/v1/tasks/status`
+  （原 /background-tasks/status，唯一消费者是自有管理台）。
 - 小程序自助登记接口删除（业主裁定 2026-11-14：名单配置的唯一入口是管理台）：
   GET /tasks、PUT /tasks/{task}、用户面文案模板与取值机器、`tasks` 能力位与
   require_capability/DEVICE_SCOPED 守卫机制（最后一个消费者消失后随之移除）；

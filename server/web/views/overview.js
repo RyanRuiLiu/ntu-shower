@@ -389,11 +389,11 @@ function refreshTaskCountdowns() {
  * 加粗。倒计时是这块的锚点——每秒走字，其余一切安静。
  */
 function renderTaskBoard(data) {
-  const scheduledByFeature = {}
-  for (const row of data.scheduled) (scheduledByFeature[row.feature] ||= []).push(row)
+  const scheduledByTask = {}
+  for (const row of data.scheduled) (scheduledByTask[row.task] ||= []).push(row)
 
   const taskSections = data.tasks.map((task) => {
-    const rows = scheduledByFeature[task.key] || []
+    const rows = scheduledByTask[task.key] || []
     const nextAt = rows.length ? rows.map((row) => row.at).sort()[0] : ''
     const head = `
       <div class="task-head">
@@ -477,7 +477,7 @@ function renderTaskBoard(data) {
 
 async function refreshTaskBoard() {
   try {
-    const data = await api.backgroundTasksStatus()
+    const data = await api.tasksStatus()
     $('taskBoard').innerHTML = renderTaskBoard(data)
   } catch (error) {
     $('taskBoard').innerHTML = `<div class="empty">${esc(problemText(error))}</div>`

@@ -61,7 +61,7 @@ class BackgroundTaskRun(TypedDict):
     door_no: int
     session_id: int | None
     cert_no: str
-    feature: str
+    task: str
     action: str | None
     outcome: str
     reason: str | None
