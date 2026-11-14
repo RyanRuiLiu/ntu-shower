@@ -57,6 +57,21 @@ rules:
         - ".githooks/*"
     pattern-regex: '(STANDARDS\.md|docs/DECISIONS\.md|docs/glossary\.md|docs/testing\.md)'
 
+  - id: stale-terminology
+    languages: [generic]
+    severity: ERROR
+    message: |
+      退役词汇入码。术语更换后继续使用就是同义漂移：授权概念一律「权限（scope）」，
+      设备上报的命令集合一律「设备动作」；X-Identity 是已删除的认证通道（ADR-0019），
+      复活前必须先推翻该决策。
+    paths:
+      exclude:
+        - ".semgrep.yml"
+      include:
+        - "server/app/**"
+        - "server/web/**"
+    pattern-regex: '(能力位|X-Identity)'
+
   - id: silent-except
     languages: [python]
     severity: ERROR

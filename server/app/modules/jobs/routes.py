@@ -25,7 +25,7 @@ from .spec import _TITLES, JOBS
 
 admin_router = APIRouter(
     prefix="/api/v1/jobs",
-    tags=["tasks"],
+    tags=["jobs"],
     dependencies=[Security(caller, scopes=["jobs:read"])],
 )
 
