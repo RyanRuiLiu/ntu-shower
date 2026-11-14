@@ -1,34 +1,33 @@
-"""测试用身份登记。
+"""测试用密钥签发。
 
-直接写新数据层，不经过任何过渡层：切换策略是一次性替换，没有兼容期。
+直接写数据层，不经过任何过渡层：切换策略是一次性替换，没有兼容期。
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
+from app.auth import crud
 from app.core.config import settings
 from app.db.session import Database
-from app.models.enums import IdentityKind
-from app.persistence import principals as principals_store
 
 
-def register(
-    identity: str,
-    kind: IdentityKind,
-    capabilities: list[str],
-    label: str = "",
+def register_key(
+    username: str,
+    scopes: list[str],
     device_scope: list[str] | None = None,
+    name: str = "",
 ) -> str:
-    """登记主体并签发一枚 Bearer 凭据，返回明文。"""
+    """登记用户并签发一枚 Bearer 密钥，返回明文。"""
     database = Database(f"sqlite:///{Path(settings.db_path).as_posix()}")
     try:
         with database.new_session() as session:
-            principals_store.put(session, identity, kind, capabilities, label, device_scope)
-            token = principals_store.issue_token(session, identity)
+            crud.create_user(session, username)
+            issued = crud.issue_key(session, username, name, scopes, device_scope or ["*"])
     finally:
         database.dispose()
-    assert token is not None
+    assert issued is not None
+    _, token = issued
     return token
 
 

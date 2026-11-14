@@ -7,10 +7,10 @@
 
 from __future__ import annotations
 
+from ..auth.models import ApiKey, User
 from ..db.base import Base
 from .device import Device, DeviceClockShift, DeviceConfig, DeviceCredential, DeviceLinkEvent, DeviceLog
 from .doors import DoorSnapshot, DoorState, DoorStateEvent
-from .identity import Principal
 from .ops import ApiCall, CommandAudit, JobRun
 from .ota import OtaRelease, OtaReleaseInstall
 from .settings import AppSettings
@@ -19,6 +19,7 @@ from .voice import VoiceAsset, VoiceDelivery, VoiceRule, VoiceUnit
 
 __all__: list[str] = [
     "ApiCall",
+    "ApiKey",
     "AppSettings",
     "Base",
     "CommandAudit",
@@ -34,9 +35,9 @@ __all__: list[str] = [
     "JobRun",
     "OtaRelease",
     "OtaReleaseInstall",
-    "Principal",
     "UsageSegment",
     "UsageSession",
+    "User",
     "VoiceAsset",
     "VoiceDelivery",
     "VoiceRule",

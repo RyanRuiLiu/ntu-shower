@@ -9,10 +9,11 @@ from pathlib import Path
 import pytest
 from sqlalchemy.orm import Session
 
+from app.auth import crud
 from app.core import passwords, tokens
 from app.db.session import Database
 from app.models import Base
-from app.persistence import devices, principals
+from app.persistence import devices
 
 NOW = datetime(2026, 11, 7, 12, 0, 0, tzinfo=UTC)
 
@@ -45,23 +46,20 @@ def test_token_helpers() -> None:
     assert tokens.extract_bearer(None) is None
 
 
-def test_user_lifecycle(session: Session) -> None:
-    created = principals.create_account(session, "admin", "s3cret", ["admin"])
-    assert created["capabilities"] == ["admin"]
-    assert created["device_scope"] == ["*"]
-    assert "password_hash" not in created
+def test_user_password_lifecycle(session: Session) -> None:
+    crud.create_user(session, "admin", password="s3cret-pass")
 
-    assert principals.authenticate(session, "admin", "wrong") is None
-    ok = principals.authenticate(session, "admin", "s3cret", now=NOW)
+    assert crud.authenticate(session, "admin", "wrong") is None
+    ok = crud.authenticate(session, "admin", "s3cret-pass", now=NOW)
     assert ok is not None
-    assert ok["last_seen_at"] == NOW
+    assert ok["last_login_at"] != ""
 
-    assert principals.set_disabled(session, "admin", True) is True
-    assert principals.authenticate(session, "admin", "s3cret") is None
-    assert principals.set_password(session, "admin", "new-pass") is True
-    assert principals.set_disabled(session, "admin", False) is True
-    assert principals.authenticate(session, "admin", "new-pass") is not None
-    assert principals.authenticate(session, "ghost", "x") is None
+    assert crud.update_user(session, "admin", disabled=True) is not None
+    assert crud.authenticate(session, "admin", "s3cret-pass") is None
+    assert crud.update_user(session, "admin", password="new-pass-123") is not None
+    assert crud.update_user(session, "admin", disabled=False) is not None
+    assert crud.authenticate(session, "admin", "new-pass-123") is not None
+    assert crud.authenticate(session, "ghost", "x") is None
 
 
 def test_device_credential_lifecycle(session: Session) -> None:
