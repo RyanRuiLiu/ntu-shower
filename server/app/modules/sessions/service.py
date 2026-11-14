@@ -10,6 +10,7 @@ scheduler 与他模块的 service 反向 import routes，导入顺序脆弱且�
 
 from sqlalchemy.orm import Session
 
+from app.auth.dependencies import require_trusted_online_device
 from app.contracts import CommandOutcome
 from app.core import actions, outcomes
 from app.core.config import settings
@@ -21,7 +22,6 @@ from app.core.problems import (
     SERVER_OVERLOADED,
     ApiProblemError,
 )
-from app.modules.access.dependencies import require_trusted_online_device
 from app.modules.devices import actions as device_actions
 from app.modules.doors import service as doors_service
 from app.modules.sessions.schemas import AssignRequest, SettleRequest

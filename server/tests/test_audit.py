@@ -37,7 +37,7 @@ def test_every_domain_is_audited(client: TestClient, admin_headers: dict[str, st
         ("/api/v1/devices", None),
         ("/api/v1/doors", None),
         ("/api/v1/config", None),
-        ("/api/v1/identities", None),
+        ("/api/v1/users", None),
         ("/api/v1/ota/releases", None),
         ("/api/v1/audit/commands", None),
     ]

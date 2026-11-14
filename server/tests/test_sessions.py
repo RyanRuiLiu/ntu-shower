@@ -45,7 +45,7 @@ def test_assign_with_unknown_identity_is_unauthorized(client: TestClient) -> Non
     r = client.post(f"/api/v1/devices/{TRUSTED}/assign", json=ASSIGN_PAYLOAD, headers=bearer("not-a-valid-token"))
 
     assert r.status_code == 401
-    assert r.json()["type"].endswith("/problems/unknown-identity")
+    assert r.json()["type"].endswith("/problems/invalid-token")
 
 
 def test_assign_hits_device_guard_after_identity(client: TestClient, ops_headers: dict[str, str]) -> None:
