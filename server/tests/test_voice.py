@@ -68,20 +68,18 @@ def voice_devices(fresh_db: str) -> None:
 
 
 @pytest.fixture
-def fake_normalize(monkeypatch: pytest.MonkeyPatch) -> None:
-    """把上传源字节原样包成 MP3，并给出可预测的时长。"""
+def fake_validate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """跳过真实 MP3 校验，给出可预测的时长；源字节本身就是落盘的素材。"""
 
-    def normalize(source: Path, target: Path) -> int:
-        data = source.read_bytes()
-        target.write_bytes(b"ID3" + data)
-        return 1_000 + len(data)
+    def validate(source: Path) -> int:
+        return 1_000 + len(source.read_bytes())
 
-    monkeypatch.setattr(audio, "normalize_to_mp3", normalize)
+    monkeypatch.setattr(audio, "validate_mp3", validate)
 
 
 @pytest.fixture
 def assets(
-    client: TestClient, admin_headers: dict[str, str], voice_devices: None, fake_normalize: None
+    client: TestClient, admin_headers: dict[str, str], voice_devices: None, fake_validate: None
 ) -> dict[str, str]:
     """上传 0–9 数字素材和一段固定音频，返回名称 → 素材 id。"""
     result: dict[str, str] = {}
@@ -183,10 +181,8 @@ def test_spec_and_status(
     client: TestClient,
     admin_headers: dict[str, str],
     voice_devices: None,
-    fake_normalize: None,
-    monkeypatch: pytest.MonkeyPatch,
+    fake_validate: None,
 ) -> None:
-    monkeypatch.setattr(service.shutil, "which", lambda name: f"/usr/bin/{name}")
     spec = client.get("/api/v1/voice/spec", headers=admin_headers).json()
     labels = {item["value"]: item["label"] for item in spec["events"]}
     assert labels == {
@@ -206,7 +202,7 @@ def test_spec_and_status(
     assert spec["max_pause_ms"] == schemas.MAX_PAUSE_MS
 
     status = client.get("/api/v1/voice/status", headers=admin_headers).json()
-    assert status == {"asset_count": 0, "digits": [], "units": [], "ffmpeg_available": True}
+    assert status == {"asset_count": 0, "digits": [], "units": []}
 
     created = _upload(client, admin_headers, "五", b"five", "5")
     assert created["digit"] == 5
@@ -223,7 +219,7 @@ def test_asset_upload_download_and_guards(
     client: TestClient,
     admin_headers: dict[str, str],
     voice_devices: None,
-    fake_normalize: None,
+    fake_validate: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     created = _upload(client, admin_headers, "请到", b"hello")
@@ -231,7 +227,7 @@ def test_asset_upload_download_and_guards(
     assert created["name"] == "请到"
     assert created["digit"] is None
     assert created["duration_ms"] == 1_005
-    assert created["size_bytes"] == 8
+    assert created["size_bytes"] == 5
     assert len(asset_id) == 64
 
     listing = client.get("/api/v1/voice/assets", headers=admin_headers).json()
@@ -239,7 +235,7 @@ def test_asset_upload_download_and_guards(
 
     download = client.get(created["url"])
     assert download.status_code == 200
-    assert download.content == b"ID3hello"
+    assert download.content == b"hello"
     assert download.headers["content-type"].startswith("audio/mpeg")
     assert "immutable" in download.headers["cache-control"]
 
@@ -286,7 +282,7 @@ def test_asset_digit_guards_and_conversion_failure(
     client: TestClient,
     admin_headers: dict[str, str],
     voice_devices: None,
-    fake_normalize: None,
+    fake_validate: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _upload(client, admin_headers, "五", b"five", "5")
@@ -307,11 +303,11 @@ def test_asset_digit_guards_and_conversion_failure(
         )
         assert response.status_code == 422
 
-    def boom(_source: Path, _target: Path) -> int:
+    def boom(_source: Path) -> int:
         message = "坏音频"
         raise audio.AudioError(message)
 
-    monkeypatch.setattr(audio, "normalize_to_mp3", boom)
+    monkeypatch.setattr(audio, "validate_mp3", boom)
     failed = client.post(
         "/api/v1/voice/assets",
         headers=admin_headers,
@@ -452,7 +448,7 @@ def test_rule_validation(
     client: TestClient,
     admin_headers: dict[str, str],
     voice_devices: None,
-    fake_normalize: None,
+    fake_validate: None,
     overrides: dict[str, Any],
 ) -> None:
     # 数字素材不全时，任何含 digits 的规则都应拒绝；先不放数字素材
@@ -466,7 +462,7 @@ def test_rule_duplicate_and_unknown_device(
     client: TestClient,
     admin_headers: dict[str, str],
     voice_devices: None,
-    fake_normalize: None,
+    fake_validate: None,
 ) -> None:
     asset_id = _upload(client, admin_headers, "请到", b"hello")["asset_id"]
     created = _create(client, admin_headers, asset_id)
@@ -502,7 +498,7 @@ def test_scope_priority_prefers_narrower_rules(
     client: TestClient,
     admin_headers: dict[str, str],
     voice_devices: None,
-    fake_normalize: None,
+    fake_validate: None,
 ) -> None:
     asset_id = _upload(client, admin_headers, "请到", b"hello")["asset_id"]
 
@@ -558,7 +554,7 @@ def test_time_window_filters_and_priority(
     client: TestClient,
     admin_headers: dict[str, str],
     voice_devices: None,
-    fake_normalize: None,
+    fake_validate: None,
 ) -> None:
     asset_id = _upload(client, admin_headers, "请到", b"hello")["asset_id"]
     general = _create(client, admin_headers, asset_id, devices=["*"], certs=["*"], events=["assigned"])
@@ -605,7 +601,7 @@ def test_time_window_cross_midnight_and_duplicate_overlap(
     client: TestClient,
     admin_headers: dict[str, str],
     voice_devices: None,
-    fake_normalize: None,
+    fake_validate: None,
 ) -> None:
     asset_id = _upload(client, admin_headers, "请到", b"hello")["asset_id"]
     friday_night = _create(
@@ -707,7 +703,7 @@ def test_wildcard_rule_and_exemptions(
     client: TestClient,
     admin_headers: dict[str, str],
     voice_devices: None,
-    fake_normalize: None,
+    fake_validate: None,
 ) -> None:
     asset_id = _upload(client, admin_headers, "请到", b"hello")["asset_id"]
     wildcard = _create(
@@ -835,7 +831,7 @@ def test_preview_guards(
     client: TestClient,
     admin_headers: dict[str, str],
     voice_devices: None,
-    fake_normalize: None,
+    fake_validate: None,
 ) -> None:
     asset_id = _upload(client, admin_headers, "请到", b"hello")["asset_id"]
     missing_digits = client.post(
@@ -1316,11 +1312,10 @@ def test_asset_insert_and_readback_failures_leave_no_file(
     fresh_db: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def normalize(source: Path, target: Path) -> int:
-        target.write_bytes(b"ID3" + source.read_bytes())
+    def validate(_source: Path) -> int:
         return 500
 
-    monkeypatch.setattr(audio, "normalize_to_mp3", normalize)
+    monkeypatch.setattr(audio, "validate_mp3", validate)
     with _svc_session() as session, pytest.raises(service.InvalidVoiceAssetError, match="0–9"):
         service.create_asset(session, "数字越界", b"x", 10, None)
 
@@ -1618,7 +1613,7 @@ def test_door_number_requires_all_units(
     client: TestClient,
     admin_headers: dict[str, str],
     voice_devices: None,
-    fake_normalize: None,
+    fake_validate: None,
 ) -> None:
     for digit, name in enumerate(DIGIT_NAMES):
         _upload(client, admin_headers, name, f"digit-{digit}".encode(), str(digit))
@@ -1638,7 +1633,7 @@ def test_unit_asset_upload_guards(
     client: TestClient,
     admin_headers: dict[str, str],
     voice_devices: None,
-    fake_normalize: None,
+    fake_validate: None,
 ) -> None:
     _upload(client, admin_headers, "十", b"unit", unit="十")
     duplicate = client.post(
