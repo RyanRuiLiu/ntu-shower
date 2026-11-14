@@ -36,6 +36,7 @@ UNTRUSTED_DEVICE = Problem("untrusted-device", 403, "设备尚未被信任")
 INVALID_DEVICE_CLAIM = Problem("invalid-device-claim", 401, "设备注册令牌无效")
 DUPLICATE_SESSION = Problem("duplicate-session", 409, "该学号已有进行中的会话")
 USER_NOT_FOUND = Problem("user-not-found", 404, "找不到用户")
+KEY_NOT_FOUND = Problem("key-not-found", 404, "找不到密钥")
 
 # ── 后台任务 ──
 TASK_NOT_FOUND = Problem("task-not-found", 404, "找不到后台任务")
@@ -79,6 +80,7 @@ REGISTRY: tuple[Problem, ...] = (
     INVALID_DEVICE_CLAIM,
     DUPLICATE_SESSION,
     USER_NOT_FOUND,
+    KEY_NOT_FOUND,
     TASK_NOT_FOUND,
     UNAUTHENTICATED,
     INVALID_TOKEN,

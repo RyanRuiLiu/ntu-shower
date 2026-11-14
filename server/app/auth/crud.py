@@ -166,6 +166,33 @@ def revoke_key(session: Session, username: str, key_id: int) -> bool:
     return True
 
 
+def find_key(session: Session, username: str, key_id: int) -> KeyRecord | None:
+    row = session.scalars(select(ApiKey).join(User).where(User.username == username, ApiKey.id == key_id)).one_or_none()
+    return key_view(row) if row is not None else None
+
+
+def update_key(
+    session: Session,
+    username: str,
+    key_id: int,
+    name: str | None = None,
+    scopes: list[str] | None = None,
+    device_scope: list[str] | None = None,
+) -> KeyRecord | None:
+    """编辑密钥：只改传了的字段，令牌不变（Stripe RAK 形态）。已吊销返回 None。"""
+    row = session.scalars(select(ApiKey).join(User).where(User.username == username, ApiKey.id == key_id)).one_or_none()
+    if row is None or row.revoked_at is not None:
+        return None
+    if name is not None:
+        row.name = name
+    if scopes is not None:
+        row.scopes = list(scopes)
+    if device_scope is not None:
+        row.device_scope = list(device_scope)
+    session.commit()
+    return key_view(row)
+
+
 def resolve_key(session: Session, token: str) -> tuple[UserRecord, KeyRecord] | None:
     """密钥明文 →（用户视图, 密钥视图）。无效、已吊销或用户被禁用返回 None。"""
     row = session.scalars(select(ApiKey).join(User).where(ApiKey.token_hash == hash_token(token))).one_or_none()
@@ -181,6 +208,7 @@ __all__: list[str] = [
     "authenticate",
     "create_user",
     "delete_user",
+    "find_key",
     "find_row",
     "find_user",
     "issue_key",
@@ -189,6 +217,7 @@ __all__: list[str] = [
     "list_users",
     "resolve_key",
     "revoke_key",
+    "update_key",
     "update_user",
     "user_view",
 ]
