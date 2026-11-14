@@ -56,7 +56,7 @@ KOTLIN_OUTCOMES = REPO_ROOT / "android/app/src/main/java/com/ryanliu/ntushower/t
 KOTLIN_REASONS = REPO_ROOT / "android/app/src/main/java/com/ryanliu/ntushower/transport/ReasonCodes.kt"
 KOTLIN_OTA = REPO_ROOT / "android/app/src/main/java/com/ryanliu/ntushower/transport/OtaContract.kt"
 KOTLIN_DEFAULTS = REPO_ROOT / "android/app/src/main/java/com/ryanliu/ntushower/core/config/ConfigDefaults.kt"
-WEB_CONTRACT = REPO_ROOT / "server/web/core/contract.js"
+WEB_CONTRACT = REPO_ROOT / "server/web/src/api/contract.ts"
 
 #: 生成物都带这一行，避免有人手改后被下一轮生成悄悄覆盖。
 GENERATED_MARK = "由 tools/sync_contracts.py 生成"
