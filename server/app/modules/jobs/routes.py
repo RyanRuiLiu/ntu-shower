@@ -21,7 +21,7 @@ from app.modules.extend_hours import service as extend_hours_service
 from app.modules.sessions import scheduler as sessions_scheduler
 
 from . import schemas
-from .spec import JOBS
+from .spec import _TITLES, JOBS
 
 admin_router = APIRouter(
     prefix="/api/v1/jobs",
@@ -38,20 +38,20 @@ def jobs_status(session: Session = Depends(get_db)) -> schemas.JobsStatus:
     各自公开自己的只读读数，这里不做任何判断——判据只有一个出处，看板只报告状态。
     """
     config = config_store.global_effective(session)
-    tasks = []
-    for spec in JOBS:
-        students = config[spec.students_key]
-        tasks.append(
+    jobs = []
+    for key, enabled_key, students_key in JOBS:
+        students = config[students_key]
+        jobs.append(
             schemas.JobStatus(
-                key=spec.key,
-                title=spec.label,
-                enabled=bool(config[spec.enabled_key]),
+                key=key,
+                title=_TITLES[key],
+                enabled=bool(config[enabled_key]),
                 students_count=len(students) if isinstance(students, dict) else 0,
             )
         )
     # 行的形状由来源模块保证（模块注释），这里只做类型收口；字段断言在看板测试
     return schemas.JobsStatus(
-        jobs=tasks,
+        jobs=jobs,
         extending=cast("list[schemas.ExtendingDevice]", extend_hours_service.current_shifts(session)),
         scheduled=cast("list[schemas.ScheduledAction]", sessions_scheduler.snapshot(session)),
     )

@@ -7,7 +7,7 @@
 from fastapi.testclient import TestClient
 
 from app.modules.config.spec import SPECS_BY_KEY, ConfigKind, ConfigScope
-from app.modules.jobs.spec import JOBS, JOBS_BY_KEY
+from app.modules.jobs.spec import _TITLES, JOBS
 from app.modules.sessions import decision
 
 CERT_NO = "2026000001"
@@ -16,36 +16,37 @@ CERT_NO = "2026000001"
 # ── 登记表本身的唯一出处 ──
 
 
-def test_task_keys_are_derived_from_the_decision_table() -> None:
-    """前三个任务的三个键与 `sessions/decision.py` 的判据表逐字相同。
+def test_job_keys_are_derived_from_the_decision_table() -> None:
+    """前三个任务的键与 `sessions/decision.py` 的判据表逐字相同。
 
     它们是从那张表派生的。这条防的是"派生被改回手抄"之后两边各自漂——判据按 A 判、
     看板按 B 显示，表现是"开关开了却不生效"，而库里看不出任何异常。
     """
     decision_keys = {spec.key for spec in decision.JOBS}
-    outside = [spec.key for spec in JOBS if spec.key not in decision_keys]
+    entries = {key: (enabled, students) for key, enabled, students in JOBS}
+    outside = set(entries) - decision_keys
 
-    assert outside == ["extend_hours"], "判据表里没有的只该是它——它的判据是设备级的"
+    assert outside == {"extend_hours"}, "判据表里没有的只该是它——它的判据是设备级的"
 
-    for spec in JOBS:
-        source = next(item for item in decision.JOBS if item.key == spec.key) if spec.key in decision_keys else None
+    for key, enabled_key, students_key in JOBS:
+        source = next(item for item in decision.JOBS if item.key == key) if key in decision_keys else None
         if source is None:
             continue
-        assert spec.enabled_key == source.enabled_key
-        assert spec.students_key == source.students_key
+        assert enabled_key == source.enabled_key
+        assert students_key == source.students_key
 
 
-def test_task_config_keys_exist_are_server_scoped_and_of_the_right_kind() -> None:
+def test_job_config_keys_exist_are_server_scoped_and_of_the_right_kind() -> None:
     """每个任务的两份键都在登记表里，类型与归属都对。
 
     scope 是关键：`*_students` 若是设备域，名单就能按设备各不相同，而名单登记这件事
     没有设备维度——那会让面板上的一个开关对应到不止一份名单。
     """
-    for spec in JOBS:
-        enabled = SPECS_BY_KEY[spec.enabled_key]
-        students = SPECS_BY_KEY[spec.students_key]
+    for key, enabled_key, students_key in JOBS:
+        enabled = SPECS_BY_KEY[enabled_key]
+        students = SPECS_BY_KEY[students_key]
 
-        assert spec.label, spec.key
+        assert _TITLES[key], key
         assert enabled.kind is ConfigKind.BOOL
         assert students.kind is ConfigKind.TEXT_MAP
         assert enabled.scope is ConfigScope.SERVER
@@ -55,8 +56,8 @@ def test_task_config_keys_exist_are_server_scoped_and_of_the_right_kind() -> Non
 def test_extend_hours_is_not_in_the_decision_table() -> None:
     """它不在判据表里是有意的：它的判据是设备级的，塞进去要放一个不成立的形状。"""
     assert "extend_hours" not in {spec.key for spec in decision.JOBS}
-    assert JOBS_BY_KEY["extend_hours"].enabled_key == "extend_hours_enabled"
-    assert JOBS_BY_KEY["extend_hours"].students_key == "extend_hours_students"
+    entries = {key: (enabled, students) for key, enabled, students in JOBS}
+    assert entries["extend_hours"] == ("extend_hours_enabled", "extend_hours_students")
 
 
 # ── 当前态看板（admin）──
@@ -73,13 +74,13 @@ def test_status_reports_tasks_extending_and_scheduled(
 
     assert resp.status_code == 200
     data = resp.json()
-    assert [task["key"] for task in data["jobs"]] == [
+    assert [job["key"] for job in data["jobs"]] == [
         "renew_wait",
         "renew_session",
         "auto_settle",
         "extend_hours",
     ]
-    assert all(task["enabled"] is False and task["students_count"] == 0 for task in data["jobs"])
+    assert all(job["enabled"] is False and job["students_count"] == 0 for job in data["jobs"])
     assert data["extending"] == []
     assert data["scheduled"] == []
 
