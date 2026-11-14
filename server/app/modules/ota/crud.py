@@ -11,13 +11,12 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.contracts import ReleaseRecord
+from app.core.clock import format_rfc3339
 from app.core.protocol import JsonObject
-
-from ..contracts import ReleaseRecord
-from ..core.clock import format_rfc3339
-from ..db.base import utcnow
-from ..models.device import Device
-from ..models.ota import OtaRelease, OtaReleaseInstall
+from app.db.base import utcnow
+from app.modules.devices.models import Device
+from app.modules.ota.models import OtaRelease, OtaReleaseInstall
 
 
 def _device(session: Session, device_id: str) -> Device | None:

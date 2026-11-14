@@ -113,36 +113,152 @@ exclude_lines = [
     "if __name__ == .__main__.:",
 ]
 
-# 架构边界：import-linter 官方 forbidden 契约
+# 架构边界：import-linter 官方契约（forbidden / independence）
 # https://import-linter.readthedocs.io/en/stable/contract_types.html
+#
+# 结构（Spring Modulith 的模块化单体模型，白名单边写死在这里）：
+# - 组合根 main 在顶，唯一 import 全部模块；gateway / auth 是核心域；
+# - 共享模块：config（配置中心）、devices（设备命令平面）——任何域可引用；
+# - 业务模块彼此零引用（independence），声明边逐条列在 forbidden 里：
+#     sessions → doors（分配预检读门现态）
+#     extend_hours → sessions、doors（续期判据与门现态）
+#     jobs → extend_hours、sessions（看板读两域的即时状态）
+#     status_line → doors（楼层汇总读门现态）
+#     voice → doors（规则目标校验读门现态）
 [tool.importlinter]
 root_package = "app"
-
-[[tool.importlinter.contracts]]
-name = "模型层不依赖业务模块"
-type = "forbidden"
-source_modules = ["app.models"]
-forbidden_modules = ["app.modules"]
-
-[[tool.importlinter.contracts]]
-name = "业务模块无循环依赖"
-type = "acyclic_siblings"
-ancestors = ["app.modules"]
 
 [[tool.importlinter.contracts]]
 name = "核心层零向上依赖"
 type = "forbidden"
 source_modules = ["app.core"]
-forbidden_modules = ["app.auth", "app.modules", "app.persistence", "app.db"]
+forbidden_modules = ["app.auth", "app.contracts", "app.gateway", "app.modules", "app.persistence", "app.db"]
 
 [[tool.importlinter.contracts]]
-name = "持久化层不依赖认证层"
+name = "共享契约零向上依赖"
 type = "forbidden"
-source_modules = ["app.persistence"]
-forbidden_modules = ["app.auth"]
+source_modules = ["app.contracts"]
+forbidden_modules = ["app.auth", "app.gateway", "app.modules", "app.persistence", "app.db"]
 
 [[tool.importlinter.contracts]]
-name = "持久化层不依赖业务模块"
+name = "持久化层不依赖上层"
 type = "forbidden"
 source_modules = ["app.persistence"]
-forbidden_modules = ["app.modules"]
+forbidden_modules = ["app.auth", "app.gateway", "app.modules"]
+
+[[tool.importlinter.contracts]]
+name = "组合根不被反向引用"
+type = "forbidden"
+source_modules = ["app.auth", "app.gateway", "app.modules", "app.persistence"]
+forbidden_modules = ["app.main"]
+
+[[tool.importlinter.contracts]]
+name = "业务模块彼此零引用（一）"
+type = "independence"
+modules = ["app.modules.audit", "app.modules.bridge", "app.modules.freelist", "app.modules.ota", "app.modules.water"]
+
+[[tool.importlinter.contracts]]
+name = "业务模块彼此零引用（二）"
+type = "independence"
+modules = ["app.modules.audit", "app.modules.doors", "app.modules.freelist", "app.modules.ota", "app.modules.water"]
+
+# 以下五条 = 声明边之外的组合一律禁止（含 jobs / sessions / extend_hours 的白名单）
+[[tool.importlinter.contracts]]
+name = "sessions 只许引用 doors"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["app.modules.sessions"]
+forbidden_modules = [
+    "app.modules.audit",
+    "app.modules.bridge",
+    "app.modules.extend_hours",
+    "app.modules.freelist",
+    "app.modules.jobs",
+    "app.modules.ota",
+    "app.modules.status_line",
+    "app.modules.voice",
+    "app.modules.water",
+]
+
+[[tool.importlinter.contracts]]
+name = "extend_hours 只许引用 sessions 与 doors"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["app.modules.extend_hours"]
+forbidden_modules = [
+    "app.modules.audit",
+    "app.modules.bridge",
+    "app.modules.freelist",
+    "app.modules.jobs",
+    "app.modules.ota",
+    "app.modules.status_line",
+    "app.modules.voice",
+    "app.modules.water",
+]
+
+[[tool.importlinter.contracts]]
+name = "jobs 只许引用 extend_hours 与 sessions"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["app.modules.jobs"]
+forbidden_modules = [
+    "app.modules.audit",
+    "app.modules.bridge",
+    "app.modules.doors",
+    "app.modules.freelist",
+    "app.modules.ota",
+    "app.modules.status_line",
+    "app.modules.voice",
+    "app.modules.water",
+]
+
+[[tool.importlinter.contracts]]
+name = "status_line 只许引用 doors"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["app.modules.status_line"]
+forbidden_modules = [
+    "app.modules.audit",
+    "app.modules.bridge",
+    "app.modules.extend_hours",
+    "app.modules.freelist",
+    "app.modules.jobs",
+    "app.modules.ota",
+    "app.modules.sessions",
+    "app.modules.voice",
+    "app.modules.water",
+]
+
+[[tool.importlinter.contracts]]
+name = "voice 只许引用 doors"
+type = "forbidden"
+allow_indirect_imports = true
+source_modules = ["app.modules.voice"]
+forbidden_modules = [
+    "app.modules.audit",
+    "app.modules.bridge",
+    "app.modules.extend_hours",
+    "app.modules.freelist",
+    "app.modules.jobs",
+    "app.modules.ota",
+    "app.modules.sessions",
+    "app.modules.status_line",
+    "app.modules.water",
+]
+
+[[tool.importlinter.contracts]]
+name = "doors 不引用任何业务模块"
+type = "forbidden"
+source_modules = ["app.modules.doors"]
+forbidden_modules = [
+    "app.modules.audit",
+    "app.modules.bridge",
+    "app.modules.extend_hours",
+    "app.modules.freelist",
+    "app.modules.jobs",
+    "app.modules.ota",
+    "app.modules.sessions",
+    "app.modules.status_line",
+    "app.modules.voice",
+    "app.modules.water",
+]

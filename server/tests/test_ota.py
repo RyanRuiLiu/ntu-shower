@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session
 from tests import apk, device_link
 
 from app.core import config as config_module
+from app.modules.ota import crud as ota
 from app.modules.ota import service
-from app.persistence import ota
 
 
 @pytest.fixture

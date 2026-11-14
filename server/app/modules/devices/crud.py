@@ -17,12 +17,11 @@ from datetime import datetime
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
-from ..contracts import DeviceRecord
-from ..core.clock import format_rfc3339
-from ..core.tokens import generate_token, hash_token
-from ..db.base import utcnow
-from ..models.device import Device, DeviceCredential, DeviceLinkEvent, DeviceLog
-from ..models.enums import DeviceLogKind, LinkEvent
+from app.contracts import DeviceLogKind, DeviceRecord, LinkEvent
+from app.core.clock import format_rfc3339
+from app.core.tokens import generate_token, hash_token
+from app.db.base import utcnow
+from app.modules.devices.models import Device, DeviceCredential, DeviceLinkEvent, DeviceLog
 
 LOG_KEEP = 5
 

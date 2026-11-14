@@ -20,7 +20,7 @@ from app.auth import crud
 from app.core.config import settings
 from app.db.session import Database
 from app.main import SESSION_COOKIE_NAME
-from app.persistence import devices
+from app.modules.devices import crud as devices
 
 USER = "admin-web"
 PASSWORD = "correct-horse-battery-staple"

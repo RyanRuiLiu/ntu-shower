@@ -7,10 +7,122 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
+
 from typing_extensions import TypedDict
 
 from .core.protocol import JsonObject
-from .models.enums import DoorState
+
+
+class DoorState(StrEnum):
+    """喷头的派生状态，由服务端从 4 个原始整数派生（规则见 doors.service.derive_state）。"""
+
+    FREE = "free"
+    WAITING = "waiting"
+    BATHING = "bathing"
+    PAUSED = "paused"
+    SELECTED = "selected"
+    REPAIR = "repair"
+    DISABLED = "disabled"
+
+
+#: 占用中的状态（有人），用于后台任务与自动结算判断。
+OCCUPIED_STATES = frozenset({DoorState.WAITING, DoorState.BATHING, DoorState.PAUSED})
+
+#: 可以被分配的状态。允许 SELECTED：选中但无人占用，且会自行消失。
+ASSIGNABLE_STATES = frozenset({DoorState.FREE, DoorState.SELECTED})
+
+
+class ActorKind(StrEnum):
+    """调用方类型，与 api_calls.actor_kind 对应。
+
+    token 与 session 是第一批认证标准化引入的两类（Bearer 凭据与会话 Cookie）；
+    identity 留给名单制调用方（X-Identity 时代的历史取值，转换工具会搬进来）。
+    """
+
+    DEVICE = "device"
+    ANONYMOUS = "anonymous"
+    IDENTITY = "identity"
+    TOKEN = "token"
+    SESSION = "session"
+
+
+class LinkEvent(StrEnum):
+    """设备链路事件。"""
+
+    ONLINE = "online"
+    OFFLINE = "offline"
+
+
+class DeviceLogKind(StrEnum):
+    """设备上送日志的种类。"""
+
+    DEVICE = "device"
+    CRASH = "crash"
+    OTA = "ota"
+
+
+class AssignedSource(StrEnum):
+    """会话起点的来源：观测到的，还是推算出来的。"""
+
+    OBSERVED = "observed"
+    INFERRED = "inferred"
+
+
+class ObservedSpan(StrEnum):
+    """会话观测的连续性。"""
+
+    CONTINUOUS = "continuous"
+    GAP = "gap"
+
+
+class SegmentSource(StrEnum):
+    """段长的来源。"""
+
+    MEASURED = "measured"
+    OBSERVED = "observed"
+    CAPPED = "capped"
+    DERIVED = "derived"
+
+
+class JobOutcome(StrEnum):
+    """后台任务的执行结果。
+
+    取值与 scheduler 的日志事件名后缀同一套（`job.<它>`）：
+    日志与审计表两边不分叉。
+    """
+
+    SETTLED = "settled"
+    ASSIGNED = "assigned"
+    SETTLE_FAILED = "settle-failed"
+    ASSIGN_WAITING = "assign-waiting"
+    ASSIGN_FAILED = "assign-failed"
+    ASSIGN_EXPIRED = "assign-expired"
+    SKIPPED = "skipped"
+    FAILED = "failed"
+    REJECTED = "rejected"
+    NO_PASSWORD = "no-password"
+    NOT_APPLICABLE = "not-applicable"
+
+
+class ApiCallKind(StrEnum):
+    """api_call 的两类来源：HTTP 请求与设备网关生命周期。"""
+
+    HTTP = "http"
+    GATEWAY = "gateway"
+
+
+class CommandStatus(StrEnum):
+    """命令结果状态，与 core.outcomes.VALUES 必须完全一致。
+
+    取值定义在 `core/outcomes.py`（它是跨端契约的唯一来源），这里是为了让数据库列
+    有可映射的类型。两者的一致性由测试对账，不在两处各自维护。
+    """
+
+    OK = "ok"
+    FAILED = "failed"
+    TIMEOUT = "timeout"
+    REJECTED = "rejected"
 
 
 class CommandOutcome(TypedDict):
@@ -213,13 +325,25 @@ class KeyRecord(TypedDict):
 
 
 __all__: list[str] = [
+    "ASSIGNABLE_STATES",
+    "OCCUPIED_STATES",
+    "ActorKind",
+    "ApiCallKind",
+    "AssignedSource",
     "Caller",
     "CommandAuditRecord",
     "CommandOutcome",
+    "CommandStatus",
+    "DeviceLogKind",
     "DeviceRecord",
+    "DoorState",
     "DoorView",
+    "JobOutcome",
     "JobRun",
     "KeyRecord",
+    "LinkEvent",
+    "ObservedSpan",
     "ReleaseRecord",
+    "SegmentSource",
     "UserRecord",
 ]

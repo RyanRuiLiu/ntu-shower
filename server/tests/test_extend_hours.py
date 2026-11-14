@@ -19,10 +19,10 @@ from app.core.clock import parse_rfc3339, shift_rfc3339
 from app.core.problems import DOOR_NOT_FREE, ApiProblemError
 from app.db.session import session_scope
 from app.modules.config import store as config_store
+from app.modules.extend_hours import crud as repository
 from app.modules.extend_hours import service as extend_hours
 from app.modules.sessions.decision import students_of
 from app.modules.sessions.schemas import AssignRequest
-from app.persistence import extend_hours as repository
 from test_scheduler import _frame
 
 DEVICE = "dev-extend"
@@ -918,7 +918,7 @@ def test_tick_clears_the_shift_row_of_a_delisted_device(fresh_db: str, monkeypat
     with session_scope() as session:
         from sqlalchemy import delete
 
-        from app.models.device import Device
+        from app.modules.devices.models import Device
 
         session.execute(delete(Device).where(Device.id == "dev-gone"))
         session.commit()

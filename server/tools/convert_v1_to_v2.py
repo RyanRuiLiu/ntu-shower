@@ -39,9 +39,8 @@ from datetime import UTC
 from pathlib import Path
 
 from app.core.clock import parse_rfc3339
-from app.db.base import utcnow
+from app.db.base import Base, utcnow
 from app.db.engine import create_db_engine
-from app.models import Base
 
 #: 已实现的转换：(旧表, 新表)。
 DONE: tuple[tuple[str, str], ...] = (

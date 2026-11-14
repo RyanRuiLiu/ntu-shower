@@ -45,6 +45,7 @@ from .core.logging import configure_logging, log_event
 from .core.version import APP_VERSION
 from .db.base import utcnow
 from .db.session import Database
+from .gateway.routes import router as gateway_router
 from .modules.audit.routes import admin_router as audit_admin_router
 from .modules.bridge.routes import admin_router as bridge_admin_router
 from .modules.bridge.routes import router as bridge_router
@@ -57,7 +58,6 @@ from .modules.devices.routes import router as devices_router
 from .modules.doors.routes import router as doors_router
 from .modules.extend_hours import service as extend_hours_service
 from .modules.freelist.routes import router as freelist_router
-from .modules.gateway.routes import router as gateway_router
 from .modules.jobs.routes import admin_router as jobs_admin_router
 from .modules.ota.routes import device_router as ota_device_router
 from .modules.ota.routes import router as ota_router

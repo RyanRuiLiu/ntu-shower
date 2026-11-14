@@ -13,8 +13,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..core.clock import format_rfc3339
-from ..models.voice import VoiceAsset, VoiceDelivery, VoiceRule, VoiceUnit
+from app.core.clock import format_rfc3339
+from app.modules.voice.models import VoiceAsset, VoiceDelivery, VoiceRule, VoiceUnit
 
 
 def _dumps(value: list[Any] | None) -> str | None:

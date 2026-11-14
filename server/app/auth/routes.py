@@ -27,7 +27,9 @@ import time
 from fastapi import APIRouter, Depends, Request, Response, Security
 from sqlalchemy.orm import Session
 
-from ..contracts import Caller, UserRecord
+from app.contracts import Caller, UserRecord
+from app.modules.devices import crud as devices_store
+
 from ..core.logging import log_event
 from ..core.problems import (
     UNAUTHENTICATED,
@@ -37,7 +39,6 @@ from ..core.problems import (
     ApiProblemError,
 )
 from ..db.deps import get_db
-from ..persistence import devices as devices_store
 from . import crud
 from .dependencies import caller, current_user
 from .permissions import ALL_SCOPES, SCOPE_LABELS

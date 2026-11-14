@@ -25,6 +25,7 @@ from app.core.problems import (
 )
 from app.db.deps import get_db
 from app.modules.ota import apk_manifest, service
+from app.modules.ota import crud as repository
 from app.modules.ota.schemas import (
     OtaManifest,
     ReleasePublished,
@@ -33,7 +34,6 @@ from app.modules.ota.schemas import (
     ReleaseRemoved,
 )
 from app.modules.ota.service import VERSION_PATTERN
-from app.persistence import ota as repository
 
 router = APIRouter(prefix="/api/v1/ota", tags=["ota"])
 

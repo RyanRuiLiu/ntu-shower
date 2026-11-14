@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from app.auth.dependencies import caller, device_scope_guard, require_trusted_online_device
+from app.contracts import CommandStatus
 from app.core import actions, outcomes, protocol, reason_codes
 from app.core.connections import manager
 from app.core.logging import log_event
@@ -31,7 +32,6 @@ from app.core.problems import DEVICE_OFFLINE, ApiProblemError
 from app.db.base import utcnow
 from app.db.deps import get_db
 from app.db.session import Database
-from app.models.enums import CommandStatus
 from app.modules.bridge.schemas import BridgeClosed, BridgeOpened, BridgeStatus
 from app.modules.config import store as config_store
 from app.persistence import audit as command_audit
