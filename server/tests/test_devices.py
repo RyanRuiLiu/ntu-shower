@@ -83,23 +83,23 @@ def test_device_list_reports_online_flag(
     assert listed["online"] is True
 
 
-def test_runtime_requires_devices_write(client: TestClient, ops_headers: dict[str, str]) -> None:
-    """运维档案 devices:write 专属：无凭据 401，缺权限 403 insufficient-scope。"""
-    assert client.get("/api/v1/devices/runtime").status_code == 401
+def test_runtime_requires_devices_read(client: TestClient, ops_headers: dict[str, str]) -> None:
+    """单台设备完整档案 devices:read 专属：无凭据 401，缺权限 403 insufficient-scope。"""
+    assert client.get(f"/api/v1/devices/{DEVICE_ID}").status_code == 401
 
-    r = client.get("/api/v1/devices/runtime", headers=ops_headers)
+    r = client.get(f"/api/v1/devices/{DEVICE_ID}", headers=ops_headers)
     assert r.status_code == 403
     assert r.json()["type"].endswith("/problems/insufficient-scope")
 
 
 def test_runtime_returns_full_record(client: TestClient, admin_headers: dict[str, str]) -> None:
-    """GET /devices/runtime 返回完整档案：版本、信任、IP、钟偏差、在线都在。"""
+    """GET /devices/{device_id} 返回完整档案：版本、信任、IP、钟偏差、在线都在。"""
     device_link.register_trusted_device(DEVICE_ID)
 
-    r = client.get("/api/v1/devices/runtime", headers=admin_headers)
+    r = client.get(f"/api/v1/devices/{DEVICE_ID}", headers=admin_headers)
 
     assert r.status_code == 200
-    record = next(item for item in r.json() if item["device_id"] == DEVICE_ID)
+    record = r.json()
     assert set(record) == {
         "device_id",
         "name",
@@ -266,11 +266,11 @@ def test_device_action_endpoints_require_devices_write(client: TestClient) -> No
     [
         ("exec", actions.DEVICE_EXEC, {"command": "id"}),
         ("capture", actions.SCREEN_CAPTURE, None),
-        ("app/restart", actions.APP_RESTART, None),
+        ("restart-app", actions.APP_RESTART, None),
         ("reboot", actions.DEVICE_REBOOT, None),
-        ("dump", actions.UI_DUMP, None),
-        ("bath/restart", actions.BATH_RESTART, None),
-        ("clock/set", actions.CLOCK_SET, {"datetime": "2026-10-02 12:00:00"}),
+        ("ui-dump", actions.UI_DUMP, None),
+        ("restart-bath", actions.BATH_RESTART, None),
+        ("clock-set", actions.CLOCK_SET, {"datetime": "2026-10-02 12:00:00"}),
     ],
 )
 def test_action_endpoints_dispatch_registered_actions(
@@ -419,7 +419,7 @@ def test_live_log_rejects_empty_result_data(
 
 def test_clock_set_rejects_malformed_datetime(client: TestClient, admin_headers: dict[str, str]) -> None:
     """datetime 形状在 HTTP 边界即拦（422），不发给设备。"""
-    r = client.post("/api/v1/devices/ghost/clock/set", headers=admin_headers, json={"datetime": "nope"})
+    r = client.post("/api/v1/devices/ghost/clock-set", headers=admin_headers, json={"datetime": "nope"})
 
     assert r.status_code == 422
 
@@ -440,7 +440,7 @@ def test_touch_click_sends_coordinates(
     admin_headers: dict[str, str],
     ready: dict[str, Any],
 ) -> None:
-    r = client.post(f"/api/v1/devices/{DEVICE_ID}/touch", headers=admin_headers, json={"x": 100, "y": 200})
+    r = client.post(f"/api/v1/devices/{DEVICE_ID}/ui-touch", headers=admin_headers, json={"x": 100, "y": 200})
 
     assert r.status_code == 200
     assert ready["params"] == {"x": 100, "y": 200}
@@ -452,7 +452,7 @@ def test_touch_accepts_zero_coordinates(
     ready: dict[str, Any],
 ) -> None:
     """0 是合法坐标，不能被当成未提供。"""
-    r = client.post(f"/api/v1/devices/{DEVICE_ID}/touch", headers=admin_headers, json={"x": 0, "y": 0})
+    r = client.post(f"/api/v1/devices/{DEVICE_ID}/ui-touch", headers=admin_headers, json={"x": 0, "y": 0})
 
     assert r.status_code == 200
     assert ready["params"] == {"x": 0, "y": 0}
@@ -465,7 +465,7 @@ def test_touch_forwards_swipe_parameters(
 ) -> None:
     """给了终点与时长就是滑动：三个参数原样下发。"""
     r = client.post(
-        f"/api/v1/devices/{DEVICE_ID}/touch",
+        f"/api/v1/devices/{DEVICE_ID}/ui-touch",
         headers=admin_headers,
         json={"x": 10, "y": 20, "to_x": 30, "to_y": 40, "duration_ms": 500},
     )
@@ -482,7 +482,7 @@ def test_touch_rejects_missing_coordinates(
     payload: dict[str, int],
 ) -> None:
     """坐标必填且成对：缺了在 schema 层就被挡下。"""
-    r = client.post(f"/api/v1/devices/{DEVICE_ID}/touch", headers=admin_headers, json=payload)
+    r = client.post(f"/api/v1/devices/{DEVICE_ID}/ui-touch", headers=admin_headers, json=payload)
 
     assert r.status_code == 422
 
@@ -493,7 +493,7 @@ def test_key_rejects_unknown_key_name(
     ready: dict[str, Any],
 ) -> None:
     """按键名是闭集。"""
-    r = client.post(f"/api/v1/devices/{DEVICE_ID}/key", headers=admin_headers, json={"key": "volume_up"})
+    r = client.post(f"/api/v1/devices/{DEVICE_ID}/ui-key", headers=admin_headers, json={"key": "volume_up"})
 
     assert r.status_code == 422
 
@@ -503,7 +503,7 @@ def test_key_dispatches_known_key(
     admin_headers: dict[str, str],
     ready: dict[str, Any],
 ) -> None:
-    r = client.post(f"/api/v1/devices/{DEVICE_ID}/key", headers=admin_headers, json={"key": "home"})
+    r = client.post(f"/api/v1/devices/{DEVICE_ID}/ui-key", headers=admin_headers, json={"key": "home"})
 
     assert r.status_code == 200
     assert ready["action"] == actions.UI_KEY
@@ -516,16 +516,16 @@ def test_input_requires_channel(
     ready: dict[str, Any],
 ) -> None:
     """注入通道是必填闭集：两条并列通路由调用方显式选择。"""
-    missing = client.post(f"/api/v1/devices/{DEVICE_ID}/input", headers=admin_headers, json={"text": "hello"})
+    missing = client.post(f"/api/v1/devices/{DEVICE_ID}/ui-input", headers=admin_headers, json={"text": "hello"})
     assert missing.status_code == 422
 
     unknown = client.post(
-        f"/api/v1/devices/{DEVICE_ID}/input", headers=admin_headers, json={"text": "hello", "channel": "telepathy"}
+        f"/api/v1/devices/{DEVICE_ID}/ui-input", headers=admin_headers, json={"text": "hello", "channel": "telepathy"}
     )
     assert unknown.status_code == 422
 
     r = client.post(
-        f"/api/v1/devices/{DEVICE_ID}/input", headers=admin_headers, json={"text": "hello", "channel": "keys"}
+        f"/api/v1/devices/{DEVICE_ID}/ui-input", headers=admin_headers, json={"text": "hello", "channel": "keys"}
     )
     assert r.status_code == 200
     assert ready["action"] == actions.UI_INPUT
@@ -564,7 +564,7 @@ def test_newly_registered_device_appends_after_the_manual_order(
     """新设备排到末尾：手动调好的顺序不被后来的登记顶掉。"""
     device_link.register_trusted_device("dev-a")
     device_link.register_trusted_device("dev-b")
-    client.put("/api/v1/devices/order", json={"order": ["dev-b", "dev-a"]}, headers=admin_headers)
+    client.patch("/api/v1/devices", json={"order": ["dev-b", "dev-a"]}, headers=admin_headers)
 
     device_link.register_trusted_device("dev-c")
 
@@ -594,9 +594,9 @@ def test_device_order_is_manual_and_covers_every_listing(
 
     # 管理员把 3F 排到最前
     ids = [item["device_id"] for item in body]
-    resp = client.put("/api/v1/devices/order", json={"order": list(reversed(ids))}, headers=admin_headers)
+    resp = client.patch("/api/v1/devices", json={"order": list(reversed(ids))}, headers=admin_headers)
     assert resp.status_code == 200, resp.json()
-    assert resp.json()["order"] == list(reversed(ids)), "PUT 的响应应已是新顺序"
+    assert resp.json()["order"] == list(reversed(ids)), "PATCH 的响应应已是新顺序"
     body = client.get("/api/v1/devices", headers=admin_headers).json()
     assert [item["name"] for item in body] == ["3F浴室", "2F浴室", "1F浴室"]
 
@@ -605,7 +605,7 @@ def test_device_order_rejects_unknown_devices(client: TestClient, admin_headers:
     """顺序清单里出现未知设备整体拒绝：半排序比不排序更难看。"""
     device_link.register_trusted_device("dev-order-a")
 
-    resp = client.put("/api/v1/devices/order", json={"order": ["dev-order-a", "dev-not-exist"]}, headers=admin_headers)
+    resp = client.patch("/api/v1/devices", json={"order": ["dev-order-a", "dev-not-exist"]}, headers=admin_headers)
 
     assert resp.status_code == 404
     body = client.get("/api/v1/devices", headers=admin_headers).json()
