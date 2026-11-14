@@ -5,8 +5,8 @@
 # RUNBOOK 里原先那条 curl 就是手填的，这个脚本取代它。
 #
 # 用法：
-#   .\deploy\publish_apk.ps1 -Token <admin 的 API Bearer 凭据>
-#   .\deploy\publish_apk.ps1 -Token <admin 的 API Bearer 凭据> -SkipBuild   # 用已构建的 APK
+#   .\deploy\publish_apk.ps1 -Token <ntushower_密钥>
+#   .\deploy\publish_apk.ps1 -Token <ntushower_密钥> -SkipBuild   # 用已构建的 APK
 #
 # 前提：`android/gradle.properties` 里有 serverDomain 与签名口令（见该文件的 example）。
 # 认证走标准 Authorization: Bearer（ADR-0019）：X-Identity 头已删除。
