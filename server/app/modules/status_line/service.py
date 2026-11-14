@@ -31,11 +31,11 @@ from typing import Any
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
+from app.contracts import DoorState
 from app.core import protocol
 from app.core.connections import manager
 from app.core.logging import log_event
 from app.db.session import session_scope
-from app.models.enums import DoorState
 from app.modules.devices import service as devices_service
 from app.modules.doors import service as doors_service
 

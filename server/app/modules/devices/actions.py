@@ -19,14 +19,13 @@ from typing import TypedDict
 
 from sqlalchemy.orm import Session
 
-from app.contracts import CommandOutcome
+from app.contracts import CommandOutcome, CommandStatus
 from app.core import actions, outcomes, protocol, reason_codes
 from app.core.config import settings
 from app.core.connections import manager
 from app.core.logging import log_event, trace_id_var
 from app.core.protocol import JsonObject
 from app.db.base import utcnow
-from app.models.enums import CommandStatus
 from app.persistence import audit as command_audit
 
 from . import service as devices_service

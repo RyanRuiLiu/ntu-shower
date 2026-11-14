@@ -18,7 +18,25 @@ os.environ.setdefault("SESSION_SECRET", "test-session-secret")
 import pytest
 from fastapi.testclient import TestClient
 
+# 完整 metadata：表模型分散在各域目录，任何 Base.metadata.create_all 之前必须全部
+# 导入，否则跨域外键（job_runs→usage_sessions 等）解析不到目标表。与 migrations/env.py
+# 是同一份清单；缺表会当场炸（no such table），漏模型由 tests/test_schema.py 钉住。
+from app.auth.models import ApiKey, User  # noqa: F401
 from app.core import config as config_module
+from app.modules.config.models import AppSettings  # noqa: F401
+from app.modules.devices.models import (  # noqa: F401
+    Device,
+    DeviceClockShift,
+    DeviceConfig,
+    DeviceCredential,
+    DeviceLinkEvent,
+    DeviceLog,
+)
+from app.modules.doors.models import DoorSnapshot, DoorStateEvent  # noqa: F401
+from app.modules.ota.models import OtaRelease, OtaReleaseInstall  # noqa: F401
+from app.modules.voice.models import VoiceAsset, VoiceDelivery, VoiceRule, VoiceUnit  # noqa: F401
+from app.persistence.audit import ApiCall, CommandAudit, JobRun  # noqa: F401
+from app.persistence.usage import UsageSegment, UsageSession  # noqa: F401
 
 ADMIN_USER = "admin"
 OPS_USER = "ops-user"
@@ -108,8 +126,8 @@ def _schema_template(tmp_path_factory: pytest.TempPathFactory) -> str:
     """
     base = tmp_path_factory.mktemp("schema-template")
     path = str(base / "template.db")
+    from app.db.base import Base
     from app.db.engine import create_db_engine
-    from app.models import Base
 
     engine = create_db_engine(f"sqlite:///{path}")
     Base.metadata.create_all(engine)
@@ -194,7 +212,7 @@ def ops_headers(fresh_db: str) -> dict[str, str]:
     from app.auth import crud
     from app.db.base import utcnow
     from app.db.session import Database
-    from app.persistence import devices as devices_store
+    from app.modules.devices import crud as devices_store
 
     database = Database(f"sqlite:///{Path(fresh_db).as_posix()}")
     try:

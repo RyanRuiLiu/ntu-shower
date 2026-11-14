@@ -11,8 +11,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models.device import DeviceConfig
-from ..models.settings import AppSettings
+from app.modules.config.models import AppSettings
+from app.modules.devices.models import DeviceConfig
 
 GLOBAL_ROW_ID = 1
 #: 库里还没有这一行时（全新安装、尚未写过任何覆盖）对外呈现的修订号：

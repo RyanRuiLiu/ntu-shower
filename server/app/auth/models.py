@@ -14,7 +14,7 @@ from datetime import datetime
 from sqlalchemy import JSON, Boolean, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from ..db.base import Base, UtcDateTime, utcnow
+from app.db.base import Base, UtcDateTime, utcnow
 
 
 class User(Base):

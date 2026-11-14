@@ -12,8 +12,8 @@ from app.core import actions
 from app.core.clock import now_rfc3339
 from app.core.connections import manager
 from app.db.session import session_scope
-from app.models.device import Device, DeviceLinkEvent
 from app.modules.devices import actions as device_actions
+from app.modules.devices.models import Device, DeviceLinkEvent
 
 DEVICE_ID = "dev-debug-1"
 
@@ -183,7 +183,7 @@ def test_patch_publishes_trimmed_device_update(
 
 
 def test_set_name_unknown_device_returns_false(fresh_db: str) -> None:
-    from app.persistence import devices as devices_store
+    from app.modules.devices import crud as devices_store
 
     with device_link.db() as session:
         assert devices_store.set_name(session, "ghost", "n") is False
@@ -197,7 +197,7 @@ def test_corrupt_capabilities_are_read_as_empty(fresh_db: str) -> None:
     """
     from sqlalchemy import text
 
-    from app.persistence import devices as devices_store
+    from app.modules.devices import crud as devices_store
 
     device_link.register_device_raw(DEVICE_ID)
     device_link.register_device_raw("dev-bad-cap", capabilities={"not": "a list"}, ip="x")
@@ -236,7 +236,7 @@ def ready(
 
 def test_device_action_endpoints_reject_unusable_devices(client: TestClient, admin_headers: dict[str, str]) -> None:
     """设备不存在 404、未信任 403、离线 409：守卫先于命令下发。"""
-    from app.persistence import devices as devices_store
+    from app.modules.devices import crud as devices_store
 
     assert (
         client.post("/api/v1/devices/dev-ghost-1/exec", headers=admin_headers, json={"command": "id"}).status_code
@@ -542,7 +542,7 @@ def test_devices_fall_back_to_natural_name_order_when_sort_orders_tie(
     """
     from sqlalchemy import text
 
-    from app.persistence import devices as devices_store
+    from app.modules.devices import crud as devices_store
 
     for name in ("10F浴室", "2F浴室", "1F浴室"):
         device_id = f"dev-{name}"
@@ -580,7 +580,7 @@ def test_device_order_is_manual_and_covers_every_listing(
     同 sort_order 回落到名字的自然排序（新设备都在 0 时就是字母序），调整后以
     管理员的顺序为准。
     """
-    from app.persistence import devices as devices_store
+    from app.modules.devices import crud as devices_store
 
     for name in ("1F浴室", "2F浴室", "3F浴室"):
         device_id = f"dev-{name}"

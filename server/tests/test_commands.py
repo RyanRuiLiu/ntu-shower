@@ -150,7 +150,7 @@ def test_silent_device_timeout_keeps_registry_reason(fresh_db: str, monkeypatch:
 
 def test_unsupported_action_fails_before_sending(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """设备声明的能力集不含该动作时，下发前即 failed，不产生设备流量。"""
-    from app.persistence import devices as devices_store
+    from app.modules.devices import crud as devices_store
 
     device_id = "dev-caps-narrow"
     with device_link.db() as session:
