@@ -154,18 +154,20 @@ ssh root@iseekdream.com 'cd /opt/ntu-shower && NTU_SHOWER_TAG=<上一个tag> doc
 
 ### 语音播报前置（voice，启用时一次性）
 
-服务端不再合成语音：规则只是一串固定音频、数字变量与停顿。上传的音频由服务端用
-ffmpeg 统一转成 MP3，因此只需系统有 `ffmpeg` 与 `ffprobe`（需带 libmp3lame）：
+服务端不再合成语音：规则只是一串固定音频、数字变量与停顿。素材只接受 **44.1kHz
+单声道 MP3**（设备端拼流的硬性要求，服务端不转码——ffmpeg 已移出镜像，转码收敛到
+上传方）：
 
 ```bash
-# ffmpeg / ffprobe（MP3 编码）已内置于镜像（Dockerfile 静态二进制层，钉 digest），无需宿主机安装；
+# 本机把任意音频转成合格素材（服务端会校验采样率/声道/时长/体积）
+ffmpeg -i in.wav -ac 1 -ar 44100 -b:a 128k out.mp3
 # 就绪状态与数字素材齐备性走接口看
 ssh root@iseekdream.com 'curl -sS -H "Authorization: Bearer <admin凭据>" http://127.0.0.1:8110/api/v1/voice/status'
 ```
 
-`ffmpeg_available=true` 才能上传素材；`digits` 列出已标记的 0–9 数字素材，含数字变量的
-规则要求 0–9 齐全。素材文件在 `data/voice/assets/`，按内容哈希命名，随 `data/` 保留；
-历史音效源文件在 `data/voice/effects/`。
+`digits` 列出已标记的 0–9 数字素材，含数字变量的规则要求 0–9 齐全。素材文件在
+`data/voice/assets/`，按内容哈希命名，随 `data/` 保留；历史音效源文件在
+`data/voice/effects/`。
 规则保存返回 `invalid-voice-rule` 时，先看返回的缺失素材或缺失数字，不要在页面上反复重试。
 
 ## 备份与恢复
@@ -297,7 +299,7 @@ ssh root@iseekdream.com 'curl -s -H "Authorization: Bearer <admin凭据>" http:/
    `audio.prefetch-failed`，页面「最近推送」的 `downloaded` 表示本次播放是否走了下载。
 3. **命令是否到达设备**：审计页看 `voice.play` / `voice.prepare` 的 status 与
    reason_code；离线是 `device.offline`，旧 APK 是 `device.unsupported_action`。
-4. **素材是否就绪**：`/api/v1/voice/status` 看 `ffmpeg_available` 与 `digits`；含数字
+4. **素材是否就绪**：`/api/v1/voice/status` 看 `digits`；含数字
    变量的规则要求 0–9 齐全。
 5. **规则引用是否完整**：被规则引用的素材删不掉；若库被外部动过，事件解析会失败并在
    服务端日志记 `voice.rule-invalid`，页面「最近推送」不会有该事件的成功记录。

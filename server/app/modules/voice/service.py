@@ -12,7 +12,6 @@
 """
 
 import asyncio
-import shutil
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -158,7 +157,6 @@ def status(session: Session) -> schemas.VoiceStatusView:
         asset_count=len(repository.list_assets(session)),
         digits=_digit_set(session),
         units=_unit_set(session),
-        ffmpeg_available=shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None,
     )
 
 
@@ -211,13 +209,12 @@ def create_asset(
     if unit is not None and unit in _unit_rows(session):
         _reject_asset(f"单位「{unit}」已有素材")
 
-    source = audio.tmp_dir() / f"upload-{uuid.uuid4().hex}.src"
-    target = audio.tmp_dir() / f"upload-{uuid.uuid4().hex}.mp3"
+    source = audio.tmp_dir() / f"upload-{uuid.uuid4().hex}.mp3"
     source.parent.mkdir(parents=True, exist_ok=True)
     try:
         source.write_bytes(data)
-        duration_ms = audio.normalize_to_mp3(source, target)
-        asset_id = audio.sha256_file(target)
+        duration_ms = audio.validate_mp3(source)
+        asset_id = audio.sha256_file(source)
         existing = repository.get_asset(session, asset_id)
         if existing is not None:
             _reject_asset(f"相同音频已存在：{existing['name']}")
@@ -225,7 +222,7 @@ def create_asset(
         final.parent.mkdir(parents=True, exist_ok=True)
         created_final = not final.exists()
         if created_final:
-            target.replace(final)
+            source.replace(final)
         try:
             repository.insert_asset(session, asset_id, clean, digit, duration_ms, final.stat().st_size)
             if unit is not None:
@@ -246,8 +243,8 @@ def create_asset(
     except audio.AudioError as exc:
         _reject_asset(str(exc))
     finally:
+        # 源文件无论成败都清掉：tmp 目录只作中转，不随失败累积
         source.unlink(missing_ok=True)
-        target.unlink(missing_ok=True)
 
 
 def rename_asset(session: Session, asset_id: str, name: str) -> schemas.VoiceAssetView:
