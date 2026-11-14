@@ -600,7 +600,7 @@ tr.audit-row:focus-visible {
   word-break: break-all;
 }
 
-/* 能力位明细：跟在「能力位」计数行下，逐项列出设备声明的能力。
+/* 设备动作明细：跟在「设备动作」计数行下，逐项列出设备声明的动作。
    左对齐排列——它是一组并列项，不是与标签成对的值 */
 .info-caps {
   display: flex;
