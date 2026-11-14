@@ -41,12 +41,15 @@ def test_unregistered_status_gets_generated_type() -> None:
 
 
 def test_http_exception_is_rendered_as_problem_json(client: TestClient, fresh_db: str) -> None:
-    """未登记的框架问题同样走 problem+json（RFC 9457 覆盖所有错误响应）。"""
-    r = client.get("/definitely-not-a-route")
+    """API 面的未登记 404 走 problem+json；非 API 的未知路径回 SPA 入口（history 路由刷新）。"""
+    spa = client.get("/definitely-not-a-route")
+    assert spa.status_code == 200
+    assert "text/html" in spa.headers["content-type"]
 
-    assert r.status_code == 404
-    assert r.headers["content-type"].startswith("application/problem+json")
-    body = r.json()
+    api_miss = client.get("/api/v1/definitely-not-a-route")
+    assert api_miss.status_code == 404
+    assert api_miss.headers["content-type"].startswith("application/problem+json")
+    body = api_miss.json()
     assert body["type"].endswith("/problems/http-404")
     assert {"type", "title", "status", "detail"} <= set(body)
 
