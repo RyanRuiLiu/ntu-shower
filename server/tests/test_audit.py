@@ -212,7 +212,7 @@ def test_prune_removes_only_expired_rows(client: TestClient, admin_headers: dict
         assert api_calls.prune(session, 90, api_calls_record.RETENTIONS) == 0
     assert len(_calls(client, admin_headers, limit=500)) == 1
 
-    # 中间件仍写旧表（audit 域随第二批切换）；保留期语义对新表直接造数据验证
+    # 保留期语义直接对表造数据验证
     from datetime import timedelta
 
     from sqlalchemy import select
