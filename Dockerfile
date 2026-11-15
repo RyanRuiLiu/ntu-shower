@@ -12,7 +12,7 @@ FROM node:26-alpine AS web-builder
 WORKDIR /build
 COPY server/web/package.json server/web/pnpm-lock.yaml ./
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
-    corepack enable pnpm && pnpm install --frozen-lockfile
+    npm install -g pnpm && pnpm install --frozen-lockfile
 COPY server/web/ ./
 RUN pnpm exec tsc -b && pnpm run build
 
