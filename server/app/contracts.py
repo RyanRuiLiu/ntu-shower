@@ -103,6 +103,16 @@ class JobOutcome(StrEnum):
     REJECTED = "rejected"
     NO_PASSWORD = "no-password"
     NOT_APPLICABLE = "not-applicable"
+    #: 延长服务时间（extend_hours）的终局：拨钟、放回与恢复。与该域日志事件名
+    #: 后缀同一套（`extend-hours.<它>`），日志与审计表两边不分叉。
+    CLOCK_MOVED = "clock-moved"
+    SHIFTED = "shifted"
+    SHIFT_FAILED = "shift-failed"
+    REASSIGNED = "reassigned"
+    REASSIGN_FAILED = "reassign-failed"
+    RESTORED = "restored"
+    RESTORE_FAILED = "restore-failed"
+    RESTORE_REARM_FAILED = "restore-rearm-failed"
 
 
 class ApiCallKind(StrEnum):
