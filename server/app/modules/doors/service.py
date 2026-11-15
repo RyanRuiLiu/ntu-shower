@@ -507,8 +507,7 @@ def _apply_snapshot(session: Session, device_id: str, payload: JsonObject) -> Sn
 
     本函数只有「原始帧没有落下去」（库满、库锁超时这一类）才会抛错——网关据此**扣下
     回执**，设备保留发件箱那一行稍后重发，原始数据不丢。派生的任何失败在此止住并照常
-    返回：帧已经收下，派生可以事后 `tools/rebuild_derived` 从原始层重算，回执让设备删掉
-    发件箱那一行才是对的。
+    返回：帧已经收下，原始帧留底可查；回执让设备删掉发件箱那一行才是对的。
 
     空的一帧不是错误：设备读库失败时会照送一条空的（见 DoorSnapshotSender），那本身
     就是一条事实。落库留痕、派生跳过即可——回错误会让设备端不删发件箱那一行，把整个
@@ -615,7 +614,7 @@ def _derive_snapshot(
             collected.extend(event for event in door_events if event.kind in lifecycle)
 
         # 现态对外的三个时间字段是**服务端轴**的：设备那口钟的读数只保留在原始帧里
-        # （为什么对外不能出现设备轴，见 DECISIONS 的「两条时间轴」）。
+        # （为什么对外不能出现设备轴，见 docs/architecture.md 的「两条时间轴」）。
         view = dict(door)
         for key in ("open_time", "in_time", "close_time"):
             view[key] = _to_server_or_empty(door.get(key), device_id)

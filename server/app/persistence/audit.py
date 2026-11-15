@@ -2,7 +2,8 @@
 
 审计是横切基础设施，不是业务模块：写入方是全部模块与网关生命周期，读取方是
 audit 域的只读出口。三张表都是只追加的时间序列，因此每条都有时刻列与索引；
-保留策略按表分别设定，不由数据库自己决定（见 api_calls.RETENTIONS）。
+保留策略按表分别设定（登记与执行见 audit_middleware 的 RETENTIONS 与
+api_calls.prune）。
 
 JobRun 的 session_id 外键指向 usage_sessions（字符串表名，不需要 import 会话模型）：
 审计行引用业务行，业务行不反向依赖审计层。
@@ -54,7 +55,7 @@ class ApiCall(Base):
 
 
 class CommandAudit(Base):
-    """下发给设备的命令及其终态，保留 180 天。"""
+    """下发给设备的命令及其终态，保留期随 audit_retention_days 配置（默认 90 天）。"""
 
     __tablename__ = "command_audits"
     __table_args__ = (Index("ix_command_audits_device_id_created_at", "device_id", "created_at"),)
@@ -239,19 +240,6 @@ def count_pending(session: Session) -> int:
     return int(session.scalar(select(func.count()).select_from(CommandAudit).where(CommandAudit.status.is_(None))) or 0)
 
 
-__all__: list[str] = [
-    "abort_pending",
-    "count_pending",
-    "finish",
-    "insert_api_call",
-    "insert_command",
-    "insert_job_run",
-    "list_api_calls",
-    "list_commands",
-    "list_job_runs",
-]
-
-
 def insert_api_call(
     session: Session,
     *,
@@ -275,8 +263,8 @@ def insert_api_call(
 ) -> None:
     """写一行 api_calls 审计（HTTP 请求与网关生命周期共用）。
 
-    device_id 是文本业务键，这里转整数外键；设备不在册时行仍要落（审计先于档案），
-    外键列留空。
+    device_id 是文本业务键，不设外键：设备不在册时行仍要落（审计先于档案），此刻
+    还没有档案可指。
     """
     requested_at = utcnow()
     session.add(
@@ -302,7 +290,6 @@ def insert_api_call(
         )
     )
     session.commit()
-    _ = format_rfc3339
 
 
 def list_api_calls(
@@ -315,7 +302,7 @@ def list_api_calls(
 ) -> list[dict[str, Any]]:
     """按时间倒序取审计行（/api/v1/audit/calls）。
 
-    返回形状与旧表一致：device_id 是文本业务键（联表取），requested_at 是 RFC 3339。
+    返回的 device_id 是文本业务键，requested_at 是 RFC 3339。
     """
     stmt = select(ApiCall).order_by(ApiCall.id.desc()).limit(limit)
     if device_id:
@@ -350,3 +337,16 @@ def list_api_calls(
             }
         )
     return out
+
+
+__all__: list[str] = [
+    "abort_pending",
+    "count_pending",
+    "finish",
+    "insert_api_call",
+    "insert_command",
+    "insert_job_run",
+    "list_api_calls",
+    "list_commands",
+    "list_job_runs",
+]
