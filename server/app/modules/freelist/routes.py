@@ -1,4 +1,4 @@
-"""免费名单域：读设备上那份名单、整份写回（`freelist:write`）。
+"""免费名单域：读设备上那份名单（`freelist:read`）、整份写回（`freelist:write`）。
 
 ## 端点
 
@@ -30,7 +30,7 @@ from .service import parse, render
 
 router = APIRouter(
     prefix="/api/v1/devices",
-    dependencies=[Security(caller, scopes=["freelist:write"]), Depends(device_scope_guard)],
+    dependencies=[Depends(device_scope_guard)],
     tags=["freelist"],
     # 命令失败在响应体里如实回报（status + reason_code），HTTP 错误面只有守卫与
     # 设备离线；读失败不是 4xx/5xx（见 GET 的 docstring）。
@@ -38,7 +38,11 @@ router = APIRouter(
 )
 
 
-@router.get("/{device_id}/freelist", summary="读免费名单")
+@router.get(
+    "/{device_id}/freelist",
+    dependencies=[Security(caller, scopes=["freelist:read"])],
+    summary="读免费名单",
+)
 async def read_freelist(device_id: str, session: Session = Depends(get_db)) -> FreelistRead:
     """读取设备上的免费名单。
 
@@ -58,7 +62,11 @@ async def read_freelist(device_id: str, session: Session = Depends(get_db)) -> F
     }
 
 
-@router.put("/{device_id}/freelist", summary="整份写回免费名单")
+@router.put(
+    "/{device_id}/freelist",
+    dependencies=[Security(caller, scopes=["freelist:write"])],
+    summary="整份写回免费名单",
+)
 async def write_freelist(device_id: str, req: FreelistRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """整份写回免费名单。
 

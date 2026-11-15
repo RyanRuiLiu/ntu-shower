@@ -34,8 +34,11 @@ class Scope(StrEnum):
     CONFIG_WRITE = "config:write"
     """修改全局与设备配置。"""
 
+    FREELIST_READ = "freelist:read"
+    """免费名单的只读面（设备上的那份，经命令现读）。"""
+
     FREELIST_WRITE = "freelist:write"
-    """免费名单的读取与登记。"""
+    """免费名单的整份写回。"""
 
     OTA_WRITE = "ota:write"
     """发布、下架与重推升级。"""
@@ -78,7 +81,8 @@ SCOPE_LABELS: dict[str, str] = {
     Scope.DEVICES_WRITE: "设备管理（档案/远程操作）",
     Scope.CONFIG_READ: "配置（读）",
     Scope.CONFIG_WRITE: "配置（写）",
-    Scope.FREELIST_WRITE: "免费名单",
+    Scope.FREELIST_READ: "免费名单（读）",
+    Scope.FREELIST_WRITE: "免费名单（写）",
     Scope.OTA_WRITE: "升级发布",
     Scope.BRIDGE_WRITE: "ADB 调试通道",
     Scope.WATER_READ: "水控板（读）",
