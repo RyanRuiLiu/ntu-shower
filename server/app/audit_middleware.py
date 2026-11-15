@@ -9,8 +9,8 @@ JSON 请求体与响应体原文入库，全有或全无、不截断、不脱敏
 不写这些字段）；数据重型且可重取的截图、拍照、UI 节点树与 multipart 上传体除外。
 审计行按 audit_retention_days 保留，过期行由清理任务删除；业务数据永久保留。
 
-存储在 persistence/api_calls.py（2026-11 审计拆分）：采集归 HTTP 侧，落库归
-持久化层——core 保持零向上依赖。
+存储在 persistence/api_calls.py：采集归 HTTP 侧，落库归持久化层——core 保持
+零向上依赖。
 """
 
 import contextlib
@@ -116,10 +116,12 @@ def record_gateway(device_id: str, event: str, client_ip: str = "") -> None:
         )
 
 
-#: 各保留期表 → (时刻列, 保留天数)。天数与各表模型的 docstring 声明一致——
-#: 声明=实现，两边由 tests/test_retention.py 钉住。业务数据（喷头状态迁移、
-#: 使用会话）是运营历史，永久保留、不在此列。清单住在 app 根：它横跨各域的表，
-#: 持久化层不得反向 import 各域模型。
+#: 各保留期表 → (时刻列, 保留天数)。ApiCall 与 CommandAudit 实际按
+#: settings.audit_retention_days 执行（登记值是配置缺省的对照，由
+#: tests/test_retention.py 钉住登记完整性）；其余表按登记天数执行，天数与各表
+#: 模型的 docstring 声明一致。业务数据（喷头状态迁移、使用会话）是运营历史，
+#: 永久保留、不在此列。清单住在 app 根：它横跨各域的表，持久化层不得反向
+#: import 各域模型。
 RETENTIONS: tuple[tuple[Any, Any, int], ...] = (
     (ApiCall, ApiCall.requested_at, 90),
     (CommandAudit, CommandAudit.created_at, 90),
