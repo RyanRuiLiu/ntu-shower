@@ -100,9 +100,9 @@ def test_invariants_over_a_frame_sequence(fresh_db: str) -> None:
         if seg["ended_at"]:
             assert seg["opened_at"] <= seg["ended_at"], f"开阀晚于出门：{dict(seg)}"
 
-    # 4 · flow_s ∈ [0, 一天]
+    # 4 · total_flow_s ∈ [0, 一天]
     for row in sessions:
-        assert 0 <= row["flow_s"] <= service.MAX_BATH_S, f"出水秒数越界：{dict(row)}"
+        assert 0 <= row["total_flow_s"] <= service.MAX_BATH_S, f"出水秒数越界：{dict(row)}"
 
     # 5 · 同一门的会话区间互不重叠
     by_door: dict[int, list[tuple[str, str]]] = {}
@@ -154,7 +154,7 @@ def test_cross_gap_does_not_join_two_baths(fresh_db: str) -> None:
     assert len(rows) == 2
     assert rows[0]["ended_at"] == t0
     assert rows[0]["last_seen_at"] == t0, "它停在最后一次确认占着的那一帧"
-    assert rows[0]["flow_s"] == 0, "跨盲区那一段没有证据，不该计入"
+    assert rows[0]["total_flow_s"] == 0, "跨盲区那一段没有证据，不该计入"
     assert rows[0]["observed_span"] == "gap"
     assert rows[1]["assigned_at"] == far, "新的一场只能从我们看见它的那一刻起算"
 
@@ -167,7 +167,7 @@ def test_occupant_change_splits_the_account(fresh_db: str) -> None:
     rows = [row for row in door_link.list_sessions(device_id) if row["door_no"] == 1]
     assert [row["cert_no"] for row in rows] == ["甲", "乙"], "门1 应当是两个人的两笔账"
     assert rows[0]["ended_at"] == rows[1]["assigned_at"], "旧账的终点就是新账的起点"
-    assert rows[0]["flow_s"] > 0, "甲那一段确实出过水"
+    assert rows[0]["total_flow_s"] > 0, "甲那一段确实出过水"
 
 
 def test_flow_s_counts_only_observed_segments(fresh_db: str) -> None:
@@ -180,7 +180,7 @@ def test_flow_s_counts_only_observed_segments(fresh_db: str) -> None:
     _run(device_id)
 
     rows = door_link.list_sessions(device_id)
-    by_cert = {row["cert_no"]: row["flow_s"] for row in rows}
+    by_cert = {row["cert_no"]: row["total_flow_s"] for row in rows}
     assert by_cert["甲"] == 110, "甲那次：第一段 50 秒（12:00:20→12:01:10）+ 第二段 60 秒（12:02:00→12:03:00）"
     assert by_cert["乙"] == 30, "乙那一次：从分配到释放"
     assert by_cert["丙"] == 0, "丙那次跨了盲区，没有证据"

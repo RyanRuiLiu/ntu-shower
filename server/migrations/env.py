@@ -27,11 +27,15 @@ from app.modules.devices.models import (  # noqa: F401
     DeviceLinkEvent,
     DeviceLog,
 )
-from app.modules.doors.models import DoorSnapshot, DoorStateEvent  # noqa: F401
+from app.modules.doors.models import (  # noqa: F401
+    DoorSegment,
+    DoorSession,
+    DoorSnapshot,
+    DoorStateEvent,
+)
 from app.modules.ota.models import OtaRelease, OtaReleaseInstall  # noqa: F401
 from app.modules.voice.models import VoiceAsset, VoiceDelivery, VoiceRule, VoiceUnit  # noqa: F401
 from app.persistence.audit import ApiCall, CommandAudit, JobRun  # noqa: F401
-from app.persistence.usage import UsageSegment, UsageSession  # noqa: F401
 
 config = context.config
 

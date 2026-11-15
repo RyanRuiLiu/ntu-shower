@@ -34,7 +34,7 @@
 | `assigned_at` / `opened_at` | **会话**起点 / **段**起点 | 统计占用时用了段，零出水的会话全丢 |
 | `last_seen_at` / `ended_at` | 最后确认占用 / 观测到结束 | 前者才是可信下界；后者跨盲区时不是真实时刻 |
 | `assigned_source` / `observed_span` / `source` / `segments_complete` | 四个**不同维度**的可信度：起点怎么来的 / 本项目看没看见 / 段长证据强度 / 段记全没有 | 当一件事用，会把"下界"和"盲区"和"截断"混成一个"不可信" |
-| `usage_sessions.flow_s` / `usage_segments.flow_s` | 段之和 / 那一段的长度 | 同名列不同层级 |
+| `door_sessions.total_flow_s` / `door_segments.flow_s` | 段之和 / 那一段的长度 | 不同词，无歧义 |
 | `flow_s` / `device_flow_s` | 本项目算的 / 设备报的 | 两者不等 = 有段没进表；拿二者相等当"完整"是循环论证 |
 | `bath_time_s` / `device_flow_s` | 现态里的瞬时值 / 会话上的最大值 | `bath_time_s` 不单调，不能拿去减 |
 | `opened_at` / `opened_raw` | 服务端轴 / 设备轴 | 对外只能出服务端轴；原文只用于复核 |

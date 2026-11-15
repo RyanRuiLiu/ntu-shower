@@ -102,7 +102,7 @@ def test_session_and_segment_lifecycle(session: Session) -> None:
         session_id,
         seen=True,
         at=T0 + timedelta(seconds=90),
-        flow_s=90,
+        total_flow_s=90,
         device_flow_s=90,
         gap=False,
     )
@@ -110,7 +110,7 @@ def test_session_and_segment_lifecycle(session: Session) -> None:
 
     closed = doors.get_session(session, session_id)
     assert closed is not None
-    assert closed["flow_s"] == 90
+    assert closed["total_flow_s"] == 90
     assert closed["ended_at"].endswith("Z")
     assert doors.get_open_session(session, "dev-a", 1) is None
     assert len(doors.segments_of_session(session, session_id)) == 1
@@ -142,14 +142,14 @@ def test_derived_segment_and_touch_branches(session: Session) -> None:
         session_id,
         seen=False,
         at=T0 + timedelta(seconds=30),
-        flow_s=10,
+        total_flow_s=10,
         device_flow_s=20,
         gap=True,
     )
     touched = doors.get_session(session, session_id)
     assert touched is not None
     assert touched["observed_span"] == "gap"
-    assert touched["flow_s"] == 10
+    assert touched["total_flow_s"] == 10
     assert touched["last_seen_at"].endswith("Z")
 
     segment_id = doors.add_derived_segment(session, session_id, "dev-a", 2, T0, T0 + timedelta(seconds=10), 10, "raw")

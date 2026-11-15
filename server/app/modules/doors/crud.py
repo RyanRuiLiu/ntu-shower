@@ -16,8 +16,13 @@ from app.contracts import OCCUPIED_STATES, DoorView, ObservedSpan, SegmentSource
 from app.contracts import DoorState as DoorStateEnum
 from app.core.clock import format_rfc3339, parse_rfc3339, seconds_between
 from app.modules.devices.models import Device
-from app.modules.doors.models import DoorSnapshot, DoorState, DoorStateEvent
-from app.persistence.usage import UsageSegment, UsageSession
+from app.modules.doors.models import (
+    DoorSegment,
+    DoorSession,
+    DoorSnapshot,
+    DoorState,
+    DoorStateEvent,
+)
 
 _RUN_WALK_LIMIT = 50
 
@@ -43,7 +48,7 @@ def _live_view(row: DoorState, device_id: str) -> dict[str, Any]:
     }
 
 
-def _session_view(row: UsageSession, device_id: str) -> dict[str, Any]:
+def _session_view(row: DoorSession, device_id: str) -> dict[str, Any]:
     return {
         "id": int(row.id),
         "device_id": device_id,
@@ -57,11 +62,11 @@ def _session_view(row: UsageSession, device_id: str) -> dict[str, Any]:
         "segments_complete": bool(row.segments_complete),
         "ended_at": _ts(row.ended_at) if row.ended_at else "",
         "last_seen_at": _ts(row.last_seen_at),
-        "flow_s": int(row.flow_s),
+        "total_flow_s": int(row.total_flow_s),
     }
 
 
-def _segment_view(row: UsageSegment, device_id: str) -> dict[str, Any]:
+def _segment_view(row: DoorSegment, device_id: str) -> dict[str, Any]:
     return {
         "id": int(row.id),
         "session_id": int(row.session_id),
@@ -214,20 +219,20 @@ def insert_event(
 
 def get_open_session(session: Session, device_id: str, door_no: int) -> dict[str, Any] | None:
     row = session.scalars(
-        select(UsageSession)
+        select(DoorSession)
         .where(
-            UsageSession.device_id == device_id,
-            UsageSession.door_no == door_no,
-            UsageSession.ended_at.is_(None),
+            DoorSession.device_id == device_id,
+            DoorSession.door_no == door_no,
+            DoorSession.ended_at.is_(None),
         )
-        .order_by(UsageSession.id.desc())
+        .order_by(DoorSession.id.desc())
         .limit(1)
     ).first()
     return _session_view(row, device_id) if row is not None else None
 
 
 def get_session(session: Session, session_id: int) -> dict[str, Any] | None:
-    row = session.get(UsageSession, session_id)
+    row = session.get(DoorSession, session_id)
     if row is None:
         return None
     business = session.scalar(select(Device.id).where(Device.id == row.device_id))
@@ -243,7 +248,7 @@ def open_session(
     assigned_at: datetime,
     assigned_source: str,
 ) -> int:
-    row = UsageSession(
+    row = DoorSession(
         device_id=device_id,
         door_no=door_no,
         card_no=card_no,
@@ -263,17 +268,17 @@ def touch_session(
     *,
     seen: bool,
     at: datetime,
-    flow_s: int,
+    total_flow_s: int,
     device_flow_s: int,
     gap: bool,
 ) -> None:
     """推进里程碑。字段只增不减，重复调用无副作用。"""
-    row = session.get(UsageSession, session_id)
+    row = session.get(DoorSession, session_id)
     if row is None:
         return
     if seen:
         row.last_seen_at = at
-    row.flow_s = max(int(row.flow_s), flow_s)
+    row.total_flow_s = max(int(row.total_flow_s), total_flow_s)
     row.device_flow_s = max(int(row.device_flow_s), device_flow_s)
     if gap:
         row.observed_span = ObservedSpan.GAP
@@ -281,7 +286,7 @@ def touch_session(
 
 
 def close_session(session: Session, session_id: int, ended_at: datetime, segments_complete: bool) -> None:
-    row = session.get(UsageSession, session_id)
+    row = session.get(DoorSession, session_id)
     if row is None:
         return
     row.ended_at = ended_at
@@ -291,13 +296,13 @@ def close_session(session: Session, session_id: int, ended_at: datetime, segment
 
 def get_active_by_cert(session: Session, device_id: str, cert_no: str) -> dict[str, Any] | None:
     row = session.scalars(
-        select(UsageSession)
+        select(DoorSession)
         .where(
-            UsageSession.device_id == device_id,
-            UsageSession.cert_no == cert_no,
-            UsageSession.ended_at.is_(None),
+            DoorSession.device_id == device_id,
+            DoorSession.cert_no == cert_no,
+            DoorSession.ended_at.is_(None),
         )
-        .order_by(UsageSession.id.desc())
+        .order_by(DoorSession.id.desc())
         .limit(1)
     ).first()
     return _session_view(row, device_id) if row is not None else None
@@ -305,9 +310,9 @@ def get_active_by_cert(session: Session, device_id: str, cert_no: str) -> dict[s
 
 def list_open_sessions_of(session: Session, device_id: str) -> list[dict[str, Any]]:
     rows = session.scalars(
-        select(UsageSession)
-        .where(UsageSession.device_id == device_id, UsageSession.ended_at.is_(None))
-        .order_by(UsageSession.door_no)
+        select(DoorSession)
+        .where(DoorSession.device_id == device_id, DoorSession.ended_at.is_(None))
+        .order_by(DoorSession.door_no)
     ).all()
     return [_session_view(row, device_id) for row in rows]
 
@@ -315,13 +320,13 @@ def list_open_sessions_of(session: Session, device_id: str) -> list[dict[str, An
 def run_started_at(session: Session, device_id: str, door_no: int, cert_no: str, gap_s: int) -> str:
     """这一串连续占用里最早那一场的分配时刻；没有则空串。"""
     rows = session.scalars(
-        select(UsageSession)
+        select(DoorSession)
         .where(
-            UsageSession.device_id == device_id,
-            UsageSession.door_no == door_no,
-            UsageSession.cert_no == cert_no,
+            DoorSession.device_id == device_id,
+            DoorSession.door_no == door_no,
+            DoorSession.cert_no == cert_no,
         )
-        .order_by(UsageSession.assigned_at.desc())
+        .order_by(DoorSession.assigned_at.desc())
         .limit(_RUN_WALK_LIMIT)
     ).all()
     started = ""
@@ -344,13 +349,13 @@ def run_started_at(session: Session, device_id: str, door_no: int, cert_no: str,
 
 def get_open_segment(session: Session, device_id: str, door_no: int) -> dict[str, Any] | None:
     row = session.scalars(
-        select(UsageSegment)
+        select(DoorSegment)
         .where(
-            UsageSegment.device_id == device_id,
-            UsageSegment.door_no == door_no,
-            UsageSegment.closed_at.is_(None),
+            DoorSegment.device_id == device_id,
+            DoorSegment.door_no == door_no,
+            DoorSegment.closed_at.is_(None),
         )
-        .order_by(UsageSegment.id.desc())
+        .order_by(DoorSegment.id.desc())
         .limit(1)
     ).first()
     return _segment_view(row, device_id) if row is not None else None
@@ -359,14 +364,14 @@ def get_open_segment(session: Session, device_id: str, door_no: int) -> dict[str
 def latest_segment_opened_at(session: Session, device_id: str, door_no: int) -> str:
     """当前未结束会话里最近一段的开阀时刻；没有则空串。"""
     value = session.scalar(
-        select(UsageSegment.opened_at)
-        .join(UsageSession, UsageSession.id == UsageSegment.session_id)
+        select(DoorSegment.opened_at)
+        .join(DoorSession, DoorSession.id == DoorSegment.session_id)
         .where(
-            UsageSession.device_id == device_id,
-            UsageSegment.door_no == door_no,
-            UsageSession.ended_at.is_(None),
+            DoorSession.device_id == device_id,
+            DoorSegment.door_no == door_no,
+            DoorSession.ended_at.is_(None),
         )
-        .order_by(UsageSegment.opened_at.desc(), UsageSegment.id.desc())
+        .order_by(DoorSegment.opened_at.desc(), DoorSegment.id.desc())
         .limit(1)
     )
     return _ts(value) if value is not None else ""
@@ -380,7 +385,7 @@ def open_segment(
     opened_at: datetime,
     opened_raw: str,
 ) -> int:
-    row = UsageSegment(
+    row = DoorSegment(
         session_id=session_id,
         device_id=device_id,
         door_no=door_no,
@@ -400,7 +405,7 @@ def close_segment(
     source: SegmentSource,
     closed_raw: str,
 ) -> None:
-    row = session.get(UsageSegment, segment_id)
+    row = session.get(DoorSegment, segment_id)
     if row is None:
         return
     row.closed_at = closed_at
@@ -421,7 +426,7 @@ def add_derived_segment(
     closed_raw: str,
 ) -> int:
     """记一段推出来的出水（冷启动接手用），`source` 固定为 `derived`。"""
-    row = UsageSegment(
+    row = DoorSegment(
         session_id=session_id,
         device_id=device_id,
         door_no=door_no,
@@ -438,9 +443,7 @@ def add_derived_segment(
 
 def segments_of_session(session: Session, session_id: int) -> list[dict[str, Any]]:
     rows = session.scalars(
-        select(UsageSegment)
-        .where(UsageSegment.session_id == session_id)
-        .order_by(UsageSegment.opened_at, UsageSegment.id)
+        select(DoorSegment).where(DoorSegment.session_id == session_id).order_by(DoorSegment.opened_at, DoorSegment.id)
     ).all()
     result: list[dict[str, Any]] = []
     for row in rows:
@@ -451,16 +454,16 @@ def segments_of_session(session: Session, session_id: int) -> list[dict[str, Any
 def latest_usage_by_door(session: Session) -> dict[tuple[str, int], dict[str, Any]]:
     """每台设备每个喷头最后一次**完整**使用（只取已关阀的段）。"""
     latest_ids = (
-        select(func.max(UsageSegment.id))
-        .where(UsageSegment.closed_at.is_not(None))
-        .group_by(UsageSegment.device_id, UsageSegment.door_no)
+        select(func.max(DoorSegment.id))
+        .where(DoorSegment.closed_at.is_not(None))
+        .group_by(DoorSegment.device_id, DoorSegment.door_no)
         .scalar_subquery()
     )
     rows = session.execute(
-        select(UsageSegment, UsageSession.cert_no, Device.id)
-        .join(UsageSession, UsageSession.id == UsageSegment.session_id)
-        .join(Device, Device.id == UsageSegment.device_id)
-        .where(UsageSegment.id.in_(latest_ids))
+        select(DoorSegment, DoorSession.cert_no, Device.id)
+        .join(DoorSession, DoorSession.id == DoorSegment.session_id)
+        .join(Device, Device.id == DoorSegment.device_id)
+        .where(DoorSegment.id.in_(latest_ids))
     ).all()
     return {
         (device_id, int(segment.door_no)): {
@@ -476,9 +479,7 @@ def latest_usage_by_door(session: Session) -> dict[tuple[str, int], dict[str, An
 
 def list_sessions(session: Session, device_id: str) -> list[dict[str, Any]]:
     """这台设备的全部占用会话，按 id 升序（读模型与统计/核对共用）。"""
-    rows = session.scalars(
-        select(UsageSession).where(UsageSession.device_id == device_id).order_by(UsageSession.id)
-    ).all()
+    rows = session.scalars(select(DoorSession).where(DoorSession.device_id == device_id).order_by(DoorSession.id)).all()
     return [_session_view(row, device_id) for row in rows]
 
 
@@ -548,15 +549,13 @@ def last_closed_by_door(session: Session, device_id: str, before: str) -> list[d
     high = _parse_moment(before)
     ranked = (
         select(
-            UsageSegment.door_no,
-            UsageSegment.closed_at,
-            UsageSession.cert_no,
-            func.row_number()
-            .over(partition_by=UsageSegment.door_no, order_by=UsageSegment.closed_at.desc())
-            .label("rn"),
+            DoorSegment.door_no,
+            DoorSegment.closed_at,
+            DoorSession.cert_no,
+            func.row_number().over(partition_by=DoorSegment.door_no, order_by=DoorSegment.closed_at.desc()).label("rn"),
         )
-        .join(UsageSession, UsageSession.id == UsageSegment.session_id)
-        .where(UsageSegment.device_id == device_id, UsageSegment.closed_at.is_not(None), UsageSegment.closed_at < high)
+        .join(DoorSession, DoorSession.id == DoorSegment.session_id)
+        .where(DoorSegment.device_id == device_id, DoorSegment.closed_at.is_not(None), DoorSegment.closed_at < high)
         .subquery()
     )
     rows = session.execute(
