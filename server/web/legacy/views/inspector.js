@@ -1,0 +1,1240 @@
+/**
+ * 界面检视：查看设备当前界面并对它做原始注入。
+ *
+ * 顶部工具条：截图、界面树、全局按键、方向键组（移动设备端焦点光标）、Enter/Del。
+ *
+ * 鼠标手势：左键按下即松为点击；按住超过 TAP_MAX_MS 为长按，时长按实际按住时间；
+ * 按住拖动为滑动；右键取消当前手势。时长一律照实上报。长按无需新协议：发起点
+ * 等于终点的滑动即长按，复用 ui.touch 的既有能力。
+ *
+ * 每次操作后自动重截画面与重读节点树（各自可关，选择记 localStorage）。截图在飞
+ * 时不重发（screenrecord 一次约 3 秒且占住采集通道），期间到来的刷新并成一次尾随
+ * 重取；命令 failed/rejected 时画面不会变，不重取，timeout 结果未知照旧重取。
+ *
+ * 画面与结构都不轮询：定时拉取会让设备持续编码，也挤占采集通道。
+ */
+import { api } from '../core/api.js'
+import { copyText } from '../core/clipboard.js'
+import { NEED_DEVICE, REBOOT_CONFIRM } from '../core/copy.js'
+import { INPUT_CHANNELS, UI_KEYS } from '../core/contract.js'
+import { problemText, statusLabel } from '../core/outcome.js'
+import { $, disposer, esc, listen } from '../core/dom.js'
+import { store, subscribe } from '../core/store.js'
+
+/**
+ * 按住多久算长按而不是单击。
+ *
+ * 取 Android 系统判长按的标准值（`ViewConfiguration.getLongPressTimeout()`）——设备上的
+ * 控件就是按这条线判断的，比它更短会被当成点击。它只决定算哪种手势，不决定发给
+ * 设备的时长：那个照实报，按住多久发多久。
+ */
+const TAP_MAX_MS = 500
+/** 移动超过这个像素就不再算点击，转为滑动。 */
+const DRAG_THRESHOLD = 5
+/** 滑动距离小于这个值不算数（只是手抖）。 */
+const SWIPE_MIN = 8
+
+/** 节点列表（深度优先摊平，每项带 depth）。 */
+let nodes = []
+/**
+ * 操作后要不要自动刷新画面 / UI 树。记在 localStorage，缺席视为开。
+ */
+const AUTO_CAPTURE_KEY = 'ntu-shower.inspector.auto-capture'
+const AUTO_TREE_KEY = 'ntu-shower.inspector.auto-tree'
+let autoCapture = localStorage.getItem(AUTO_CAPTURE_KEY) !== '0'
+let autoTree = localStorage.getItem(AUTO_TREE_KEY) !== '0'
+
+/**
+ * 文本注入通道：`clipboard` 粘贴（支持中文；同一字段第二次插入会多一个空格——ROM
+ * 行为）与 `keys` 按键注入（无空格问题，仅英文/数字/符号）。两条并列、由使用者
+ * 按内容选择，选择记在 localStorage。
+ *
+ * 取值不在这里列——取自 `contract.js` 的 `INPUT_CHANNELS`（服务端
+ * `DeviceUiTextRequest.channel` 生成，有 `test_contract_sync.py` 守着）。
+ */
+const INPUT_CHANNEL_KEY = 'ntu-shower.inspector.input-channel'
+let inputChannel = localStorage.getItem(INPUT_CHANNEL_KEY)
+if (!INPUT_CHANNELS.includes(inputChannel)) inputChannel = 'clipboard'
+/** 父索引 → 子索引数组；根节点的父记作 -1。 */
+let children = new Map()
+/** 折叠起来的节点索引。 */
+let collapsed = new Set()
+/** 树里拥有 Tab 停靠点的节点索引；-1 表示尚未确定，渲染时落到第一个可见节点。 */
+let treeFocus = -1
+/** 当前选中的节点索引；-1 表示未选。 */
+let selected = -1
+/** 最近一次读到的原始 XML，过滤时重渲染用。 */
+let currentXml = ''
+/** 设备分辨率，取自图片原始像素——坐标换算的基准。 */
+let deviceWidth = 0
+let deviceHeight = 0
+
+/** 左键按下的起点（设备坐标 + 视口坐标）。 */
+let pressStart = null
+/** 按下的时刻（`performance.now()`），手势时长按实际按住时间算。 */
+let pressStartedAt = 0
+/** 计时刷新句柄。 */
+let pressTicker = null
+/** 拖动起点（设备坐标）；有值时表示正在拖动。 */
+let dragStart = null
+
+const BOUNDS = /^\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]$/
+
+function boundsOf(node) {
+  const match = BOUNDS.exec(node.bounds || '')
+  if (!match) return null
+  const [, left, top, right, bottom] = match.map(Number)
+  return { left, top, right, bottom, cx: Math.round((left + right) / 2), cy: Math.round((top + bottom) / 2) }
+}
+
+/** 类名的末段：`android.widget.LinearLayout` → `LinearLayout`。 */
+function shortClass(name) {
+  return (name || '').split('.').pop() || '(node)'
+}
+
+/**
+ * 是否是输入框。
+ *
+ * 官方 `uiautomator` XML 没有 `editable` 字段（旧版自定义 JSON 有），只能按类名判断。
+ * `EditText` 覆盖绝大多数输入场景，`AutoCompleteTextView` 是它的子类，一并算上。
+ */
+function isEditable(cls) {
+  return /EditText|AutoCompleteTextView/.test(cls || '')
+}
+
+function setOpState(text, kind) {
+  const box = $('opState')
+  box.className = kind === 'ok' ? 'tb-status is-ok' : kind === 'err' ? 'tb-status is-err' : 'tb-status'
+  box.textContent = text
+}
+
+// ── 树 ─────────────────────────────────────────────────────
+
+function parseTree(xml) {
+  const doc = new DOMParser().parseFromString(xml, 'text/xml')
+  if (doc.querySelector('parsererror')) throw new Error('节点树解析失败')
+
+  const list = []
+  const stack = []
+
+  const walk = (element, depth) => {
+    const parent = stack.length > 0 ? stack[stack.length - 1] : -1
+    list.push({
+      index: list.length,
+      depth,
+      parent,
+      text: element.getAttribute('text') || '',
+      id: element.getAttribute('resource-id') || '',
+      cls: element.getAttribute('class') || '',
+      desc: element.getAttribute('content-desc') || '',
+      bounds: element.getAttribute('bounds') || '',
+      clickable: element.getAttribute('clickable') === 'true',
+      longClickable: element.getAttribute('long-clickable') === 'true',
+      scrollable: element.getAttribute('scrollable') === 'true',
+      checkable: element.getAttribute('checkable') === 'true',
+      checked: element.getAttribute('checked') === 'true',
+      editable: isEditable(element.getAttribute('class')),
+    })
+    stack.push(list.length - 1)
+    for (const child of element.children) walk(child, depth + 1)
+    stack.pop()
+  }
+
+  for (const child of doc.documentElement.children) walk(child, 0)
+
+  nodes = list
+  children = new Map()
+  for (const node of list) {
+    if (!children.has(node.parent)) children.set(node.parent, [])
+    children.get(node.parent).push(node.index)
+  }
+}
+
+/** 搜索词支持 `id:` / `text:` / `class:` 前缀。 */
+function parseSearch(raw) {
+  const text = (raw || '').trim()
+  if (text.startsWith('id:') || text.startsWith('res:')) return { field: 'id', term: text.slice(3).trim().toLowerCase() }
+  if (text.startsWith('text:')) return { field: 'text', term: text.slice(5).trim().toLowerCase() }
+  if (text.startsWith('class:')) return { field: 'cls', term: text.slice(6).trim().toLowerCase() }
+  return { field: 'any', term: text.toLowerCase() }
+}
+
+function matches(node, search) {
+  if (!search.term) return true
+  const haystack =
+    search.field === 'any'
+      ? `${node.cls} ${node.text} ${node.desc} ${node.id}`.toLowerCase()
+      : String(node[search.field] || '').toLowerCase()
+  return haystack.includes(search.term)
+}
+
+/** 当前可见（未被折叠隐藏）的节点索引，文档顺序。 */
+function visibleIndexes() {
+  const result = []
+  const walk = (index) => {
+    result.push(index)
+    if (!collapsed.has(index)) for (const kid of children.get(index) || []) walk(kid)
+  }
+  for (const root of children.get(-1) || []) walk(root)
+  return result
+}
+
+function renderTree() {
+  const box = $('treeContent')
+  const search = parseSearch($('treeSearch').value)
+  const hit = new Set(nodes.filter((node) => matches(node, search)).map((node) => node.index))
+  const filtering = Boolean(search.term)
+
+  // 重画会换掉整棵 DOM：滚动位置与焦点按重画前的状态还原，翻看深层节点时列表才不跳回顶部
+  const scrollTop = box.scrollTop
+  const focused = box.contains(document.activeElement) ? document.activeElement.closest('.node') : null
+  const focusedIndex = focused ? Number(focused.dataset.index) : null
+  if (focusedIndex !== null) treeFocus = focusedIndex
+  const visible = visibleIndexes()
+  const tabStop = visible.includes(treeFocus) ? treeFocus : (visible[0] ?? -1)
+
+  const lines = []
+  const walk = (index) => {
+    const node = nodes[index]
+    if (!node) return
+    const kids = children.get(index) || []
+    const isCollapsed = collapsed.has(index)
+
+    const classes = ['node']
+    if (index === selected) classes.push('is-selected')
+    if (node.clickable) classes.push('is-clickable')
+    if (node.longClickable) classes.push('is-long-clickable')
+    if (node.editable) classes.push('is-editable')
+    if (node.scrollable) classes.push('is-scrollable')
+    if (filtering && !hit.has(index)) classes.push('is-dim')
+    if (filtering && hit.has(index)) classes.push('is-hit')
+
+    const tags = []
+    if (node.clickable) tags.push('<span class="node-tag int">tap</span>')
+    if (node.longClickable) tags.push('<span class="node-tag long">hold</span>')
+    if (node.editable) tags.push('<span class="node-tag edit">edit</span>')
+    if (node.scrollable) tags.push('<span class="node-tag scroll">scroll</span>')
+
+    const label = [
+      `<span class="node-class">${esc(shortClass(node.cls))}</span>`,
+      node.text ? ` <span class="node-text">"${esc(node.text)}"</span>` : '',
+      node.id ? ` <span class="node-id">${esc(node.id.split('/').pop())}</span>` : '',
+      tags.join(' '),
+    ].join('')
+
+    lines.push(
+      `<div class="${classes.join(' ')}" data-index="${index}" data-depth="${node.depth}"
+        role="treeitem" aria-level="${node.depth + 1}" aria-selected="${index === selected}"
+        ${kids.length > 0 ? `aria-expanded="${!isCollapsed}"` : ''}
+        tabindex="${index === tabStop ? 0 : -1}">
+        <span class="node-toggle" data-toggle="${index}" aria-hidden="true">${kids.length > 0 ? (isCollapsed ? '▶' : '▼') : '·'}</span>
+        <span class="node-label">${label}</span>
+      </div>`,
+    )
+    if (!isCollapsed) for (const kid of kids) walk(kid)
+  }
+  for (const root of children.get(-1) || []) walk(root)
+
+  box.innerHTML = lines.join('') || '<div class="empty">暂无节点</div>'
+  box.scrollTop = scrollTop
+  // 缩进是运行时几何值：只写深度变量，间距公式留在 CSS 令牌里
+  for (const row of box.querySelectorAll('.node[data-depth]')) {
+    row.style.setProperty('--depth', row.dataset.depth)
+  }
+  if (focusedIndex !== null) {
+    const target =
+      box.querySelector(`.node[data-index="${focusedIndex}"]`) ??
+      box.querySelector(`.node[data-index="${tabStop}"]`)
+    if (target) target.focus()
+  }
+  $('treeCount').textContent = filtering ? `${hit.size} / ${nodes.length}` : `${nodes.length} 个节点`
+}
+
+// ── 选中、面包屑、高亮 ─────────────────────────────────────
+
+function renderBreadcrumb(index) {
+  const trail = []
+  let cursor = index
+  while (cursor >= 0 && trail.length < 24) {
+    const node = nodes[cursor]
+    if (!node) break
+    trail.unshift({ index: cursor, label: node.id ? node.id.split('/').pop() : shortClass(node.cls) })
+    cursor = node.parent
+  }
+  $('breadcrumb').innerHTML = trail
+    .map(({ index: at, label }) => `<button type="button" class="crumb" data-jump="${at}">${esc(label)}</button>`)
+    .join('<span class="sep" aria-hidden="true">›</span>')
+}
+
+function renderProps(node) {
+  if (!node) {
+    for (const id of ['propClass', 'propRid', 'propText', 'propDesc', 'propBounds', 'propSize', 'propCoords']) {
+      $(id).textContent = '-'
+    }
+    $('propTags').innerHTML = ''
+    return
+  }
+  const box = boundsOf(node)
+  $('propClass').textContent = node.cls || '-'
+  $('propRid').textContent = node.id || '-'
+  $('propText').textContent = node.text || '-'
+  $('propDesc').textContent = node.desc || '-'
+  $('propBounds').textContent = node.bounds || '-'
+  $('propSize').textContent = box ? `${box.right - box.left} × ${box.bottom - box.top}` : '-'
+  $('propCoords').textContent = box ? `${box.cx}, ${box.cy}` : '-'
+
+  const flags = [
+    ['clickable', node.clickable],
+    ['long-clickable', node.longClickable],
+    ['scrollable', node.scrollable],
+    ['checkable', node.checkable],
+    ['checked', node.checked],
+    ['editable', node.editable],
+  ]
+  $('propTags').innerHTML = flags
+    .map(([name, on]) => `<span class="prop-tag ${on ? 'on' : ''}">${esc(name)}</span>`)
+    .join('')
+}
+
+/** 在画面上框出选中节点。覆盖层与图片同尺寸，因此按设备坐标的百分比定位。 */
+function highlight(index) {
+  const node = index >= 0 ? nodes[index] : null
+  const box = node ? boundsOf(node) : null
+  if (!box || !deviceWidth || !deviceHeight) {
+    $('overlay').innerHTML = ''
+    return
+  }
+  const left = (box.left / deviceWidth) * 100
+  const top = (box.top / deviceHeight) * 100
+  const width = ((box.right - box.left) / deviceWidth) * 100
+  const height = ((box.bottom - box.top) / deviceHeight) * 100
+  $('overlay').innerHTML = '<div class="highlight"></div>'
+  const boxEl = $('overlay').querySelector('.highlight')
+  boxEl.style.setProperty('--left', `${left}%`)
+  boxEl.style.setProperty('--top', `${top}%`)
+  boxEl.style.setProperty('--width', `${width}%`)
+  boxEl.style.setProperty('--height', `${height}%`)
+}
+
+function selectNode(index) {
+  selected = index
+  const node = index >= 0 ? nodes[index] : null
+  renderProps(node)
+  highlight(index)
+  if (node) renderBreadcrumb(index)
+  else $('breadcrumb').innerHTML = ''
+  $('propTap').disabled = !node || !boundsOf(node)
+  renderTree()
+}
+
+// ── 动作 ───────────────────────────────────────────────────
+
+async function requireDevice() {
+  if (!store.deviceId) {
+    setOpState(NEED_DEVICE, 'err')
+    return null
+  }
+  return store.deviceId
+}
+
+async function act(label, run, options = {}) {
+  const deviceId = await requireDevice()
+  if (!deviceId) return
+  setOpState(`${label}…`)
+  try {
+    const result = await run(deviceId)
+    const ok = result.status === 'ok'
+    const detail = result.terminal_message || result.reason_code || ''
+    // 状态词取自 core.outcome 不自建；加动作名前缀是因为这块面板会连点多个动作
+    const state = statusLabel(result.status)
+    setOpState(detail ? `${label} · ${state} · ${detail}` : `${label} · ${state}`, ok ? 'ok' : 'err')
+    // 操作改变了界面，画面与树都要跟着更新。failed/rejected 未落到界面，重取只是
+    // 白花一轮采集；timeout 结果未知，照旧重取。
+    if (options.refresh !== false && (ok || result.status === 'timeout')) refreshBoth()
+  } catch (error) {
+    setOpState(problemText(error), 'err')
+  }
+}
+
+/**
+ * 重启整机。
+ *
+ * 放在这个工具条上，是因为"界面卡住不动了"最先被打开的就是这一页——从这里能直接重启，
+ * 不必切回设备页。
+ *
+ * `refresh: false`：设备马上要重启，紧接着去重取画面与界面树只会白等一轮超时，而那一轮
+ * 的失败还会把状态栏染红，看上去像是重启失败了。
+ */
+async function rebootDevice() {
+  if (!window.confirm(REBOOT_CONFIRM)) return
+  await act('重启设备', (deviceId) => api.reboot(deviceId), { refresh: false })
+}
+
+/** 截图在飞标记：screenrecord 占住设备端采集通道，重复触发只会有害。 */
+let capturing = false
+/** 刷新单飞与尾随合并：连续操作只补一轮，不把采集通道排成串。 */
+let refreshInFlight = false
+let refreshPending = false
+
+/**
+ * 把画面框缩到面板能容纳的最大尺寸，保持设备宽高比。
+ *
+ * 覆盖层、高亮与坐标换算都以框为基准，所以框必须与图片显示区域同尺寸；
+ * 面板尺寸变化（窗口缩放、右侧界面树收起）时重算。
+ */
+function fitScreen() {
+  const frame = $('screenFrame')
+  if (frame.hidden) return
+  const img = $('screenshot')
+  const width = img.naturalWidth || deviceWidth
+  const height = img.naturalHeight || deviceHeight
+  const panel = $('screenPanel')
+  if (!width || !height || !panel.clientWidth || !panel.clientHeight) return
+  const scale = Math.min(panel.clientWidth / width, panel.clientHeight / height)
+  frame.style.setProperty('--screen-w', `${Math.max(1, Math.floor(width * scale))}px`)
+  frame.style.setProperty('--screen-h', `${Math.max(1, Math.floor(height * scale))}px`)
+}
+
+async function capture() {
+  const deviceId = await requireDevice()
+  if (!deviceId) return
+  if (capturing) return
+  capturing = true
+  setOpState('正在截图…')
+  $('screenPanel').classList.add('is-loading')
+  try {
+    const result = await api.capture(deviceId)
+    const image = result.data?.image_base64
+    if (!image) {
+      setOpState('设备未返回画面', 'err')
+      return
+    }
+    const url = `data:image/jpeg;base64,${image}`
+    const probe = new Image()
+    probe.onload = () => {
+      deviceWidth = probe.naturalWidth
+      deviceHeight = probe.naturalHeight
+      $('screenshot').src = url
+      $('screenFrame').hidden = false
+      $('screenHint').hidden = true
+      fitScreen()
+      highlight(selected)
+      if (nodes.length > 0) renderTree()
+      setOpState(`画面 ${deviceWidth}×${deviceHeight}`, 'ok')
+    }
+    probe.onerror = () => setOpState('画面解码失败', 'err')
+    probe.src = url
+  } catch (error) {
+    setOpState(problemText(error), 'err')
+  } finally {
+    $('screenPanel').classList.remove('is-loading')
+    capturing = false
+  }
+}
+
+async function refreshTree() {
+  const deviceId = await requireDevice()
+  if (!deviceId) return
+  setOpState('正在读取界面结构…')
+  try {
+    const result = await api.dumpTree(deviceId)
+    const xml = result.data?.xml
+    if (!xml) {
+      setOpState(result.terminal_message || '未能读取界面结构', 'err')
+      return
+    }
+    currentXml = xml
+    parseTree(xml)
+    collapsed = new Set()
+    selectNode(-1)
+    setOpState(`${nodes.length} 个节点`, 'ok')
+  } catch (error) {
+    setOpState(problemText(error), 'err')
+  }
+}
+
+/** 画面与树一起刷新：只刷一边会看到不匹配的两份状态。
+ *  两个开关各自决定要不要刷，全关就不刷（用户明确要手动控制）。
+ *  在飞时不重发，期间的请求并成一次尾随重取——连点五下只产生两轮采集，不是五轮。 */
+async function refreshBoth() {
+  if (!autoCapture && !autoTree) return
+  if (refreshInFlight) {
+    refreshPending = true
+    return
+  }
+  refreshInFlight = true
+  try {
+    const jobs = [autoCapture ? capture() : null, autoTree ? refreshTree() : null].filter(Boolean)
+    await Promise.all(jobs)
+  } finally {
+    refreshInFlight = false
+    if (refreshPending) {
+      refreshPending = false
+      refreshBoth()
+    }
+  }
+}
+
+/** 画面上的坐标换算。越界时夹到边缘：拖到画面外也要能结束滑动。 */
+function toDevice(clientX, clientY) {
+  if ($('screenFrame').hidden || !deviceWidth) return null
+  const rect = $('screenshot').getBoundingClientRect()
+  if (!rect.width) return null
+  const cx = Math.max(0, Math.min(rect.width, clientX - rect.left))
+  const cy = Math.max(0, Math.min(rect.height, clientY - rect.top))
+  return {
+    x: Math.round((cx / rect.width) * deviceWidth),
+    y: Math.round((cy / rect.height) * deviceHeight),
+    cx,
+    cy,
+    rect,
+  }
+}
+
+/**
+ * 按下指示：一圈进度 + 实时秒数。
+ *
+ * 进度环走满一圈代表到了长按的界线，秒数照实显示按了多久。
+ */
+function pressIndicator(at) {
+  const size = 46
+  const radius = size / 2 - 3
+  const circumference = 2 * Math.PI * radius
+  const layer = $('overlay')
+
+  const ring = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  ring.setAttribute('class', 'press-ring')
+  ring.setAttribute('width', size)
+  ring.setAttribute('height', size)
+  const x = `${(at.cx / at.rect.width) * 100}%`
+  const y = `${(at.cy / at.rect.height) * 100}%`
+  ring.style.setProperty('--x', x)
+  ring.style.setProperty('--y', y)
+  ring.innerHTML =
+    `<circle cx="${size / 2}" cy="${size / 2}" r="${radius}" ` +
+    `stroke-dasharray="${circumference}" stroke-dashoffset="${circumference}"/>`
+
+  const label = document.createElement('div')
+  label.className = 'press-label'
+  label.style.setProperty('--x', x)
+  label.style.setProperty('--y', y)
+
+  layer.append(ring, label)
+  const circle = ring.querySelector('circle')
+
+  return {
+    tick(heldMs) {
+      circle.setAttribute('stroke-dashoffset', String(circumference * (1 - Math.min(heldMs / TAP_MAX_MS, 1))))
+      ring.classList.toggle('is-held', heldMs >= TAP_MAX_MS)
+      label.textContent = `${(heldMs / 1000).toFixed(1)}s`
+      label.classList.toggle('is-held', heldMs >= TAP_MAX_MS)
+    },
+    clear() {
+      ring.remove()
+      label.remove()
+    },
+  }
+}
+
+function stopPress() {
+  if (pressTicker !== null) {
+    cancelAnimationFrame(pressTicker)
+    pressTicker = null
+  }
+  pressIndicatorRef?.clear()
+  pressIndicatorRef = null
+  pressStart = null
+}
+
+let pressIndicatorRef = null
+
+/** 画一次涟漪。颜色由调用方给：点击绿、长按橙、滑动紫，一眼分得清刚才发的是哪种。 */
+function ripple(at, color) {
+  const dot = document.createElement('div')
+  dot.className = 'ripple'
+  dot.style.setProperty('--x', `${(at.cx / at.rect.width) * 100}%`)
+  dot.style.setProperty('--y', `${(at.cy / at.rect.height) * 100}%`)
+  dot.style.setProperty('--tone', color)
+  $('overlay').appendChild(dot)
+  setTimeout(() => dot.remove(), 500)
+}
+
+function tapAt(x, y) {
+  act(`点击 ${x},${y}`, (deviceId) => api.touch(deviceId, { x, y }))
+}
+
+/**
+ * 长按：起点等于终点的滑动就是长按，设备端按有无 to_x 分派，无需新协议。
+ * durationMs 照实取按住时间：某些界面靠按住时长区分行为，写死会让"按住多久"
+ * 无法表达。
+ */
+function longPressAt(x, y, durationMs) {
+  act(`长按 ${x},${y} ${(durationMs / 1000).toFixed(1)}s`, (deviceId) =>
+    api.touch(deviceId, { x, y, to_x: x, to_y: y, duration_ms: durationMs }),
+  )
+}
+
+/** 滑动。时长同样取实际按住时间——拖得快就该滑得快。 */
+function swipeFrom(from, to, durationMs) {
+  act(`滑动 ${from.x},${from.y} → ${to.x},${to.y} ${(durationMs / 1000).toFixed(1)}s`, (deviceId) =>
+    api.touch(deviceId, { x: from.x, y: from.y, to_x: to.x, to_y: to.y, duration_ms: durationMs }),
+  )
+}
+
+function tapSelected() {
+  const node = nodes[selected]
+  const box = node ? boundsOf(node) : null
+  if (!box) {
+    setOpState('选中的节点没有可用坐标', 'err')
+    return
+  }
+  tapAt(box.cx, box.cy)
+}
+
+// ── 拖动的方向箭头 ─────────────────────────────────────────
+
+function drawSwipe(from, to) {
+  const layer = $('swipeLayer')
+  const angle = Math.atan2(to.cy - from.cy, to.cx - from.cx)
+  const head = 12
+
+  const path = (x1, y1, x2, y2, stroke, width, dash = '') =>
+    `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${stroke}" stroke-width="${width}" ${dash ? `stroke-dasharray="${dash}"` : ''} stroke-linecap="round"/>`
+
+  layer.innerHTML = `
+    ${path(from.cx, from.cy, to.cx, to.cy, 'var(--purple)', 3, '8,4')}
+    <polygon points="${to.cx},${to.cy} ${to.cx - head * Math.cos(angle - 0.45)},${to.cy - head * Math.sin(angle - 0.45)} ${to.cx - head * Math.cos(angle + 0.45)},${to.cy - head * Math.sin(angle + 0.45)}" fill="var(--purple)"/>
+    <circle cx="${from.cx}" cy="${from.cy}" r="5" fill="var(--purple)"/>
+    <circle cx="${to.cx}" cy="${to.cy}" r="4" fill="var(--text)"/>`
+}
+
+function clearSwipe() {
+  $('swipeLayer').innerHTML = ''
+}
+
+// ── 右键菜单 ───────────────────────────────────────────────
+
+let ctxIndex = -1
+/** 菜单的触发位置；关闭时按它把焦点还回去（键盘用户不能在菜单消失后掉到页面开头）。 */
+let ctxReturnFocus = null
+
+function showContextMenu(clientX, clientY, index) {
+  ctxIndex = index
+  const menu = $('ctxMenu')
+  ctxReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  menu.hidden = false
+  menu.style.setProperty('--x', `${Math.min(clientX, window.innerWidth - menu.offsetWidth)}px`)
+  menu.style.setProperty('--y', `${Math.min(clientY, window.innerHeight - menu.offsetHeight)}px`)
+  menu.querySelector('.item')?.focus()
+}
+
+function hideContextMenu({ restoreFocus = false } = {}) {
+  const menu = $('ctxMenu')
+  const returnFocus = ctxReturnFocus
+  ctxReturnFocus = null
+  if (menu.hidden) return
+  menu.hidden = true
+  if (restoreFocus && returnFocus?.isConnected) returnFocus.focus()
+}
+
+/** 树的焦点移动：只改停靠点与 DOM 焦点，不改变选中项——选中由 Enter 决定。 */
+function focusTreeIndex(index) {
+  treeFocus = index
+  $('treeContent').querySelector(`.node[data-index="${index}"]`)?.focus()
+}
+
+/** 键盘在树内移动：上下走可见节点，左右折叠/展开，Enter 选中，空格折叠。 */
+function handleTreeKey(event) {
+  const row = event.target.closest('.node')
+  if (!row) return
+  const index = Number(row.dataset.index)
+  const rows = [...$('treeContent').querySelectorAll('.node')]
+  const position = rows.indexOf(row)
+  const kids = children.get(index) || []
+  const isCollapsed = collapsed.has(index)
+
+  if ((event.key === 'F10' && event.shiftKey) || event.key === 'ContextMenu') {
+    event.preventDefault()
+    selectNode(index)
+    const focusedRow = $('treeContent').querySelector(`.node[data-index="${index}"]`)
+    const rect = focusedRow.getBoundingClientRect()
+    showContextMenu(rect.left + 12, rect.top + rect.height, index)
+    return
+  }
+
+  if (event.key === 'ArrowDown' && position < rows.length - 1) {
+    event.preventDefault()
+    focusTreeIndex(Number(rows[position + 1].dataset.index))
+  } else if (event.key === 'ArrowUp' && position > 0) {
+    event.preventDefault()
+    focusTreeIndex(Number(rows[position - 1].dataset.index))
+  } else if (event.key === 'ArrowRight') {
+    event.preventDefault()
+    if (kids.length > 0 && isCollapsed) {
+      collapsed.delete(index)
+      renderTree()
+      focusTreeIndex(index)
+    } else if (kids.length > 0) {
+      focusTreeIndex(kids[0])
+    }
+  } else if (event.key === 'ArrowLeft') {
+    event.preventDefault()
+    if (kids.length > 0 && !isCollapsed) {
+      collapsed.add(index)
+      renderTree()
+      focusTreeIndex(index)
+    } else {
+      const parent = nodes[index]?.parent ?? -1
+      if (parent >= 0) focusTreeIndex(parent)
+    }
+  } else if (event.key === 'Enter') {
+    event.preventDefault()
+    selectNode(index)
+    focusTreeIndex(index)
+  } else if (event.key === ' ' && kids.length > 0) {
+    event.preventDefault()
+    if (isCollapsed) collapsed.delete(index)
+    else collapsed.add(index)
+    renderTree()
+    focusTreeIndex(index)
+  }
+}
+
+/** 失败进本页操作状态区（核心模块不认识各页的结果区），成功文案由核心统一。 */
+function copy(text, what) {
+  copyText(text, { label: what, onFail: () => setOpState('复制失败（浏览器未授予剪贴板权限）', 'err') })
+}
+
+// ── 视图 ───────────────────────────────────────────────────
+
+let dispose = disposer()
+
+/**
+ * 模板里的按键与文本通道必须与契约逐字一致。
+ *
+ * 这两样东西的性质不同，分开是对的：**布局**（按钮怎么排、中文叫什么）由模板定，
+ * **取值**（`home` / `clipboard` 这些字符串）是契约，由 `contract.js` 从服务端的请求
+ * 模型生成、`test_contract_sync.py` 逐字节守着。
+ *
+ * 但取值不能在这里另抄一份：服务端增删一个按键时，手抄的那份会静默少一个按钮——
+ * 使用者按下去没反应，而没有任何东西报错。所以模板照写，这里对齐。
+ */
+function assertTemplateMatchesContract(root) {
+  for (const selector of ['[data-key]', '[data-channel]']) {
+    const attribute = selector.slice(1, -1)
+    const values = [...root.querySelectorAll(selector)].map((el) => el.getAttribute(attribute))
+    const rendered = new Set(values)
+    const expected = selector === '[data-key]' ? UI_KEYS : INPUT_CHANNELS
+    const missing = expected.filter((value) => !rendered.has(value))
+    const extra = [...rendered].filter((value) => !expected.includes(value))
+    if (missing.length > 0 || extra.length > 0) {
+      throw new Error(`${attribute} 与契约不一致：缺 [${missing}]；多 [${extra}]`)
+    }
+  }
+}
+
+export const inspectorView = {
+  id: 'inspector',
+  title: '界面检视',
+
+  mount(root) {
+    root.innerHTML = `
+      <div class="tb">
+        <button type="button" class="btn btn-sm" data-act="capture">截图</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-act="tree">界面树</button>
+        <span class="sep"></span>
+        <span class="grp">
+          <button type="button" class="btn btn-ghost btn-sm" data-key="home">主页</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-key="back">返回</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-key="recents">最近任务</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-key="notifications">通知栏</button>
+        </span>
+        <span class="sep"></span>
+        <span class="grp">
+          <button type="button" class="btn btn-ghost btn-sm" data-key="dpad_up" title="焦点上移">▲</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-key="dpad_down" title="焦点下移">▼</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-key="dpad_left" title="焦点左移">◀</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-key="dpad_right" title="焦点右移">▶</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-key="dpad_center" title="按下焦点控件">确认</button>
+        </span>
+        <span class="sep"></span>
+        <span class="grp">
+          <button type="button" class="btn btn-ghost btn-sm" data-key="enter">回车</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-key="del">删除</button>
+        </span>
+        <span class="sep"></span>
+        <span class="grp">
+          <button type="button" class="btn btn-danger btn-sm" data-act="reboot" title="重启整机；设备会离线一段时间，进行中的会话会中断">重启设备</button>
+        </span>
+        <div class="tb-right">
+          <label class="tb-toggle" title="操作后自动重截画面">
+            <input type="checkbox" id="autoCaptureToggle"> 自动截图
+          </label>
+          <label class="tb-toggle" title="操作后自动重读界面结构">
+            <input type="checkbox" id="autoTreeToggle"> 自动界面树
+          </label>
+          <span class="tb-status" id="opState">就绪</span>
+        </div>
+      </div>
+
+      <div class="stage">
+        <div class="screen-panel" id="screenPanel">
+          <span class="muted" id="screenHint">点击「截图」加载画面，随后可直接在画面上操作</span>
+          <div class="screen-frame" id="screenFrame" hidden>
+            <img id="screenshot" alt="设备屏幕" draggable="false">
+            <div class="overlay" id="overlay"></div>
+            <svg class="swipe-layer" id="swipeLayer"></svg>
+            <svg class="crosshair" id="crosshair">
+              <line id="crossH" x1="0" y1="0" x2="100%" y2="0"></line>
+              <line id="crossV" x1="0" y1="0" x2="0" y2="100%"></line>
+            </svg>
+            <!-- 提示条必须挂在 screen-frame 里：坐标按图片算，挂在面板上会差出留白，
+                 而面板 overflow:hidden 会把贴边时的提示条裁掉 -->
+            <div class="coord-tip" id="coordTip" hidden></div>
+          </div>
+        </div>
+
+        <div class="tree-panel" id="treePanel">
+          <div class="panel-header">
+            <button type="button" class="panel-title-btn" id="panelCollapse"
+              aria-controls="treePanel" aria-expanded="true" title="收起右侧面板，画面占满整行">界面树</button>
+            <span class="count" id="treeCount"></span>
+            <span class="actions">
+              <button type="button" class="btn btn-ghost btn-sm" data-act="collapse" title="折叠选中节点的子树">[-]</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-act="expand" title="展开全部">[+]</button>
+            </span>
+          </div>
+          <input type="text" class="tree-search" id="treeSearch" placeholder="搜索  class:Button  text:确认  id:btn  …" aria-label="搜索界面树">
+          <div class="breadcrumb" id="breadcrumb"></div>
+          <div class="tree-content" id="treeContent" role="tree" aria-label="界面节点树"><div class="empty">点击「界面树」加载</div></div>
+
+          <div class="prop-panel">
+            <div class="prop-header">属性</div>
+            <div class="prop-section">
+              <div class="prop-section-title">基本信息</div>
+              <div class="kv is-compact"><span class="k">Class</span><span class="v" id="propClass">-</span></div>
+              <div class="kv is-compact"><span class="k">ResId</span><span class="v" id="propRid">-</span></div>
+              <div class="kv is-compact"><span class="k">Text</span><span class="v" id="propText">-</span></div>
+              <div class="kv is-compact"><span class="k">Desc</span><span class="v" id="propDesc">-</span></div>
+            </div>
+            <div class="prop-section">
+              <div class="prop-section-title">布局信息</div>
+              <div class="kv is-compact"><span class="k">Bounds</span><span class="v" id="propBounds">-</span></div>
+              <div class="kv is-compact"><span class="k">Size</span><span class="v" id="propSize">-</span></div>
+              <div class="kv is-compact"><span class="k">Center</span><span class="v" id="propCoords">-</span></div>
+            </div>
+            <div class="prop-section">
+              <div class="prop-section-title">交互状态</div>
+              <div class="prop-tags" id="propTags"></div>
+            </div>
+            <div class="prop-section">
+              <button type="button" class="btn btn-sm btn-block" id="propTap" disabled>点击所选元素</button>
+            </div>
+          </div>
+
+          <div class="input-bar">
+            <span class="btn-group" id="inputChannel">
+              <button type="button" class="btn btn-ghost btn-sm" data-channel="clipboard" title="剪贴板粘贴：支持中文；同一字段第二次插入会多一个空格（ROM 行为）">粘贴</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-channel="keys" title="按键注入：无多余空格问题，仅支持英文、数字与符号">按键</button>
+            </span>
+            <input type="text" id="textInput" placeholder="输入文本后按回车发送" aria-label="输入文本">
+            <button type="button" class="btn btn-sm" data-act="send">发送</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右面板收起后的恢复把手：贴在画面区右缘 -->
+      <button type="button" class="tree-restore" id="treeRestore" title="展开界面树面板" hidden>‹ 界面树</button>
+
+      <div class="ctx-menu" id="ctxMenu" role="menu" aria-label="节点操作" hidden>
+        <button type="button" class="item" role="menuitem" tabindex="-1" data-ctx="tap">点击元素<span class="shortcut" aria-hidden="true">双击</span></button>
+        <button type="button" class="item" role="menuitem" tabindex="-1" data-ctx="long-tap">长按元素</button>
+        <button type="button" class="item" role="menuitem" tabindex="-1" data-ctx="copy-id">复制 resource-id</button>
+        <button type="button" class="item" role="menuitem" tabindex="-1" data-ctx="copy-text">复制文本</button>
+        <button type="button" class="item" role="menuitem" tabindex="-1" data-ctx="copy-desc">复制内容描述</button>
+        <button type="button" class="item" role="menuitem" tabindex="-1" data-ctx="copy-class">复制类名</button>
+        <button type="button" class="item" role="menuitem" tabindex="-1" data-ctx="copy-bounds">复制范围</button>
+        <button type="button" class="item" role="menuitem" tabindex="-1" data-ctx="copy-center">复制中心坐标</button>
+      </div>`
+
+    dispose = disposer()
+    selected = -1
+    treeFocus = -1
+    currentXml = ''
+    nodes = []
+    children = new Map()
+    collapsed = new Set()
+    pressStart = null
+    dragStart = null
+
+    // ── 工具条 ──
+    assertTemplateMatchesContract(root)
+
+    root.querySelector('[data-act="capture"]').addEventListener('click', capture)
+    root.querySelector('[data-act="tree"]').addEventListener('click', refreshTree)
+    root.querySelector('[data-act="reboot"]').addEventListener('click', rebootDevice)
+    root.querySelector('[data-act="collapse"]').addEventListener('click', () => {
+      // 折叠选中节点而不是全部：全部折叠会把用户刚展开的那条路径也收掉，
+      // 而这里通常只想起把当前这棵子树收起来
+      if (selected >= 0) collapsed.add(selected)
+      renderTree()
+    })
+    root.querySelector('[data-act="expand"]').addEventListener('click', () => {
+      collapsed = new Set()
+      renderTree()
+    })
+    root.querySelector('[data-act="send"]').addEventListener('click', () => {
+      const text = $('textInput').value.trim()
+      if (!text) {
+        setOpState('请输入文本', 'err')
+        return
+      }
+      // 按键通道只走得通 ASCII：客户端先拦一次，别等设备端拒绝才看到原因
+      if (inputChannel === 'keys' && /[^\x20-\x7E]/.test(text)) {
+        setOpState('按键通道仅支持英文、数字与符号，中文请切换到粘贴通道', 'err')
+        return
+      }
+      // 发送后清空输入框：一屏通常要连着输几次
+      act('输入文本', (deviceId) => api.input(deviceId, text, inputChannel)).then(() => {
+        $('textInput').value = ''
+      })
+    })
+
+    // 输入通道切换：点谁用谁，选择记忆
+    const channelBox = $('inputChannel')
+    const applyChannel = () => {
+      channelBox.querySelectorAll('button').forEach((btn) => {
+        btn.classList.toggle('is-active', btn.dataset.channel === inputChannel)
+      })
+    }
+    applyChannel()
+    dispose.add(
+      listen(channelBox, 'click', (event) => {
+        const btn = event.target.closest('[data-channel]')
+        if (!btn) return
+        inputChannel = btn.dataset.channel
+        localStorage.setItem(INPUT_CHANNEL_KEY, inputChannel)
+        applyChannel()
+      }),
+    )
+
+    // 右面板收起/恢复：收起后画面占满整行；百分比高亮随图片尺寸自动跟随，无需重算
+    const treePanel = $('treePanel')
+    const treeRestore = $('treeRestore')
+    const collapseButton = $('panelCollapse')
+    dispose.add(
+      listen(collapseButton, 'click', () => {
+        treePanel.hidden = true
+        treeRestore.hidden = false
+        collapseButton.setAttribute('aria-expanded', 'false')
+        treeRestore.focus()
+        clearSwipe()
+      }),
+    )
+    dispose.add(
+      listen(treeRestore, 'click', () => {
+        treePanel.hidden = false
+        treeRestore.hidden = true
+        collapseButton.setAttribute('aria-expanded', 'true')
+        collapseButton.focus()
+        clearSwipe()
+      }),
+    )
+
+    dispose.add(
+      listen($('textInput'), 'keydown', (event) => {
+        if (event.key !== 'Enter') return
+        event.preventDefault()
+        root.querySelector('[data-act="send"]').click()
+      }),
+    )
+
+    root.querySelectorAll('[data-key]').forEach((btn) => {
+      dispose.add(listen(btn, 'click', () => act(`按键 ${btn.textContent}`, (id) => api.key(id, btn.dataset.key))))
+    })
+
+    // ── 自动刷新开关：选择即时生效并记忆，下一次进页面还是这个选择 ──
+    const autoCaptureBox = $('autoCaptureToggle')
+    const autoTreeBox = $('autoTreeToggle')
+    autoCaptureBox.checked = autoCapture
+    autoTreeBox.checked = autoTree
+    dispose.add(
+      listen(autoCaptureBox, 'change', () => {
+        autoCapture = autoCaptureBox.checked
+        localStorage.setItem(AUTO_CAPTURE_KEY, autoCapture ? '1' : '0')
+      }),
+    )
+    dispose.add(
+      listen(autoTreeBox, 'change', () => {
+        autoTree = autoTreeBox.checked
+        localStorage.setItem(AUTO_TREE_KEY, autoTree ? '1' : '0')
+      }),
+    )
+
+    // ── 树 ──
+    dispose.add(
+      listen($('treeSearch'), 'input', () => {
+        if (currentXml) renderTree()
+      }),
+    )
+
+    dispose.add(
+      listen($('treeContent'), 'click', (event) => {
+        const toggle = event.target.closest('[data-toggle]')
+        if (toggle) {
+          event.stopPropagation()
+          const index = Number(toggle.dataset.toggle)
+          if (collapsed.has(index)) collapsed.delete(index)
+          else collapsed.add(index)
+          renderTree()
+          return
+        }
+        const row = event.target.closest('.node')
+        if (row) {
+          treeFocus = Number(row.dataset.index)
+          selectNode(treeFocus)
+        }
+      }),
+    )
+
+    dispose.add(listen($('treeContent'), 'keydown', handleTreeKey))
+
+    dispose.add(
+      listen($('treeContent'), 'dblclick', (event) => {
+        if (event.target.closest('.node')) tapSelected()
+      }),
+    )
+
+    dispose.add(
+      listen($('treeContent'), 'contextmenu', (event) => {
+        const row = event.target.closest('.node')
+        if (!row) return
+        event.preventDefault()
+        selectNode(Number(row.dataset.index))
+        showContextMenu(event.clientX, event.clientY, selected)
+      }),
+    )
+
+    dispose.add(listen($('propTap'), 'click', tapSelected))
+
+    dispose.add(
+      listen($('breadcrumb'), 'click', (event) => {
+        const span = event.target.closest('[data-jump]')
+        if (span) selectNode(Number(span.dataset.jump))
+      }),
+    )
+
+    // ── 画面：左键三种手势，右键取消 ──
+    const frame = $('screenFrame')
+
+    /** 抬手（或取消）时按实际按住时长分派：太短是点击，够久是长按，移动过就是滑动。 */
+    const settle = (clientX, clientY) => {
+      const heldMs = Math.max(0, performance.now() - pressStartedAt)
+      const from = dragStart
+      const at = toDevice(clientX, clientY)
+      stopPress()
+      dragStart = null
+      clearSwipe()
+
+      if (from && at) {
+        const moved = Math.abs(at.x - from.x) > SWIPE_MIN || Math.abs(at.y - from.y) > SWIPE_MIN
+        if (moved) {
+          ripple(at, 'var(--purple)')
+          swipeFrom(from, at, Math.round(heldMs))
+          return
+        }
+      }
+      const point = at || pressStart
+      if (!point) return
+      ripple(point, heldMs >= TAP_MAX_MS ? 'var(--orange)' : 'var(--green)')
+      if (heldMs >= TAP_MAX_MS) longPressAt(point.x, point.y, Math.round(heldMs))
+      else tapAt(point.x, point.y)
+    }
+
+    dispose.add(
+      listen(frame, 'mousedown', (event) => {
+        if (event.button === 2) {
+          // 右键取消：手势中途改主意时，不该把已经按下的那一下发出去
+          event.preventDefault()
+          stopPress()
+          dragStart = null
+          clearSwipe()
+          setOpState('已取消')
+          return
+        }
+        if (event.button !== 0) return
+        const at = toDevice(event.clientX, event.clientY)
+        if (!at) return
+        pressStart = at
+        pressStartedAt = performance.now()
+        pressIndicatorRef = pressIndicator(at)
+        const tick = (now) => {
+          if (!pressIndicatorRef || !pressStart) return
+          pressIndicatorRef.tick(now - pressStartedAt)
+          pressTicker = requestAnimationFrame(tick)
+        }
+        pressTicker = requestAnimationFrame(tick)
+      }),
+    )
+
+    // 抬手挂在 window 上：指针移出画面后松开也要能收尾，否则手势会一直悬着
+    dispose.add(
+      listen(window, 'mouseup', (event) => {
+        if (!pressStart && !dragStart) return
+        if (event.button === 2) return
+        settle(event.clientX, event.clientY)
+      }),
+    )
+
+    dispose.add(
+      listen(frame, 'mousemove', (event) => {
+        const at = toDevice(event.clientX, event.clientY)
+        const cross = $('crosshair')
+        const tip = $('coordTip')
+        if (!at) {
+          cross.classList.remove('is-on')
+          tip.hidden = true
+          return
+        }
+
+        cross.classList.add('is-on')
+        $('crossH').setAttribute('y1', at.cy)
+        $('crossH').setAttribute('y2', at.cy)
+        $('crossV').setAttribute('x1', at.cx)
+        $('crossV').setAttribute('x2', at.cx)
+        tip.hidden = false
+        tip.textContent = `${at.x}, ${at.y}`
+        // 提示条贴边时向内翻转，而不是溢出被裁：光标在右缘时往左弹、在顶缘时往下弹。
+        // 先写入文字再量尺寸，offsetWidth/Height 才是这段文字的真实占位
+        const tipW = tip.offsetWidth
+        const tipH = tip.offsetHeight
+        const overflowRight = at.cx + 16 + tipW > at.rect.width
+        tip.style.setProperty('--x', `${overflowRight ? at.cx - 16 - tipW : at.cx + 16}px`)
+        const overflowTop = at.cy - tipH - 8 < 0
+        tip.style.setProperty('--y', `${overflowTop ? at.cy + 18 : at.cy - tipH - 8}px`)
+
+        // 按住后移动超过阈值：这一下不再是点击/长按，转为滑动
+        if (pressStart) {
+          const dx = Math.abs(at.cx - pressStart.cx)
+          const dy = Math.abs(at.cy - pressStart.cy)
+          if (dx > DRAG_THRESHOLD || dy > DRAG_THRESHOLD) {
+            dragStart = pressStart
+            pressIndicatorRef?.clear()
+            pressIndicatorRef = null
+            if (pressTicker !== null) {
+              cancelAnimationFrame(pressTicker)
+              pressTicker = null
+            }
+            pressStart = null
+          }
+        }
+
+        if (dragStart) drawSwipe(dragStart, at)
+      }),
+    )
+
+    dispose.add(
+      listen(frame, 'mouseleave', () => {
+        $('crosshair').classList.remove('is-on')
+        $('coordTip').hidden = true
+      }),
+    )
+
+    dispose.add(listen(frame, 'contextmenu', (event) => event.preventDefault()))
+
+    // 窗口尺寸变了：重算画面框，再让高亮与拖动箭头按新尺寸重画
+    dispose.add(
+      listen(window, 'resize', () => {
+        fitScreen()
+        highlight(selected)
+        clearSwipe()
+      }),
+    )
+
+    // 右侧界面树收起/展开也会改变画面面板宽度；以面板自身尺寸为准重算
+    const screenObserver = new ResizeObserver(() => fitScreen())
+    screenObserver.observe($('screenPanel'))
+    dispose.add(() => screenObserver.disconnect())
+
+    // ── 右键菜单 ──
+    const ctxMenu = $('ctxMenu')
+    dispose.add(
+      listen(ctxMenu, 'keydown', (event) => {
+        const items = [...ctxMenu.querySelectorAll('.item')]
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          hideContextMenu({ restoreFocus: true })
+          return
+        }
+        if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+        event.preventDefault()
+        const current = items.indexOf(document.activeElement)
+        let next = 0
+        if (event.key === 'ArrowDown') next = (current + 1) % items.length
+        else if (event.key === 'ArrowUp') next = (current - 1 + items.length) % items.length
+        else if (event.key === 'End') next = items.length - 1
+        items[next]?.focus()
+      }),
+    )
+    dispose.add(
+      listen(ctxMenu, 'click', (event) => {
+        const item = event.target.closest('[data-ctx]')
+        if (!item) return
+        const node = nodes[ctxIndex]
+        hideContextMenu({ restoreFocus: true })
+        if (!node) return
+        const box = boundsOf(node)
+        switch (item.dataset.ctx) {
+          case 'tap':
+            tapSelected()
+            break
+          case 'long-tap':
+            // 起点等于终点的滑动就是长按（设备端按"有没有 to_x"分派）；时长取 1s
+            if (!box) {
+              setOpState('选中的节点没有可用坐标', 'err')
+              break
+            }
+            longPressAt(box.cx, box.cy, 1000)
+            break
+          case 'copy-id':
+            copy(node.id || '(无 resource-id)', 'resource-id')
+            break
+          case 'copy-text':
+            copy(node.text || '(无文本)', '文本')
+            break
+          case 'copy-desc':
+            copy(node.desc || '(无内容描述)', '内容描述')
+            break
+          case 'copy-class':
+            copy(node.cls || '(无类名)', '类名')
+            break
+          case 'copy-bounds':
+            copy(node.bounds || '', '范围')
+            break
+          case 'copy-center':
+            if (box) copy(`${box.cx}, ${box.cy}`, '中心坐标')
+            else setOpState('选中的节点没有可用坐标', 'err')
+            break
+        }
+      }),
+    )
+    dispose.add(listen(document, 'click', () => hideContextMenu()))
+
+    dispose.add(
+      subscribe('view', (id) => {
+        if (id !== 'inspector') dispose.dispose()
+      }),
+    )
+  },
+
+  unmount() {
+    dispose.dispose()
+    stopPress()
+    dragStart = null
+    nodes = []
+    children = new Map()
+    collapsed = new Set()
+    treeFocus = -1
+    currentXml = ''
+  },
+}
