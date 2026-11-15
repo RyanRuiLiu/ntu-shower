@@ -1,12 +1,27 @@
-"""ORM 基类与列类型约定。
+"""ORM 基类、全库模型约定与时间戳 Mixin——数据模型的唯一规定出处。
 
-主键形态（全库约定）：默认代理 `id` 主键 + `<实体>_id` 外键，同名同型同义；
-例外三处各有一条注释声明理由——`devices` 业务键主键（ADR-0008）、
-`voice_units` 自然主键（两列映射无独立生命周期）、连接表复合主键
-（身份即两列组合）。
+## 全库模型约定（models 必须遵守，tests/test_model_conventions.py 钉住）
 
-约束命名必须集中在 metadata 上：Alembic 自动生成迁移时按它给索引、外键、唯一约束起名。
-不集中，同一个约束在不同机器上会得到不同名字，迁移脚本就无法复用。
+- **主键**：默认代理 `id` 主键 + `<实体>_id` 外键，同名同型同义；例外三处各有
+  注释声明理由——`devices` 业务键主键（ADR-0008）、`voice_units` 自然主键
+  （两列映射无独立生命周期）、连接表复合主键（身份即两列组合）。
+- **外键**：一律指向 `<表>.id`，ondelete 只允许两种——历史/业务数据 RESTRICT
+  （除档保留历史）、随主键消亡的从属数据 CASCADE（凭据）；审计/日志/事实表
+  无外键（事实先于档案，设备不在册也要落行）。
+- **时间列**：一律 UtcDateTime（UTC 强制，naive 拒写）；created_at 全库事实表
+  必备（TimestampMixin / CreatedAtMixin）；updated_at 仅业务现态表（UPSERT 行）
+  必备（TimestampMixin）——只追加的流水/事件/凭据表行不可变，没有 updated_at。
+- **豁免清单**（无 created_at，各有一条注释声明）：`voice_units`（纯映射）、
+  `ota_release_installs`（applied_at 即创建时刻）、`app_settings`/`device_configs`
+  （单行 UPSERT，updated_at 即最新写入）。
+- **枚举列**：一律经 enum_column（VARCHAR+CHECK，取值小写）。
+- **时长列**：一律 `*_s` 整数秒。
+- **约束命名**：必须走 NAMING_CONVENTION——Alembic 按它给索引、外键、唯一约束
+  起名，不集中则同名约束在不同机器上不同名，迁移脚本无法复用。
+- **保留期**：声明在模型 docstring、登记在 audit_middleware.RETENTIONS、
+  钉在 tests/test_retention.py（声明=实现）。
+- **多词命名**：Python 侧 snake_case；布尔用单词形容词；JSON 只放设备原话或
+  键值差异（见各模型注释）。
 """
 
 from __future__ import annotations
@@ -17,7 +32,7 @@ from enum import StrEnum
 from sqlalchemy import DateTime, MetaData
 from sqlalchemy import Enum as SaEnum
 from sqlalchemy.engine import Dialect
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
 #: 写入 naive datetime 时的错误文案。抽成常量，避免在异常构造处写长字符串。
@@ -90,4 +105,29 @@ def enum_column(py_enum: type[StrEnum], name: str) -> SaEnum:
     )
 
 
-__all__: list[str] = ["NAMING_CONVENTION", "Base", "UtcDateTime", "enum_column", "utcnow"]
+class TimestampMixin:
+    """业务现态表（UPSERT 行）的时间戳约定列：created_at + updated_at。
+
+    用法：`class Device(TimestampMixin, Base):`——Mixin 列在 DDL 里排在自有列
+    之前（SQLAlchemy 的声明顺序），对行为无影响。
+    """
+
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow, onupdate=utcnow)
+
+
+class CreatedAtMixin:
+    """只追加的流水/事件/凭据表的时间戳约定列：仅 created_at（行不可变）。"""
+
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
+
+
+__all__: list[str] = [
+    "NAMING_CONVENTION",
+    "Base",
+    "CreatedAtMixin",
+    "TimestampMixin",
+    "UtcDateTime",
+    "enum_column",
+    "utcnow",
+]

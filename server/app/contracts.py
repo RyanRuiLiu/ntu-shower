@@ -229,7 +229,7 @@ class DeviceRecord(DeviceSummary):
 
 
 class DoorView(TypedDict):
-    """一个喷头的现态：door_live 全列 + 上次使用。
+    """一个喷头的现态：door_states 全列 + 上次使用。
 
     只回答**门域**的问题（这扇门什么状态、上次谁用的）；设备域的事实（在不在线、
     叫什么、能对它做什么）由设备资源回答：GET /devices 与 device.update 推送。

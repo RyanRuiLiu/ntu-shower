@@ -172,7 +172,7 @@ def create_app() -> FastAPI:
     app.include_router(voice_admin_router)
     app.include_router(auth_router)
 
-    @app.get("/healthz", tags=["meta"])
+    @app.get("/healthz", tags=["meta"], summary="存活探针")
     def health() -> HealthStatus:
         return {"status": "ok", "name": "ntu-shower", "version": APP_VERSION}
 

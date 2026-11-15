@@ -22,10 +22,10 @@ from app.contracts import ActorKind, ApiCallKind, CommandAuditRecord, CommandSta
 from app.contracts import JobRun as JobRunView
 from app.core import outcomes, reason_codes
 from app.core.clock import format_rfc3339
-from app.db.base import Base, UtcDateTime, enum_column, utcnow
+from app.db.base import Base, CreatedAtMixin, UtcDateTime, enum_column, utcnow
 
 
-class ApiCall(Base):
+class ApiCall(CreatedAtMixin, Base):
     """一次 HTTP 调用的审计行，保留 90 天。"""
 
     __tablename__ = "api_calls"
@@ -51,10 +51,9 @@ class ApiCall(Base):
     problem_type: Mapped[str | None] = mapped_column(String(64), default=None)
     detail: Mapped[str | None] = mapped_column(Text, default=None)
     response_body: Mapped[str | None] = mapped_column(Text, default=None)
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
 
 
-class CommandAudit(Base):
+class CommandAudit(CreatedAtMixin, Base):
     """下发给设备的命令及其终态，保留期随 audit_retention_days 配置（默认 90 天）。"""
 
     __tablename__ = "command_audits"
@@ -76,7 +75,7 @@ class CommandAudit(Base):
     result: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
 
 
-class JobRun(Base):
+class JobRun(CreatedAtMixin, Base):
     """后台任务的一次执行记录，保留 180 天。"""
 
     __tablename__ = "job_runs"
@@ -93,7 +92,6 @@ class JobRun(Base):
     outcome: Mapped[JobOutcome] = mapped_column(enum_column(JobOutcome, "job_outcome"))
     reason: Mapped[str | None] = mapped_column(String(128), default=None)
     threshold_s: Mapped[int | None] = mapped_column(Integer, default=None)
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
 
 
 def _dumps(value: dict[str, Any] | None) -> str | None:
