@@ -141,7 +141,30 @@ def create_app() -> FastAPI:
 
     # 调试 UI（/docs、/redoc）不对外：对外契约是 /openapi.json（外部调用方拿它
     # 生成客户端），调试面没有消费方，暴露它只是白送接口拓扑（OWASP API8）。
-    app = FastAPI(title="NTU Shower", version=APP_VERSION, lifespan=lifespan, docs_url=None, redoc_url=None)
+    # info.description 是外部调用方的唯一入口说明：认证方式、密钥签发渠道、
+    # 错误形状——openapi.json 的其余部分只描述端点本身，回答不了"拿什么调"。
+    app = FastAPI(
+        title="NTU Shower",
+        version=APP_VERSION,
+        description=(
+            "浴室中控系统的对外 API。\n\n"
+            "## 认证\n\n"
+            "除标注公开的端点（设备清单、/doors、/devices/enroll、/healthz）外，"
+            "全部端点要求 `Authorization: Bearer <密钥>` 头。\n\n"
+            "密钥（`ntushower_` 前缀）由管理员在管理台「用户与密钥」页签发，"
+            "权限集（scopes）与设备作用域附在每枚密钥上，永久有效直到吊销；"
+            "对应用户可持多枚密钥并存轮换。各端点要求的 scope 见 securitySchemes。\n\n"
+            "## 错误\n\n"
+            "非 2xx 响应一律 RFC 9457 problem+json：`type`（可分支的错误类别 URI）、"
+            "`title`（稳定简述）、`detail`（本次的具体中文说明）。\n\n"
+            "## 设备 WebSocket\n\n"
+            "设备端协议帧的 JSON Schema 见仓库 `protocol/schema/*.json`"
+            "（不在本文件内：WS 帧走帧级协议版本，路径冻结）。"
+        ),
+        lifespan=lifespan,
+        docs_url=None,
+        redoc_url=None,
+    )
     install_error_handlers(app)
     audit_middleware.install_audit(app)
     # 配置保存 → 定时器重算 + 设备推送：组合根装配（写侧不 import sessions，见
