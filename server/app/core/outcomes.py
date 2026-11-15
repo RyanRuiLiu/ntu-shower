@@ -1,4 +1,4 @@
-"""命令结果的总体状态：session.command_result.status 的唯一来源。
+"""命令结果的总体状态：device.command_result.status 的唯一来源。
 
 | 取值 | 含义 |
 |---|---|

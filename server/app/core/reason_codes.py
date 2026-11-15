@@ -69,7 +69,7 @@ COMMAND_ABORTED = Reason("command.aborted", "命令已中断：发起方断开")
 
 DOOR_NOT_FREE = Reason("door.not_free", "喷头不是空闲状态")
 DOOR_NOT_FOUND = Reason("door.not_found", "找不到喷头")
-DOOR_NO_OCCUPIED = Reason("door.no_occupied", "该学号没有正在使用的喷头")
+DOOR_UNOCCUPIED = Reason("door.unoccupied", "该学号没有正在使用的喷头")
 
 # ── 界面操作（无障碍）──
 
@@ -132,7 +132,7 @@ REGISTRY: tuple[Reason, ...] = (
     COMMAND_ABORTED,
     DOOR_NOT_FREE,
     DOOR_NOT_FOUND,
-    DOOR_NO_OCCUPIED,
+    DOOR_UNOCCUPIED,
     UI_NO_TARGET_AT_POINT,
     UI_NO_EDITABLE_FIELD,
     UI_KEY_REJECTED,
