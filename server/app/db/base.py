@@ -18,7 +18,7 @@
 - **时长列**：一律 `*_s` 整数秒。
 - **约束命名**：必须走 NAMING_CONVENTION——Alembic 按它给索引、外键、唯一约束
   起名，不集中则同名约束在不同机器上不同名，迁移脚本无法复用。
-- **保留期**：声明在模型 docstring、登记在 audit_middleware.RETENTIONS、
+- **保留期**：声明在模型 docstring、登记在 app/retention.py 的 RETENTIONS、
   钉在 tests/test_retention.py（声明=实现）。
 - **多词命名**：Python 侧 snake_case；布尔用单词形容词；JSON 只放设备原话或
   键值差异（见各模型注释）。

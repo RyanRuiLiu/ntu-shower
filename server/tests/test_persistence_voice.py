@@ -125,7 +125,6 @@ def test_delivery_is_idempotent(session: Session) -> None:
         segment_count=1,
         duration_ms=800,
         occurred_at=NOW,
-        trace_id="t1",
         created_at=NOW,
     )
     second = voice.claim_delivery(
@@ -140,7 +139,6 @@ def test_delivery_is_idempotent(session: Session) -> None:
         segment_count=1,
         duration_ms=800,
         occurred_at=NOW,
-        trace_id="t1",
         created_at=NOW,
     )
     assert first is True
@@ -204,7 +202,6 @@ def test_claim_for_missing_device_keeps_its_key(session: Session) -> None:
             segment_count=0,
             duration_ms=0,
             occurred_at=NOW,
-            trace_id="",
             created_at=NOW,
         )
         is True

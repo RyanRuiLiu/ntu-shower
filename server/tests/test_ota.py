@@ -35,10 +35,10 @@ def _repo(name: str, *args: object, **kwargs: object) -> object:
         return fn(session, *args, **kwargs)
 
 
-def _publish(version: str, code: int, *, force: bool = False, target: str = "all") -> None:
+def _publish(version: str, code: int, *, force: bool = False, targets: list[str] | None = None) -> None:
     service.store_release(version, f"apk-of-{version}".encode())
     with _db() as session:
-        ota.insert_release(session, version, code, "0" * 64, mandatory=False, force=force, target=target)
+        ota.insert_release(session, version, code, "0" * 64, force=force, target=targets or ["*"])
 
 
 # ── 仓储层：发布判定 ──
@@ -47,7 +47,7 @@ def _publish(version: str, code: int, *, force: bool = False, target: str = "all
 def test_latest_for_respects_version_and_target(fresh_db: str) -> None:
     device_link.register_device_raw("dev-1")
     device_link.register_device_raw("dev-2")
-    _publish("0.2.0", 2, target="dev-1,dev-2")
+    _publish("0.2.0", 2, targets=["dev-1", "dev-2"])
 
     rel = _repo("latest_for", "dev-1", 1)
     assert rel is not None
@@ -59,7 +59,7 @@ def test_latest_for_respects_version_and_target(fresh_db: str) -> None:
 def test_force_release_semantics(fresh_db: str) -> None:
     """force 无视版本号推送，安装确认后停止；rearm 重新生效；常规发布不受确认影响。"""
     device_link.register_device_raw("dev-loop")
-    _publish("0.2.5", 7, force=True, target="dev-loop")
+    _publish("0.2.5", 7, force=True, targets=["dev-loop"])
 
     rel = _repo("latest_for", "dev-loop", 7)
     assert rel is not None
@@ -81,7 +81,7 @@ def test_force_release_semantics(fresh_db: str) -> None:
 
 def test_force_higher_version_wins_over_normal(fresh_db: str) -> None:
     _publish("0.2.0", 2)
-    _publish("0.2.0", 2, force=True, target="dev-1")
+    _publish("0.2.0", 2, force=True, targets=["dev-1"])
 
     rel = _repo("latest_for", "dev-1", 1)
     assert rel is not None
@@ -194,7 +194,7 @@ def test_manifest_reports_update_with_frozen_url_and_size(client: TestClient, ot
     """manifest 是设备硬编码契约，字段集逐项断言：设备端在发起下载前就读 sha256，
     缺任一字段都会让升级在下载前静默中止（2026-10-02 实际发生，设备卡在旧版）。
     """
-    _publish("0.2.5", 7, target="dev-ota-1")
+    _publish("0.2.5", 7, targets=["dev-ota-1"])
 
     r = client.get("/ota/manifest", params={"device_id": "dev-ota-1", "version_code": 6})
 
@@ -205,7 +205,6 @@ def test_manifest_reports_update_with_frozen_url_and_size(client: TestClient, ot
     assert body["url"] == "/api/v1/ota/releases/0.2.5/download"
     assert body["sha256"] == "0" * 64
     assert body["size"] == len(b"apk-of-0.2.5")
-    assert body["mandatory"] is False
     assert body["force"] is False
 
 
@@ -216,7 +215,7 @@ def test_manifest_requires_query_params(client: TestClient) -> None:
 
 def test_manifest_without_release_file_reports_up_to_date(client: TestClient, ota_dir: Path) -> None:
     """库里有记录、文件却不在：当作没有更新，不给设备一个下不动的地址。"""
-    _repo("insert_release", "1.2.3", 8, "b" * 64, mandatory=False, force=False, target="dev-ota-2")
+    _repo("insert_release", "1.2.3", 8, "b" * 64, force=False, target=["dev-ota-2"])
 
     r = client.get("/ota/manifest", params={"device_id": "dev-ota-2", "version_code": 6})
 

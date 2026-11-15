@@ -7,7 +7,7 @@
 
 JSON 请求体与响应体原文入库，全有或全无、不截断、不脱敏（受限审计表；stdout 日志
 不写这些字段）；数据重型且可重取的截图、拍照、UI 节点树与 multipart 上传体除外。
-审计行按 audit_retention_days 保留，过期行由清理任务删除；业务数据永久保留。
+过期行的清理与各表保留期登记在 app/retention.py（横切运维，不属 HTTP 采集）。
 
 存储在 persistence/api_calls.py：采集归 HTTP 侧，落库归持久化层——core 保持
 零向上依赖。
@@ -19,7 +19,7 @@ import re
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from typing import Any, cast
+from typing import cast
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI
@@ -29,14 +29,9 @@ from starlette.requests import Request
 from starlette.responses import Response, StreamingResponse
 
 from app.contracts import ApiCallKind
-from app.core.config import settings
-from app.core.logging import log_event, request_id_var, trace_id_var
+from app.core.logging import request_id_var, trace_id_var
 from app.db.session import session_scope
-from app.modules.devices.models import DeviceLinkEvent
-from app.modules.doors.models import DoorSnapshot
-from app.modules.voice.models import VoiceDelivery
 from app.persistence import api_calls
-from app.persistence.audit import ApiCall, CommandAudit, JobRun
 
 #: 需要审计的路径前缀 = 版本化对外面的全部域（/api/v1，见 main.py 的模块注释）。
 #: /ota/manifest 是设备硬编码契约，无版本前缀（见 ota/routes.py），但它是设备
@@ -46,8 +41,6 @@ from app.persistence.audit import ApiCall, CommandAudit, JobRun
 _AUDITED_PREFIXES = ("/api/v1", "/ota/manifest")
 
 _TRACEPARENT = re.compile(r"^[0-9a-f]{2}-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$", re.IGNORECASE)
-
-PRUNE_INTERVAL_S = 6 * 3600.0
 
 
 def resolve_trace_id(traceparent: str | None) -> str:
@@ -113,36 +106,6 @@ def record_gateway(device_id: str, event: str, client_ip: str = "") -> None:
             actor_kind="device",
             actor=device_id,
             client_ip=client_ip or None,
-        )
-
-
-#: 各保留期表 → (时刻列, 保留天数)。ApiCall 与 CommandAudit 实际按
-#: settings.audit_retention_days 执行（登记值是配置缺省的对照，由
-#: tests/test_retention.py 钉住登记完整性）；其余表按登记天数执行，天数与各表
-#: 模型的 docstring 声明一致。业务数据（喷头状态迁移、使用会话）是运营历史，
-#: 永久保留、不在此列。清单住在 app 根：它横跨各域的表，持久化层不得反向
-#: import 各域模型。
-RETENTIONS: tuple[tuple[Any, Any, int], ...] = (
-    (ApiCall, ApiCall.requested_at, 90),
-    (CommandAudit, CommandAudit.created_at, 90),
-    (JobRun, JobRun.occurred_at, 180),
-    (DeviceLinkEvent, DeviceLinkEvent.occurred_at, 90),
-    (DoorSnapshot, DoorSnapshot.received_at, 30),
-    (VoiceDelivery, VoiceDelivery.occurred_at, 90),
-)
-
-
-async def prune_once() -> None:
-    """清理一轮；生命周期（启动、取消、间隔）由 core/background 统一管理。"""
-    with session_scope() as session:
-        removed = api_calls.prune(session, settings.audit_retention_days, RETENTIONS)
-    if removed:
-        log_event(
-            "INFO",
-            "audit.pruned",
-            "审计过期行已清理",
-            rows=removed,
-            retention_days=settings.audit_retention_days,
         )
 
 

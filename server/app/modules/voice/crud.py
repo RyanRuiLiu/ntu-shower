@@ -6,22 +6,15 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.contracts import DeliveryStatus
 from app.core.clock import format_rfc3339
 from app.modules.voice.models import VoiceAsset, VoiceDelivery, VoiceRule, VoiceUnit
-
-
-def _dumps(value: list[Any] | None) -> str | None:
-    """JSON 列 → 字符串（API 契约里 segments 是 JSON 文本）。"""
-    if value is None:
-        return None
-    return json.dumps(value, ensure_ascii=False)
 
 
 def _asset_view(row: VoiceAsset) -> dict[str, Any]:
@@ -278,7 +271,6 @@ def claim_delivery(
     segment_count: int,
     duration_ms: int,
     occurred_at: datetime,
-    trace_id: str,
     created_at: datetime,
 ) -> bool:
     """认领一次投递。`event_key` 已存在时返回 False——幂等靠唯一约束。"""
@@ -297,8 +289,7 @@ def claim_delivery(
             segment_count=segment_count,
             duration_ms=duration_ms,
             occurred_at=occurred_at,
-            status="pending",
-            trace_id=trace_id,
+            status=DeliveryStatus.PENDING,
             created_at=created_at,
         )
     )
@@ -310,7 +301,7 @@ def finish_delivery(
     session: Session,
     event_key: str,
     dispatched_at: datetime,
-    status: str,
+    status: DeliveryStatus,
     detail: str,
     done_at: datetime,
     downloaded: bool,
