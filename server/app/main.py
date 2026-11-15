@@ -180,17 +180,20 @@ def create_app() -> FastAPI:
     # - API/网关/健康检查前缀的未匹配路径回 404 problem+json——接口错误绝不能
     #   伪装成 200 的 HTML；
     # - 其余未匹配路径：dist 里真实存在的文件（assets、favicon）按文件回，
-    #   否则回 index.html，让 /devices 等前端路由刷新时落到应用入口。
+    #   否则回 dist/index.html，让 /devices 等前端路由刷新时落到应用入口。
+    # 本地开发时 dist 不存在则回退 web/ 根的源 index.html（Vite dev server 供 JS）。
     web_dir = Path(__file__).resolve().parent.parent / "web"
+    dist_dir = web_dir / "dist"
 
     @app.get("/{spa_path:path}", include_in_schema=False)
     async def spa_fallback(spa_path: str) -> Response:
         if spa_path.startswith(("api/", "gateway/", "ota/", "healthz", "problems/")):
             raise StarletteHTTPException(status_code=404)
-        candidate = web_dir / spa_path
+        base = dist_dir if dist_dir.is_dir() else web_dir
+        candidate = base / spa_path
         if "." in Path(spa_path).name and candidate.is_file():
             return FileResponse(candidate)
-        return FileResponse(web_dir / "index.html")
+        return FileResponse(base / "index.html")
 
     # 前端资源要求浏览器每次都回来验一遍：no-cache 不是"不缓存"，而是带 ETag
     # 协商，没变 304，变了才重新下载。实时状态 API 则一律 no-store：不带任何缓存
