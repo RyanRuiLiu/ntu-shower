@@ -18,6 +18,7 @@ URL 只表达资源，不表达权限——谁能调用由 scope 守卫决定（
 - /api/v1/stream                     实时推送（公开，可按 device_id 过滤）
 - /gateway/device                    设备 WS 网关（设备硬编码契约，路径冻结）
 - /voice/assets/{id}.mp3             语音素材下载（设备硬编码契约，路径冻结）
+- /problems/{code}                   RFC 9457 问题类型登记表（type URI 的可解析目标）
 
 模块按领域划分（modules/<域>），URL 按资源组织：/devices/* 由 devices、
 sessions、bridge、config 各域按资源归属提供端点。网页端（web/）挂在根路径，
@@ -31,6 +32,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
@@ -42,8 +44,9 @@ from .auth.routes import identity_router as users_identity_router
 from .auth.routes import router as auth_router
 from .core.background import Background
 from .core.config import settings
-from .core.errors import install_error_handlers
+from .core.errors import install_error_handlers, problem_responses
 from .core.logging import configure_logging, log_event
+from .core.problems import REGISTRY
 from .core.version import APP_VERSION
 from .db.base import utcnow
 from .db.session import Database
@@ -99,6 +102,14 @@ class HealthStatus(TypedDict):
     version: str
 
 
+class ProblemDoc(BaseModel):
+    """问题类型的可解析说明（RFC 9457 type URI 的目标）。"""
+
+    code: str = Field(description="问题类型码（kebab-case，全局唯一）")
+    title: str = Field(description="稳定简述，与问题响应体的 title 一致")
+    status: int = Field(description="该类型默认的 HTTP 状态码")
+
+
 def _abort_pending_commands() -> None:
     """启动时收尾上一进程留下的 pending 命令（审计页不再永久显示进行中）。
 
@@ -152,14 +163,27 @@ def create_app() -> FastAPI:
             "除标注公开的端点（设备清单、/doors、/devices/enroll、/healthz）外，"
             "全部端点要求 `Authorization: Bearer <密钥>` 头。\n\n"
             "密钥（`ntushower_` 前缀）由管理员在管理台「用户与密钥」页签发，"
-            "权限集（scopes）与设备作用域附在每枚密钥上，永久有效直到吊销；"
-            "对应用户可持多枚密钥并存轮换。各端点要求的 scope 见 securitySchemes。\n\n"
+            "权限集（scopes）与设备作用域附于每枚密钥，永久有效直至吊销；"
+            "同一用户可持有多个密钥以便轮换。各端点要求的 scope 见 securitySchemes。\n\n"
             "## 错误\n\n"
             "非 2xx 响应一律 RFC 9457 problem+json：`type`（可分支的错误类别 URI）、"
             "`title`（稳定简述）、`detail`（本次的具体中文说明）。\n\n"
-            "## 设备 WebSocket\n\n"
-            "设备端协议帧的 JSON Schema 见仓库 `protocol/schema/*.json`"
-            "（不在本文件内：WS 帧走帧级协议版本，路径冻结）。"
+            "## WebSocket\n\n"
+            "OpenAPI 不描述 WebSocket 端点，本节即两条 WebSocket 通道的全部契约；"
+            "两者均经 WSS 接入（与 HTTPS 同端口、同证书）。\n\n"
+            "- 推送通道 `wss://<host>/api/v1/stream`：面向网页端与外部订阅方，公开，"
+            "无需认证。查询参数 `device_id`（可选）：指定后仅推送该设备的事件。\n"
+            "  连接为服务端单向推送：客户端不得发送任何帧，服务端将任何来帧视为断开"
+            "信号；链路保活由传输层 ping/pong 承担。帧为 JSON 文本，形状统一为"
+            ' `{"type": "<事件类型>", "payload": {...}}`：\n'
+            "  - `door.update`——喷头现态变化；payload 为该设备的完整现态"
+            "（与 `GET /doors` 单台结果同构）；\n"
+            "  - `device.update`——设备在场或档案变化；payload 为精简档案"
+            "（device_id、name、online、retired）加 `at` 时间戳。\n"
+            "  推送为尽力而为：服务端队列满时丢弃事件，断线窗口内的状态不随事件补发。"
+            "恢复职责在客户端——重连后先调用 `GET /doors` 取全量现态，此后以推送为准。\n"
+            "- 设备通道 `wss://<host>/gateway/device`：设备端拨入专用，路径冻结；"
+            "帧结构带帧级协议版本，JSON Schema 见仓库 `protocol/schema/*.json`。"
         ),
         lifespan=lifespan,
         docs_url=None,
@@ -198,6 +222,24 @@ def create_app() -> FastAPI:
     @app.get("/healthz", tags=["meta"], summary="存活探针")
     def health() -> HealthStatus:
         return {"status": "ok", "name": "ntu-shower", "version": APP_VERSION}
+
+    @app.get(
+        "/problems/{problem_code}",
+        tags=["meta"],
+        summary="问题类型说明",
+        response_model=ProblemDoc,
+        responses=problem_responses(404, 422),
+    )
+    def problem_doc(problem_code: str) -> ProblemDoc:
+        """RFC 9457 type URI 的可解析目标：返回问题类型的稳定登记信息。
+
+        问题响应体的 `type` 成员（/problems/<code>）指到这里；未登记的 code 按未
+        找到的资源处理（404 problem+json）。
+        """
+        for problem in REGISTRY:
+            if problem.code == problem_code:
+                return ProblemDoc(code=problem.code, title=problem.title, status=problem.status)
+        raise StarletteHTTPException(status_code=404)
 
     # 网页端挂在根路径：它就是这个服务唯一的人机界面，而 API 路由已在前注册。
     # history 路由的 SPA fallback 用 catch-all 路由（FastAPI 社区主流写法）：

@@ -69,3 +69,15 @@ def test_shared_wording_between_problem_and_reason_registries() -> None:
     assert problems.DOOR_NOT_FREE.title == reason_codes.DOOR_NOT_FREE.message
     assert problems.DEVICE_OFFLINE.title == "设备离线"
     assert reason_codes.describe("device.offline") == "设备离线"
+
+
+def test_problem_type_uris_are_resolvable(client: TestClient, fresh_db: str) -> None:
+    """RFC 9457 type URI（/problems/<code>）必须可解析：已登记的回登记信息，
+    未登记的按未找到的资源处理（404 problem+json）。"""
+    doc = client.get("/problems/device-not-found")
+    assert doc.status_code == 200
+    assert doc.json() == {"code": "device-not-found", "title": "找不到设备", "status": 404}
+
+    miss = client.get("/problems/no-such-code")
+    assert miss.status_code == 404
+    assert miss.headers["content-type"].startswith("application/problem+json")

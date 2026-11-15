@@ -7,10 +7,12 @@ type 取自 core.problems 登记表，客户端据此分支不解析文案；tit
 """
 
 import traceback
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .config import settings
@@ -18,6 +20,38 @@ from .problems import VALIDATION_FAILED, ApiProblemError, Problem
 
 PROBLEM_MEDIA_TYPE = "application/problem+json"
 PROBLEM_TYPE_PATH = "/problems/"
+
+
+class ProblemDetail(BaseModel):
+    """RFC 9457 problem+json 响应体：全部非 2xx 响应的统一形状。"""
+
+    type: str = Field(description="问题类型 URI（/problems/<code>，可解析），客户端据此分支，不解析文案")
+    title: str = Field(description="该问题类型的稳定简述")
+    status: int = Field(description="HTTP 状态码")
+    detail: str = Field(description="本次请求的具体说明")
+
+
+#: 各状态码在契约里的通用描述；具体问题类型见 /problems/<code> 的可解析登记表。
+_STATUS_DESCRIPTIONS: dict[int, str] = {
+    401: "未认证：凭据缺失、无效或设备注册令牌无效",
+    403: "权限不足：scope 不满足或设备不在密钥作用域",
+    404: "目标资源不存在",
+    409: "与设备或资源的当前状态冲突（离线、占用、端口冲突等）",
+    413: "请求体超过体积上限",
+    422: "请求内容校验失败",
+    502: "设备侧执行失败（网关返回失败结果）",
+}
+
+
+def problem_responses(*statuses: int) -> "dict[int | str, dict[str, Any]]":
+    """构建 OpenAPI responses 声明：错误响应一律 problem+json（RFC 9457）。
+
+    FastAPI 对带校验参数的路由会自动生成 422 响应，形状是框架默认的
+    HTTPValidationError——与实际返回的 problem+json 不符。各路由以本函数声明
+    422 即覆盖它；其余状态码按各路由守卫与业务真正可能抛出的声明。用 "model"
+    形式让 FastAPI 登记并引用 ProblemDetail 组件（契约里统一形状，单一出处）。
+    """
+    return {status: {"description": _STATUS_DESCRIPTIONS[status], "model": ProblemDetail} for status in statuses}
 
 
 def _problem(problem: Problem, detail: str) -> JSONResponse:
