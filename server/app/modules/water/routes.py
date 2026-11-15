@@ -15,6 +15,10 @@
 - 板配置展示：板子 `F4 B1`（可能是 24 门/30 分钟，只展示）；
 - 板状态：`F4 B3`，只取 `waterList.nozzlenumber` 条，多出的门不返回。
 
+本域的 `nozzle`（喷头位）与 doors 域的 `door`（门位）指同一物理位置：两个词各自
+锚定各自的外部来源——`t_doorlist`（浴室 App 的表）与 `waterList.nozzlenumber`
+（水控板的表），不互相改写。
+
 服务端只发 `door_no`，不解析 waterList，也不保存板坐标。设备端返回的目标/原包在
 `CommandOutcome.data` 里，随 `command_audit` 留档。
 
