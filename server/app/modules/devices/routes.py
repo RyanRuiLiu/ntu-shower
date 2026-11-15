@@ -27,11 +27,12 @@ from sqlalchemy.orm import Session
 
 from app.auth.dependencies import caller, device_scope_guard, optional_caller
 from app.auth.permissions import allowed_actions
-from app.contracts import Caller, CommandOutcome
+from app.contracts import Caller, CommandOutcome, DeviceLogKind
 from app.core import actions
 from app.core.clock import now_rfc3339
 from app.core.config import settings
 from app.core.connections import manager
+from app.core.errors import problem_responses
 from app.core.outcomes import OK as OUTCOME_OK
 from app.core.problems import (
     DEVICE_LOG_READ_FAILED,
@@ -61,24 +62,30 @@ from .schemas import (
     DeviceUiTouchRequest,
 )
 
-router = APIRouter(prefix="/api/v1", tags=["devices"])
+router = APIRouter(prefix="/api/v1", tags=["devices"], responses=problem_responses(422))
 
 
-@router.post("/devices/enroll", response_model=schemas.DeviceEnrollResult, summary="设备自注册（claim 换凭据）")
+@router.post(
+    "/devices/enroll",
+    response_model=schemas.DeviceEnrollResult,
+    summary="设备自注册（claim 换凭据）",
+    responses=problem_responses(401),
+)
 def enroll_device(
     req: schemas.DeviceEnrollRequest, request: Request, session: Session = Depends(get_db)
 ) -> schemas.DeviceEnrollResult:
-    """设备自注册：APK 构建期内置一枚全队共享的 claim 令牌，设备首次连接凭它换
-    每台自己的接入凭据（AWS IoT fleet provisioning by claim 同型）。
+    """设备自注册：APK 构建期内置一枚全队共享的 claim 令牌，设备首次连接以此
+    换取自身专属的接入凭据（AWS IoT fleet provisioning by claim 同型）。
 
     - 通道开关在服务端配置（`DEVICE_ENROLL_TOKEN`）：留空即 fail closed，一律 401；
-    - 注册只回答「这是我们的程序」，**不等于信任**——信任位照旧由管理员在档案上
-      点（ADR-0007 模型不动），未信任设备照旧收 `trusted=false`、业务帧被墙；
-    - 每次注册先吊销该设备旧凭据再签发新的：重装 APK、凭据丢失都能自助恢复，
+    - 注册仅证明「来自本系统的客户端」，**不等于信任**——信任位仍由管理员在
+      设备档案上设置（ADR-0007 模型不变），未信任设备的注册响应仍为
+      `trusted=false`，业务帧仍被网关拒绝；
+    - 每次注册先吊销该设备旧凭据再签发新凭据：重装 APK、凭据丢失均可自助恢复，
       轮换语义与 `--token-output` 签发的一致；
-    - 已在册设备（含转换搬来的 6 台）档案字段照常刷新、trusted 位不动。
+    - 已在册设备的档案字段照常刷新，trusted 位保持不变。
 
-    凭据明文只出现在本次响应；比对用哈希后常量时间比较，不暴露时序。
+    凭据明文只出现在本次响应；服务端以哈希后常量时间比较，不暴露时序。
     """
     claim = extract_bearer(request.headers.get("authorization"))
     configured = settings.device_enroll_token
@@ -114,20 +121,20 @@ admin_router = APIRouter(
     prefix="/api/v1/devices",
     dependencies=[Security(caller, scopes=["devices:write"])],
     tags=["devices-admin"],
+    responses=problem_responses(401, 403, 422),
 )
 device_router = APIRouter(
     prefix="/api/v1/devices",
     dependencies=[Security(caller, scopes=["devices:write"]), Depends(device_scope_guard)],
     tags=["devices-admin"],
+    responses=problem_responses(401, 403, 404, 409, 422),
 )
 device_read_router = APIRouter(
     prefix="/api/v1/devices",
     dependencies=[Security(caller, scopes=["devices:read"]), Depends(device_scope_guard)],
     tags=["devices-admin"],
+    responses=problem_responses(401, 403, 404, 422),
 )
-
-#: 可查看/上送的三份设备日志。
-LOG_KINDS = ("device", "crash", "ota")
 
 
 def _ui_timeout_s(session: Session, device_id: str) -> float:
@@ -170,14 +177,15 @@ def list_devices(
 
 
 @device_read_router.get("/{device_id}/logs", summary="设备最近一次上送的日志")
-def get_device_logs(device_id: str, kind: str = "device", session: Session = Depends(get_db)) -> schemas.DeviceLogView:
+def get_device_logs(
+    device_id: str, kind: DeviceLogKind = DeviceLogKind.DEVICE, session: Session = Depends(get_db)
+) -> schemas.DeviceLogView:
     """该设备最近一次上送的日志（kind=device / crash / ota）。
 
-    上送的是离线时留下的副本：设备每次握手、变化后的周期与关键错误后都会更新；
-    要看此刻设备上的原文走 `/logs/live`。设备从未上送过该类日志时 404。
+    返回的是设备离线期间留存、重连时上送的副本：设备在每次握手、变化后的周期
+    与关键错误后都会更新；读取设备当前的日志原文使用 `/logs/live`。
+    设备从未上送过该类日志时 404。
     """
-    if kind not in LOG_KINDS:
-        raise ApiProblemError(VALIDATION_FAILED, f"日志种类 {kind}（应为 {' / '.join(LOG_KINDS)}）")
     _require_device(session, device_id)
     latest = service.latest_device_log(session, device_id, kind)
     if latest is None:
@@ -185,20 +193,18 @@ def get_device_logs(device_id: str, kind: str = "device", session: Session = Dep
     return schemas.DeviceLogView.model_validate(latest)
 
 
-@device_read_router.get("/{device_id}/logs/live", summary="设备日志尾部现读")
+@device_read_router.get("/{device_id}/logs/live", summary="设备日志尾部现读", responses=problem_responses(409, 502))
 async def get_live_device_log(
     device_id: str,
-    kind: str = "device",
+    kind: DeviceLogKind = DeviceLogKind.DEVICE,
     lines: int = Query(default=200, ge=1, le=500),
     session: Session = Depends(get_db),
 ) -> schemas.DeviceLogLiveView:
-    """从设备现读日志尾部；设备离线时返回 409，页面再显示上次上送内容。
+    """从设备现读日志尾部；设备离线时返回 409，调用方转而展示最近一次上送内容。
 
     `present=false` 不是错误：crash.log 只在真正崩溃后才会出现，ota-install.log 只在
-    发起过安装后才会出现；页面据此显示"设备上暂无该日志"。
+    发起过安装后才会出现；调用方据此提示「设备上暂无该日志」。
     """
-    if kind not in LOG_KINDS:
-        raise ApiProblemError(VALIDATION_FAILED, f"日志种类 {kind}（应为 {' / '.join(LOG_KINDS)}）")
     outcome = await device_action(
         session,
         device_id,
@@ -238,7 +244,7 @@ def get_device(device_id: str, session: Session = Depends(get_db)) -> DeviceReco
 def patch_device_order(req: DeviceOrderRequest, session: Session = Depends(get_db)) -> schemas.DeviceOrderResponse:
     """按给定顺序重排设备：设备下拉、管理台设备表、统计接口全部照此排列。
 
-    清单必须完整（漏掉的设备保持原位），出现未知设备整体拒绝。
+    清单必须完整（未列出的设备保持原位），出现未知设备整体拒绝。
     """
     service.set_order(session, req.order)
     return schemas.DeviceOrderResponse(order=[str(record["device_id"]) for record in service.list_devices(session)])
@@ -246,15 +252,15 @@ def patch_device_order(req: DeviceOrderRequest, session: Session = Depends(get_d
 
 @device_router.patch("/{device_id}", summary="改设备档案（改名/信任/停用）")
 async def patch_device(device_id: str, req: DevicePatchRequest, session: Session = Depends(get_db)) -> DeviceRecord:
-    """改设备档案：改名、改信任位，只改传了的字段。
+    """修改设备档案：改名、改信任位，仅修改请求中出现的字段。
 
-    改完推一条 `device.update`（精简载荷）：其它打开的页面要靠它更新设备名与
-    在线标记，不推就要等轮询。
+    修改完成后发布一条 `device.update`（精简载荷）：其它已打开的页面依赖它更新
+    设备名与在线标记，否则需等待轮询。
 
-    **改信任位必须掐断现有连接**：信任只在 hello 握手时判定一次，在线设备的旧连接
-    不会自动带上新信任——它的业务帧与命令结果会被静默丢弃，表现是「设备在线、功能
-    全坏」。掐掉之后设备按重连退避几秒内回来，带着新信任重新握手，startup 全貌帧
-    随之补上。
+    **修改信任位必须断开现有连接**：信任只在 hello 握手时判定一次，在线设备的
+    旧连接不会自动获得新信任——其业务帧与命令结果会被静默丢弃，表现为「设备
+    在线、功能全部失效」。断开后设备按重连退避在数秒内重新接入，以新信任重新
+    握手，startup 全貌帧随之补上。
     """
     if req.name is not None:
         service.rename_device(session, device_id, req.name)
@@ -286,15 +292,15 @@ async def exec_command(device_id: str, req: DeviceExecRequest, session: Session 
 async def capture_screen(device_id: str, session: Session = Depends(get_db)) -> CommandOutcome:
     """抓取设备全屏画面，结果在 data.image_base64（JPEG，NO_WRAP）。
 
-    设备端走 screenrecord + MediaCodec 解码首帧：本机 framebuffer 与 screencap
-    取不到画面（硬件合成器直出）。
+    设备端采用 screenrecord 加 MediaCodec 解码首帧：本机 framebuffer 与
+    screencap 均取不到画面（硬件合成器直出）。
     """
     return await device_action(session, device_id, actions.SCREEN_CAPTURE, {}, DEVICE_ACTION_TIMEOUT_S)
 
 
 @device_router.post("/{device_id}/restart-app", summary="重启应用进程")
 async def restart_app(device_id: str, session: Session = Depends(get_db)) -> CommandOutcome:
-    """重启 NTU Shower 进程（不重启整机，也不动浴室 APP）。"""
+    """重启 NTU Shower 进程（不重启整机，亦不重启浴室 App）。"""
     return await device_action(session, device_id, actions.APP_RESTART, {}, DEVICE_ACTION_TIMEOUT_S)
 
 
@@ -308,13 +314,13 @@ async def set_clock(device_id: str, req: DeviceClockSetRequest, session: Session
 
 @device_router.post("/{device_id}/restart-bath", summary="重启浴室 App")
 async def restart_bath_app(device_id: str, session: Session = Depends(get_db)) -> CommandOutcome:
-    """重启浴室 App：先强停再冷启动。排障用——延长服务流程已改用 power.schedule。"""
+    """重启浴室 App：先强制停止再冷启动。仅用于排障；延长服务流程已改用 power.schedule。"""
     return await device_action(session, device_id, actions.BATH_RESTART, {}, DEVICE_ACTION_TIMEOUT_S)
 
 
 @device_router.post("/{device_id}/reboot", summary="重启整机")
 async def reboot_device(device_id: str, session: Session = Depends(get_db)) -> CommandOutcome:
-    """重启整机。设备重启后 agent 随之重来，会话与喷头现态由重连后的全貌帧重建。"""
+    """重启整机。设备重启后 agent 重新接入，会话与喷头现态由重连后的全貌帧重建。"""
     return await device_action(session, device_id, actions.DEVICE_REBOOT, {}, DEVICE_ACTION_TIMEOUT_S)
 
 
@@ -334,9 +340,9 @@ async def dump_ui_tree(device_id: str, session: Session = Depends(get_db)) -> Co
 
 @device_router.post("/{device_id}/ui-touch", summary="按坐标点击或滑动")
 async def touch(device_id: str, req: DeviceUiTouchRequest, session: Session = Depends(get_db)) -> CommandOutcome:
-    """按屏幕坐标点击或滑动：不给 to_x/to_y 是点击，给了是滑动。
+    """按屏幕坐标点击或滑动：未提供 to_x/to_y 时为点击，提供时为滑动。
 
-    定位先经 dump 读节点树、由 bounds 求中心点，不使用遍历序号。
+    定位先经 dump 读取节点树、由 bounds 求中心点，不使用遍历序号。
     """
     params: dict[str, int] = {"x": req.x, "y": req.y}
     if req.to_x is not None and req.to_y is not None:
@@ -349,7 +355,7 @@ async def touch(device_id: str, req: DeviceUiTouchRequest, session: Session = De
 
 @device_router.post("/{device_id}/ui-key", summary="发送系统按键")
 async def send_key(device_id: str, req: DeviceUiKeyRequest, session: Session = Depends(get_db)) -> CommandOutcome:
-    """发送系统按键（闭集，路由层 422 挡下非法值）。"""
+    """发送系统按键（闭集，路由层以 422 拒绝非法值）。"""
     return await device_action(session, device_id, actions.UI_KEY, {"key": req.key}, _ui_timeout_s(session, device_id))
 
 

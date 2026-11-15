@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.dependencies import caller, device_scope_guard
 from app.contracts import CommandOutcome
+from app.core.errors import problem_responses
 from app.db.deps import get_db
 from app.modules.sessions.schemas import AssignRequest, SettleRequest
 
@@ -22,10 +23,15 @@ from . import service
 
 router = APIRouter(prefix="/api/v1", tags=["sessions"])
 
+#: 分配/结算/拍照的公共错误面：守卫三件套（401/403/404）、设备与喷头状态冲突
+# （409）、请求体校验（422）。
+_ACTION_RESPONSES = problem_responses(401, 403, 404, 409, 422)
+
 
 @router.post(
     "/devices/{device_id}/assign",
     dependencies=[Security(caller, scopes=["sessions:write"]), Depends(device_scope_guard)],
+    responses=_ACTION_RESPONSES,
 )
 async def assign(
     device_id: str,
@@ -39,6 +45,7 @@ async def assign(
 @router.post(
     "/devices/{device_id}/settle",
     dependencies=[Security(caller, scopes=["sessions:write"]), Depends(device_scope_guard)],
+    responses=_ACTION_RESPONSES,
 )
 async def settle(
     device_id: str,
@@ -52,6 +59,7 @@ async def settle(
 @router.post(
     "/devices/{device_id}/photo",
     dependencies=[Security(caller, scopes=["devices:photo"]), Depends(device_scope_guard)],
+    responses=_ACTION_RESPONSES,
 )
 async def photo(
     device_id: str,

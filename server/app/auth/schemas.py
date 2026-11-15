@@ -25,7 +25,7 @@ class AccountView(BaseModel):
 
 
 class MeView(BaseModel):
-    """调用方自身视图：我是谁、我有什么权限（任意已认证调用方）。"""
+    """调用方自身视图：账号身份与权限集合（任意已认证调用方）。"""
 
     username: str
     name: str
@@ -35,11 +35,11 @@ class MeView(BaseModel):
 
 
 class UserCreate(BaseModel):
-    """登记一个用户：username 唯一；不给口令即纯密钥调用方（machine user）。"""
+    """登记一个用户：username 唯一；不设置口令即纯密钥调用方（machine user）。"""
 
     username: str = Field(min_length=2, max_length=64, pattern=r"^\S+$")
     name: str = Field(default="", max_length=64)
-    password: str | None = Field(default=None, min_length=8, description="可选；给了即可登录管理台")
+    password: str | None = Field(default=None, min_length=8, description="可选；设置后即可登录管理台")
 
 
 class UserUpdate(BaseModel):
@@ -98,7 +98,7 @@ class KeyView(BaseModel):
 
 
 class KeyIssued(BaseModel):
-    """签发响应：记录 + 明文（只此一次）。"""
+    """签发响应：密钥记录 + 明文（仅此一次，服务端不保存明文）。"""
 
     id: int
     user_id: int

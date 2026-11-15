@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from app.auth.dependencies import caller, device_scope_guard
 from app.contracts import Caller
 from app.core.config import settings
+from app.core.errors import problem_responses
 from app.core.logging import log_event
 from app.core.problems import (
     OTA_APK_MISMATCH,
@@ -52,7 +53,7 @@ def list_releases(session: Session = Depends(get_db)) -> list[ReleaseRecord]:
     return repository.list_releases(session)
 
 
-@device_router.get("/ota/manifest", summary="设备升级清单（硬编码契约）")
+@device_router.get("/ota/manifest", summary="设备升级清单（硬编码契约）", responses=problem_responses(422))
 def manifest(device_id: str, version_code: int, session: Session = Depends(get_db)) -> OtaManifest:
     """设备定期轮询：返回是否有可用更新及其元数据。路径为设备硬编码契约，冻结。"""
     rel = repository.latest_for(session, device_id, version_code)
@@ -79,7 +80,7 @@ def manifest(device_id: str, version_code: int, session: Session = Depends(get_d
     }
 
 
-@router.get("/releases/{version}/download", summary="下载发布 APK")
+@router.get("/releases/{version}/download", summary="下载发布 APK", responses=problem_responses(404, 422))
 def download(version: ReleaseVersion) -> FileResponse:
     path = service.release_path(version)
     if not path.is_file():
@@ -95,6 +96,7 @@ def download(version: ReleaseVersion) -> FileResponse:
     "/releases/{version}/rearm",
     dependencies=[Security(caller, scopes=["ota:write"])],
     summary="清除安装确认（重新生效）",
+    responses=problem_responses(401, 403, 422),
 )
 def rearm_release(
     version: str, req: ReleaseRearmRequest, caller: Caller = Depends(caller), session: Session = Depends(get_db)
@@ -105,9 +107,14 @@ def rearm_release(
     return {"version": version, "device_id": device_id, "rearmed": repository.rearm(session, device_id, version)}
 
 
-@router.delete("/releases/{version}", dependencies=[Security(caller, scopes=["ota:write"])], summary="下架发布")
+@router.delete(
+    "/releases/{version}",
+    dependencies=[Security(caller, scopes=["ota:write"])],
+    summary="下架发布",
+    responses=problem_responses(401, 403, 422),
+)
 def delete_release(version: str, session: Session = Depends(get_db)) -> ReleaseRemoved:
-    """下架发布（紧急止损，如终止 OTA 循环）。注册行与 APK 文件一起删。"""
+    """下架发布（紧急止损，如终止 OTA 循环）。注册行与 APK 文件一并删除。"""
     deleted = repository.delete_release(session, version)
     file_removed = service.remove_release_file(version)
     if deleted or file_removed:
@@ -115,7 +122,12 @@ def delete_release(version: str, session: Session = Depends(get_db)) -> ReleaseR
     return {"version": version, "deleted": deleted}
 
 
-@router.post("/releases", dependencies=[Security(caller, scopes=["ota:write"])], summary="发布新版本")
+@router.post(
+    "/releases",
+    dependencies=[Security(caller, scopes=["ota:write"])],
+    summary="发布新版本",
+    responses=problem_responses(401, 403, 413, 422),
+)
 async def upload_release(
     version: ReleaseVersionForm,
     version_code: Annotated[int, Form()],
@@ -129,11 +141,11 @@ async def upload_release(
 
     发布成功后向在线的目标设备即时推送 ota.upgrade_available。
 
-    **版本必须在 HTTP 边界与 APK 内容比对**（根因闸门，2026-10-24 事故）：表单声明
-    0.4.40 而字节里是 0.4.39 的发布曾被照单全收，六台设备 pm Success 而版本不变、
-    陷入无限重装循环。APK 的真实版本从二进制 manifest 解析（apk_manifest），不一致
-    即拒——这是发布内容的唯一可信来源，发布端 `-SkipBuild` 用到陈旧构建产物时在这里
-    被拦下。
+    **版本必须在 HTTP 边界与 APK 内容比对**（根因闸门，源自 2026-10-24 事故）：
+    曾有表单声明 0.4.40、APK 实际为 0.4.39 的发布被直接受理，六台设备安装成功
+    而版本不变，陷入无限重装循环。APK 的真实版本从二进制 manifest 解析
+    （apk_manifest），不一致即拒——这是发布内容的唯一可信来源；发布端以
+    `-SkipBuild` 复用陈旧构建产物时在此被拒绝。
     """
     data = await file.read()
     if len(data) > settings.max_ota_bytes:
