@@ -2,10 +2,11 @@ name: docker
 
 # docker / build 是分支保护的 required check：PR 上必须每次都报告（GitHub 官方对
 # required check 的要求），不能做 paths 过滤——整个 workflow 被跳过时没有 check run，
-# 保护即无法满足。提速靠并发取消。
+# 保护即无法满足。提速靠并发取消；main 上不取消——build→deploy 是生产链，
+# 中途取消会把部署掐在半路。
 concurrency:
   group: docker-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 on:
   push:
@@ -25,3 +26,32 @@ jobs:
     secrets:
       ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
       ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+
+  # main 推送：镜像构建成功即滚动部署生产（pull → up → 健康探测，失败即红）。
+  # 部署序列与 deploy/README.md 的人工步骤一致，只是由 CI 代为执行；镜像标签
+  # 由 metadata 的 type=sha 产出（sha-<短哈希>），与本仓全部部署记录同形。
+  deploy:
+    needs: docker
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to production
+        uses: appleboy/ssh-action@823bd89e131d8d508129f9443cad5855e9ba96f0  # v1.2.4
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -eu
+            cd /opt/ntu-shower
+            NTU_SHOWER_TAG=sha-${GITHUB_SHA::7} docker compose pull ntu-shower
+            NTU_SHOWER_TAG=sha-${GITHUB_SHA::7} docker compose up -d
+            for i in $(seq 1 12); do
+              sleep 5
+              if curl -sf http://127.0.0.1:8110/healthz > /dev/null; then
+                echo "deploy healthy (attempt $i)"
+                exit 0
+              fi
+            done
+            echo "health check failed after deploy" >&2
+            exit 1
