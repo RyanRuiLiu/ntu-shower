@@ -176,6 +176,10 @@ TEXT_MAP = ConfigKind.TEXT_MAP
 TIME = ConfigKind.TIME
 WEEKDAYS = ConfigKind.WEEKDAYS
 
+#: 跨模块引用的配置键名。以字符串字面量散落在消费方迟早漂移（登记表改名一处、
+#: 消费方三处），跨模块引用一律取这里的常量。
+EXTEND_HOURS_STUDENTS_KEY = "extend_hours_students"
+
 
 #: 全部配置键的规格。新增配置键时只改这里——服务端校验、客户端渲染、文档
 #: 生成都从它派生。
@@ -1097,20 +1101,6 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         group="extend_hours",
     ),
     ConfigSpec(
-        "extend_hours_zone_offset_minutes",
-        INT,
-        SERVER,
-        480,
-        "设备时区偏移",
-        "设备墙钟与 UTC 的差，用来把最近一帧的读数换算成「设备表盘上现在几点」。默认 480 即"
-        "UTC+8。**它是设备的事实而不是我们的策略**：浴室 App 判时间用的是设备默认时区，配错会"
-        "让拨钟时机整体错位一小时，而且不报任何错",
-        minimum=-720,
-        maximum=840,
-        unit="分钟",
-        group="extend_hours",
-    ),
-    ConfigSpec(
         "extend_hours_students",
         TEXT_MAP,
         SERVER,
@@ -1122,6 +1112,21 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         group="extend_hours",
     ),
     # ── 自动校时 ──
+    ConfigSpec(
+        "server_zone_offset_minutes",
+        INT,
+        SERVER,
+        480,
+        "设备时区偏移",
+        "设备墙钟与 UTC 的差，用来把设备钟换算成「设备表盘上现在几点」。默认 480 即 UTC+8。"
+        "**它是设备的事实而不是我们的策略**：浴室 App 判时间用的是设备默认时区，配错会让"
+        "一切按表盘换算的动作（拨钟时机、校时判定）整体错位一小时，而且不报任何错。"
+        "延长服务与自动校时共用这一个换算轴——设备的表盘只有一个",
+        minimum=-720,
+        maximum=840,
+        unit="分钟",
+        group="server_clock",
+    ),
     ConfigSpec(
         "time_sync_enabled",
         BOOL,
