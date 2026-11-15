@@ -10,8 +10,8 @@
 - `GET /devices`：精简视图（id、名称、在线、actions）——查看语义，公开；
   `actions` 由 auth.allowed_actions 按调用方权限与作用域算出，客户端不复制
   判定规则。
-- `GET /devices/runtime`：运维档案（版本、信任、IP、时钟偏差等诊断字段），
-  admin 专属，管理台设备表专用。
+- `GET /devices/{device_id}`：单台运维档案（版本、信任、IP、时钟偏差等诊断
+  字段），devices:read 专属，管理台设备表专用。
 
 ## 守卫
 
