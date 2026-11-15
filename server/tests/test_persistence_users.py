@@ -106,3 +106,21 @@ def test_delete_user_cascades_keys(session: Session) -> None:
     crud.delete_user(session, "dorm-01")
     assert crud.resolve_key(session, issued[1]) is None
     assert crud.list_keys(session, "dorm-01") == []
+
+
+def test_database_level_cascade_deletes_keys(session: Session) -> None:
+    """DB 层的 ON DELETE CASCADE 必须与 ORM cascade 同义（波次2 删除语义三态：
+    凭据 CASCADE）。绕过 ORM 直接 SQL 删用户——迁移脚本、外部工具、未来的
+    非ORM 路径都走这条——密钥行必须随行消失；ORM 层的真相不许是唯一真相。"""
+    from sqlalchemy import text
+
+    crud.create_user(session, "dorm-01")
+    issued = crud.issue_key(session, "dorm-01", "a", ["jobs:read"], ["*"])
+    assert issued is not None
+
+    session.execute(text("PRAGMA foreign_keys=ON"))
+    session.execute(text("DELETE FROM users WHERE username = 'dorm-01'"))
+    session.commit()
+
+    remaining = session.execute(text("SELECT COUNT(*) FROM api_keys")).scalar_one()
+    assert remaining == 0
