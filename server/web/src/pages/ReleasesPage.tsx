@@ -52,7 +52,7 @@ export function ReleasesPage() {
                 release.force ? "bg-amber-500/20 text-amber-300" : "bg-indigo-500/20 text-indigo-200"
               }`}
             >
-              {release.force ? "强制" : release.mandatory ? "必需" : "可选"}
+              {release.force ? "强制" : "可选"}
             </span>
             <span className="text-default-500">{fmtFullDateTime(release.created_at)}</span>
             <Button size="sm" variant="danger-soft" onPress={() => remove(release.version)}>
@@ -73,9 +73,6 @@ export function ReleasesPage() {
         >
           <input name="version" className="w-32 rounded-xl border border-white/10 bg-content2/60 px-3 py-1.5 text-sm" placeholder="版本号" required />
           <input name="version_code" type="number" className="w-24 rounded-xl border border-white/10 bg-content2/60 px-3 py-1.5 text-sm" placeholder="版本号 code" required />
-          <label className="flex items-center gap-1 text-xs">
-            <input name="mandatory" type="checkbox" /> 必需
-          </label>
           <label className="flex items-center gap-1 text-xs">
             <input name="force" type="checkbox" /> 强制
           </label>

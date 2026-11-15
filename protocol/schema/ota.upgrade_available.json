@@ -17,8 +17,7 @@
           "required": [
             "version",
             "version_code",
-            "url",
-            "mandatory"
+            "url"
           ],
           "properties": {
             "version": {
@@ -29,9 +28,6 @@
             },
             "url": {
               "type": "string"
-            },
-            "mandatory": {
-              "type": "boolean"
             }
           }
         }

@@ -4,10 +4,9 @@
  * 上传走 multipart，不能预设 Content-Type——boundary 必须由浏览器自己生成，
  * 这一点由 `core/api.js` 的 `raw` 选项处理，这里只管把 `FormData` 递过去。
  *
- * ## 两个开关的语义
+ * ## 开关的语义
  *
- * - `mandatory`：设备端视为必须安装（当前实现未强制，但记录在案）
- * - `force`：无视版本号，调试期反复推同一版本用。正式升级不要勾——它会让所有
+ * `force`：无视版本号，调试期反复推同一版本用。正式升级不要勾——它会让所有
  *   目标设备重新装一遍，即使版本号没变
  *
  * 下架是紧急止损：发出去才发现有问题时，用它终止后续设备继续安装。
@@ -31,8 +30,8 @@ function render(list) {
       <tr data-version="${esc(item.version)}">
         <td class="mono">${esc(item.version)}</td>
         <td class="mono">${esc(item.version_code)}</td>
-        <td>${item.force ? '<span class="badge badge-amber">强制</span>' : ''}${item.mandatory ? '<span class="badge badge-blue">必需</span>' : ''}</td>
-        <td>${esc(item.target)}</td>
+        <td>${item.force ? '<span class="badge badge-amber">强制</span>' : ''}</td>
+        <td>${esc(item.target.join(', '))}</td>
         <td class="mono muted" title="${esc(item.sha256)}">${esc(item.sha256.slice(0, 12))}…</td>
         <td class="mono">${esc(fmtFullDateTime(item.created_at))}</td>
         <td class="col-actions">

@@ -119,7 +119,7 @@ def prune(session: Session, retention_days: int, retentions: tuple[tuple[Any, An
     其余表用各自声明值，不随该配置变。全部 DELETE 共用一个事务：要么都清、
     要么都不清，各表保留期才不会错开。库文件不复缩，页复用即可。
 
-    `retentions` 由调用方（app 根的 audit_middleware）传入：保留期清单横跨各域的
+    `retentions` 由调用方（app 根的 retention）传入：保留期清单横跨各域的
     表，持久化层不得反向 import 各域模型，清单住在装配侧。
     """
     removed = 0

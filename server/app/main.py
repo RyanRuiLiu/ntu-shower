@@ -38,7 +38,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 from typing_extensions import TypedDict
 
-from . import audit_middleware
+from . import audit_middleware, retention
 from .auth.routes import admin_router as users_admin_router
 from .auth.routes import identity_router as users_identity_router
 from .auth.routes import router as auth_router
@@ -56,6 +56,7 @@ from .modules.bridge.routes import admin_router as bridge_admin_router
 from .modules.bridge.routes import router as bridge_router
 from .modules.config import notifier as config_notifier
 from .modules.config.routes import admin_router as config_admin_router
+from .modules.devices import push as devices_push
 from .modules.devices.routes import admin_router as devices_admin_router
 from .modules.devices.routes import device_read_router as devices_device_read_router
 from .modules.devices.routes import device_router as devices_device_router
@@ -140,7 +141,7 @@ def create_app() -> FastAPI:
         # 间隔任务统一装配：各模块只提供「一轮做什么」，生命周期集中在这一个对象上。
         background.interval("extend-hours", extend_hours_service.TICK_INTERVAL_S, extend_hours_service.tick_once)
         background.interval("status-line", status_line_service.PUSH_INTERVAL_S, status_line_service.tick)
-        background.interval("audit-prune", audit_middleware.PRUNE_INTERVAL_S, audit_middleware.prune_once)
+        background.interval("audit-prune", retention.PRUNE_INTERVAL_S, retention.prune_once)
         _abort_pending_commands()
         background.start()
         # 事件驱动型任务保持自己的模型：按设备惰性起 worker，不占统一循环。
@@ -191,8 +192,9 @@ def create_app() -> FastAPI:
     )
     install_error_handlers(app)
     audit_middleware.install_audit(app)
-    # 配置保存 → 定时器重算 + 设备推送：组合根装配（写侧不 import sessions，见
-    # modules/config/notifier.py 的模块注释）。
+    # 配置保存 → 设备推送 + 定时器重算：两个订阅者各司一职，组合根装配（写侧
+    # 不 import 任何订阅方，见 modules/config/notifier.py 的模块注释）。
+    config_notifier.register(devices_push.on_config_change)
     config_notifier.register(sessions_scheduler.on_config_change)
 
     app.include_router(gateway_router)

@@ -2,7 +2,7 @@
 
 审计是横切基础设施，不是业务模块：写入方是全部模块与网关生命周期，读取方是
 audit 域的只读出口。三张表都是只追加的时间序列，因此每条都有时刻列与索引；
-保留策略按表分别设定（登记与执行见 audit_middleware 的 RETENTIONS 与
+保留策略按表分别设定（登记与执行见 app/retention.py 的 RETENTIONS 与
 api_calls.prune）。
 
 JobRun 的 session_id 外键指向 door_sessions（字符串表名，不需要 import 会话模型）：
@@ -71,8 +71,9 @@ class CommandAudit(CreatedAtMixin, Base):
     reason_code: Mapped[str | None] = mapped_column(String(64), default=None)
     terminal_message: Mapped[str | None] = mapped_column(Text, default=None)
     trace_id: Mapped[str] = mapped_column(String(64), default="")
-    #: 设备在成功时回传的数据，字段名由 core.outcomes.ACTION_DATA 登记
-    result: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    #: 设备在成功时回传的数据，字段名由 core.outcomes.ACTION_DATA 登记；
+    #: 与 device.command_result 帧、CommandOutcome.data 同一个词
+    data: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
 
 
 class JobRun(CreatedAtMixin, Base):
@@ -138,7 +139,7 @@ def finish(
     row.status = status
     row.reason_code = reason_code
     row.terminal_message = terminal_message
-    row.result = data
+    row.data = data
     session.commit()
 
 
@@ -172,7 +173,7 @@ def list_commands(session: Session, device_id: str | None = None, limit: int = 5
                 "reason_code": row.reason_code,
                 "terminal_message": row.terminal_message,
                 "trace_id": row.trace_id or None,
-                "data": _dumps(row.result),
+                "data": _dumps(row.data),
             }
         )
     return records

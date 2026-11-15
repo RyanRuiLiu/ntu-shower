@@ -26,7 +26,6 @@ class OtaManifest(TypedDict, total=False):
     url: str
     sha256: str
     size: int
-    mandatory: bool
     force: bool
 
 
