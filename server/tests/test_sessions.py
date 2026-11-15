@@ -208,12 +208,12 @@ def test_assign_round_trip_returns_device_outcome(
 
         thread = Thread(target=call)
         thread.start()
-        command = frames.recv_until(ws, "session.command")
+        command = frames.recv_until(ws, "device.command")
         assert command["payload"]["action"] == "session.assign"
         assert command["payload"]["params"] == ASSIGN_PAYLOAD
         ws.send_text(
             frames.frame(
-                "session.command_result",
+                "device.command_result",
                 {"status": "ok", "reason_code": "", "terminal_message": "已分配", "data": None},
                 reply_to=command["id"],
             )

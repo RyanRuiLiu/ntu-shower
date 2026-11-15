@@ -28,8 +28,8 @@ KNOWN_TYPES = [
     "link.error",
     "door.snapshot",
     "door.snapshot_ack",
-    "session.command",
-    "session.command_result",
+    "device.command",
+    "device.command_result",
     "config.update",
     "config.ack",
     "status_line.update",
@@ -71,8 +71,8 @@ SAMPLES: dict[str, dict[str, Any]] = {
         }
     },
     "door.snapshot_ack": {"payload": {"snapshot_id": "11111111-1111-4111-8111-111111111111"}},
-    "session.command": {"payload": {"action": "session.assign", "params": {}, "timeout_ms": 30000}},
-    "session.command_result": {"payload": {"status": "ok", "reason_code": "", "data": {}}},
+    "device.command": {"payload": {"action": "session.assign", "params": {}, "timeout_ms": 30000}},
+    "device.command_result": {"payload": {"status": "ok", "reason_code": "", "data": {}}},
     "config.update": {"payload": {"revision": 1, "config": {"heartbeat_interval_s": 30}}},
     "config.ack": {"payload": {"revision": 1}},
     "status_line.update": {

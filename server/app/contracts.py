@@ -128,7 +128,7 @@ class CommandStatus(StrEnum):
 class CommandOutcome(TypedDict):
     """设备命令的终态结果。
 
-    对齐 protocol/schema/session.command_result.json。`data` 按命令而异
+    对齐 protocol/schema/device.command_result.json。`data` 按命令而异
     （拍照回 image_base64、远程执行回 output），因此保持开放对象：前端按
     `action` 分支取字段，而非为每种命令各造一个响应类型。
     """
