@@ -24,7 +24,7 @@ from .schemas import DoorView
 router = APIRouter(prefix="/api/v1", tags=["doors"])
 
 
-@router.get("/doors")
+@router.get("/doors", summary="喷头现态列表")
 def list_doors(device_id: str | None = None, session: Session = Depends(get_db)) -> list[DoorView]:
     """喷头现态列表；带 device_id 即该设备的喷头，不带列全部设备。"""
     return service.list_doors(session, device_id)

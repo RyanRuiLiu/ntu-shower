@@ -242,7 +242,7 @@ async def _serve_client(bridge: AdbBridge, reader: asyncio.StreamReader, writer:
     await _pump_tcp_to_ws(bridge, reader)
 
 
-@admin_router.post("/devices/{device_id}/bridge/open")
+@admin_router.post("/devices/{device_id}/bridge/open", summary="打开调试桥")
 async def adb_open(device_id: str, session: Session = Depends(get_db)) -> BridgeOpened:
     """打开设备的 ADB 桥：下发 bridge.open 并绑定本机回环 TCP 监听。
 
@@ -312,7 +312,7 @@ async def adb_open(device_id: str, session: Session = Depends(get_db)) -> Bridge
         return {"device_id": device_id, "port": bridge.port, "already_open": False, "generation": bridge.generation}
 
 
-@admin_router.post("/devices/{device_id}/bridge/close")
+@admin_router.post("/devices/{device_id}/bridge/close", summary="关闭调试桥")
 async def adb_close(device_id: str, session: Session = Depends(get_db)) -> BridgeClosed:
     """关闭桥：回收监听与流，并让设备停掉 adbd。与开桥共用同一把锁，理由见 adb_open。"""
     async with registry.op_lock:
@@ -331,7 +331,7 @@ async def adb_close(device_id: str, session: Session = Depends(get_db)) -> Bridg
         return {"device_id": device_id, "closed": True}
 
 
-@admin_router.get("/devices/{device_id}/bridge")
+@admin_router.get("/devices/{device_id}/bridge", summary="调试桥状态")
 async def adb_status(device_id: str, session: Session = Depends(get_db)) -> BridgeStatus:
     """桥接状态可观测（管理面）。
 

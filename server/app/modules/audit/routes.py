@@ -20,7 +20,7 @@ from app.persistence.api_calls import ApiCallRecord, list_calls
 admin_router = APIRouter(prefix="/api/v1", dependencies=[Security(caller, scopes=["audit:read"])], tags=["audit"])
 
 
-@admin_router.get("/audit/calls")
+@admin_router.get("/audit/calls", summary="接口调用审计")
 def list_calls_endpoint(
     device_id: Annotated[str | None, Query(description="按设备过滤")] = None,
     actor_kind: Annotated[str | None, Query(description="按调用方过滤：identity / device / anonymous")] = None,
@@ -31,7 +31,7 @@ def list_calls_endpoint(
     return list_calls(device_id=device_id, actor_kind=actor_kind, kind=kind, limit=limit)
 
 
-@admin_router.get("/audit/commands")
+@admin_router.get("/audit/commands", summary="命令审计")
 def list_commands_endpoint(
     device_id: Annotated[str | None, Query(description="按设备过滤")] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
@@ -41,7 +41,7 @@ def list_commands_endpoint(
     return command_audit.list_commands(session, device_id=device_id, limit=limit)
 
 
-@admin_router.get("/audit/job-runs")
+@admin_router.get("/audit/job-runs", summary="后台任务审计")
 def list_job_runs_endpoint(
     device_id: Annotated[str | None, Query(description="按设备过滤")] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
