@@ -31,6 +31,7 @@ class DeviceSummary(TypedDict):
     device_id: str
     name: str
     online: bool
+    retired: bool
 
 
 class DeviceListItem(DeviceSummary):
@@ -79,6 +80,7 @@ class DevicePatchRequest(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=64)
     trusted: bool | None = None
+    retired: bool | None = None
 
 
 class DeviceExecRequest(BaseModel):

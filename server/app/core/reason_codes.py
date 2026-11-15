@@ -38,6 +38,7 @@ UNKNOWN_COMMAND_ID = Reason("command.unknown_id", "该结果没有对应的待�
 # ── 设备侧 ──
 
 DEVICE_OFFLINE = Reason("device.offline", "设备离线")
+DEVICE_RETIRED = Reason("device.retired", "设备已停用")
 DEVICE_UNSUPPORTED_ACTION = Reason("device.unsupported_action", "设备未声明该能力，无法执行")
 DEVICE_INTERNAL_ERROR = Reason("device.internal_error", "设备端内部错误")
 DEVICE_EXEC_FAILED = Reason("device.exec_failed", "命令执行失败，原因见输出")

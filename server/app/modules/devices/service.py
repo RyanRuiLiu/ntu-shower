@@ -55,7 +55,12 @@ def set_order(session: Session, device_ids: list[str]) -> None:
 
 def to_summary(record: DeviceRecord) -> DeviceSummary:
     """完整档案裁剪为精简视图（字段收口于此，用户面与推送共用）。"""
-    return {"device_id": record["device_id"], "name": record["name"], "online": record["online"]}
+    return {
+        "device_id": record["device_id"],
+        "name": record["name"],
+        "online": record["online"],
+        "retired": record["retired"],
+    }
 
 
 def publish_device_update(session: Session, device_id: str) -> None:
@@ -64,7 +69,7 @@ def publish_device_update(session: Session, device_id: str) -> None:
     if record is not None:
         payload: dict[str, object] = dict(to_summary(record))
     else:
-        payload = {"device_id": device_id, "name": "", "online": False}
+        payload = {"device_id": device_id, "name": "", "online": False, "retired": True}
     payload["at"] = now_rfc3339()
     events.publish(events.DEVICE_UPDATE, payload)
 
@@ -170,6 +175,15 @@ def set_trusted(session: Session, device_id: str, trusted: bool) -> bool:
     路由）改完必须**掐断现有连接**让设备重新握手，见 `routes.patch_device`。
     """
     return repository.set_trusted(session, device_id, trusted)
+
+
+def set_retired(session: Session, device_id: str, retired: bool) -> bool:
+    """停用/恢复（只落库）。
+
+    执行语义在网关与自注册：握手与 enroll 即刻拒绝。调用方改完必须掐断现有
+    连接——在线设备的业务帧不会因这个位自动停下（与信任位同一处置）。
+    """
+    return repository.set_retired(session, device_id, retired)
 
 
 def is_online(device_id: str) -> bool:

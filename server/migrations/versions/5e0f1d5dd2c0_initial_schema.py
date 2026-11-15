@@ -164,6 +164,11 @@ def upgrade() -> None:
         sa.Column("last_ip", sa.String(length=45), nullable=True),
         sa.Column("booted_at", UtcDateTime(), nullable=True),
         sa.Column("clock_skew_s", sa.Double(), nullable=False),
+        sa.Column("clock_shifted_at", UtcDateTime(), nullable=True),
+        sa.Column("clock_shift_assignments", sa.JSON(), nullable=True),
+        sa.Column("config_revision", sa.Integer(), nullable=False),
+        sa.Column("config_override", sa.JSON(), nullable=True),
+        sa.Column("retired_at", UtcDateTime(), nullable=True),
         sa.Column("sort_order", sa.Integer(), nullable=False),
         sa.Column("created_at", UtcDateTime(), nullable=False),
         sa.Column("updated_at", UtcDateTime(), nullable=False),
@@ -245,33 +250,6 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id", name=op.f("pk_voice_rules")),
     )
     op.create_table(
-        "device_clock_shifts",
-        sa.Column("id", sa.Integer(), nullable=False),
-        sa.Column("device_id", sa.String(length=64), nullable=False),
-        sa.Column("shifted_at", UtcDateTime(), nullable=False),
-        sa.Column("restarted_at", UtcDateTime(), nullable=True),
-        sa.Column("assignments", sa.JSON(), nullable=False),
-        sa.Column("updated_at", UtcDateTime(), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["device_id"], ["devices.id"], name=op.f("fk_device_clock_shifts_device_id_devices"), ondelete="CASCADE"
-        ),
-        sa.PrimaryKeyConstraint("id", name=op.f("pk_device_clock_shifts")),
-        sa.UniqueConstraint("device_id", name=op.f("uq_device_clock_shifts_device_id")),
-    )
-    op.create_table(
-        "device_configs",
-        sa.Column("id", sa.Integer(), nullable=False),
-        sa.Column("device_id", sa.String(length=64), nullable=True),
-        sa.Column("revision", sa.Integer(), nullable=False),
-        sa.Column("config", sa.JSON(), nullable=False),
-        sa.Column("updated_at", UtcDateTime(), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["device_id"], ["devices.id"], name=op.f("fk_device_configs_device_id_devices"), ondelete="CASCADE"
-        ),
-        sa.PrimaryKeyConstraint("id", name=op.f("pk_device_configs")),
-        sa.UniqueConstraint("device_id", name=op.f("uq_device_configs_device_id")),
-    )
-    op.create_table(
         "device_credentials",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("device_id", sa.String(length=64), nullable=False),
@@ -301,7 +279,7 @@ def upgrade() -> None:
         sa.Column("device_clock", sa.String(length=64), nullable=True),
         sa.Column("created_at", UtcDateTime(), nullable=False),
         sa.ForeignKeyConstraint(
-            ["device_id"], ["devices.id"], name=op.f("fk_door_snapshots_device_id_devices"), ondelete="CASCADE"
+            ["device_id"], ["devices.id"], name=op.f("fk_door_snapshots_device_id_devices"), ondelete="RESTRICT"
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_door_snapshots")),
         sa.UniqueConstraint("device_id", "snapshot_id", name="uq_door_snapshots_device_id_snapshot_id"),
@@ -355,7 +333,7 @@ def upgrade() -> None:
         sa.Column("occurred_at", UtcDateTime(), nullable=False),
         sa.Column("created_at", UtcDateTime(), nullable=False),
         sa.ForeignKeyConstraint(
-            ["device_id"], ["devices.id"], name=op.f("fk_door_state_events_device_id_devices"), ondelete="CASCADE"
+            ["device_id"], ["devices.id"], name=op.f("fk_door_state_events_device_id_devices"), ondelete="RESTRICT"
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_door_state_events")),
     )
@@ -398,7 +376,7 @@ def upgrade() -> None:
         sa.Column("reported_at", UtcDateTime(), nullable=False),
         sa.Column("updated_at", UtcDateTime(), nullable=False),
         sa.ForeignKeyConstraint(
-            ["device_id"], ["devices.id"], name=op.f("fk_door_states_device_id_devices"), ondelete="CASCADE"
+            ["device_id"], ["devices.id"], name=op.f("fk_door_states_device_id_devices"), ondelete="RESTRICT"
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_door_states")),
         sa.UniqueConstraint("device_id", "door_no", name="uq_door_states_device_id_door_no"),
@@ -412,7 +390,7 @@ def upgrade() -> None:
         sa.Column("device_id", sa.String(length=64), nullable=False),
         sa.Column("applied_at", UtcDateTime(), nullable=False),
         sa.ForeignKeyConstraint(
-            ["device_id"], ["devices.id"], name=op.f("fk_ota_release_installs_device_id_devices"), ondelete="CASCADE"
+            ["device_id"], ["devices.id"], name=op.f("fk_ota_release_installs_device_id_devices"), ondelete="RESTRICT"
         ),
         sa.ForeignKeyConstraint(
             ["release_id"],
@@ -651,8 +629,6 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f("ix_device_credentials_device_id"))
 
     op.drop_table("device_credentials")
-    op.drop_table("device_configs")
-    op.drop_table("device_clock_shifts")
     op.drop_table("voice_rules")
     with op.batch_alter_table("voice_assets", schema=None) as batch_op:
         batch_op.drop_index(batch_op.f("ix_voice_assets_digit"))
