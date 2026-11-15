@@ -30,9 +30,10 @@ from app.core.connections import manager
 from app.core.errors import problem_responses
 from app.core.logging import log_event
 from app.core.problems import DEVICE_OFFLINE, ApiProblemError
+from app.core.protocol import as_int
 from app.db.base import utcnow
 from app.db.deps import get_db
-from app.db.session import Database
+from app.db.session import Database, session_scope
 from app.modules.bridge.schemas import BridgeClosed, BridgeOpened, BridgeStatus
 from app.modules.config import store as config_store
 from app.persistence import audit as command_audit
@@ -84,10 +85,11 @@ def _bridge_timeout_s(session: Session, key: str) -> float:
     """读一个桥接超时（秒）。
 
     三个键都是 SERVER 归属：桥建在服务端侧，取全局有效值即可。不硬编码，调试
-    通道该开多久是运维判断的事，项目规范把超时归在必须可调的那一类。
+    通道该开多久是运维判断的事，项目规范把超时归在必须可调的那一类。取值经
+    as_int：INT 键的规格保证它是整数，类型不符时让转换如实报错而不是静默给 0
+    （寿命 0 意味着桥立即回收，那是把配置错误伪装成运行现象）。
     """
-    value = config_store.global_effective(session)[key]
-    return float(value) if isinstance(value, int) else 0.0
+    return float(as_int(config_store.global_effective(session)[key]))
 
 
 def _append(buffer: bytearray, data: bytes) -> None:
@@ -190,8 +192,6 @@ async def device_bridge(ws: WebSocket, device_id: str) -> None:
         if bridge.device_ws is ws:
             await bridge.recycle(reason)
             audit_id = _bridge_audit_id()
-            from app.db.session import session_scope
-
             with session_scope() as session:
                 command_audit.insert_command(session, audit_id, device_id, SESSION_END_ACTION, utcnow())
                 command_audit.finish(session, audit_id, CommandStatus(outcomes.OK.value), "", reason, utcnow())

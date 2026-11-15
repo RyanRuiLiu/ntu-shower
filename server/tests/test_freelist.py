@@ -167,3 +167,32 @@ def test_write_strips_what_the_editor_left_around_a_student(
     client.put(f"/api/v1/devices/{DEVICE}/freelist", headers=admin_headers, json={"students": [" 1992045 "]})
 
     assert sent == [(actions.FREELIST_WRITE, {"content": "1992045\r\n"})]
+
+
+# ── 读写分离（与 water 域同一模式：read 与 write 是两枚独立 scope） ──────────
+
+
+def test_read_scope_can_read_but_not_write(client: TestClient, fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """只授 freelist:read 的密钥：GET 可用，PUT 403——最小权限不含写。"""
+    from tests.identity import bearer, register_key
+
+    _stub_action(monkeypatch, result=_readable())
+    headers = bearer(register_key("freelist-reader", ["freelist:read"], device_scope=["*"]))
+
+    assert client.get(f"/api/v1/devices/{DEVICE}/freelist", headers=headers).status_code == 200
+    put = client.put(f"/api/v1/devices/{DEVICE}/freelist", headers=headers, json={"students": []})
+    assert put.status_code == 403
+    assert put.json()["type"].endswith("/problems/insufficient-scope")
+
+
+def test_write_scope_can_write_but_not_read(client: TestClient, fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """只授 freelist:write 的密钥：PUT 可用，GET 403——写位不再顺带送读位。"""
+    from tests.identity import bearer, register_key
+
+    _stub_action(monkeypatch, sent=[])
+    headers = bearer(register_key("freelist-writer", ["freelist:write"], device_scope=["*"]))
+
+    assert client.put(f"/api/v1/devices/{DEVICE}/freelist", headers=headers, json={"students": []}).status_code == 200
+    get = client.get(f"/api/v1/devices/{DEVICE}/freelist", headers=headers)
+    assert get.status_code == 403
+    assert get.json()["type"].endswith("/problems/insufficient-scope")
