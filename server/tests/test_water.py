@@ -72,15 +72,20 @@ def test_status_sends_no_business_params(
     sent: list[tuple[str, str, dict[str, int], float]] = []
     _stub_action(monkeypatch, sent)
 
-    response = client.post(f"/api/v1/devices/{DEVICE}/water/status", headers=admin_headers)
+    response = client.get(f"/api/v1/devices/{DEVICE}/water-status", headers=admin_headers)
 
     assert response.status_code == 200
     assert sent == [(DEVICE, actions.WATER_STATUS, {}, routes.WATER_ACTION_TIMEOUT_S)]
 
 
-@pytest.mark.parametrize("path", ["open", "close", "status"])
+@pytest.mark.parametrize("path", ["water/open", "water/close"])
 def test_water_endpoints_need_admin(client: TestClient, path: str) -> None:
-    response = client.post(f"/api/v1/devices/{DEVICE}/water/{path}", json={"door_no": 1})
+    response = client.post(f"/api/v1/devices/{DEVICE}/{path}", json={"door_no": 1})
+    assert response.status_code == 401
+
+
+def test_water_status_needs_admin(client: TestClient) -> None:
+    response = client.get(f"/api/v1/devices/{DEVICE}/water-status")
     assert response.status_code == 401
 
 
