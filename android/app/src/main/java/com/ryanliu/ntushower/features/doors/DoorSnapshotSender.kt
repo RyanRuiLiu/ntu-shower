@@ -42,7 +42,7 @@ class DoorSnapshotSender(context: Context, private val onDoorsRead: (DoorReading
      * 上一次上报的喷头状态指纹；`null` 表示"还没有指纹"。
      *
      * 用可空而不是某个具体的哨兵值：`hashCode()` 的取值范围是整个 Int，拿任何一个数字
-     * 当"没有"，都可能与真实指纹撞上。
+     * 当"没有"，都可能恰与真实指纹相同而误判。
      */
     @Volatile private var lastHash: Int? = null
 

@@ -260,9 +260,9 @@ class GatewayClient(private val context: Context, private val callback: Callback
                     handler.post { callback.onConnected(trusted, config, upgrade, serverTime) }
                 }
 
+                // 服务端对心跳的应答，链路层消化（锚点已在收到 ping 请求时立过）
                 MessageTypes.LINK_PONG -> Unit
 
-                // 心跳回包，链路层消化
                 MessageTypes.LINK_ERROR -> Log.w(TAG, "server error: ${env.payload}")
 
                 else -> handler.post { callback.onMessage(env) }

@@ -255,7 +255,7 @@ class A11yService :
      *
      * 代价是联网超时（见 [launchBathApp]），所以只在名单待生效时用。不走
      * [com.ryanliu.ntushower.features.automation.BathAppRestart]：那条路要 `force-stop`，
-     * 会掐断进行中的会话。
+     * 会中断进行中的会话。
      */
     private fun launchBathAppFull(): Boolean = try {
         val intent = packageManager.getLaunchIntentForPackage(AppConfig.BATH_APP_PACKAGE) ?: return false
