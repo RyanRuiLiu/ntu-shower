@@ -89,7 +89,6 @@ SAMPLES: dict[str, dict[str, Any]] = {
             "version": "0.2.4",
             "version_code": 6,
             "url": "/api/v1/ota/releases/0.2.4/download",
-            "mandatory": False,
         }
     },
     "ota.progress": {"payload": {"version": "0.2.4", "stage": "downloading", "detail": ""}},

@@ -274,9 +274,8 @@ export interface ReleaseRecord {
   version: string;
   version_code: number;
   sha256: string;
-  mandatory: boolean;
   force: boolean;
-  target: string;
+  target: string[];
   created_at: string;
 }
 

@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from tests import apk, frames
 
 from app import audit_middleware
-from app import audit_middleware as api_calls_record
+from app import retention as api_calls_record
 from app.db.base import utcnow
 from app.persistence import api_calls
 from app.persistence import audit as command_audit

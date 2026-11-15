@@ -41,14 +41,14 @@ def _device(session: Session, device_id: str = "dev-a") -> None:
 
 
 def test_insert_and_list_ordered_by_version_code(session: Session) -> None:
-    ota.insert_release(session, "0.6.5", 605, "a" * 64, False, False, "all")
-    ota.insert_release(session, "0.6.6", 606, "b" * 64, True, False, "all")
+    ota.insert_release(session, "0.6.5", 605, "a" * 64, False, ["*"])
+    ota.insert_release(session, "0.6.6", 606, "b" * 64, True, ["*"])
     assert [item["version"] for item in ota.list_releases(session)] == ["0.6.6", "0.6.5"]
 
 
 def test_latest_for_returns_newer_release(session: Session) -> None:
     _device(session)
-    ota.insert_release(session, "0.6.5", 605, "a" * 64, False, False, "all")
+    ota.insert_release(session, "0.6.5", 605, "a" * 64, False, ["*"])
     latest = ota.latest_for(session, "dev-a", 604)
     assert latest is not None
     assert latest["version"] == "0.6.5"
@@ -57,7 +57,7 @@ def test_latest_for_returns_newer_release(session: Session) -> None:
 
 def test_force_release_stops_after_install(session: Session) -> None:
     _device(session)
-    ota.insert_release(session, "0.6.5", 605, "a" * 64, False, True, "all")
+    ota.insert_release(session, "0.6.5", 605, "a" * 64, True, ["*"])
     assert ota.latest_for(session, "dev-a", 605) is not None
     ota.mark_installed_upto(session, "dev-a", 605)
     assert ota.is_installed(session, "dev-a", "0.6.5") is True
@@ -67,14 +67,14 @@ def test_force_release_stops_after_install(session: Session) -> None:
 def test_target_whitelist(session: Session) -> None:
     _device(session, "dev-a")
     _device(session, "dev-b")
-    ota.insert_release(session, "0.6.5", 605, "a" * 64, False, False, "dev-b")
+    ota.insert_release(session, "0.6.5", 605, "a" * 64, False, ["dev-b"])
     assert ota.latest_for(session, "dev-a", 604) is None
     assert ota.latest_for(session, "dev-b", 604) is not None
 
 
 def test_rearm_makes_force_applicable_again(session: Session) -> None:
     _device(session)
-    ota.insert_release(session, "0.6.5", 605, "a" * 64, False, True, "all")
+    ota.insert_release(session, "0.6.5", 605, "a" * 64, True, ["*"])
     ota.mark_installed_upto(session, "dev-a", 605)
     assert ota.rearm(session, "dev-a", "0.6.5") is True
     assert ota.latest_for(session, "dev-a", 605) is not None
@@ -82,14 +82,14 @@ def test_rearm_makes_force_applicable_again(session: Session) -> None:
 
 
 def test_delete_release(session: Session) -> None:
-    ota.insert_release(session, "0.6.5", 605, "a" * 64, False, False, "all")
+    ota.insert_release(session, "0.6.5", 605, "a" * 64, False, ["*"])
     assert ota.delete_release(session, "0.6.5") is True
     assert ota.delete_release(session, "0.6.5") is False
     assert ota.list_releases(session) == []
 
 
 def test_missing_device_is_a_noop(session: Session) -> None:
-    ota.insert_release(session, "0.6.5", 605, "a" * 64, False, True, "all")
+    ota.insert_release(session, "0.6.5", 605, "a" * 64, True, ["*"])
     ota.mark_installed_upto(session, "missing", 605)
     assert ota.is_installed(session, "missing", "0.6.5") is False
     assert ota.rearm(session, "missing", "0.6.5") is False
