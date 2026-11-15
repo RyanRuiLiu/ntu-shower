@@ -42,6 +42,7 @@ jobs:
               - '.github/workflows/ci.yml'
             web:
               - 'server/web/**'
+              - 'server/web-legacy/**'
             docs:
               - '**/*.md'
 
@@ -108,9 +109,10 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm exec tsc -b
           pnpm exec eslint src --config eslint.config.mjs
-          pnpm exec eslint legacy --config legacy/eslint.config.mjs
-          pnpm exec stylelint "legacy/style/*.css" --config legacy/.stylelintrc.json
           pnpm exec vitest run
+          cd ..
+          node web/node_modules/eslint/bin/eslint.js --config web-legacy/eslint.config.mjs web-legacy
+          node web/node_modules/stylelint/bin/stylelint.mjs "web-legacy/style/*.css" --config web-legacy/.stylelintrc.json
 
   semgrep:
     needs: changes
