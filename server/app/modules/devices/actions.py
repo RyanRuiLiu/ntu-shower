@@ -1,6 +1,6 @@
 """设备命令与配置推送的统一传输通道：排队、下发、审计、Future 回填。
 
-独立成模块的原因：sessions 的领域入口（分配/结算/拍照）、extend_hours 的重布、
+独立成模块的原因：sessions 的领域入口（分配/结算）、extend_hours 的重布、
 voice 的播报、devices 的远程操作共用同一条「下发并等结果」的路径。传输是设备
 I/O，归属设备域；此前放在 sessions 使 devices 的守卫反向依赖 sessions（包级
 循环），下沉后依赖方向单一：业务模块 → 本模块。
@@ -24,6 +24,7 @@ from app.core import actions, outcomes, protocol, reason_codes
 from app.core.config import settings
 from app.core.connections import manager
 from app.core.logging import log_event, trace_id_var
+from app.core.problems import SERVER_OVERLOADED, ApiProblemError
 from app.core.protocol import JsonObject
 from app.db.base import utcnow
 from app.persistence import audit as command_audit
@@ -54,6 +55,18 @@ def _with_message(outcome: CommandOutcome) -> CommandOutcome:
         terminal_message=reason_codes.describe(outcome["reason_code"]),
         data=outcome["data"],
     )
+
+
+def reject_overloaded(outcome: CommandOutcome) -> CommandOutcome:
+    """通道排队满时把拒绝转成领域异常（调用方 HTTP 层转 409）。
+
+    这不是"设备忙"：同通道的先后命令会排队执行，只有队满才拒。前者说明设备正忙、
+    等一会就好；后者说明积压已多、该换个时间再来。判定只有这一处——要改语义，
+    所有「下发并等结果」的调用方一起改。
+    """
+    if outcome.get("status") == outcomes.REJECTED.value:
+        raise ApiProblemError(SERVER_OVERLOADED, f"原因码：{outcome.get('reason_code')}")
+    return outcome
 
 
 @dataclass
