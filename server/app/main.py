@@ -30,6 +30,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
@@ -182,12 +183,17 @@ def create_app() -> FastAPI:
     # - 其余未匹配路径：dist 里真实存在的文件（assets、favicon）按文件回，
     #   否则回 dist/index.html，让 /devices 等前端路由刷新时落到应用入口。
     # 本地开发时 dist 不存在则回退 web/ 根的源 index.html（Vite dev server 供 JS）。
+    # legacy 前缀例外：它是与新版并存的旧版界面（同一套新契约、不同界面实现），
+    # 有自己的静态目录，不回 SPA 入口。
     web_dir = Path(__file__).resolve().parent.parent / "web"
     dist_dir = web_dir / "dist"
+    legacy_dir = web_dir / "legacy"
+
+    app.mount("/legacy", StaticFiles(directory=str(legacy_dir), html=True), name="legacy")
 
     @app.get("/{spa_path:path}", include_in_schema=False)
     async def spa_fallback(spa_path: str) -> Response:
-        if spa_path.startswith(("api/", "gateway/", "ota/", "healthz", "problems/")):
+        if spa_path.startswith(("api/", "gateway/", "ota/", "healthz", "problems/", "legacy/")):
             raise StarletteHTTPException(status_code=404)
         base = dist_dir if dist_dir.is_dir() else web_dir
         candidate = base / spa_path
