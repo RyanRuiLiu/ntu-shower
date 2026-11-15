@@ -56,6 +56,7 @@ export interface DeviceSummary {
   device_id: string;
   name: string;
   online: boolean;
+  retired: boolean;
 }
 
 export interface DeviceListItem extends DeviceSummary {

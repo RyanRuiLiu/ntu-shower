@@ -114,6 +114,16 @@ def set_trusted(session: Session, device_id: str, trusted: bool) -> bool:
     return True
 
 
+def set_retired(session: Session, device_id: str, retired: bool) -> bool:
+    """停用/恢复。停用即拒绝握手与自注册，历史数据全部保留。"""
+    row = _find(session, device_id)
+    if row is None:
+        return False
+    row.retired_at = utcnow() if retired else None
+    session.commit()
+    return True
+
+
 def set_order(session: Session, device_ids: list[str]) -> None:
     for position, device_id in enumerate(device_ids):
         row = _find(session, device_id)
@@ -216,6 +226,7 @@ def as_record(row: Device) -> DeviceRecord:
         "device_id": row.id,
         "name": row.name,
         "trusted": bool(row.trusted),
+        "retired": row.retired_at is not None,
         "app_version": row.app_version,
         "version_code": int(row.version_code),
         "os_version": row.os_version,
@@ -335,6 +346,7 @@ __all__: list[str] = [
     "set_clock_skew",
     "set_name",
     "set_order",
+    "set_retired",
     "set_trusted",
     "touch_seen",
 ]
