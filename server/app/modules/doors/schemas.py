@@ -1,8 +1,10 @@
-"""喷头领域的 API 契约：只有 DoorView 一个视图模型。
+"""喷头领域的 API 契约与内域视图。
 
-权限管的是能不能调接口，不是返回什么内容：任何返回喷头数据的接口给的都是
-同一套字段，前端只写一套渲染。
+对外（`GET /doors`）是 `contracts.DoorView`。这里的三个内域视图给 mypy strict
+一个可校验的形状——列名拼错、漏键当场红；`DoorLiveView` 另承载完整对账列。
 """
+
+from typing_extensions import TypedDict
 
 from app.contracts import DoorState
 from app.contracts import DoorView as DoorView
@@ -26,3 +28,56 @@ _STATE_LABELS: dict[DoorState, str] = {
 def state_label(state: DoorState) -> str:
     """状态取值的界面中文名。只此一处，客户端与本服务端的其它域都取它。"""
     return _STATE_LABELS[state]
+
+
+class DoorLiveView(TypedDict):
+    """门现态的完整读数：`door_states` 全列，设备原词对账列都在。
+
+    `status_raw` 是设备上报的原始整数——只用于排障对账，判状态一律看 `state`。
+    """
+
+    device_id: str
+    door_no: int
+    state: DoorState
+    card_no: int
+    cert_no: str
+    acc_no: str
+    open_time: str
+    in_time: str
+    close_time: str
+    bath_time_s: int
+    status_raw: int
+    reported_at: str
+
+
+class DoorSessionView(TypedDict):
+    """一场占用的读出形状：人 + 门 + 起止 + 两个口径的时长。"""
+
+    id: int
+    device_id: str
+    door_no: int
+    card_no: int
+    cert_no: str
+    assigned_at: str
+    assigned_source: str
+    observed_span: str
+    device_flow_s: int
+    segments_complete: bool
+    ended_at: str
+    last_seen_at: str
+    total_flow_s: int
+
+
+class DoorSegmentView(TypedDict):
+    """一段连续出水的读出形状。"""
+
+    id: int
+    session_id: int
+    device_id: str
+    door_no: int
+    opened_at: str
+    closed_at: str
+    flow_s: int
+    opened_raw: str
+    closed_raw: str
+    source: str

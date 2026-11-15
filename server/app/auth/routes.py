@@ -72,7 +72,7 @@ admin_router = APIRouter(
 )
 
 
-@router.post("/login", status_code=204)
+@router.post("/login", status_code=204, summary="口令登录")
 def login(request: Request, body: LoginRequest, session: Session = Depends(get_db)) -> Response:
     """口令校验通过即签发会话（204 无体：账号事实由 GET /users/me 提供）。
 
@@ -89,13 +89,13 @@ def login(request: Request, body: LoginRequest, session: Session = Depends(get_d
     return Response(status_code=204)
 
 
-@router.post("/logout", status_code=204)
+@router.post("/logout", status_code=204, summary="退出登录")
 def logout(request: Request) -> None:
     """注销即清空会话：SessionMiddleware 把置空后的会话下发成一条过期 Cookie。"""
     request.session.clear()
 
 
-@identity_router.get("/me", response_model=MeView)
+@identity_router.get("/me", response_model=MeView, summary="当前调用方身份")
 def who(caller: Caller = Depends(caller)) -> MeView:
     """调用方自身视图：我是谁、我有什么权限。外部调用方据此验证自己的密钥。"""
     return MeView(
@@ -107,7 +107,7 @@ def who(caller: Caller = Depends(caller)) -> MeView:
     )
 
 
-@admin_router.get("", response_model=UserCatalog)
+@admin_router.get("", response_model=UserCatalog, summary="用户与权限字典")
 def list_users(session: Session = Depends(get_db)) -> UserCatalog:
     """用户域读模型：权限字典 + 用户名单，用户页一次装载。"""
     return UserCatalog(
@@ -116,7 +116,7 @@ def list_users(session: Session = Depends(get_db)) -> UserCatalog:
     )
 
 
-@admin_router.post("", response_model=UserView)
+@admin_router.post("", response_model=UserView, summary="登记用户")
 def create_user(req: UserCreate, session: Session = Depends(get_db)) -> UserView:
     """登记一个用户。username 撞上既有用户整体拒绝（编辑请用 PUT）。"""
     if crud.find_row(session, req.username) is not None:
@@ -126,7 +126,7 @@ def create_user(req: UserCreate, session: Session = Depends(get_db)) -> UserView
     return UserView(**user)
 
 
-@admin_router.put("/{username}", response_model=UserView)
+@admin_router.put("/{username}", response_model=UserView, summary="编辑用户")
 def update_user(username: str, req: UserUpdate, session: Session = Depends(get_db)) -> UserView:
     """编辑用户：显示名、禁用位与口令（设置/重置）。禁用即时生效。"""
     user = crud.update_user(session, username, req.name, req.disabled, req.password)
@@ -136,7 +136,7 @@ def update_user(username: str, req: UserUpdate, session: Session = Depends(get_d
     return UserView(**user)
 
 
-@admin_router.delete("/{username}", status_code=204)
+@admin_router.delete("/{username}", status_code=204, summary="删除用户")
 def delete_user(username: str, caller: Caller = Depends(caller), session: Session = Depends(get_db)) -> Response:
     """删除用户（名下密钥一并删除）。不能删除自己的账号。"""
     if caller["username"] == username:
@@ -147,7 +147,7 @@ def delete_user(username: str, caller: Caller = Depends(caller), session: Sessio
     return Response(status_code=204)
 
 
-@admin_router.post("/{username}/keys", response_model=KeyIssued)
+@admin_router.post("/{username}/keys", response_model=KeyIssued, summary="签发密钥")
 def issue_key(username: str, req: KeyCreate, session: Session = Depends(get_db)) -> KeyIssued:
     """给用户签发一枚密钥：权限集 + 设备作用域都附在密钥上，明文只此一次。"""
     _validated_scopes(req.scopes)
@@ -160,7 +160,7 @@ def issue_key(username: str, req: KeyCreate, session: Session = Depends(get_db))
     return KeyIssued(**view, token=token)
 
 
-@admin_router.get("/{username}/keys", response_model=UserKeys)
+@admin_router.get("/{username}/keys", response_model=UserKeys, summary="用户的密钥清单")
 def list_keys(username: str, session: Session = Depends(get_db)) -> UserKeys:
     """该用户的全部密钥（含已吊销——吊销历史本身是要看的事实）。"""
     if crud.find_row(session, username) is None:
@@ -168,7 +168,7 @@ def list_keys(username: str, session: Session = Depends(get_db)) -> UserKeys:
     return UserKeys(keys=[KeyView(**key) for key in crud.list_keys(session, username)])
 
 
-@admin_router.put("/{username}/keys/{key_id}", response_model=KeyView)
+@admin_router.put("/{username}/keys/{key_id}", response_model=KeyView, summary="编辑密钥")
 def update_key(username: str, key_id: int, req: KeyUpdate, session: Session = Depends(get_db)) -> KeyView:
     """编辑密钥：名称、权限集与设备作用域，令牌不变，下一次请求即生效（Stripe RAK 形态）。"""
     if req.scopes is not None:
@@ -187,7 +187,7 @@ def update_key(username: str, key_id: int, req: KeyUpdate, session: Session = De
     return KeyView(**updated)
 
 
-@admin_router.delete("/{username}/keys/{key_id}", status_code=204)
+@admin_router.delete("/{username}/keys/{key_id}", status_code=204, summary="吊销密钥")
 def revoke_key(username: str, key_id: int, session: Session = Depends(get_db)) -> Response:
     """吊销单枚密钥：该枚下一次请求即 401，同用户其他密钥不受影响。幂等。"""
     crud.revoke_key(session, username, key_id)

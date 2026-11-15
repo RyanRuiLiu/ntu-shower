@@ -48,7 +48,9 @@ router = APIRouter(prefix="/api/v1/devices", tags=["water"])
 
 
 @router.post(
-    "/{device_id}/water/open", dependencies=[Security(caller, scopes=["water:write"]), Depends(device_scope_guard)]
+    "/{device_id}/water/open",
+    dependencies=[Security(caller, scopes=["water:write"]), Depends(device_scope_guard)],
+    summary="授权出水",
 )
 async def open_valve(device_id: str, req: WaterDoorRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """授权出水：置指定喷头的授权位；**不直接出水**，真正出水仍需现场按电磁阀。"""
@@ -62,7 +64,9 @@ async def open_valve(device_id: str, req: WaterDoorRequest, session: Session = D
 
 
 @router.post(
-    "/{device_id}/water/close", dependencies=[Security(caller, scopes=["water:write"]), Depends(device_scope_guard)]
+    "/{device_id}/water/close",
+    dependencies=[Security(caller, scopes=["water:write"]), Depends(device_scope_guard)],
+    summary="断水",
 )
 async def close_valve(device_id: str, req: WaterDoorRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """断水：清授权位与出水位；不清按钮位。"""
@@ -76,7 +80,9 @@ async def close_valve(device_id: str, req: WaterDoorRequest, session: Session = 
 
 
 @router.get(
-    "/{device_id}/water-status", dependencies=[Security(caller, scopes=["water:read"]), Depends(device_scope_guard)]
+    "/{device_id}/water-status",
+    dependencies=[Security(caller, scopes=["water:read"]), Depends(device_scope_guard)],
+    summary="读板配置与状态",
 )
 async def read_status(device_id: str, session: Session = Depends(get_db)) -> CommandOutcome:
     """读该设备 waterList 里每块板的配置与状态。
