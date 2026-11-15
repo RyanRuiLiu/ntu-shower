@@ -222,7 +222,7 @@ def _device_pk() -> int | None:
 
 def _seed() -> None:
     """把上面这些真实行原样插进库。段通过 (设备, 喷头, 学号) 认领它所属的那一场会话。"""
-    from app.persistence.usage import UsageSegment, UsageSession
+    from app.modules.doors.models import DoorSegment, DoorSession
 
     pk = _device_pk()
     ids_by_key: dict[tuple[int, str], int] = {}
@@ -239,7 +239,7 @@ def _seed() -> None:
             device_flow_s,
             complete,
         ) = row
-        orm_row = UsageSession(
+        orm_row = DoorSession(
             device_id=pk,
             door_no=door_no,
             cert_no=cert_no,
@@ -248,7 +248,7 @@ def _seed() -> None:
             observed_span=observed_span,
             ended_at=_moment(ended_at) if ended_at else None,
             last_seen_at=_moment(last_seen_at),
-            flow_s=flow_s,
+            total_flow_s=flow_s,
             device_flow_s=device_flow_s,
             segments_complete=bool(complete),
         )
@@ -262,7 +262,7 @@ def _seed() -> None:
         (opened_at, closed_at, flow_s, source, opened_raw, closed_raw) = rest
         with session_scope() as session:
             session.add(
-                UsageSegment(
+                DoorSegment(
                     session_id=ids_by_key[(int(door_no), str(cert_no))],
                     device_id=pk,
                     door_no=door_no,
@@ -299,7 +299,7 @@ def test_the_real_two_segment_session_adds_up(real_rows: None) -> None:
     segments = [seg for row in rows for seg in door_link.list_segments_of(row["id"])]
 
     assert [seg["flow_s"] for seg in segments] == [251, 175]
-    assert rows[0]["flow_s"] == sum(seg["flow_s"] for seg in segments) == 426
+    assert rows[0]["total_flow_s"] == sum(seg["flow_s"] for seg in segments) == 426
     assert rows[0]["device_flow_s"] == 426
     assert rows[0]["segments_complete"] is True
 
@@ -323,7 +323,7 @@ def test_the_real_incomplete_session_reports_a_mismatch(real_rows: None) -> None
     """段没记齐的那一场：设备报 900 秒，我们的两段只累到 600——差额就是"有段没进表"。"""
     row = next(item for item in door_link.list_sessions("dev-1") if item["door_no"] == 2)
 
-    assert row["flow_s"] < row["device_flow_s"]
+    assert row["total_flow_s"] < row["device_flow_s"]
     assert row["segments_complete"] is False
     assert row["observed_span"] == "gap"
 
@@ -419,11 +419,11 @@ def test_snapshots_walks_real_rows_and_the_live_view(real_rows: None) -> None:
     帧按真实形状给：**本机无卡，占用是靠 `acc_no` 判出来的**（`card_no` 恒为 0），
     只给 `cert_no` 会被判成空闲——这是真实帧里才看得到的事。
     """
-    from app.persistence.usage import UsageSession
+    from app.modules.doors.models import DoorSession
 
     with session_scope() as session:
         session.add(
-            UsageSession(
+            DoorSession(
                 device_id=_device_pk(),
                 door_no=1,
                 cert_no="2026000001",
@@ -432,7 +432,7 @@ def test_snapshots_walks_real_rows_and_the_live_view(real_rows: None) -> None:
                 observed_span="continuous",
                 ended_at=None,
                 last_seen_at=_moment("2026-10-03T21:57:02.488Z"),
-                flow_s=0,
+                total_flow_s=0,
                 device_flow_s=0,
                 segments_complete=False,
             )
