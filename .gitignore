@@ -68,3 +68,4 @@ Thumbs.db
 # 不进版本控制。SHA256SUMS 是登记件，入库。
 backups/*.db
 backups/*.gz
+.deploy-token
