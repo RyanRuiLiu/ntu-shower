@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://<public-domain>/schema/session.command_result.json",
+  "$id": "https://<public-domain>/schema/device.command_result.json",
   "title": "Device command result (reply_to = command id)",
   "allOf": [
     {
@@ -10,7 +10,7 @@
       "type": "object",
       "properties": {
         "type": {
-          "const": "session.command_result"
+          "const": "device.command_result"
         },
         "payload": {
           "type": "object",

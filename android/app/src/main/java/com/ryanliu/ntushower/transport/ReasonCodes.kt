@@ -1,7 +1,7 @@
 package com.ryanliu.ntushower.transport
 
 /**
- * 失败原因码（协议 `session.command_result.reason_code` 的取值）。
+ * 失败原因码（协议 `device.command_result.reason_code` 的取值）。
  *
  * **本文件由 tools/sync_contracts.py 生成，不要手改**——改了会在下一轮生成时被覆盖，
  * 而 `tests/test_contract_sync.py` 也会立刻失败。要动取值或文案，改服务端的
@@ -81,7 +81,7 @@ object ReasonCodes {
     const val DOOR_NOT_FOUND = "door.not_found"
 
     /** 该学号没有正在使用的喷头 */
-    const val DOOR_NO_OCCUPIED = "door.no_occupied"
+    const val DOOR_UNOCCUPIED = "door.unoccupied"
 
     /** 该位置没有可点击的控件 */
     const val UI_NO_TARGET_AT_POINT = "ui.no_target_at_point"

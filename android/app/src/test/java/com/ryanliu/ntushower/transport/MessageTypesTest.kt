@@ -32,7 +32,7 @@ class MessageTypesTest {
             setOf(
                 "link.hello", "link.hello_ack", "link.ping", "link.pong", "link.error",
                 "door.snapshot", "door.snapshot_ack",
-                "session.command", "session.command_result",
+                "device.command", "device.command_result",
                 "config.update", "config.ack",
                 "status_line.update",
                 "bridge.open", "bridge.close",

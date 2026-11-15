@@ -93,14 +93,14 @@ def test_cancel_while_waiting_for_channel_lock(fresh_db: str, monkeypatch: pytes
 
 
 def test_round_trip_success(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """命令完整往返：下发 session.command → 设备回执 → 结果透传。"""
+    """命令完整往返：下发 device.command → 设备回执 → 结果透传。"""
     fake = _online(monkeypatch, "dev-roundtrip")
 
     async def flow() -> dict[str, Any]:
         task = asyncio.create_task(_send("dev-roundtrip", actions.SESSION_ASSIGN, {"door_no": 1}, timeout_s=5))
         await fake.wait_for_sent()
         command = json.loads(fake.sent[0])
-        assert command["type"] == "session.command"
+        assert command["type"] == "device.command"
         assert command["payload"]["action"] == "session.assign"
         assert command["payload"]["timeout_ms"] > 0
         _resolve_ok(command)
@@ -175,7 +175,7 @@ def test_unsupported_action_fails_before_sending(fresh_db: str, monkeypatch: pyt
     assert result["status"] == "failed"
     assert result["reason_code"] == "device.unsupported_action"
     # 状态行是服务端另一条现态推送通道，与命令无关；这里只断言没有命令帧下发
-    assert [frame for frame in (json.loads(text) for text in fake.sent) if frame["type"] == "session.command"] == []
+    assert [frame for frame in (json.loads(text) for text in fake.sent) if frame["type"] == "device.command"] == []
 
     with _svc_session() as session:
         rows = command_audit.list_commands(session, device_id=device_id)

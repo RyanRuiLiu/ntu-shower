@@ -25,7 +25,7 @@ enum class CommandChannel {
     WATER,
 }
 
-/** 调度器产出的命令结果（与 session.command_result payload 对应）。 */
+/** 调度器产出的命令结果（与 device.command_result payload 对应）。 */
 data class CommandOutcome(
     val commandId: String,
     // status 的合法取值唯一来源是 transport/OutcomeStatus（与服务端 outcomes.py 对账），

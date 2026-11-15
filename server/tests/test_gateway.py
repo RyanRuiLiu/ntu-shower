@@ -159,7 +159,7 @@ def test_device_pong_without_device_time_keeps_the_previous_skew(
 def test_unknown_command_id_replies_error(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:
     """回执找不到对应的在途命令：回 command.unknown_id 保持协议反馈。"""
     with device_link.trusted_online(client, "dev-frames-cmd", admin_headers) as ws:
-        ws.send_text(frames.frame("session.command_result", {"status": "ok"}, reply_to="no-such-command"))
+        ws.send_text(frames.frame("device.command_result", {"status": "ok"}, reply_to="no-such-command"))
         err = frames.recv_until(ws, "link.error")
         assert err["payload"]["code"] == "command.unknown_id"
 
@@ -228,7 +228,7 @@ def test_untrusted_device_business_frames_are_ignored(client: TestClient, fresh_
         assert ack["payload"]["trusted"] is False
 
         ws.send_text(frames.frame("door.snapshot", {"doors": [{"door_no": 1}]}))
-        ws.send_text(frames.frame("session.command_result", {"status": "ok"}))
+        ws.send_text(frames.frame("device.command_result", {"status": "ok"}))
 
         # 下一条回帧是 ping 的 pong，证明前面两帧确实被忽略
         ws.send_text(frames.frame("link.ping", {"sender_time": "2026-09-30T12:00:00.000Z"}))
