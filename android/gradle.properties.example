@@ -9,3 +9,8 @@ serverDomain=ntu-shower.iseekdream.com
 
 # 签名密钥（keystore 文件位于 keystore/，已 gitignore）
 deviceEnrollToken=（与生产 env 的 DEVICE_ENROLL_TOKEN 同值）
+
+# 构建缓存：CI（setup-gradle 缓存 gradle home 含 build-cache-1）与本地之间复用
+# 编译/lint/detekt 产物——android 门在 CI 上冷启动 171s，其中绝大部分是逐次
+# 从零重算，缓存命中后只剩增量编译与测试执行。
+org.gradle.caching=true

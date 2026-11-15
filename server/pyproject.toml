@@ -90,11 +90,11 @@ pythonpath = ["."]
 # 的用例永远等不到。这道闸要卡得紧：宽到 30 秒等于没卡，一次挂起就是白等半分钟。
 timeout = 5
 timeout_method = "thread"
-# 全量 1062 条串行约 65 秒；本机实测 6 进程并行降到约 14 秒（含覆盖率 17 秒）。
-# 固定 6 而不是 -n auto：32 核机器上 auto 会起 32 个进程，调度开销反而更慢。
-# 覆盖率在并行下由 pytest-cov 合并各进程数据，已验证 96.35% 统计正确。
+# 全量 1062 条串行约 65 秒；本机（32 核）实测：6 进程 14.5s / 12 进程 12.9s /
+# 18 进程 14.1s / auto(32) 16.4s——峰值在 12，过多进程的调度开销反超并行收益。
+# 覆盖率在并行下由 pytest-cov 合并各进程数据，统计已验证正确。
 # 需要串行时用 `pytest -n 0` 覆盖。
-addopts = "-ra --strict-markers -n 6"
+addopts = "-ra --strict-markers -n 12"
 
 [tool.coverage.run]
 source = ["app"]

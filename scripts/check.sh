@@ -9,6 +9,7 @@ cd "$(dirname "$0")/../server"
 ./.venv/Scripts/lint-imports.exe
 # semgrep 在 pre-commit 的隔离环境里跑（见 server/requirements-dev.txt 的说明）：
 # 两段分别对应 SAST 规则集与项目自有规则，与 CI 的 semgrep job 逐条一致。
+# 必须逐 id 指定：不指定即连 project-checks 一起跑，而它调用的就是本脚本——递归。
 .venv/Scripts/pre-commit.exe run semgrep-sast --hook-stage manual
 .venv/Scripts/pre-commit.exe run semgrep-project --hook-stage manual
 .venv/Scripts/python.exe -m pytest -q --cov=app --cov-report=term-missing
