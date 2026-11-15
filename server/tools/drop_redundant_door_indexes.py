@@ -30,7 +30,8 @@ def main() -> int:
     for table, index in REDUNDANT:
         indexes = {r[1] for r in conn.execute(f"PRAGMA index_list({table})")}
         if index not in indexes:
-            raise SystemExit(f"{table}.{index}: 库里没有这个索引，清单与库不一致")
+            detail = f"{table}.{index}: 库里没有这个索引，清单与库不一致"
+            raise SystemExit(detail)
         conn.execute(f"DROP INDEX {index}")
     conn.commit()
     conn.close()
