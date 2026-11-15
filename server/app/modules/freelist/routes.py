@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from app.auth.dependencies import caller, device_scope_guard
 from app.contracts import CommandOutcome
 from app.core import actions, outcomes
+from app.core.errors import problem_responses
 from app.db.deps import get_db
 from app.modules.devices.dependencies import DEVICE_ACTION_TIMEOUT_S, device_action
 
@@ -31,16 +32,19 @@ router = APIRouter(
     prefix="/api/v1/devices",
     dependencies=[Security(caller, scopes=["freelist:write"]), Depends(device_scope_guard)],
     tags=["freelist"],
+    # 命令失败在响应体里如实回报（status + reason_code），HTTP 错误面只有守卫与
+    # 设备离线；读失败不是 4xx/5xx（见 GET 的 docstring）。
+    responses=problem_responses(401, 403, 404, 409, 422),
 )
 
 
 @router.get("/{device_id}/freelist", summary="读免费名单")
 async def read_freelist(device_id: str, session: Session = Depends(get_db)) -> FreelistRead:
-    """读设备上那份免费名单。
+    """读取设备上的免费名单。
 
-    读不到（文件不在、读不出）时如实回报 status 与原因码，students 留空——**不用 HTTP
-    错误代替它**：那会把"设备在线但那份文件没了"说成请求本身有问题，而这两件事要查的
-    地方完全不同。
+    读不到（文件不在、读不出）时如实回报 status 与原因码，students 留空——**不以
+    HTTP 错误代替**：「设备在线但名单文件缺失」与请求本身故障是两类问题，排查
+    的方向完全不同。
     """
     outcome = await device_action(session, device_id, actions.FREELIST_READ, {}, DEVICE_ACTION_TIMEOUT_S)
     # 读失败时 data 为 None，行留空；**不把它当"空名单"**——那两件事要分开看（见 FreelistRead）
@@ -58,8 +62,8 @@ async def read_freelist(device_id: str, session: Session = Depends(get_db)) -> F
 async def write_freelist(device_id: str, req: FreelistRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """整份写回免费名单。
 
-    名单在浴室 App **下次启动**时生效（它启动时读一次），所以这里不跟一步重启：重启会
-    掐断进行中的会话，而名单改动不急在那几十秒。
+    名单在浴室 App **下次启动**时生效（它启动时读取一次），故本接口不附带重启：
+    重启会中断进行中的会话，而名单变更无需在数十秒内生效。
     """
     return await device_action(
         session, device_id, actions.FREELIST_WRITE, {"content": render(req.students)}, DEVICE_ACTION_TIMEOUT_S

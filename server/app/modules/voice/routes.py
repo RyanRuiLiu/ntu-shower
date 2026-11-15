@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from app.auth.dependencies import caller
+from app.core.errors import problem_responses
 from app.core.problems import INVALID_VOICE_ASSET, INVALID_VOICE_RULE, VOICE_ASSET_NOT_FOUND, ApiProblemError
 from app.db.deps import get_db
 
@@ -24,25 +25,50 @@ from . import schemas, service
 admin_router = APIRouter(prefix="/api/v1", tags=["voice"])
 router = APIRouter(tags=["voice"])
 
+#: 只读出口的公共错误面。
+_READ_RESPONSES = problem_responses(401, 403)
+#: 写出口的公共错误面（含请求体校验）。
+_WRITE_RESPONSES = problem_responses(401, 403, 422)
+
 _ASSET_ID = re.compile(r"[0-9a-f]{64}")
 
 
-@admin_router.get("/voice/spec", dependencies=[Security(caller, scopes=["voice:read"])], summary="语音登记表")
+@admin_router.get(
+    "/voice/spec",
+    dependencies=[Security(caller, scopes=["voice:read"])],
+    summary="语音登记表",
+    responses=_READ_RESPONSES,
+)
 def get_spec(session: Session = Depends(get_db)) -> schemas.VoiceSpecView:
     return service.spec(session)
 
 
-@admin_router.get("/voice/status", dependencies=[Security(caller, scopes=["voice:read"])], summary="语音播报状态")
+@admin_router.get(
+    "/voice/status",
+    dependencies=[Security(caller, scopes=["voice:read"])],
+    summary="语音播报状态",
+    responses=_READ_RESPONSES,
+)
 def get_status(session: Session = Depends(get_db)) -> schemas.VoiceStatusView:
     return service.status(session)
 
 
-@admin_router.get("/voice/assets", dependencies=[Security(caller, scopes=["voice:read"])], summary="语音素材清单")
+@admin_router.get(
+    "/voice/assets",
+    dependencies=[Security(caller, scopes=["voice:read"])],
+    summary="语音素材清单",
+    responses=_READ_RESPONSES,
+)
 def list_assets(session: Session = Depends(get_db)) -> list[schemas.VoiceAssetView]:
     return service.list_assets(session)
 
 
-@admin_router.post("/voice/assets", dependencies=[Security(caller, scopes=["voice:write"])], summary="上传语音素材")
+@admin_router.post(
+    "/voice/assets",
+    dependencies=[Security(caller, scopes=["voice:write"])],
+    summary="上传语音素材",
+    responses=_WRITE_RESPONSES,
+)
 async def create_asset(
     name: Annotated[str, Form()],
     file: Annotated[UploadFile, File()],
@@ -66,7 +92,10 @@ async def create_asset(
 
 
 @admin_router.patch(
-    "/voice/assets/{asset_id}", dependencies=[Security(caller, scopes=["voice:write"])], summary="重命名素材"
+    "/voice/assets/{asset_id}",
+    dependencies=[Security(caller, scopes=["voice:write"])],
+    summary="重命名素材",
+    responses=problem_responses(401, 403, 404, 422),
 )
 async def rename_asset(
     asset_id: str, req: schemas.VoiceAssetRename, session: Session = Depends(get_db)
@@ -82,12 +111,13 @@ async def rename_asset(
     status_code=204,
     dependencies=[Security(caller, scopes=["voice:write"])],
     summary="删除素材",
+    responses=problem_responses(401, 403, 404, 409, 422),
 )
 def delete_asset(asset_id: str, session: Session = Depends(get_db)) -> None:
     service.delete_asset(session, asset_id)
 
 
-@router.get("/voice/assets/{asset_id}.mp3", summary="下载素材（设备硬编码契约）")
+@router.get("/voice/assets/{asset_id}.mp3", summary="下载素材（设备硬编码契约）", responses=problem_responses(404, 422))
 def download_asset(asset_id: str, session: Session = Depends(get_db)) -> FileResponse:
     if _ASSET_ID.fullmatch(asset_id) is None:
         raise ApiProblemError(VOICE_ASSET_NOT_FOUND, asset_id)
@@ -99,12 +129,22 @@ def download_asset(asset_id: str, session: Session = Depends(get_db)) -> FileRes
     )
 
 
-@admin_router.get("/voice/rules", dependencies=[Security(caller, scopes=["voice:read"])], summary="播报规则清单")
+@admin_router.get(
+    "/voice/rules",
+    dependencies=[Security(caller, scopes=["voice:read"])],
+    summary="播报规则清单",
+    responses=_READ_RESPONSES,
+)
 def list_rules(session: Session = Depends(get_db)) -> list[schemas.VoiceRuleView]:
     return service.list_rules(session)
 
 
-@admin_router.post("/voice/rules", dependencies=[Security(caller, scopes=["voice:write"])], summary="新建播报规则")
+@admin_router.post(
+    "/voice/rules",
+    dependencies=[Security(caller, scopes=["voice:write"])],
+    summary="新建播报规则",
+    responses=_WRITE_RESPONSES,
+)
 async def create_rule(req: schemas.VoiceRuleBody, session: Session = Depends(get_db)) -> schemas.VoiceRuleView:
     try:
         view = await run_in_threadpool(service.create_rule, session, req)
@@ -115,7 +155,10 @@ async def create_rule(req: schemas.VoiceRuleBody, session: Session = Depends(get
 
 
 @admin_router.put(
-    "/voice/rules/{rule_id}", dependencies=[Security(caller, scopes=["voice:write"])], summary="整份更新规则"
+    "/voice/rules/{rule_id}",
+    dependencies=[Security(caller, scopes=["voice:write"])],
+    summary="整份更新规则",
+    responses=problem_responses(401, 403, 404, 422),
 )
 async def update_rule(
     rule_id: int, req: schemas.VoiceRuleBody, session: Session = Depends(get_db)
@@ -129,7 +172,10 @@ async def update_rule(
 
 
 @admin_router.patch(
-    "/voice/rules/{rule_id}", dependencies=[Security(caller, scopes=["voice:write"])], summary="启用/停用规则"
+    "/voice/rules/{rule_id}",
+    dependencies=[Security(caller, scopes=["voice:write"])],
+    summary="启用/停用规则",
+    responses=problem_responses(401, 403, 404, 422),
 )
 async def patch_rule(
     rule_id: int, req: schemas.VoiceRuleEnabledPatch, session: Session = Depends(get_db)
@@ -144,12 +190,18 @@ async def patch_rule(
     status_code=204,
     dependencies=[Security(caller, scopes=["voice:write"])],
     summary="删除规则",
+    responses=problem_responses(401, 403, 404, 422),
 )
 def delete_rule(rule_id: int, session: Session = Depends(get_db)) -> None:
     service.delete_rule(session, rule_id)
 
 
-@admin_router.post("/voice/preview", dependencies=[Security(caller, scopes=["voice:write"])], summary="规则试听")
+@admin_router.post(
+    "/voice/preview",
+    dependencies=[Security(caller, scopes=["voice:write"])],
+    summary="规则试听",
+    responses=_WRITE_RESPONSES,
+)
 async def preview(req: schemas.VoicePreviewRequest, session: Session = Depends(get_db)) -> schemas.VoicePreviewView:
     try:
         return await run_in_threadpool(service.preview, session, req)
@@ -158,7 +210,10 @@ async def preview(req: schemas.VoicePreviewRequest, session: Session = Depends(g
 
 
 @admin_router.post(
-    "/voice/rules/{rule_id}/push", dependencies=[Security(caller, scopes=["voice:write"])], summary="推送规则到设备"
+    "/voice/rules/{rule_id}/push",
+    dependencies=[Security(caller, scopes=["voice:write"])],
+    summary="推送规则到设备",
+    responses=problem_responses(401, 403, 404, 422),
 )
 async def push_rule(
     rule_id: int, req: schemas.VoicePushRequest, session: Session = Depends(get_db)
@@ -166,7 +221,12 @@ async def push_rule(
     return await service.push_to_device(session, rule_id, req.device_id)
 
 
-@admin_router.get("/voice/deliveries", dependencies=[Security(caller, scopes=["voice:read"])], summary="播报投递记录")
+@admin_router.get(
+    "/voice/deliveries",
+    dependencies=[Security(caller, scopes=["voice:read"])],
+    summary="播报投递记录",
+    responses=problem_responses(401, 403, 422),
+)
 def list_deliveries(
     limit: int = Query(default=50, ge=1, le=200), session: Session = Depends(get_db)
 ) -> list[schemas.VoiceDeliveryView]:

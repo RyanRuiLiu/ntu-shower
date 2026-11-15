@@ -27,6 +27,7 @@ from app.auth.dependencies import caller, device_scope_guard, require_trusted_on
 from app.contracts import CommandStatus
 from app.core import actions, outcomes, protocol, reason_codes
 from app.core.connections import manager
+from app.core.errors import problem_responses
 from app.core.logging import log_event
 from app.core.problems import DEVICE_OFFLINE, ApiProblemError
 from app.db.base import utcnow
@@ -52,6 +53,7 @@ admin_router = APIRouter(
     prefix="/api/v1",
     dependencies=[Security(caller, scopes=["bridge:write"]), Depends(device_scope_guard)],
     tags=["bridge"],
+    responses=problem_responses(401, 403, 404, 409, 422),
 )
 
 #: 隧道结束时的命令审计标记。它不是设备动作（设备端不执行它），故不进 actions
@@ -247,10 +249,10 @@ async def adb_open(device_id: str, session: Session = Depends(get_db)) -> Bridge
     """打开设备的 ADB 桥：下发 bridge.open 并绑定本机回环 TCP 监听。
 
     整个过程持锁：建立过程有 start_server 与退避重试两处让出事件循环的机会，
-    并发的第二个请求会读到半成品状态。若注册表里已有桥则直接返回它，判据是
-    "注册表里有它"而非"设备已连入"：桥开着而设备未连入是常见状态（请求刚下发、
-    配对超时前），此时建新会话必然撞上自己已绑定的端口。"设备是否连入"由
-    bridge/status 的 device_connected 回答。
+    并发请求可能读到建立中的中间状态。若注册表里已有桥则直接返回它，判据是
+    「注册表里有它」而非「设备已连入」：桥已开启而设备未连入是常见状态（请求
+    刚下发、配对超时前），此时新建会话必然因端口已被自身绑定而失败。
+    「设备是否连入」由 bridge/status 的 device_connected 回答。
     """
     require_trusted_online_device(device_id, session)
     async with registry.op_lock:
@@ -335,10 +337,11 @@ async def adb_close(device_id: str, session: Session = Depends(get_db)) -> Bridg
 async def adb_status(device_id: str, session: Session = Depends(get_db)) -> BridgeStatus:
     """桥接状态可观测（管理面）。
 
-    `expires_in_s` 给出距离绝对寿命到点的秒数——运维据此判断还来不来得及做完
-    手上的事，而不是等到连接莫名断开再回头看日志。
+    `expires_in_s` 给出距离绝对寿命到点的秒数——运维据此判断剩余时间是否足以
+    完成当前操作，而非在连接中断后追溯日志。
 
-    `ssh_target` 与桥开没开无关，所以关着时也给：网页端要靠它拼出本机那条连接命令。
+    `ssh_target` 与桥的开启状态无关，桥关闭时同样返回：网页端依赖它组装本机
+    连接命令。
     """
     ssh_target = str(config_store.global_effective(session)["bridge_ssh_target"])
     bridge = registry.get(device_id)

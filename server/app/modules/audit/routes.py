@@ -12,19 +12,26 @@ from fastapi import APIRouter, Depends, Query, Security
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import caller
+from app.contracts import ActorKind, ApiCallKind
+from app.core.errors import problem_responses
 from app.db.deps import get_db
 from app.modules.audit.schemas import CommandAuditRecord, JobRun
 from app.persistence import audit as command_audit
 from app.persistence.api_calls import ApiCallRecord, list_calls
 
-admin_router = APIRouter(prefix="/api/v1", dependencies=[Security(caller, scopes=["audit:read"])], tags=["audit"])
+admin_router = APIRouter(
+    prefix="/api/v1",
+    dependencies=[Security(caller, scopes=["audit:read"])],
+    tags=["audit"],
+    responses=problem_responses(401, 403, 422),
+)
 
 
 @admin_router.get("/audit/calls", summary="接口调用审计")
 def list_calls_endpoint(
     device_id: Annotated[str | None, Query(description="按设备过滤")] = None,
-    actor_kind: Annotated[str | None, Query(description="按调用方过滤：identity / device / anonymous")] = None,
-    kind: Annotated[str | None, Query(description="按类别过滤：http / gateway")] = None,
+    actor_kind: Annotated[ActorKind | None, Query(description="按调用方类型过滤")] = None,
+    kind: Annotated[ApiCallKind | None, Query(description="按记录类别过滤")] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> list[ApiCallRecord]:
     """接口调用与网关生命周期审计。"""
@@ -47,5 +54,5 @@ def list_job_runs_endpoint(
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
     session: Session = Depends(get_db),
 ) -> list[JobRun]:
-    """后台任务审计：配置好的任务自动替谁做了什么、为什么（与 commands 按时间对照）。"""
+    """后台任务审计：自动化任务以谁的名义执行了何种操作及其依据（与 commands 按时间对照）。"""
     return command_audit.list_job_runs(session, device_id=device_id, limit=limit)
