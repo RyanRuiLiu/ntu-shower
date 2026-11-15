@@ -11,10 +11,10 @@ from datetime import datetime
 from sqlalchemy import Boolean, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, UtcDateTime, utcnow
+from app.db.base import Base, TimestampMixin, UtcDateTime
 
 
-class OtaRelease(Base):
+class OtaRelease(TimestampMixin, Base):
     """一次 APK 发布。"""
 
     __tablename__ = "ota_releases"
@@ -30,12 +30,13 @@ class OtaRelease(Base):
     force: Mapped[bool] = mapped_column(Boolean, default=False)
     #: 目标选择：`all` 或具体设备白名单
     target: Mapped[str] = mapped_column(String(32), default="all")
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow, onupdate=utcnow)
 
 
 class OtaReleaseInstall(Base):
-    """某台设备已经应用了某个版本。"""
+    """某台设备已经应用了某个版本。
+
+    时间豁免：`applied_at` 即创建时刻（事件行），无 created_at。
+    """
 
     __tablename__ = "ota_release_installs"
 

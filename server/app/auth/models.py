@@ -14,10 +14,10 @@ from datetime import datetime
 from sqlalchemy import JSON, Boolean, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, UtcDateTime, utcnow
+from app.db.base import Base, CreatedAtMixin, TimestampMixin, UtcDateTime
 
 
-class User(Base):
+class User(TimestampMixin, Base):
     """一个用户：管理台操作者、小程序用户、外部系统共用一张表。
 
     - `hashed_password`：有口令即可登管理台（会话 Cookie 通道）；没有即纯密钥
@@ -36,13 +36,11 @@ class User(Base):
     hashed_password: Mapped[str | None] = mapped_column(String(255), default=None)
     disabled: Mapped[bool] = mapped_column(Boolean, default=False)
     last_login_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow, onupdate=utcnow)
 
     keys: Mapped[list[ApiKey]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
-class ApiKey(Base):
+class ApiKey(CreatedAtMixin, Base):
     """一枚 API 密钥：权限集与设备作用域都附在密钥上，不附在用户上。
 
     GitHub fine-grained PAT 同型：权限与资源范围是每枚密钥的属性。轮换 = 发一枚
@@ -62,7 +60,6 @@ class ApiKey(Base):
     #: 设备作用域：["*"] 或设备 id 白名单
     device_scope: Mapped[list[str]] = mapped_column(JSON, default=list)
     last_used_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
     revoked_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
 
 

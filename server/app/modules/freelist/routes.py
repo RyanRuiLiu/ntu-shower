@@ -34,7 +34,7 @@ router = APIRouter(
 )
 
 
-@router.get("/{device_id}/freelist")
+@router.get("/{device_id}/freelist", summary="读免费名单")
 async def read_freelist(device_id: str, session: Session = Depends(get_db)) -> FreelistRead:
     """读设备上那份免费名单。
 
@@ -54,7 +54,7 @@ async def read_freelist(device_id: str, session: Session = Depends(get_db)) -> F
     }
 
 
-@router.put("/{device_id}/freelist")
+@router.put("/{device_id}/freelist", summary="整份写回免费名单")
 async def write_freelist(device_id: str, req: FreelistRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """整份写回免费名单。
 
