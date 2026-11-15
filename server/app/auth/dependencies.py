@@ -39,12 +39,9 @@ from fastapi.security import OAuth2PasswordBearer, SecurityScopes
 from sqlalchemy.orm import Session
 
 from app.contracts import Caller, DeviceRecord, KeyRecord, UserRecord
-from app.core.tokens import extract_bearer
-from app.modules.devices import crud as devices_store
-
-from ..core.config import settings
-from ..core.connections import manager
-from ..core.problems import (
+from app.core.config import settings
+from app.core.connections import manager
+from app.core.problems import (
     DEVICE_NOT_FOUND,
     DEVICE_OFFLINE,
     INSUFFICIENT_SCOPE,
@@ -53,7 +50,10 @@ from ..core.problems import (
     UNTRUSTED_DEVICE,
     ApiProblemError,
 )
-from ..db.deps import get_db
+from app.core.tokens import extract_bearer
+from app.db.deps import get_db
+from app.modules.devices import crud as devices_store
+
 from . import crud
 from .permissions import SCOPE_LABELS, Scope, scopes_satisfied
 

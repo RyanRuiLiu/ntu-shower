@@ -1,7 +1,6 @@
 """HTTP 调用审计的存储：写行、查询、保留期清理。
 
-从 core/audit.py 拆出（2026-11 审计）：core 是最底层基础设施，核心层不该向上
-依赖 auth/db/models——审计的存储归持久化层，HTTP 侧的采集与装配在
+审计的存储归持久化层（核心层不向上依赖 auth/db/models），HTTP 侧的采集与装配在
 app/audit_middleware.py。两张审计表（api_call 与 command_audit）的清理共用
 一个事务，见 [prune]。
 """
@@ -16,10 +15,10 @@ from sqlalchemy.orm import Session
 from typing_extensions import TypedDict
 
 from app.contracts import ApiCallKind
+from app.core.logging import request_id_var, trace_id_var
 from app.db.base import utcnow
+from app.db.session import session_scope
 
-from ..core.logging import request_id_var, trace_id_var
-from ..db.session import session_scope
 from . import audit as audit_store
 from .audit import ApiCall, CommandAudit
 

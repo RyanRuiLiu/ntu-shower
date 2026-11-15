@@ -5,8 +5,7 @@
 """
 
 from app.contracts import DoorState
-
-from ...contracts import DoorView as DoorView
+from app.contracts import DoorView as DoorView
 
 #: 状态取值 → 界面中文名。**这是唯一的数据源。**
 #:
