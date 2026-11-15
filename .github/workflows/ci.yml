@@ -100,7 +100,7 @@ jobs:
         working-directory: .
         if: needs.changes.outputs.docs == 'true'
         run: npx --yes markdownlint-cli2@0.20.0 "*.md" "docs/*.md" "docs/adr/*.md" "deploy/*.md" ".github/*.md" --config .markdownlint.json
-      - name: Web (tsc + eslint + vitest)
+      - name: Web (tsc + eslint + stylelint + vitest)
         working-directory: server/web
         if: needs.changes.outputs.web == 'true'
         run: |
@@ -108,6 +108,8 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm exec tsc -b
           pnpm exec eslint src --config eslint.config.mjs
+          pnpm exec eslint legacy --config legacy/eslint.config.mjs
+          pnpm exec stylelint "legacy/style/*.css" --config legacy/.stylelintrc.json
           pnpm exec vitest run
 
   semgrep:
