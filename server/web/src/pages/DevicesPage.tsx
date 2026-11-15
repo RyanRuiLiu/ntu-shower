@@ -21,6 +21,9 @@ export function DevicesPage() {
               <div className="flex items-center gap-2">
                 <span className="font-mono text-sm">{device.device_id}</span>
                 <span className="text-sm">{device.name}</span>
+                {device.retired && (
+                  <span className="rounded-full bg-rose-500/20 px-2 py-0.5 text-xs text-rose-300">已停用</span>
+                )}
                 <span
                   className={`ml-auto rounded-full px-2 py-0.5 text-xs ${
                     device.online ? "bg-emerald-500/20 text-emerald-300" : "bg-default-500/20 text-default-400"
@@ -80,6 +83,17 @@ function DeviceDetail({ deviceId }: { deviceId: string }) {
         </div>
       )}
       <div className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          variant={runtime.data?.retired ? "primary" : "danger-soft"}
+          onPress={() =>
+            run((id) => devicesApi.patch(id, { retired: !runtime.data?.retired })).then(() =>
+              void queryClient.invalidateQueries({ queryKey: ["device", deviceId] }),
+            )
+          }
+        >
+          {runtime.data?.retired ? "恢复" : "停用"}
+        </Button>
         <Button size="sm" variant="ghost" onPress={() => run(devicesApi.capture)}>
           截图
         </Button>
