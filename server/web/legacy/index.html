@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NTU Shower 运维控制台</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style/tokens.css">
+<link rel="stylesheet" href="style/base.css">
+<link rel="stylesheet" href="style/layout.css">
+<link rel="stylesheet" href="style/components.css">
+<link rel="stylesheet" href="style/overview.css">
+<link rel="stylesheet" href="style/inspector.css">
+<!-- 减少动态效果与窄屏适配最后加载：它们负责改写上面几份规则样式 -->
+<link rel="stylesheet" href="style/reduced-motion.css">
+<link rel="stylesheet" href="style/narrow.css">
+</head>
+<body>
+
+<!--
+  顶栏：导航 + 设备选择 + 连接状态 + 设备信息入口。
+
+  导航按钮与设备下拉都由 app.js 按注册表生成，这里只留空容器：
+  写死在 HTML 里就得两处维护，加一个视图要改两个文件。
+
+  设备选择放在顶栏而不是某个视图里：八个视图都要认"当前设备"，
+  它是全局上下文，不是某个视图的局部状态。
+
+  "设备信息"是个按钮而不是常驻显示：里面是设备 ID、IP、版本这些排障时才看的
+  字段，常驻会挤掉真正要一直盯着的两样东西（在线状态、身份）。
+-->
+<div class="bar">
+  <nav class="bar-nav" id="nav"></nav>
+
+  <div class="device-picker">
+    <label for="devicePicker">设备</label>
+    <select id="devicePicker"></select>
+  </div>
+
+  <div class="bar-status">
+    <span class="bar-dot off" id="deviceDot"></span>
+    <span id="deviceText">设备离线</span>
+  </div>
+
+  <!--
+    右半部分分两组，中间用一条竖线隔开：
+    左组关于被控设备（身份、版本、地址），右组关于本页与服务端之间的链路
+    （实时通道、身份标识、服务端时钟）。两组的失效含义不同：设备离线说明那台
+    机器有问题，实时断开说明网络或服务端有问题。
+  -->
+  <div class="bar-right">
+    <div class="bar-group">
+      <button type="button" class="btn btn-ghost btn-sm" id="btnRefreshWater" hidden>刷新水控板</button>
+      <button type="button" class="btn btn-ghost btn-sm" id="btnDeviceInfo" aria-expanded="false">设备信息</button>
+      <div class="info-panel" id="deviceInfo" hidden></div>
+    </div>
+
+    <div class="bar-group">
+      <span class="badge badge-red" id="streamChip">断开</span>
+      <button type="button" class="btn btn-ghost btn-sm" id="btnIdentity">登录</button>
+      <span id="clock" class="bar-mono">--:--:--</span>
+    </div>
+  </div>
+</div>
+
+<!--
+  登录对话框：口令走 <input type="password">（浏览器掩码，不用 prompt——prompt 明文可见）。
+  提交后 POST /api/v1/auth/login，成功由服务端 Set-Cookie 签发会话。
+-->
+<dialog id="loginDialog">
+  <form id="loginForm" method="dialog">
+    <div class="field">
+      <label for="loginUser">用户名</label>
+      <input id="loginUser" type="text" name="username" autocomplete="username" required />
+    </div>
+    <div class="field">
+      <label for="loginPassword">口令</label>
+      <input id="loginPassword" type="password" name="password" autocomplete="current-password" required />
+    </div>
+    <!-- 错误就地显示在对话框里（统一 .result.err 样式）：showModal 的对话框在浏览器
+         顶层，全局 toast 会被它盖住 -->
+    <p class="result err" id="loginResult" role="alert" hidden></p>
+    <div class="btn-row">
+      <button type="submit" class="btn">登录</button>
+      <button type="button" class="btn btn-ghost" id="btnLoginCancel">取消</button>
+    </div>
+  </form>
+</dialog>
+
+<!--
+  八个能力域各一个容器，切入时才由对应视图模块填充。
+  容器 id 与视图的 id 一一对应（`view-<id>`）：加视图只需在 views/ 下加一个模块
+  并在 app.js 的注册表里排个位置，本文件不用动。
+-->
+<main class="view" id="view-overview"></main>
+<main class="view view-inspector" id="view-inspector" hidden></main>
+<main class="view" id="view-devices" hidden></main>
+<main class="view" id="view-config" hidden></main>
+<main class="view" id="view-users" hidden></main>
+<main class="view" id="view-voice" hidden></main>
+<main class="view" id="view-releases" hidden></main>
+<main class="view" id="view-audit" hidden></main>
+
+<div class="toast" id="toast"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
