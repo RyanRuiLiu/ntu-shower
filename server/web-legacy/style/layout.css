@@ -1,0 +1,280 @@
+/* 布局：顶栏、导航、视图容器、面板、分区。
+ *
+ * 页面骨架只有这一种：顶栏（导航 + 设备选择 + 状态）→ 视图容器 → 视图内部用面板分区。
+ */
+
+/* ── 顶栏 ───────────────────────────────────────────────── */
+
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: var(--bar-height);
+  padding: 0 var(--sp-4);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  /* 防拖拽选中导航文字；信息面板里那些 ID 与 IP 要能选中，见 .info-panel 的 user-select */
+  user-select: none;
+}
+
+/* ── 导航 ───────────────────────────────────────────────── */
+
+.bar-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  overflow-x: auto;
+}
+
+/* 组内紧凑相邻；组与组之间留出间距，并由相邻分组的相邻边画一条分隔线 */
+.bar-nav-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.bar-nav-group + .bar-nav-group {
+  padding-left: 10px;
+  border-left: 1px solid var(--border);
+}
+
+.bar-nav-item {
+  flex: none;
+  padding: 3px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--dim);
+  font: 600 var(--fs-small) var(--font-ui);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--transition), background var(--transition);
+}
+
+.bar-nav-item:hover {
+  color: var(--text);
+  background: var(--elevated);
+}
+
+.bar-nav-item[aria-current='page'] {
+  color: var(--accent);
+  background: var(--elevated);
+  border-color: var(--border);
+}
+
+/* ── 设备选择：多设备下每个视图都要能切 ───────────────────── */
+
+.device-picker {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding-left: var(--sp-3);
+  border-left: 1px solid var(--border);
+}
+
+.device-picker select {
+  padding: 3px 8px;
+  font-size: var(--fs-small);
+}
+
+/* ── 顶栏右侧 ───────────────────────────────────────────── */
+
+.bar-status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-small);
+}
+
+.bar-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-circle);
+  flex-shrink: 0;
+}
+
+.bar-dot.on {
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+}
+
+.bar-dot.off {
+  background: var(--red);
+}
+
+/*
+ * 右半部分：两组信息，一条竖线隔开。
+ *
+ * 左组关于被控设备，右组关于本页与服务端之间的链路。两组的失效含义不同——设备离线
+ * 说明那台机器有问题，实时断开说明网络或服务端有问题——所以它们在视觉上也必须分开，
+ * 不能连成一片。
+ */
+.bar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  margin-left: auto;
+  font-size: var(--fs-small);
+  color: var(--dim);
+}
+
+.bar-group {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.bar-group + .bar-group {
+  padding-left: var(--sp-4);
+  border-left: 1px solid var(--border);
+}
+
+.bar-mono {
+  font-family: var(--font-mono);
+}
+
+/* ── 视图容器 ───────────────────────────────────────────── */
+
+/*
+ * `flex: 1 1 auto` 里的 basis 必须是 `auto` 而不是 `0`：内容高的视图（配置页有上千像素）
+ * 要能把 body 撑高、让整页滚动；basis 为 0 时容器按视口高度封顶，内容会溢出到页面之外。
+ * 内容矮的视图（概览）则由 flex-grow 补满剩余高度。
+ *
+ * `width: 100%` 与 `margin: 0 auto` 配套：在 flex 容器里 auto 外边距会优先吃掉横轴自由
+ * 空间，条目的宽度随之收缩到内容宽度，"居中"就变成了缩成一条。
+ */
+.view {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  width: 100%;
+  gap: var(--sp-4);
+  padding: var(--sp-4);
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+/* ── 面板：视图内的分区单位 ─────────────────────────────── */
+
+.panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--elevated);
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-title {
+  font-size: var(--fs-small);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.panel-note {
+  font-size: var(--fs-chip);
+  color: var(--muted);
+}
+
+.panel-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;
+}
+
+.panel-body {
+  padding: var(--sp-3);
+}
+
+/* 面板内的分区：同一张卡片里两组性质不同的东西，用一条线分开。
+   比如"远程命令"里上半是执行任意命令、下半是重启与卸载这类设备自身的动作——
+   它们的结果各说各话，混成一片会看不清哪句话对应哪次操作。 */
+.panel-split {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+
+.panel-split-label {
+  margin-bottom: var(--sp-2);
+  font-size: var(--fs-chip);
+  color: var(--muted);
+}
+
+/*
+ * 承载表格的面板体（设备、身份、发布、审计四张表都挂在它上面）。
+ *
+ * 表格的列数由业务决定，窄屏放不下是常态；不给它滚动，多出来的列会被 .panel 的
+ * `overflow: hidden` 直接裁掉——看着就像"这几列本来就没有"。四张表各自写一遍
+ * `overflow-x` 会漏掉将来新加的那一张，所以由容器统一给。
+ */
+.panel-body.flush {
+  padding: 0;
+  overflow: auto;
+}
+
+/* ── 网格：面板内并排两块 ───────────────────────────────── */
+
+/*
+ * 两张网格都用 `minmax(min(<列宽>, 100%), 1fr)`：`100%` 那一项让最小轨道宽度不超过
+ * 容器，窄屏自动落成一列。双列承载表格与表单，最小列宽取 560px——半宽面板里塞
+ * 七列表格只能靠压缩换行，落成一列后由表格自己横向滚动。`auto-fit` 会折叠多余的
+ * 空轨道，所以宽屏上仍是"几个子项就几列、各占等分"。
+ */
+.grid {
+  display: grid;
+  gap: var(--sp-4);
+}
+
+.grid-2 {
+  grid-template-columns: repeat(auto-fit, minmax(min(var(--grid-2-min), 100%), 1fr));
+}
+
+.grid-3 {
+  grid-template-columns: repeat(auto-fit, minmax(min(var(--grid-3-min), 100%), 1fr));
+}
+
+/*
+ * 列表 + 编辑表单：列表要放多列表格，表单只需一列。
+ * 两块的基准宽度之和放不下时整行换行，列表独占一行、表格自己横向滚动。
+ */
+.grid-list-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+  align-items: stretch;
+}
+
+.grid-list-form > :first-child {
+  flex: 2 0 var(--list-form-list-min);
+  min-width: 0;
+}
+
+.grid-list-form > :last-child {
+  flex: 1 0 var(--list-form-form-min);
+  min-width: 0;
+}
+
+/* 列表与表单同高：列表随表单的高度拉伸，内容超出时在面板内滚动 */
+.grid-list-form > .panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.grid-list-form > .panel > .panel-body.flush {
+  flex: 1;
+  min-height: 0;
+}

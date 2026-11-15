@@ -1,0 +1,192 @@
+/* 窄屏适配 —— 全站唯一一处。
+ *
+ * 规矩两条，都由 `tests/test_web_layout.py` 守着：
+ *
+ * 1. **只有本文件可以出现 `@media`**。其余样式文件靠内容自身的宽度自适应
+ *    （`minmax(min(…, 100%), 1fr)`、`flex-wrap`）：同一条规则在两处各写一遍，改一处
+ *    时另一处不会跟着变，而 CSS 不会因此报错——它只是安静地开始不一致。
+ * 2. **断点只有一个值**。它是 1024：顶栏单行要装下七个导航项、设备选择、链路状态
+ *    与那两组按钮，实需约 990px；低于它顶栏就放弃单行。
+ *
+ * 顶栏高度不进任何 `calc()`：`body` 是列向 flex 容器，那些"撑满顶栏之下剩余高度"的
+ * 视图（界面检视、审计分栏）靠 flex 分配空间，顶栏在窄屏不再是固定的一行时它们自动
+ * 跟随。这一条由 `test_view_height_is_not_computed_from_the_bar_height` 守着。
+ */
+
+@media (width <= 1024px) {
+  /*
+   * 窄屏顶栏有几行由内容决定（375px 宽时导航、设备上下文、链路与身份各占一行，
+   * 实高约 123px），所以这个值不再是"顶栏高度"，而是**滚动锚点要避开的余量**：
+   * 取各窄屏宽度下的最大值，宁可多留——多留只是滚完多一段留白，小了会把锚点目标
+   * 遮在顶栏底下。改顶栏内容（加一个按钮、换字体大小）后要回来看它。
+   *
+   * 它不再参与任何 `calc(100vh - …)`：那些视图的高度由 flex 分配（见 base.css）。
+   */
+  :root {
+    --bar-height: 128px;
+  }
+
+  /* ── 顶栏：导航一行，其余一行 ───────────────────────────── */
+
+  .bar {
+    height: auto;
+    flex-wrap: wrap;
+    row-gap: var(--sp-2);
+    padding: var(--sp-2);
+  }
+
+  /* 导航横向滑动而不折行：折行会让顶栏高度随导航项个数变化，
+     而它上面挂着"撑满剩余高度"的那几个视图 */
+  .bar-nav {
+    order: 1;
+    flex: 1 1 100%;
+    gap: var(--sp-2);
+  }
+
+  .device-picker {
+    order: 2;
+    padding-left: 0;
+    border-left: none;
+  }
+
+  .bar-status {
+    order: 3;
+  }
+
+  /* 右半部分放不下时整组换到下一行，行内两组还能各自折 */
+  .bar-right {
+    order: 4;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    row-gap: var(--sp-2);
+  }
+
+  .bar-group + .bar-group {
+    padding-left: var(--sp-2);
+  }
+
+  /* 设备信息浮层在原位是"贴按钮、宽 340px"，窄屏会从屏幕左边溢出去。
+     改成贴着屏幕底部的浮层：它不再依赖顶栏有多高（顶栏高度在窄屏是不定的），
+     拉长的字段列表在自己的区域里滚动 */
+  .info-panel {
+    position: fixed;
+    top: auto;
+    right: var(--sp-2);
+    bottom: var(--sp-2);
+    left: var(--sp-2);
+    min-width: 0;
+    max-height: 70dvh;
+    overflow: auto;
+  }
+
+  /* ── 视图与面板 ─────────────────────────────────────────── */
+
+  .view {
+    padding: var(--sp-3);
+    gap: var(--sp-3);
+  }
+
+  /* 标题与工具组排不下时折行：挤在一行里，多出来的工具会被面板的 overflow 裁掉 */
+  .panel-head {
+    flex-wrap: wrap;
+    row-gap: var(--sp-1);
+  }
+
+  /* 表格不压缩列：窄屏保持最小可读宽度，由 .table-wrap / .panel-body.flush 横向滚动 */
+  .table {
+    min-width: var(--table-min-width);
+  }
+
+  /* 列表 + 编辑表单：窄屏各自独占一行 */
+  .grid-list-form > :first-child,
+  .grid-list-form > :last-child {
+    flex-basis: 100%;
+  }
+
+  /* 素材与上传落成一列：列表恢复按内容定高，限高保持不变 */
+  .voice-top {
+    grid-template-columns: 1fr;
+  }
+
+  .voice-top > .panel:first-child {
+    contain: none;
+  }
+
+  /* ── 审计：上下堆叠，各自限高 ───────────────────────────── */
+
+  .audit-split {
+    display: block;
+    flex: none;
+    height: auto;
+  }
+
+  .audit-split > .panel + .panel {
+    margin-top: var(--sp-3);
+  }
+
+  /* 两块面板各自限高并在内部滚动：不限高的话列表一长，详情就落到屏幕外 */
+  .audit-split > .panel > .panel-body.flush {
+    max-height: 55dvh;
+  }
+
+  #detailPanel > .panel-body {
+    max-height: 60dvh;
+  }
+
+  /* ── 界面检视：画面在上、界面树在下 ─────────────────────── */
+
+  .stage {
+    flex-direction: column;
+  }
+
+  /* 画面占一个固定比例，剩下的全给界面树：树里还有属性面板与输入栏，
+     两边都按内容撑会把输入栏挤出屏幕 */
+  .screen-panel {
+    flex: 0 0 auto;
+    height: 38dvh;
+    min-height: 180px;
+  }
+
+  /* 树面板从"右侧一栏"变成"下方一栏"：宽度跟随容器，边框换到上边 */
+  .tree-panel {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+    border-top: 1px solid var(--border);
+    border-left: none;
+    resize: none;
+  }
+
+  .tree-restore {
+    top: auto;
+    bottom: var(--sp-2);
+  }
+
+  /* ── 触控目标 ───────────────────────────────────────────── */
+
+  /* 手指点不准 20px 高的按钮，窄屏一律抬到 34px 上下。
+     鼠标精确点击不在乎这点高度差，所以只在窄屏放大 */
+  .btn {
+    padding: 9px 16px;
+  }
+
+  .btn-sm {
+    padding: 8px 12px;
+    font-size: var(--fs-small);
+  }
+
+  .cfg-tab,
+  .audit-tab {
+    padding: 8px 12px;
+  }
+
+  .tree-search {
+    padding: 8px;
+    font-size: var(--fs-small);
+  }
+
+  /* 工具条在窄屏会折行，竖线分隔符跟着换行就没有分隔意义了，只剩一截浮在行首 */
+  .tb .sep {
+    display: none;
+  }
+}
