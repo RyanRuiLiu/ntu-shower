@@ -64,7 +64,7 @@ from .schemas import (
 router = APIRouter(prefix="/api/v1", tags=["devices"])
 
 
-@router.post("/devices/enroll", response_model=schemas.DeviceEnrollResult)
+@router.post("/devices/enroll", response_model=schemas.DeviceEnrollResult, summary="设备自注册（claim 换凭据）")
 def enroll_device(
     req: schemas.DeviceEnrollRequest, request: Request, session: Session = Depends(get_db)
 ) -> schemas.DeviceEnrollResult:
@@ -145,7 +145,7 @@ def _ui_timeout_s(session: Session, device_id: str) -> float:
 # ── 查询 ──
 
 
-@router.get("/devices")
+@router.get("/devices", summary="设备清单（含该调用方可执行的动作）")
 def list_devices(
     identity: Caller | None = Depends(optional_caller), session: Session = Depends(get_db)
 ) -> list[DeviceListItem]:
@@ -169,7 +169,7 @@ def list_devices(
     return items
 
 
-@device_read_router.get("/{device_id}/logs")
+@device_read_router.get("/{device_id}/logs", summary="设备最近一次上送的日志")
 def get_device_logs(device_id: str, kind: str = "device", session: Session = Depends(get_db)) -> schemas.DeviceLogView:
     """该设备最近一次上送的日志（kind=device / crash / ota）。
 
@@ -185,7 +185,7 @@ def get_device_logs(device_id: str, kind: str = "device", session: Session = Dep
     return schemas.DeviceLogView.model_validate(latest)
 
 
-@device_read_router.get("/{device_id}/logs/live")
+@device_read_router.get("/{device_id}/logs/live", summary="设备日志尾部现读")
 async def get_live_device_log(
     device_id: str,
     kind: str = "device",
@@ -225,7 +225,7 @@ async def get_live_device_log(
     )
 
 
-@device_read_router.get("/{device_id}")
+@device_read_router.get("/{device_id}", summary="单台设备运维档案")
 def get_device(device_id: str, session: Session = Depends(get_db)) -> DeviceRecord:
     """单台设备的运维档案（版本、信任、来源 IP、时钟偏差等诊断字段）。
 
@@ -234,7 +234,7 @@ def get_device(device_id: str, session: Session = Depends(get_db)) -> DeviceReco
     return _require_device(session, device_id)
 
 
-@admin_router.patch("", response_model=schemas.DeviceOrderResponse)
+@admin_router.patch("", response_model=schemas.DeviceOrderResponse, summary="设备展示顺序")
 def patch_device_order(req: DeviceOrderRequest, session: Session = Depends(get_db)) -> schemas.DeviceOrderResponse:
     """按给定顺序重排设备：设备下拉、管理台设备表、统计接口全部照此排列。
 
@@ -244,7 +244,7 @@ def patch_device_order(req: DeviceOrderRequest, session: Session = Depends(get_d
     return schemas.DeviceOrderResponse(order=[str(record["device_id"]) for record in service.list_devices(session)])
 
 
-@device_router.patch("/{device_id}")
+@device_router.patch("/{device_id}", summary="改设备档案（改名/信任/停用）")
 async def patch_device(device_id: str, req: DevicePatchRequest, session: Session = Depends(get_db)) -> DeviceRecord:
     """改设备档案：改名、改信任位，只改传了的字段。
 
@@ -274,7 +274,7 @@ async def patch_device(device_id: str, req: DevicePatchRequest, session: Session
 # ── 远程动作 ──
 
 
-@device_router.post("/{device_id}/exec")
+@device_router.post("/{device_id}/exec", summary="远程执行 shell 命令")
 async def exec_command(device_id: str, req: DeviceExecRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """远程调试：在设备上以 root 执行 shell 命令并取回输出（审计留痕）。"""
     return await device_action(
@@ -282,7 +282,7 @@ async def exec_command(device_id: str, req: DeviceExecRequest, session: Session 
     )
 
 
-@device_router.post("/{device_id}/capture")
+@device_router.post("/{device_id}/capture", summary="抓取设备屏幕")
 async def capture_screen(device_id: str, session: Session = Depends(get_db)) -> CommandOutcome:
     """抓取设备全屏画面，结果在 data.image_base64（JPEG，NO_WRAP）。
 
@@ -292,13 +292,13 @@ async def capture_screen(device_id: str, session: Session = Depends(get_db)) -> 
     return await device_action(session, device_id, actions.SCREEN_CAPTURE, {}, DEVICE_ACTION_TIMEOUT_S)
 
 
-@device_router.post("/{device_id}/restart-app")
+@device_router.post("/{device_id}/restart-app", summary="重启应用进程")
 async def restart_app(device_id: str, session: Session = Depends(get_db)) -> CommandOutcome:
     """重启 NTU Shower 进程（不重启整机，也不动浴室 APP）。"""
     return await device_action(session, device_id, actions.APP_RESTART, {}, DEVICE_ACTION_TIMEOUT_S)
 
 
-@device_router.post("/{device_id}/clock-set")
+@device_router.post("/{device_id}/clock-set", summary="设置设备时钟")
 async def set_clock(device_id: str, req: DeviceClockSetRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """设置设备系统时钟（datetime 为设备本地墙钟时间）。浴室 App 的每日开关机计划依赖它。"""
     return await device_action(
@@ -306,13 +306,13 @@ async def set_clock(device_id: str, req: DeviceClockSetRequest, session: Session
     )
 
 
-@device_router.post("/{device_id}/restart-bath")
+@device_router.post("/{device_id}/restart-bath", summary="重启浴室 App")
 async def restart_bath_app(device_id: str, session: Session = Depends(get_db)) -> CommandOutcome:
     """重启浴室 App：先强停再冷启动。排障用——延长服务流程已改用 power.schedule。"""
     return await device_action(session, device_id, actions.BATH_RESTART, {}, DEVICE_ACTION_TIMEOUT_S)
 
 
-@device_router.post("/{device_id}/reboot")
+@device_router.post("/{device_id}/reboot", summary="重启整机")
 async def reboot_device(device_id: str, session: Session = Depends(get_db)) -> CommandOutcome:
     """重启整机。设备重启后 agent 随之重来，会话与喷头现态由重连后的全貌帧重建。"""
     return await device_action(session, device_id, actions.DEVICE_REBOOT, {}, DEVICE_ACTION_TIMEOUT_S)
@@ -323,7 +323,7 @@ async def reboot_device(device_id: str, session: Session = Depends(get_db)) -> C
 # 给动作，与 capture（一张图）互补。排查"设备卡在某个弹窗"时节点树比截图有用。
 
 
-@device_router.post("/{device_id}/ui-dump")
+@device_router.post("/{device_id}/ui-dump", summary="导出界面节点树")
 async def dump_ui_tree(device_id: str, session: Session = Depends(get_db)) -> CommandOutcome:
     """导出设备当前界面的节点树，结果在 data.xml。
 
@@ -332,7 +332,7 @@ async def dump_ui_tree(device_id: str, session: Session = Depends(get_db)) -> Co
     return await device_action(session, device_id, actions.UI_DUMP, {}, _ui_timeout_s(session, device_id))
 
 
-@device_router.post("/{device_id}/ui-touch")
+@device_router.post("/{device_id}/ui-touch", summary="按坐标点击或滑动")
 async def touch(device_id: str, req: DeviceUiTouchRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """按屏幕坐标点击或滑动：不给 to_x/to_y 是点击，给了是滑动。
 
@@ -347,13 +347,13 @@ async def touch(device_id: str, req: DeviceUiTouchRequest, session: Session = De
     return await device_action(session, device_id, actions.UI_TOUCH, params, _ui_timeout_s(session, device_id))
 
 
-@device_router.post("/{device_id}/ui-key")
+@device_router.post("/{device_id}/ui-key", summary="发送系统按键")
 async def send_key(device_id: str, req: DeviceUiKeyRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """发送系统按键（闭集，路由层 422 挡下非法值）。"""
     return await device_action(session, device_id, actions.UI_KEY, {"key": req.key}, _ui_timeout_s(session, device_id))
 
 
-@device_router.post("/{device_id}/ui-input")
+@device_router.post("/{device_id}/ui-input", summary="注入文本")
 async def input_text(device_id: str, req: DeviceUiTextRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """向当前焦点控件输入文本；channel 在两条并列通路中显式选择。"""
     return await device_action(
