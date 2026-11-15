@@ -1,4 +1,4 @@
-"""水控板直控 API：授权出水、断水、读板信息（`POST /devices/{device_id}/water/<动词>`）。
+"""水控板直控 API：授权出水、断水、读板信息（`/devices/{device_id}/water/<动词>`）。
 
 ## 与会话域的分工
 
@@ -80,7 +80,7 @@ async def close_valve(device_id: str, req: WaterDoorRequest, session: Session = 
 
 
 @router.get(
-    "/{device_id}/water-status",
+    "/{device_id}/water",
     dependencies=[Security(caller, scopes=["water:read"]), Depends(device_scope_guard)],
     summary="读板配置与状态",
 )
