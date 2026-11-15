@@ -1,9 +1,8 @@
 """事件 → 规则匹配：一次设备事件命中哪条启用规则。
 
-从 persistence.matching_rules 迁入（2026-11 审计）：时段解析、优先级排序与歧义
-拒绝是业务规则——「哪条规则更紧」不是存储的事。持久化层只负责把启用规则行交出
-来（repository.list_enabled_rules），匹配是纯读判定，供 service._dispatch_event
-调用。
+时段解析、优先级排序与歧义拒绝是业务规则——「哪条规则更紧」不是存储的事。
+持久化层只负责把启用规则行交出来（repository.list_enabled_rules），匹配是纯读
+判定，供 service._dispatch_event 调用。
 """
 
 from __future__ import annotations

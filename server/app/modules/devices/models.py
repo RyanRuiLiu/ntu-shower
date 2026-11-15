@@ -88,7 +88,7 @@ class DeviceClockShift(Base):
 
 
 class DeviceLog(Base):
-    """设备上送的日志，保留 30 天。"""
+    """设备上送的日志，每个（设备，kind）只留最近 `LOG_KEEP` 份（见 devices.crud）。"""
 
     __tablename__ = "device_logs"
     __table_args__ = (Index("ix_device_logs_device_id_kind_uploaded_at", "device_id", "kind", "uploaded_at"),)
