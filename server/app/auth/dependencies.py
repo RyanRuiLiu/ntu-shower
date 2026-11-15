@@ -61,9 +61,15 @@ from .permissions import SCOPE_LABELS, Scope, scopes_satisfied
 #: 空闲超过 idle 的会话由 Cookie 寿命兜底。
 RENEW_AFTER_S = 24 * 60 * 60
 
-#: OpenAPI 的安全方案声明（tokenUrl 指向登录端点；scopes 即权限字典）。
-#: 实现层不消费它的返回值——提取走 extract_bearer，Cookie 通道经 current_user，
-#: auto_error=False 让两条通道在同一依赖里汇合。
+#: OpenAPI 的安全方案声明。OAuth2 Password flow 是 RFC 6749 定义、OpenAPI 原生
+#: 支持的两种凭据通道之一（另一种是 http bearer）：
+#: - API 调用方持 `ntushower_` 密钥，`Authorization: Bearer <密钥>` 调用——密钥由
+#:   管理台在用户与密钥页签发（users:write），scopes 即权限字典，与 HTTP 头里
+#:   实际传的凭据一一对应；
+#: - 管理台浏览器走同一 flow 的 password grant（tokenUrl 指向登录端点）换会话
+#:   Cookie，对 OpenAPI 而言两种通道汇合为同一个 securityScheme。
+#: 实现层不消费 oauth2_scheme 的返回值——提取走 extract_bearer，Cookie 通道经
+#: current_user，auto_error=False 让两条通道在同一依赖里汇合。
 oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl="/api/v1/auth/login",
     scheme_name="ntu_shower_auth",
