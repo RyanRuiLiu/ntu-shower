@@ -176,8 +176,9 @@ def update_global(session: Session, augment: Callable[[ConfigValues], ConfigValu
     读的为什么不是 `effective(device_id)`：那会把设备覆盖一起合并进来，而设备覆盖属于
     另一张表，混进来就会在写全局的时候把某台设备的覆盖当成全局值固化。
 
-    `*_students` 名单的增删走这里。"先读后写"若不在同一把锁里，两个人同时登记会各写
-    各读到的旧名单，后写的把先写的抹掉。
+    这是 `*_students` 名单增删的**原子入口**（判据不是死代码）：名单是覆盖式整份写回，
+    "先读后写"若不在同一把锁里，两个人同时登记会各写各读到的旧名单，后写的把先写的
+    抹掉。名单写侧接手时必须走这里，不得绕过锁自拼读改写。
     """
     with _global_lock:
         return put_global_overrides(session, augment(global_effective(session)))

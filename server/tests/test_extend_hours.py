@@ -32,7 +32,7 @@ CONFIG: dict[str, object] = {
     "extend_hours_enabled": True,
     "extend_hours_at": "23:49",
     "extend_shift_minutes": 15,
-    "extend_hours_zone_offset_minutes": 480,
+    "server_zone_offset_minutes": 480,
     "extend_hours_students": {"2026000001": "000000", "2026000003": "111111"},
     "power_off_at": "23:58",
     "power_on_at": "10:55",
@@ -859,7 +859,7 @@ def test_tick_advances_each_extending_device_with_its_own_config(
     device_link.register_trusted_device("dev-ext-b")
     base = {
         "extend_hours_enabled": False,  # 不参与拨钟，只走推进
-        "extend_hours_zone_offset_minutes": 480,
+        "server_zone_offset_minutes": 480,
         "extend_shift_minutes": 15,
         "extend_hours_students": {},
         "time_sync_enabled": False,
