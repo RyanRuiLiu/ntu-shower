@@ -13,20 +13,20 @@
 
 ## 为什么每喷头一个定时器
 
-一个喷头会随会话推进依次落到不同的判据上，而**已暂停**同时落在"会话续期"与"自动结算"
-两条上（见 `decision.py`）。每功能各挂一个定时器会互相打架（取消与重挂交错），所以每
-喷头只留**一个**、指着最早的那个；状态一变就重算，它自己会纠正。
+一个喷头会随会话推进依次落到不同的判据上；任一时刻它处于哪个状态、该由哪个功能动手，
+判据只有一个出处（`decision.py` 的互不相交认领——一个状态只有一个主人）。每喷头只留
+**一个**定时器、指着「下一个该动手的时刻」：状态一变就重算，它自己会纠正。
 
 ## 串行
 
-`sessions.service.send_command_and_wait` 已经按 (设备, 通道) 加了串行锁，而 assign 与
+`devices.actions.send_command_and_wait` 已经按 (设备, 通道) 加了串行锁，而 assign 与
 settle 同属 automation 通道，所以**单条命令**不会并发。这里再加一层**每设备一个队列 +
 一个 worker**，是为了让"结算 → 分配"这个**两步序列**原子化：不串行的话两场续期会交错
 成 settle(A) settle(B) … assign(A) assign(B)，而每一步都要读服务端现态。
 
 ## 走领域层，不另写一份判据
 
-结算与分配都经 `sessions.routes` 的 `perform_settle` / `perform_assign`——那是"所有调用
+结算与分配都经 `sessions.service` 的 `perform_settle` / `perform_assign`——那是"所有调用
 方共用"的入口，前置检查（可分配状态、重复会话、设备守卫）都在里面。**直接调
 `send_command_and_wait` 会把那些前置整条绕过去**，等于同一个判据有两个出处。
 
@@ -62,13 +62,14 @@ from app.core import actions, outcomes, problems
 from app.core.clock import now_rfc3339, shift_rfc3339
 from app.core.logging import log_event
 from app.core.problems import ApiProblemError
-from app.core.protocol import as_int
+from app.core.protocol import JsonObject, as_int
 from app.db.base import utcnow
 from app.db.session import session_scope
 from app.modules.config import store as config_store
 from app.modules.config.schemas import ConfigPushNotice
 from app.modules.devices import actions as device_actions
 from app.modules.doors import service as doors_service
+from app.persistence import audit as audit_store
 
 from . import service as sessions_service
 from .decision import (
@@ -263,9 +264,6 @@ def _record(
         job=subject.job,
         **extra,
     )
-    from app.db.session import session_scope
-    from app.persistence import audit as audit_store
-
     with session_scope() as session:
         audit_store.insert_job_run(
             session,
@@ -354,12 +352,14 @@ def on_frame(device_id: str) -> None:
     """一帧刚派生完。重算该设备每个喷头的"下一个到点"，并把待补的分配接上。
 
     它在事件循环上调用（网关的 `_handle_frame` 是协程），所以可以直接碰定时器。
+    清理结束会话与重算计划共用同一次取数——一帧一次读库。
     """
     if not _running:
         return
     with session_scope() as session:
         _forget_closed_sessions(session, device_id)
-    reschedule(device_id)
+        planned = _plan(session, device_id)
+    _apply_plan(device_id, planned)
     _flush_pending_assign(device_id)
 
 
@@ -400,17 +400,22 @@ async def on_config_change(revision: int, device_ids: Sequence[str]) -> list[Con
 
 
 def reschedule(device_id: str) -> None:
-    """重算该设备的定时器。帧到达、配置保存、一次执行跑完之后都调它。
+    """重算该设备的定时器。配置保存、一次执行跑完之后都调它。
 
     **只管定时器**：待补的分配由 [on_frame] 单独推——若放在这里，一次"前置还不满足"的
     分配会在 worker 收尾时再触发一次刷新、再排一次，转成自触发的死循环。
     """
     if not _running:
         return
-    worker = _worker(device_id)
-    loop = asyncio.get_running_loop()
     with session_scope() as session:
         planned = _plan(session, device_id)
+    _apply_plan(device_id, planned)
+
+
+def _apply_plan(device_id: str, planned: dict[int, tuple[float, Candidate, Trigger]]) -> None:
+    """把计划落到定时器上：不在计划里的取消，计划里的重挂。纯内存操作，不碰库。"""
+    worker = _worker(device_id)
+    loop = asyncio.get_running_loop()
 
     for door_no, existing in list(worker.timers.items()):
         if door_no not in planned:
@@ -456,12 +461,13 @@ def snapshot(session: Session) -> list[dict[str, object]]:
         for door_no, planned in worker.timers.items()
     )
     rows: list[dict[str, object]] = []
+    configs: dict[str, JsonObject] = {}
     for at, device_id, door_no, candidate, trigger in entries:
         spec = JOBS_BY_KEY[trigger.job]
         started = candidate.assigned_at if spec.start == "assigned_at" else candidate.paused_at
         # 本轮链的用量上限随功能而定（预约续期有、其余没有）；连同起算时刻一起给，
-        # 面板才能回答"这一轮什么时候到头"。
-        config = config_store.effective(session, device_id)
+        # 面板才能回答"这一轮什么时候到头"。同一设备的配置取一次，不逐行读库。
+        config = configs.setdefault(device_id, config_store.effective(session, device_id))
         max_duration = as_int(config[spec.max_duration_key]) if spec.max_duration_key is not None else None
         rows.append(
             {
@@ -556,7 +562,7 @@ async def _worker_loop(device_id: str) -> None:
 async def _perform_settle(job: _SettleJob) -> None:
     """结算一次。失败即停，不重试。
 
-    **走领域层**：`sessions.routes` 的 `perform_settle` 是"所有调用方共用"的那个入口，
+    **走领域层**：`sessions.service` 的 `perform_settle` 是"所有调用方共用"的那个入口，
     它自带前置检查；在这里另写一份就等于同一个判据有两个出处。
     """
     candidate = job.candidate

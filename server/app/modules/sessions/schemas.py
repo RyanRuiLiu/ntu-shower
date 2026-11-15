@@ -1,13 +1,8 @@
-"""会话领域的 API 契约：请求与响应模型集中于此。
+"""会话领域的 API 请求契约。
 
-请求模型与响应模型放同一处，前端生成类型只认一处。两种风格并存而非强行统一：
-
-- 请求用 Pydantic 模型：它承担实际校验（字段范围、必填），错误经 FastAPI 转成
-  problem+json 的 422；
-- 响应用 TypedDict：响应不需要运行时校验，TypedDict 零开销，且 FastAPI 同样能
-  据它生成 OpenAPI schema。
-
-本文件不被任何领域逻辑依赖；`service` 反向从这里取响应模型，故无循环引用。
+请求用 Pydantic 模型：它承担实际校验（字段范围、必填），错误经 FastAPI 转成
+problem+json 的 422。响应形状是命令结果（CommandOutcome，见 app.contracts），
+不需要本文件另立一份。
 """
 
 from pydantic import BaseModel, Field

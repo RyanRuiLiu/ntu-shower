@@ -1,4 +1,4 @@
-"""会话 API：身份链、设备守卫、喷头预检、重复分配拦截、拍照与完整命令往返。"""
+"""会话 API：身份链、设备守卫、喷头预检、重复分配拦截与完整命令往返。"""
 
 import uuid
 from threading import Thread
@@ -80,14 +80,6 @@ def test_assign_rejects_untrusted_device(client: TestClient, ops_headers: dict[s
 def test_assign_rejects_offline_device(client: TestClient, ops_headers: dict[str, str]) -> None:
     """已注册已信任但不在线是 409（设备离线）。"""
     r = client.post(f"/api/v1/devices/{TRUSTED}/assign", json=ASSIGN_PAYLOAD, headers=ops_headers)
-
-    assert r.status_code == 409
-    assert r.json()["type"].endswith("/problems/device-offline")
-
-
-def test_photo_rejects_offline_device(client: TestClient, ops_headers: dict[str, str]) -> None:
-    """拍照走同一条设备守卫，无请求体。"""
-    r = client.post(f"/api/v1/devices/{TRUSTED}/photo", headers=ops_headers)
 
     assert r.status_code == 409
     assert r.json()["type"].endswith("/problems/device-offline")
