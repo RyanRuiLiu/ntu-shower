@@ -37,10 +37,13 @@ jobs:
     steps:
       - name: Deploy to production
         uses: appleboy/ssh-action@823bd89e131d8d508129f9443cad5855e9ba96f0  # v1.2.4
+        env:
+          GITHUB_SHA: ${{ github.sha }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: GITHUB_SHA
           script: |
             set -eu
             cd /opt/ntu-shower
