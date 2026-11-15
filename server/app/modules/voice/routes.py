@@ -19,6 +19,7 @@ from app.auth.dependencies import caller
 from app.core.errors import problem_responses
 from app.core.problems import INVALID_VOICE_ASSET, INVALID_VOICE_RULE, VOICE_ASSET_NOT_FOUND, ApiProblemError
 from app.db.deps import get_db
+from app.db.session import session_scope
 
 from . import schemas, service
 
@@ -74,9 +75,12 @@ async def create_asset(
     file: Annotated[UploadFile, File()],
     digit: Annotated[str, Form()] = "",
     unit: Annotated[str, Form()] = "",
-    session: Session = Depends(get_db),
 ) -> schemas.VoiceAssetView:
-    """上传固定音频；可选 0–9 标记为数字素材，或十/百/千/万标记为单位素材。"""
+    """上传固定音频；可选 0–9 标记为数字素材，或十/百/千/万标记为单位素材。
+
+    会话在线程函数内部开、内部关（铁律见 gateway._call 的注释）：整个生命周期
+    待在同一条线程里，与线程池的取消语义解耦。下面四个 async 端点同此。
+    """
     if digit.strip():
         if not digit.strip().isdigit() or not (0 <= int(digit) <= 9):
             raise ApiProblemError(INVALID_VOICE_ASSET, "数字标记只能是 0–9")
@@ -85,8 +89,13 @@ async def create_asset(
         digit_value = None
     unit_value = unit.strip() or None
     data = await file.read()
+
+    def _create() -> schemas.VoiceAssetView:
+        with session_scope() as session:
+            return service.create_asset(session, name, data, digit_value, unit_value)
+
     try:
-        return await run_in_threadpool(service.create_asset, session, name, data, digit_value, unit_value)
+        return await run_in_threadpool(_create)
     except service.InvalidVoiceAssetError as exc:
         raise ApiProblemError(INVALID_VOICE_ASSET, str(exc)) from exc
 
@@ -97,11 +106,13 @@ async def create_asset(
     summary="重命名素材",
     responses=problem_responses(401, 403, 404, 422),
 )
-async def rename_asset(
-    asset_id: str, req: schemas.VoiceAssetRename, session: Session = Depends(get_db)
-) -> schemas.VoiceAssetView:
+async def rename_asset(asset_id: str, req: schemas.VoiceAssetRename) -> schemas.VoiceAssetView:
+    def _rename() -> schemas.VoiceAssetView:
+        with session_scope() as session:
+            return service.rename_asset(session, asset_id, req.name)
+
     try:
-        return await run_in_threadpool(service.rename_asset, session, asset_id, req.name)
+        return await run_in_threadpool(_rename)
     except service.InvalidVoiceAssetError as exc:
         raise ApiProblemError(INVALID_VOICE_ASSET, str(exc)) from exc
 
@@ -145,12 +156,19 @@ def list_rules(session: Session = Depends(get_db)) -> list[schemas.VoiceRuleView
     summary="新建播报规则",
     responses=_WRITE_RESPONSES,
 )
-async def create_rule(req: schemas.VoiceRuleBody, session: Session = Depends(get_db)) -> schemas.VoiceRuleView:
+async def create_rule(req: schemas.VoiceRuleBody) -> schemas.VoiceRuleView:
+    def _create() -> schemas.VoiceRuleView:
+        with session_scope() as session:
+            return service.create_rule(session, req)
+
     try:
-        view = await run_in_threadpool(service.create_rule, session, req)
+        view = await run_in_threadpool(_create)
     except service.InvalidVoiceRuleError as exc:
         raise ApiProblemError(INVALID_VOICE_RULE, str(exc)) from exc
-    service.schedule_rule_prepare(session, view)
+    # 预下载调度要 spawn asyncio 任务，必须在事件循环线程上执行——重开一条
+    # 本线程的会话读现态，与线程函数的会话互不相干。
+    with session_scope() as session:
+        service.schedule_rule_prepare(session, view)
     return view
 
 
@@ -160,14 +178,17 @@ async def create_rule(req: schemas.VoiceRuleBody, session: Session = Depends(get
     summary="整份更新规则",
     responses=problem_responses(401, 403, 404, 422),
 )
-async def update_rule(
-    rule_id: int, req: schemas.VoiceRuleBody, session: Session = Depends(get_db)
-) -> schemas.VoiceRuleView:
+async def update_rule(rule_id: int, req: schemas.VoiceRuleBody) -> schemas.VoiceRuleView:
+    def _update() -> schemas.VoiceRuleView:
+        with session_scope() as session:
+            return service.update_rule(session, rule_id, req)
+
     try:
-        view = await run_in_threadpool(service.update_rule, session, rule_id, req)
+        view = await run_in_threadpool(_update)
     except service.InvalidVoiceRuleError as exc:
         raise ApiProblemError(INVALID_VOICE_RULE, str(exc)) from exc
-    service.schedule_rule_prepare(session, view)
+    with session_scope() as session:
+        service.schedule_rule_prepare(session, view)
     return view
 
 
@@ -177,11 +198,14 @@ async def update_rule(
     summary="启用/停用规则",
     responses=problem_responses(401, 403, 404, 422),
 )
-async def patch_rule(
-    rule_id: int, req: schemas.VoiceRuleEnabledPatch, session: Session = Depends(get_db)
-) -> schemas.VoiceRuleView:
-    view = await run_in_threadpool(service.set_enabled, session, rule_id, req.enabled)
-    service.schedule_rule_prepare(session, view)
+async def patch_rule(rule_id: int, req: schemas.VoiceRuleEnabledPatch) -> schemas.VoiceRuleView:
+    def _patch() -> schemas.VoiceRuleView:
+        with session_scope() as session:
+            return service.set_enabled(session, rule_id, req.enabled)
+
+    view = await run_in_threadpool(_patch)
+    with session_scope() as session:
+        service.schedule_rule_prepare(session, view)
     return view
 
 
@@ -202,9 +226,13 @@ def delete_rule(rule_id: int, session: Session = Depends(get_db)) -> None:
     summary="规则试听",
     responses=_WRITE_RESPONSES,
 )
-async def preview(req: schemas.VoicePreviewRequest, session: Session = Depends(get_db)) -> schemas.VoicePreviewView:
+async def preview(req: schemas.VoicePreviewRequest) -> schemas.VoicePreviewView:
+    def _preview() -> schemas.VoicePreviewView:
+        with session_scope() as session:
+            return service.preview(session, req)
+
     try:
-        return await run_in_threadpool(service.preview, session, req)
+        return await run_in_threadpool(_preview)
     except service.InvalidVoiceRuleError as exc:
         raise ApiProblemError(INVALID_VOICE_RULE, str(exc)) from exc
 
