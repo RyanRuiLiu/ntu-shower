@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Security
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import caller
+from app.core.errors import problem_responses
 from app.db.deps import get_db
 from app.modules.config import store as config_store
 from app.modules.extend_hours import service as extend_hours_service
@@ -27,6 +28,7 @@ admin_router = APIRouter(
     prefix="/api/v1/jobs",
     tags=["jobs"],
     dependencies=[Security(caller, scopes=["jobs:read"])],
+    responses=problem_responses(401, 403),
 )
 
 
