@@ -214,10 +214,14 @@ def upgrade() -> None:
         sa.Column("last_used_at", UtcDateTime(), nullable=True),
         sa.Column("created_at", UtcDateTime(), nullable=False),
         sa.Column("revoked_at", UtcDateTime(), nullable=True),
-        sa.ForeignKeyConstraint(["user_id"], ["users.id"], name=op.f("fk_api_keys_user_id_users")),
+        sa.ForeignKeyConstraint(
+            ["user_id"], ["users.id"], name=op.f("fk_api_keys_user_id_users"), ondelete="CASCADE"
+        ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_api_keys")),
         sa.UniqueConstraint("token_hash", name=op.f("uq_api_keys_token_hash")),
     )
+    with op.batch_alter_table("api_keys", schema=None) as batch_op:
+        batch_op.create_index(batch_op.f("ix_api_keys_user_id"), ["user_id"], unique=False)
     op.create_table(
         "voice_assets",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -642,6 +646,9 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f("ix_voice_assets_digit"))
 
     op.drop_table("voice_assets")
+    with op.batch_alter_table("api_keys", schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f("ix_api_keys_user_id"))
+
     op.drop_table("api_keys")
     op.drop_table("users")
     op.drop_table("ota_releases")
