@@ -49,13 +49,24 @@ def _db_session(ws: WebSocket) -> Session:
 
 
 async def _call[T](ws: WebSocket, fn: Callable[..., T], *args: object) -> T:
-    """在线程池里执行一个收 `session` 首参的同步服务函数；会话随调用结束关闭。
+    """在线程池里执行一个收 `session` 首参的同步服务函数。
 
     WS 帧处理没有请求上下文，设备域服务已改为显式注入；这里是 WS 侧唯一的
     会话来源，等价于路由层的 `Depends(get_db)`。
+
+    会话在**线程函数内部**开、内部关（铁律：会话在哪个线程里生，就在哪个线程里
+    关）。此前会话在事件循环线程上开、交给线程池用、回到循环线程上关——调用方
+    取消（门户关闭、客户端断连）时，`run_in_threadpool` 的取消不会停掉线程函数，
+    with 块却在线程函数仍在执行 SQL 的情况下收线：同一连接被两条线程并发触碰，
+    正是 background.py 记载的 SQLite 原生崩溃（测试并行时的 worker segfault）
+    的残留通路。整个会话生命周期待在线程函数里后，与取消语义解耦。
     """
-    with _db_session(ws) as session:
-        return await run_in_threadpool(fn, session, *args)
+
+    def _run() -> T:
+        with _db_session(ws) as session:
+            return fn(session, *args)
+
+    return await run_in_threadpool(_run)
 
 
 @router.websocket("/gateway/device")
