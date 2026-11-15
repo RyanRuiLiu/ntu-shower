@@ -38,7 +38,7 @@ selected > free。"有人" = `cardno ≠ 0` **或** `accno` 既非空串也非 `
 | R1 不动会话 | 两端都在空闲组 | 16 | 状态变了才记事件 |
 | R2 开会话 | 空闲 → 占用 | 12 | 记事件 + 开会话 |
 | R3 结束会话 | 占用 → 空闲 | 12 | 记事件 + 结束会话 |
-| R4 推进 | 都在占用组、**同一人** | 9 | 推进 `last_seen_at` 与 `flow_s` |
+| R4 推进 | 都在占用组、**同一人** | 9 | 推进 `last_seen_at` 与 `total_flow_s` |
 | R5 换人 | 都在占用组、**不同人** | 9 | 结旧账 + 开新账 |
 
 **只有"有人→有人"那 9 对会分裂成两种**——只有那种情形下"是不是同一个人"才有意义。
@@ -210,18 +210,6 @@ class LiveDoor:
     close_time: str
 
 
-@dataclass(frozen=True)
-class SessionDurations:
-    """一场会话的两个时长来源：分配起点/结束与已累计的淋浴秒数。
-
-    `ended_at` 为空表示会话仍在进行；`flow_s` 是段之和，已包含在途那一段。
-    """
-
-    assigned_at: str
-    ended_at: str
-    flow_s: int
-
-
 def live_doors(session: Session, device_id: str) -> dict[int, LiveDoor]:
     """这台设备每个喷头此刻的现态（门号 → 现态）。
 
@@ -245,21 +233,6 @@ def open_sessions(session: Session, device_id: str) -> list[OpenSession]:
         )
         for row in repository.list_open_sessions_of(session, device_id)
     ]
-
-
-def session_durations(session: Session, session_id: int) -> SessionDurations | None:
-    """按会话 id 取播报需要的两个时长来源；会话不存在时给 None。
-
-    别的领域不直接读本域的表：这里只交出答案，不把 `sqlite3.Row` 漏出去。
-    """
-    row = repository.get_session(session, session_id)
-    if row is None:
-        return None
-    return SessionDurations(
-        assigned_at=str(row["assigned_at"] or ""),
-        ended_at=str(row["ended_at"] or ""),
-        flow_s=as_int(row["flow_s"]),
-    )
 
 
 def run_started_at(session: Session, device_id: str, door_no: int, cert_no: str) -> str:
@@ -976,7 +949,7 @@ def _advance_session(
 ) -> None:
     """把会话推进到本帧。
 
-    `flow_s` 是**已结束段之和，加上在途的那一截**：会话总时长由段累加而来，不再另造一条
+    `total_flow_s` 是**已结束段之和，加上在途的那一截**：会话总时长由段累加而来，不再另造一条
     合成通路——段是唯一记过出水的地方。在途的那一段还没结束、没有最终长度，但"从开阀到
     现在"这段是**观测到的事实**；不计的话正在淋浴的人时长为 0。上界取一次出水的物理上限，
     越过的部分没有证据。
@@ -996,7 +969,7 @@ def _advance_session(
         session_id,
         seen=True,
         at=_moment(at),
-        flow_s=sum(int(s["flow_s"]) for s in segments) + in_flight,
+        total_flow_s=sum(int(s["flow_s"]) for s in segments) + in_flight,
         device_flow_s=as_int(door.get("bath_time_s")),
         gap=gap > SESSION_MAX_S,
     )
@@ -1030,6 +1003,6 @@ def _close(session: Session, open_session: dict[str, Any], door: JsonObject, at:
     flow = sum(int(s["flow_s"]) for s in segments)
     device_flow_s = max(int(open_session["device_flow_s"]), as_int(door.get("bath_time_s")))
     repository.touch_session(
-        session, session_id, seen=False, at=_moment(at), flow_s=flow, device_flow_s=device_flow_s, gap=gap
+        session, session_id, seen=False, at=_moment(at), total_flow_s=flow, device_flow_s=device_flow_s, gap=gap
     )
     repository.close_session(session, session_id, _moment(at), _segments_complete(segments, device_flow_s))
