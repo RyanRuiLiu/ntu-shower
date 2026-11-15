@@ -12,10 +12,10 @@ from typing import Any
 from sqlalchemy import JSON, Boolean, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, UtcDateTime, utcnow
+from app.db.base import Base, CreatedAtMixin, TimestampMixin, UtcDateTime
 
 
-class VoiceAsset(Base):
+class VoiceAsset(CreatedAtMixin, Base):
     """一段已经规范化过的音频素材（mp3）。"""
 
     __tablename__ = "voice_assets"
@@ -28,10 +28,9 @@ class VoiceAsset(Base):
     digit: Mapped[int | None] = mapped_column(Integer, default=None, index=True)
     duration_ms: Mapped[int] = mapped_column(Integer)
     size_bytes: Mapped[int] = mapped_column(Integer)
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
 
 
-class VoiceRule(Base):
+class VoiceRule(TimestampMixin, Base):
     """一条播报规则：什么设备、什么事件、什么时段、播什么。"""
 
     __tablename__ = "voice_rules"
@@ -45,12 +44,13 @@ class VoiceRule(Base):
     segments: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
     volume: Mapped[int] = mapped_column(Integer)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow, onupdate=utcnow)
 
 
 class VoiceUnit(Base):
-    """语音单元 → 素材的映射，自然主键。"""
+    """语音单元 → 素材的映射，自然主键。
+
+    时间豁免：纯映射表（两列，无独立生命周期），无 created_at。
+    """
 
     __tablename__ = "voice_units"
 
@@ -58,7 +58,7 @@ class VoiceUnit(Base):
     asset_id: Mapped[str] = mapped_column(ForeignKey("voice_assets.asset_id", ondelete="RESTRICT"), index=True)
 
 
-class VoiceDelivery(Base):
+class VoiceDelivery(CreatedAtMixin, Base):
     """一次播报投递，保留 90 天。
 
     `event_key` 是幂等身份：重复派生或重复投递不会播第二遍。
@@ -87,7 +87,6 @@ class VoiceDelivery(Base):
     status: Mapped[str] = mapped_column(String(32))
     detail: Mapped[str] = mapped_column(Text, default="")
     trace_id: Mapped[str] = mapped_column(String(64), default="")
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
 
 
 __all__: list[str] = ["VoiceAsset", "VoiceDelivery", "VoiceRule", "VoiceUnit"]

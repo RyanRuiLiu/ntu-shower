@@ -99,7 +99,7 @@ selected > free。"有人" = `cardno ≠ 0` **或** `accno` 既非空串也非 `
 import threading
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, NoReturn
+from typing import NoReturn
 
 from sqlalchemy.orm import Session
 
@@ -110,7 +110,7 @@ from app.core.logging import exc_info_text, log_event
 from app.core.protocol import JsonObject, as_int, text_of
 from app.modules.doors import crud as repository
 from app.modules.doors.events import DoorEvent, DoorEventKind, SnapshotResult
-from app.modules.doors.schemas import DoorView
+from app.modules.doors.schemas import DoorLiveView, DoorSegmentView, DoorSessionView, DoorView
 
 # t_doorlist.status 的原始值（设备上报的 int，仅作辅助判据）
 RAW_STATUS_REPAIR = 1
@@ -328,7 +328,7 @@ def _occupant(door: JsonObject) -> tuple[int, str]:
     return as_int(door.get("card_no")), cert_no or str(door.get("acc_no") or "")
 
 
-def _assigned_at(door: JsonObject, at: str, device_id: str, previous: dict[str, Any] | None) -> tuple[str, str]:
+def _assigned_at(door: JsonObject, at: str, device_id: str, previous: DoorLiveView | None) -> tuple[str, str]:
     """会话起点与它的来源，一起返回。
 
     **优先**：把设备报的 `open_time` 加上钟偏差平移过来。那是**分配那一刻**设备写下的，
@@ -372,9 +372,7 @@ def _assigned_at(door: JsonObject, at: str, device_id: str, previous: dict[str, 
     return shifted, SESSION_ASSIGNED_INFERRED
 
 
-def _start_readings_agree(
-    start: str, door: JsonObject, at: str, device_id: str, previous: dict[str, Any] | None
-) -> bool:
+def _start_readings_agree(start: str, door: JsonObject, at: str, device_id: str, previous: DoorLiveView | None) -> bool:
     """`open_time` 平移出的起点，与同一帧里其他读数是否自洽（判据见 [_assigned_at]）。
 
     与 `in_time` 那一条用 [seconds_between]，它把"结束早于开始"归零——换人时新人的
@@ -634,7 +632,7 @@ def _to_server_or_empty(value: object, device_id: str) -> str:
     return device_clock.to_server(value, device_id) or ""
 
 
-def _gap(previous: dict[str, Any] | None, at: str) -> int:
+def _gap(previous: DoorLiveView | None, at: str) -> int:
     """上一帧到本帧的秒数。没有上一帧时给 -1——它与任何"不超过上限"的判断都不成立，
     调用方本来就该靠"有没有上一帧"另行判断首帧。"""
     if previous is None:
@@ -642,7 +640,7 @@ def _gap(previous: dict[str, Any] | None, at: str) -> int:
     return seconds_between(str(previous["reported_at"]), at)
 
 
-def _close_segment(session: Session, segment: dict[str, Any], door: JsonObject, device_id: str, at: str) -> None:
+def _close_segment(session: Session, segment: DoorSegmentView, door: JsonObject, device_id: str, at: str) -> None:
     """关掉一段出水，定下它的长度与来源。
 
     **A**（设备轴）：`close_time − in_time`。两个读数取自设备的同一口钟，偏差在里面
@@ -726,7 +724,7 @@ def _derive_segment(
     )
 
 
-def _segments_complete(segments: list[dict[str, Any]], device_flow_s: int) -> bool:
+def _segments_complete(segments: list[DoorSegmentView], device_flow_s: int) -> bool:
     """我们的段之和与设备累计值是否一致。
 
     **有 derived 段时恒为假**：那一段的长度就是从设备那个值推出来的，等式必然成立，
@@ -785,7 +783,7 @@ def _maintain_session(
     state: DoorState,
     door: JsonObject,
     at: str,
-    previous: dict[str, Any] | None,
+    previous: DoorLiveView | None,
     event_id: int | None,
     startup: bool,
 ) -> list[DoorEvent]:
@@ -975,7 +973,7 @@ def _advance_session(
     )
 
 
-def _close(session: Session, open_session: dict[str, Any], door: JsonObject, at: str, gap: bool) -> None:
+def _close(session: Session, open_session: DoorSessionView, door: JsonObject, at: str, gap: bool) -> None:
     """结束一次会话：先把这一帧的段收干净，再收尾。
 
     `gap` 表示这次收尾是因为发现了一个盲区（而不是看见喷头空了）。它要落进

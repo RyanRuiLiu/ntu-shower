@@ -15,10 +15,10 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.contracts import AssignedSource, ObservedSpan, SegmentSource
 from app.contracts import DoorState as DoorStateEnum
-from app.db.base import Base, UtcDateTime, enum_column, utcnow
+from app.db.base import Base, CreatedAtMixin, TimestampMixin, UtcDateTime, enum_column
 
 
-class DoorState(Base):
+class DoorState(TimestampMixin, Base):
     """每个门一行的现态，写入走 UPSERT。
 
     表名用 `door_states` 而不是 `door_live`：单数、且 `live` 是过程描述，
@@ -29,7 +29,7 @@ class DoorState(Base):
     __table_args__ = (UniqueConstraint("device_id", "door_no", name="uq_door_states_device_id_door_no"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    device_id: Mapped[str] = mapped_column(ForeignKey("devices.id", ondelete="RESTRICT"), index=True)
+    device_id: Mapped[str] = mapped_column(ForeignKey("devices.id", ondelete="RESTRICT"))
     door_no: Mapped[int] = mapped_column(Integer)
     state: Mapped[DoorStateEnum] = mapped_column(enum_column(DoorStateEnum, "door_state"))
     card_no: Mapped[int] = mapped_column(Integer, default=0)
@@ -47,11 +47,9 @@ class DoorState(Base):
     #: 直接判整数会静默走错分支，判定一律用派生出的 `state`。
     status_raw: Mapped[int] = mapped_column(Integer, default=0)
     reported_at: Mapped[datetime] = mapped_column(UtcDateTime)
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow, onupdate=utcnow)
 
 
-class DoorStateEvent(Base):
+class DoorStateEvent(CreatedAtMixin, Base):
     """观测到的状态迁移，只追加。
 
     盲区帧与全貌帧不编造迁移——只有真正看到边沿才写一行。
@@ -77,10 +75,9 @@ class DoorStateEvent(Base):
     cert_no: Mapped[str] = mapped_column(String(32), default="")
     bath_time_s: Mapped[int] = mapped_column(Integer, default=0)
     occurred_at: Mapped[datetime] = mapped_column(UtcDateTime, index=True)
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
 
 
-class DoorSnapshot(Base):
+class DoorSnapshot(CreatedAtMixin, Base):
     """设备上报的原始帧，保留 30 天。
 
     清理任务按 `received_at` 删除，所以它必须有独立索引；复合索引的第一列不是它，
@@ -91,7 +88,7 @@ class DoorSnapshot(Base):
     __table_args__ = (UniqueConstraint("device_id", "snapshot_id", name="uq_door_snapshots_device_id_snapshot_id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    device_id: Mapped[str] = mapped_column(ForeignKey("devices.id", ondelete="RESTRICT"), index=True)
+    device_id: Mapped[str] = mapped_column(ForeignKey("devices.id", ondelete="RESTRICT"))
     #: 设备为这一帧生成的标识，用于幂等去重
     snapshot_id: Mapped[str] = mapped_column(String(64))
     seq: Mapped[int | None] = mapped_column(Integer, default=None)
@@ -104,10 +101,9 @@ class DoorSnapshot(Base):
     doors: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
     #: 设备自报的时钟字符串，原文保留
     device_clock: Mapped[str | None] = mapped_column(String(64), default=None)
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
 
 
-class DoorSession(Base):
+class DoorSession(TimestampMixin, Base):
     """一次占用：人 + 门 + 起止（服务端轴）。"""
 
     __tablename__ = "door_sessions"
@@ -121,7 +117,7 @@ class DoorSession(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    device_id: Mapped[str] = mapped_column(ForeignKey("devices.id", ondelete="RESTRICT"), index=True)
+    device_id: Mapped[str] = mapped_column(ForeignKey("devices.id", ondelete="RESTRICT"))
     door_no: Mapped[int] = mapped_column(Integer)
     card_no: Mapped[int] = mapped_column(Integer, default=0)
     cert_no: Mapped[str] = mapped_column(String(32), default="", index=True)
@@ -143,11 +139,9 @@ class DoorSession(Base):
     segments_complete: Mapped[bool] = mapped_column(Boolean, default=False)
     ended_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
     last_seen_at: Mapped[datetime] = mapped_column(UtcDateTime)
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow, onupdate=utcnow)
 
 
-class DoorSegment(Base):
+class DoorSegment(CreatedAtMixin, Base):
     """会话里的一段连续出水。"""
 
     __tablename__ = "door_segments"
@@ -177,7 +171,6 @@ class DoorSegment(Base):
     closed_raw: Mapped[str] = mapped_column(String(32), default="")
     #: 段长的来源；未关阀时空，关阀那一刻才定稿
     source: Mapped[SegmentSource | None] = mapped_column(enum_column(SegmentSource, "segment_source"), default=None)
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
 
 
 __all__: list[str] = ["DoorSegment", "DoorSession", "DoorSnapshot", "DoorState", "DoorStateEvent"]

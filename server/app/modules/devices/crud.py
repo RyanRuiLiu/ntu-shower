@@ -265,7 +265,10 @@ def issue(
 
 
 def list_for_device(session: Session, device_id: str) -> list[dict[str, object]]:
-    """列出某设备的凭据元数据；明文不存库，所以这里没有 token 字段。"""
+    """列出某设备的凭据元数据；明文不存库，所以这里没有 token 字段。
+
+    生产路径暂无消费者：凭据事实的读者是派生测试——它是本域的读原语。
+    """
     rows = session.scalars(
         select(DeviceCredential)
         .where(DeviceCredential.device_id == device_id, DeviceCredential.revoked_at.is_(None))

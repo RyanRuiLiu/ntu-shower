@@ -16,7 +16,10 @@ from app.db.base import Base, UtcDateTime, utcnow
 
 
 class AppSettings(Base):
-    """全局配置，单行。"""
+    """全局配置，单行。
+
+    时间豁免：单行 UPSERT 表，`updated_at` 即最新写入时刻，无 created_at。
+    """
 
     __tablename__ = "app_settings"
 
