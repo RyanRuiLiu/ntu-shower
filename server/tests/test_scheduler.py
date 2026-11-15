@@ -102,7 +102,7 @@ def _clean_scheduler() -> Iterator[None]:
 
 
 def _seed_session(candidate: Candidate) -> None:
-    """给桩出来的候选会话落真实行：审计行的 session_id 是真外键（usage_sessions）。
+    """给桩出来的候选会话落真实行：审计行的 session_id 是真外键（door_sessions）。
 
     id 显式给、与候选一致；登记设备满足外键；其余列给不参与判定的合法值。
     未声明库（该用例不落库）直接跳过——审计也不会发生，无需种子。
@@ -112,7 +112,7 @@ def _seed_session(candidate: Candidate) -> None:
     from sqlalchemy import text
     from sqlalchemy.exc import OperationalError
 
-    from app.persistence.usage import UsageSession
+    from app.modules.doors.models import DoorSession
 
     with session_scope() as session:
         try:
@@ -122,9 +122,9 @@ def _seed_session(candidate: Candidate) -> None:
     device_link.register_trusted_device(candidate.device_id)
     with session_scope() as session:
         assigned = datetime.fromisoformat(candidate.assigned_at.replace("Z", "+00:00"))
-        if session.get(UsageSession, candidate.session_id) is None:
+        if session.get(DoorSession, candidate.session_id) is None:
             session.add(
-                UsageSession(
+                DoorSession(
                     id=candidate.session_id,
                     device_id=candidate.device_id,
                     door_no=candidate.door_no,

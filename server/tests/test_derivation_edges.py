@@ -133,7 +133,7 @@ def test_full_session_four_moments(fresh_db: str) -> None:
     assert row["last_seen_at"] == "2026-09-30T12:02:10.000Z", "停在最后一次确认占用，不是结束帧"
     assert row["ended_at"] == "2026-09-30T12:02:30.000Z"
     assert row["cert_no"] == "C"
-    assert row["flow_s"] == 100
+    assert row["total_flow_s"] == 100
 
     segments = _segments_of(row["id"])
     assert len(segments) == 1
@@ -152,7 +152,7 @@ def test_leaving_while_bathing_keeps_last_segment(fresh_db: str) -> None:
     door_link.feed(device_id, _frame([_door()], "2026-09-30T12:03:20.000Z"))
 
     row = _sessions(device_id)[0]
-    assert row["flow_s"] == 200
+    assert row["total_flow_s"] == 200
     segments = _segments_of(row["id"])
     assert segments[0]["opened_at"] == T0
     assert segments[0]["source"] == "observed", "没有 close_time，只能用观测差"
@@ -166,7 +166,7 @@ def test_assign_then_settle_without_water(fresh_db: str) -> None:
 
     row = _sessions(device_id)[0]
     assert _segments_of(row["id"]) == []
-    assert row["flow_s"] == 0
+    assert row["total_flow_s"] == 0
     assert row["ended_at"] == "2026-09-30T12:00:20.000Z"
 
 
@@ -191,7 +191,7 @@ def test_two_sessions_are_separate(fresh_db: str) -> None:
 
     rows = _sessions(device_id)
     assert [row["cert_no"] for row in rows] == ["C", "D"]
-    assert [row["flow_s"] for row in rows] == [60, 60]
+    assert [row["total_flow_s"] for row in rows] == [60, 60]
 
 
 def test_handover_leaves_the_previous_accumulation_unowned(fresh_db: str) -> None:
@@ -208,9 +208,9 @@ def test_handover_leaves_the_previous_accumulation_unowned(fresh_db: str) -> Non
 
     first, second = _sessions(device_id)
     assert first["cert_no"] == "C"
-    assert first["flow_s"] == 0, "只看见一帧暂停态，造不出段"
+    assert first["total_flow_s"] == 0, "只看见一帧暂停态，造不出段"
     assert second["cert_no"] == "D"
-    assert second["flow_s"] == 0, "后人还没出过水"
+    assert second["total_flow_s"] == 0, "后人还没出过水"
     assert second["device_flow_s"] == 200, "设备累计里留着前人那一场，但它没有归属"
     assert second["segments_complete"] == 0, "两边对不上——这正是它要表达的事"
 
@@ -243,7 +243,7 @@ def test_gap_exactly_at_session_limit_is_still_continuous(fresh_db: str) -> None
     door_link.feed(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], T0))
     door_link.feed(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], _plus(T0, limit)))
 
-    assert _sessions(device_id)[0]["flow_s"] == limit
+    assert _sessions(device_id)[0]["total_flow_s"] == limit
 
 
 def test_gap_one_second_over_the_limit_breaks_the_segment(fresh_db: str) -> None:
@@ -253,7 +253,7 @@ def test_gap_one_second_over_the_limit_breaks_the_segment(fresh_db: str) -> None
     door_link.feed(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], T0))
     door_link.feed(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], _plus(T0, limit + 1)))
 
-    assert _sessions(device_id)[0]["flow_s"] == 0
+    assert _sessions(device_id)[0]["total_flow_s"] == 0
 
 
 def test_offline_gap_does_not_inflate_flow(fresh_db: str) -> None:
@@ -270,7 +270,7 @@ def test_offline_gap_does_not_inflate_flow(fresh_db: str) -> None:
 
     rows = _sessions(device_id)
     assert len(rows) == 2
-    assert rows[0]["flow_s"] == 100, "盲区那段不计，只剩我们看见的那 100 秒"
+    assert rows[0]["total_flow_s"] == 100, "盲区那段不计，只剩我们看见的那 100 秒"
     assert rows[0]["ended_at"] == _plus(T0, 100), "在我们最后看见它的时刻收尾"
     assert rows[0]["observed_span"] == "gap"
     assert rows[1]["assigned_at"] == _plus(T0, 8 * 3600), "新的一场只能从我们看见它的那一刻起算"
@@ -336,7 +336,7 @@ def test_replaying_the_same_frame_is_idempotent(fresh_db: str) -> None:
         door_link.feed(device_id, frame)
 
     assert len(_sessions(device_id)) == 1
-    assert _sessions(device_id)[0]["flow_s"] == 0
+    assert _sessions(device_id)[0]["total_flow_s"] == 0
     events = len(door_link.list_events(device_id))
     assert events == 0
 
@@ -379,7 +379,7 @@ def test_first_frame_already_occupied_marks_the_observation_bound(fresh_db: str)
     row = _sessions(device_id)[0]
     assert row["assigned_at"] == T0, "观测下界：我们确知它此刻占着，仅此而已"
     assert row["assigned_source"] == service.SESSION_ASSIGNED_OBSERVED, "这一帧没带 open_time，平移不了"
-    assert row["flow_s"] == 0, "刚开阀，本段还没有长度"
+    assert row["total_flow_s"] == 0, "刚开阀，本段还没有长度"
     assert row["device_flow_s"] == 180, "设备说它出过 180 秒水，但那 180 秒我们看不见起止"
 
     segments = _segments_of(row["id"])
@@ -418,7 +418,7 @@ def test_takeover_with_open_time_infers_the_real_start(fresh_db: str) -> None:
     row = _sessions(device_id)[0]
     assert row["assigned_source"] == service.SESSION_ASSIGNED_INFERRED
     assert row["assigned_at"] == "2026-09-30T11:58:00.000Z", "设备说的 11:57:30，加 30 秒"
-    assert row["flow_s"] == 90, "本段：设备说的 11:58:30 到我们看见它的 12:00:00"
+    assert row["total_flow_s"] == 90, "本段：设备说的 11:58:30 到我们看见它的 12:00:00"
     assert row["device_flow_s"] == 600, "设备那 600 秒是之前几段结算的，我们不知道它们的起止"
 
     segments = _segments_of(row["id"])
@@ -454,9 +454,9 @@ def test_inferred_start_makes_the_span_cover_the_duration(fresh_db: str) -> None
 
     row = _sessions(device_id)[0]
     assert row["assigned_at"] == "2026-09-30T11:45:30.000Z", "分配平移"
-    assert row["flow_s"] == 870, "本段：设备说的 11:50:30 到关阀那一刻"
+    assert row["total_flow_s"] == 870, "本段：设备说的 11:50:30 到关阀那一刻"
     span = 1170  # 11:45:30 → 12:05:00
-    assert row["flow_s"] <= span, "时长落在跨度之内——起点是事实，不再是下界"
+    assert row["total_flow_s"] <= span, "时长落在跨度之内——起点是事实，不再是下界"
 
 
 def test_takeover_session_duration_stays_within_its_span(fresh_db: str) -> None:
@@ -477,8 +477,8 @@ def test_takeover_session_duration_stays_within_its_span(fresh_db: str) -> None:
 
     row = _sessions(device_id)[0]
     span = 300  # 12:00:00 → 12:05:00，我们只看了这五分钟
-    assert row["flow_s"] == 300, "我们看见它出水的这五分钟"
-    assert row["flow_s"] <= span
+    assert row["total_flow_s"] == 300, "我们看见它出水的这五分钟"
+    assert row["total_flow_s"] <= span
     assert row["device_flow_s"] == 600, "设备说 600，多出来的那 300 秒没有起止"
     assert row["segments_complete"] == 0
 
@@ -516,7 +516,7 @@ def test_takeover_while_paused_recovers_the_open_time(fresh_db: str) -> None:
 
     row = _sessions(device_id)[0]
     assert row["assigned_at"] == "2026-09-30T11:59:00.000Z", "分配平移"
-    assert row["flow_s"] == 120
+    assert row["total_flow_s"] == 120
 
     segments = _segments_of(row["id"])
     assert segments[0]["opened_at"] == "2026-09-30T12:00:00.000Z", "关阀 12:02 往前数 120 秒"
@@ -549,7 +549,7 @@ def test_opened_at_comes_from_the_shifted_in_time(fresh_db: str) -> None:
     )
 
     row = _sessions(device_id)[0]
-    assert row["flow_s"] == 540
+    assert row["total_flow_s"] == 540
     segments = _segments_of(row["id"])
     assert segments[0]["opened_at"] == "2026-09-30T12:01:00.000Z", "设备 12:00 平移到服务端 12:01"
     assert segments[0]["opened_at"] != "2026-09-30T12:10:00.000Z", "不是我们看见它的那一帧"
@@ -583,7 +583,7 @@ def test_out_of_range_open_time_is_not_adopted(fresh_db: str) -> None:
     row = _sessions(device_id)[0]
     assert row["assigned_at"] == "2026-09-30T11:59:00.000Z"
     assert _segments_of(row["id"]) == [], "12:02 往前数 3600 秒得到 11:02，早于分配，丢掉"
-    assert row["flow_s"] == 0
+    assert row["total_flow_s"] == 0
     assert row["device_flow_s"] == 3600, "设备的话留着，但它凑不出一段"
 
 
