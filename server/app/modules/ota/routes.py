@@ -23,6 +23,7 @@ from app.core.problems import (
     OTA_APK_MISMATCH,
     RELEASE_NOT_FOUND,
     RELEASE_TOO_LARGE,
+    VALIDATION_FAILED,
     ApiProblemError,
 )
 from app.db.deps import get_db
@@ -46,6 +47,21 @@ device_router = APIRouter(tags=["ota"])
 # 路径/表单中的发布版本号：格式不合规由 FastAPI 返回 422
 ReleaseVersion = Annotated[str, Path(pattern=VERSION_PATTERN)]
 ReleaseVersionForm = Annotated[str, Form(pattern=VERSION_PATTERN)]
+
+
+def _parse_targets(raw: str) -> list[str]:
+    """发布表单的 target 文本 → 目标设备列表：'all' → ['*']，逗号分隔 → 数组。
+
+    存储与通知共用这一种形状（ota_releases.target），通配词汇 `*` 与 voice_rules
+    的设备维度一致。
+    """
+    value = raw.strip()
+    if value == "all":
+        return ["*"]
+    targets = [item.strip() for item in value.split(",") if item.strip()]
+    if not targets:
+        raise ApiProblemError(VALIDATION_FAILED, "target 不能解析出任何目标设备")
+    return targets
 
 
 @router.get("/releases", summary="发布清单")
@@ -75,7 +91,6 @@ def manifest(device_id: str, version_code: int, session: Session = Depends(get_d
         "sha256": rel["sha256"],
         # 大小现取文件的：它是文件的属性，存一份副本会在手工替换后对不上
         "size": path.stat().st_size,
-        "mandatory": bool(rel["mandatory"]),
         "force": bool(rel["force"]),
     }
 
@@ -132,12 +147,11 @@ async def upload_release(
     version: ReleaseVersionForm,
     version_code: Annotated[int, Form()],
     file: Annotated[UploadFile, File()],
-    mandatory: Annotated[bool, Form()] = False,
     force: Annotated[bool, Form()] = False,
     target: Annotated[str, Form()] = "all",
     session: Session = Depends(get_db),
 ) -> ReleasePublished:
-    """上传新版本 APK 并注册发布（target='all' 或逗号分隔的 device_id 列表）。
+    """上传新版本 APK 并注册发布（target='all' 表示全部设备，或逗号分隔的 device_id 列表）。
 
     发布成功后向在线的目标设备即时推送 ota.upgrade_available。
 
@@ -147,6 +161,7 @@ async def upload_release(
     （apk_manifest），不一致即拒——这是发布内容的唯一可信来源；发布端以
     `-SkipBuild` 复用陈旧构建产物时在此被拒绝。
     """
+    targets = _parse_targets(target)
     data = await file.read()
     if len(data) > settings.max_ota_bytes:
         log_event("WARNING", "ota.release-too-large", "发布被拒：超出单文件上限", version=version, size=len(data))
@@ -171,8 +186,8 @@ async def upload_release(
         )
         raise ApiProblemError(OTA_APK_MISMATCH, detail)
     sha256 = service.store_release(version, data)
-    repository.insert_release(session, version, version_code, sha256, mandatory, force, target)
-    notified = await service.notify_target_devices(version, version_code, mandatory, target)
+    repository.insert_release(session, version, version_code, sha256, force, targets)
+    notified = await service.notify_target_devices(version, version_code, targets)
     pruned = service.prune_releases(session, settings.ota_release_keep)
     if pruned:
         log_event(

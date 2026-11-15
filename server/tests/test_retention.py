@@ -5,11 +5,11 @@
 不在此列——它们的 docstring 写的是「永久保留」。
 """
 
-from app.audit_middleware import RETENTIONS
 from app.modules.devices.models import DeviceCredential, DeviceLinkEvent, DeviceLog
 from app.modules.doors.models import DoorSnapshot
 from app.modules.voice.models import VoiceDelivery
 from app.persistence.audit import ApiCall, CommandAudit, JobRun
+from app.retention import RETENTIONS
 
 
 def test_every_declared_retention_is_registered() -> None:

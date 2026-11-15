@@ -14,7 +14,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.contracts import DoorState
+from app.contracts import DeliveryStatus, DoorState
 from app.modules.doors.events import DoorEventKind
 from app.modules.doors.schemas import state_label
 
@@ -271,7 +271,7 @@ class VoiceDeliveryView(BaseModel):
     occurred_at: str
     dispatched_at: str
     done_at: str
-    status: str
+    status: DeliveryStatus
     detail: str
     downloaded: bool
 

@@ -12,7 +12,8 @@ from typing import Any
 from sqlalchemy import JSON, Boolean, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, CreatedAtMixin, TimestampMixin, UtcDateTime
+from app.contracts import DeliveryStatus
+from app.db.base import Base, CreatedAtMixin, TimestampMixin, UtcDateTime, enum_column
 
 
 class VoiceAsset(CreatedAtMixin, Base):
@@ -62,8 +63,7 @@ class VoiceDelivery(CreatedAtMixin, Base):
     """一次播报投递，保留 90 天。
 
     `event_key` 是幂等身份：重复派生或重复投递不会播第二遍。
-    `status` 用字符串而不是枚举：它的取值集合属于 voice 模块的结果词汇，
-    目前尚未收敛成闭集，硬编成枚举会让每次新增状态都要改迁移。
+    `status` 是闭集（DeliveryStatus）：pending 为在途态，终态沿用命令结果四值。
     """
 
     __tablename__ = "voice_deliveries"
@@ -84,9 +84,8 @@ class VoiceDelivery(CreatedAtMixin, Base):
     dispatched_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
     done_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
     downloaded: Mapped[bool] = mapped_column(Boolean, default=False)
-    status: Mapped[str] = mapped_column(String(32))
+    status: Mapped[DeliveryStatus] = mapped_column(enum_column(DeliveryStatus, "voice_delivery_status"))
     detail: Mapped[str] = mapped_column(Text, default="")
-    trace_id: Mapped[str] = mapped_column(String(64), default="")
 
 
 __all__: list[str] = ["VoiceAsset", "VoiceDelivery", "VoiceRule", "VoiceUnit"]

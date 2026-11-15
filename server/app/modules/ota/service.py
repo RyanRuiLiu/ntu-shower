@@ -80,22 +80,22 @@ def prune_releases(session: Session, keep: int) -> list[str]:
     return removed
 
 
-async def notify_target_devices(version: str, version_code: int, mandatory: bool, target: str) -> list[str]:
-    """向在线的目标设备推送升级通知，返回成功送达的 device_id 列表。"""
-    targets = None if target == "all" else [t.strip() for t in target.split(",") if t.strip()]
+async def notify_target_devices(version: str, version_code: int, target: list[str]) -> list[str]:
+    """向在线的目标设备推送升级通知，返回成功送达的 device_id 列表。
 
+    `target` 与注册表同形：`["*"]` 表示全部在线设备，其余按 device_id 匹配。
+    """
     envelope = protocol.envelope(
         "ota.upgrade_available",
         {
             "version": version,
             "version_code": version_code,
             "url": f"/api/v1/ota/releases/{version}/download",
-            "mandatory": mandatory,
         },
     )
     notified: list[str] = []
     for device_id, _ws in manager.online_connections():
-        if targets is not None and device_id not in targets:
+        if "*" not in target and device_id not in target:
             continue
         if await manager.send_to(device_id, envelope):
             notified.append(device_id)

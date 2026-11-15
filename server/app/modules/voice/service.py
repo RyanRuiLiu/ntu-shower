@@ -19,10 +19,10 @@ from typing import Any, NoReturn
 
 from sqlalchemy.orm import Session
 
-from app.contracts import CommandOutcome
+from app.contracts import CommandOutcome, DeliveryStatus
 from app.core import actions
 from app.core.clock import now_rfc3339, parse_rfc3339, to_local
-from app.core.logging import log_event, trace_id_var
+from app.core.logging import log_event
 from app.core.problems import (
     DEVICE_NOT_FOUND,
     INVALID_VOICE_RULE,
@@ -736,7 +736,6 @@ def _claim_delivery(session: Session, event: DoorEvent, rule_id: int, plan: list
         len(plan),
         duration_ms,
         parse_rfc3339(event.occurred_at) or utcnow(),
-        trace_id_var.get(),
         utcnow(),
     )
 
@@ -753,12 +752,12 @@ async def _send_play(session: Session, device_id: str, plan: list[PlanItem], vol
 
 
 def _finish_delivery(session: Session, event_key: str, outcome: CommandOutcome, detail: str) -> None:
-    """落回执：状态、说明与下载标记写入投递记录。"""
+    """落回执：状态、说明与下载标记写入投递记录。终态即命令结果四值（DeliveryStatus）。"""
     repository.finish_delivery(
         session,
         event_key,
         utcnow(),
-        str(outcome["status"]),
+        DeliveryStatus(str(outcome["status"])),
         detail,
         utcnow(),
         _downloaded(outcome),
@@ -1017,7 +1016,7 @@ def list_deliveries(session: Session, limit: int) -> list[schemas.VoiceDeliveryV
                 occurred_at=str(row["occurred_at"]),
                 dispatched_at=str(row["dispatched_at"]),
                 done_at=str(row["done_at"]),
-                status=str(row["status"]),
+                status=DeliveryStatus(str(row["status"])),
                 detail=str(row["detail"]),
                 downloaded=bool(row["downloaded"]),
             )
