@@ -374,6 +374,7 @@ def upgrade() -> None:
         sa.Column("bath_time_s", sa.Integer(), nullable=False),
         sa.Column("status_raw", sa.Integer(), nullable=False),
         sa.Column("reported_at", UtcDateTime(), nullable=False),
+        sa.Column("created_at", UtcDateTime(), nullable=False),
         sa.Column("updated_at", UtcDateTime(), nullable=False),
         sa.ForeignKeyConstraint(
             ["device_id"], ["devices.id"], name=op.f("fk_door_states_device_id_devices"), ondelete="RESTRICT"
@@ -404,7 +405,7 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f("ix_ota_release_installs_device_id"), ["device_id"], unique=False)
 
     op.create_table(
-        "usage_sessions",
+        "door_sessions",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("device_id", sa.String(length=64), nullable=False),
         sa.Column("door_no", sa.Integer(), nullable=False),
@@ -427,19 +428,19 @@ def upgrade() -> None:
         sa.Column("segments_complete", sa.Boolean(), nullable=False),
         sa.Column("ended_at", UtcDateTime(), nullable=True),
         sa.Column("last_seen_at", UtcDateTime(), nullable=False),
-        sa.Column("flow_s", sa.Integer(), nullable=False),
+        sa.Column("total_flow_s", sa.Integer(), nullable=False),
         sa.Column("created_at", UtcDateTime(), nullable=False),
         sa.Column("updated_at", UtcDateTime(), nullable=False),
         sa.ForeignKeyConstraint(
-            ["device_id"], ["devices.id"], name=op.f("fk_usage_sessions_device_id_devices"), ondelete="RESTRICT"
+            ["device_id"], ["devices.id"], name=op.f("fk_door_sessions_device_id_devices"), ondelete="RESTRICT"
         ),
-        sa.PrimaryKeyConstraint("id", name=op.f("pk_usage_sessions")),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_door_sessions")),
     )
-    with op.batch_alter_table("usage_sessions", schema=None) as batch_op:
-        batch_op.create_index(batch_op.f("ix_usage_sessions_cert_no"), ["cert_no"], unique=False)
-        batch_op.create_index(batch_op.f("ix_usage_sessions_device_id"), ["device_id"], unique=False)
+    with op.batch_alter_table("door_sessions", schema=None) as batch_op:
+        batch_op.create_index(batch_op.f("ix_door_sessions_cert_no"), ["cert_no"], unique=False)
+        batch_op.create_index(batch_op.f("ix_door_sessions_device_id"), ["device_id"], unique=False)
         batch_op.create_index(
-            "ix_usage_sessions_device_id_door_no_assigned_at", ["device_id", "door_no", "assigned_at"], unique=False
+            "ix_door_sessions_device_id_door_no_assigned_at", ["device_id", "door_no", "assigned_at"], unique=False
         )
 
     op.create_table(
@@ -523,8 +524,8 @@ def upgrade() -> None:
         sa.Column("created_at", UtcDateTime(), nullable=False),
         sa.ForeignKeyConstraint(
             ["session_id"],
-            ["usage_sessions.id"],
-            name=op.f("fk_job_runs_session_id_usage_sessions"),
+            ["door_sessions.id"],
+            name=op.f("fk_job_runs_session_id_door_sessions"),
             ondelete="SET NULL",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_job_runs")),
@@ -534,7 +535,7 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f("ix_job_runs_occurred_at"), ["occurred_at"], unique=False)
 
     op.create_table(
-        "usage_segments",
+        "door_segments",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("session_id", sa.Integer(), nullable=False),
         sa.Column("device_id", sa.String(length=64), nullable=False),
@@ -560,21 +561,21 @@ def upgrade() -> None:
         ),
         sa.Column("created_at", UtcDateTime(), nullable=False),
         sa.ForeignKeyConstraint(
-            ["device_id"], ["devices.id"], name=op.f("fk_usage_segments_device_id_devices"), ondelete="RESTRICT"
+            ["device_id"], ["devices.id"], name=op.f("fk_door_segments_device_id_devices"), ondelete="RESTRICT"
         ),
         sa.ForeignKeyConstraint(
             ["session_id"],
-            ["usage_sessions.id"],
-            name=op.f("fk_usage_segments_session_id_usage_sessions"),
+            ["door_sessions.id"],
+            name=op.f("fk_door_segments_session_id_door_sessions"),
             ondelete="CASCADE",
         ),
-        sa.PrimaryKeyConstraint("id", name=op.f("pk_usage_segments")),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_door_segments")),
     )
-    with op.batch_alter_table("usage_segments", schema=None) as batch_op:
+    with op.batch_alter_table("door_segments", schema=None) as batch_op:
         batch_op.create_index(
-            "ix_usage_segments_device_id_door_no_opened_at", ["device_id", "door_no", "opened_at"], unique=False
+            "ix_door_segments_device_id_door_no_opened_at", ["device_id", "door_no", "opened_at"], unique=False
         )
-        batch_op.create_index(batch_op.f("ix_usage_segments_session_id"), ["session_id"], unique=False)
+        batch_op.create_index(batch_op.f("ix_door_segments_session_id"), ["session_id"], unique=False)
 
     # ### end Alembic commands ###
 
@@ -582,11 +583,11 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade schema."""
     # ### commands auto generated by Alembic - please adjust! ###
-    with op.batch_alter_table("usage_segments", schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f("ix_usage_segments_session_id"))
-        batch_op.drop_index("ix_usage_segments_device_id_door_no_opened_at")
+    with op.batch_alter_table("door_segments", schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f("ix_door_segments_session_id"))
+        batch_op.drop_index("ix_door_segments_device_id_door_no_opened_at")
 
-    op.drop_table("usage_segments")
+    op.drop_table("door_segments")
     with op.batch_alter_table("job_runs", schema=None) as batch_op:
         batch_op.drop_index(batch_op.f("ix_job_runs_occurred_at"))
         batch_op.drop_index("ix_job_runs_device_id_occurred_at")
@@ -601,12 +602,12 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f("ix_voice_deliveries_device_id"))
 
     op.drop_table("voice_deliveries")
-    with op.batch_alter_table("usage_sessions", schema=None) as batch_op:
-        batch_op.drop_index("ix_usage_sessions_device_id_door_no_assigned_at")
-        batch_op.drop_index(batch_op.f("ix_usage_sessions_device_id"))
-        batch_op.drop_index(batch_op.f("ix_usage_sessions_cert_no"))
+    with op.batch_alter_table("door_sessions", schema=None) as batch_op:
+        batch_op.drop_index("ix_door_sessions_device_id_door_no_assigned_at")
+        batch_op.drop_index(batch_op.f("ix_door_sessions_device_id"))
+        batch_op.drop_index(batch_op.f("ix_door_sessions_cert_no"))
 
-    op.drop_table("usage_sessions")
+    op.drop_table("door_sessions")
     with op.batch_alter_table("ota_release_installs", schema=None) as batch_op:
         batch_op.drop_index(batch_op.f("ix_ota_release_installs_device_id"))
 
