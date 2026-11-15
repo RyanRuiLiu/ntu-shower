@@ -28,10 +28,8 @@ from fastapi import APIRouter, Depends, Request, Response, Security
 from sqlalchemy.orm import Session
 
 from app.contracts import Caller
-from app.modules.devices import crud as devices_store
-
-from ..core.logging import log_event
-from ..core.problems import (
+from app.core.logging import log_event
+from app.core.problems import (
     KEY_NOT_FOUND,
     UNAUTHENTICATED,
     UNKNOWN_SCOPE,
@@ -39,7 +37,9 @@ from ..core.problems import (
     VALIDATION_FAILED,
     ApiProblemError,
 )
-from ..db.deps import get_db
+from app.db.deps import get_db
+from app.modules.devices import crud as devices_store
+
 from . import crud
 from .dependencies import caller
 from .permissions import ALL_SCOPES, SCOPE_LABELS
