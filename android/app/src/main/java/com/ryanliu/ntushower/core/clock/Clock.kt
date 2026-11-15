@@ -13,7 +13,7 @@ import java.util.TimeZone
  * 解析的消费者是 [ServerClock]：拿 `link.hello_ack` 的 `server_time` 与每一轮
  * `link.ping` 的 `sender_time` 立锚点。**墙钟本身仍不得用于"判断某个时刻
  * 过了没有"**——那类判定依赖两台机器的时钟一致，而这台设备没有 NTP；命令的有效期因此
- * 仍是相对时长（见 `protocol/schema/session.command.json` 的 `timeout_ms`）。
+ * 仍是相对时长（见 `protocol/schema/device.command.json` 的 `timeout_ms`）。
  *
  * **命名带 `wallClock` 是刻意的**：这里和 [ServerClock] 都能给"现在"，但一个是设备那口
  * 会被拨的钟、一个是锚在服务端轴上的权威时刻，差一个 3590 秒的偏差。名字里不写出轴，
