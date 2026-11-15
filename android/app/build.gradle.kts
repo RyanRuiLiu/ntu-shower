@@ -217,7 +217,6 @@ val frameworkBoundClasses = listOf(
     // 自管理：依赖 root shell 与包管理器（A11ySettingsMerge / A11yState / TimeSync 的
     // shellDatetime 与阈值判定是纯逻辑，已纳入覆盖）
     "**/features/selfmanage/A11yGuard*",
-    "**/features/selfmanage/OtaUpdater*",
     "**/features/selfmanage/TimeSync*",
     // 浴室 App 进程级重启：依赖真实 root shell（拉起与否的决策由 BathAppGuardTest 覆盖）
     "**/features/automation/BathAppRestart*",
