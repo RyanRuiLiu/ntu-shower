@@ -27,8 +27,8 @@ def session(tmp_path: Path) -> Iterator[Session]:
 
 
 def test_global_defaults_to_empty(session: Session) -> None:
-    # 库里还没有这一行（全新安装）时对外呈现修订号 1：与旧层 init_tables 预置的
-    # 行语义一致，GET 报 1、第一次写入变成 2（契约由 test_global_config_roundtrip 锁定）。
+    # 库里还没有这一行（全新安装）时对外呈现修订号 1，第一次写入变成 2
+    # （契约由 test_global_config_roundtrip 锁定）。
     assert config.get_global(session) == (1, {})
 
 
