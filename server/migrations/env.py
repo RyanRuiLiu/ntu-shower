@@ -23,8 +23,6 @@ from app.db.engine import create_db_engine
 from app.modules.config.models import AppSettings  # noqa: F401
 from app.modules.devices.models import (  # noqa: F401
     Device,
-    DeviceClockShift,
-    DeviceConfig,
     DeviceCredential,
     DeviceLinkEvent,
     DeviceLog,

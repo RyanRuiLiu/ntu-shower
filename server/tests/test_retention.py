@@ -6,7 +6,7 @@
 """
 
 from app.audit_middleware import RETENTIONS
-from app.modules.devices.models import DeviceClockShift, DeviceConfig, DeviceCredential, DeviceLinkEvent, DeviceLog
+from app.modules.devices.models import DeviceCredential, DeviceLinkEvent, DeviceLog
 from app.modules.doors.models import DoorSnapshot
 from app.modules.voice.models import VoiceDelivery
 from app.persistence.audit import ApiCall, CommandAudit, JobRun
@@ -28,6 +28,6 @@ def test_every_declared_retention_is_registered() -> None:
 
 def test_permanent_tables_are_not_registered() -> None:
     """永久保留的业务表不得进入清理登记（防止误删运营历史）。"""
-    permanent = {DeviceClockShift, DeviceConfig, DeviceCredential, DeviceLog}
+    permanent = {DeviceCredential, DeviceLog}
     registered_tables = {table for table, _column, _days in RETENTIONS}
     assert registered_tables.isdisjoint(permanent)

@@ -206,6 +206,10 @@ async def _accept_hello(ws: WebSocket, token_device_id: str | None) -> tuple[str
         return None
     version_code = as_int(hello_payload.get("version_code"))
     row = await _call(ws, devices_service.get_device, device_id)
+    if row is not None and row["retired"]:
+        await ws.send_text(protocol.error(reason_codes.DEVICE_RETIRED.code, reason_codes.DEVICE_RETIRED.message))
+        await ws.close(code=1008)
+        return None
     trusted = bool(row and row["trusted"])
     # 经 Caddy 代理而来：真实设备 IP 在 X-Real-IP 头里
     ip = ws.headers.get("x-real-ip") or (ws.client.host if ws.client else "")

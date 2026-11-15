@@ -85,6 +85,10 @@ def enroll_device(
     if not configured or claim is None or not hmac.compare_digest(hash_token(claim), hash_token(configured)):
         raise ApiProblemError(INVALID_DEVICE_CLAIM, "注册令牌缺失或无效")
 
+    existing = devices_store.get(session, req.device_id)
+    if existing is not None and existing["retired"]:
+        raise ApiProblemError(VALIDATION_FAILED, "设备已停用，不能重新注册")
+
     devices_store.register(
         session,
         device_id=req.device_id,
@@ -256,6 +260,11 @@ async def patch_device(device_id: str, req: DevicePatchRequest, session: Session
         service.rename_device(session, device_id, req.name)
     if req.trusted is not None:
         service.set_trusted(session, device_id, req.trusted)
+        await manager.disconnect(device_id)
+    if req.retired is not None:
+        service.set_retired(session, device_id, req.retired)
+        # 在线设备的业务帧不会因这个位自动停下，掐断让它按重连退避回来——
+        # 那时握手即被拒（已停用），数据流就此停止。
         await manager.disconnect(device_id)
     record = _require_device(session, device_id)
     service.publish_device_update(session, device_id)
