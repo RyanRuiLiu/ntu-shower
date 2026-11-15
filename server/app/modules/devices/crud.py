@@ -1,12 +1,10 @@
 """设备档案、链路事件与设备日志的持久化。
 
-与旧实现的契约一致：
 - `register` 只覆盖版本、能力、时刻与开机时间，不动 name / trusted / sort_order
 - 展示顺序以 `sort_order` 为准，同序回落到名字的自然排序
 - 设备日志每个（设备，种类）只留最近 `LOG_KEEP` 份
 
-区别在参数类型：新层接收带时区的 `datetime`，返回的记录仍把时间序列化成
-RFC 3339 字符串，与路由层的既有形状保持一致。
+时间一律接收带时区的 `datetime`，返回的记录把时刻序列化成 RFC 3339 字符串。
 """
 
 from __future__ import annotations
@@ -232,28 +230,7 @@ def as_record(row: Device) -> DeviceRecord:
     return record
 
 
-__all__: list[str] = [
-    "LOG_KEEP",
-    "append_device_log",
-    "as_record",
-    "authenticate_device",
-    "get",
-    "get_clock_skew",
-    "insert_link_event",
-    "issue",
-    "latest_device_log",
-    "link_events",
-    "list_all",
-    "list_for_device",
-    "register",
-    "revoke",
-    "revoke_all",
-    "set_clock_skew",
-    "set_name",
-    "set_order",
-    "set_trusted",
-    "touch_seen",
-]
+# ── 设备凭据 ──
 
 
 def issue(
@@ -337,3 +314,27 @@ def authenticate_device(session: Session, token: str) -> str | None:
     if credential.revoked_at is not None:
         return None
     return str(business_id)
+
+
+__all__: list[str] = [
+    "LOG_KEEP",
+    "append_device_log",
+    "as_record",
+    "authenticate_device",
+    "get",
+    "get_clock_skew",
+    "insert_link_event",
+    "issue",
+    "latest_device_log",
+    "link_events",
+    "list_all",
+    "list_for_device",
+    "register",
+    "revoke",
+    "revoke_all",
+    "set_clock_skew",
+    "set_name",
+    "set_order",
+    "set_trusted",
+    "touch_seen",
+]
