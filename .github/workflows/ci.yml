@@ -10,7 +10,9 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # 只取消 PR 的过期运行：main 是部署链的源头（docker→deploy），中途取消
+  # 会把部署掐在半路。
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # PR 按改动面分发检查面；push 到 main 一律全量（主线安全网）。ci.yml 自身在
@@ -85,6 +87,8 @@ jobs:
         if: needs.changes.outputs.server == 'true'
         with:
           python-version: "3.13"
+          cache: pip
+          cache-dependency-path: server/requirements-dev.txt
       - run: pip install -r requirements-dev.txt
         if: needs.changes.outputs.server == 'true'
       - run: ruff format --check app tests
@@ -123,6 +127,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
+          cache: pip
       - run: pip install semgrep==1.184.0
       - run: semgrep scan --config p/python --config p/security-audit server/app --error --quiet
       - run: semgrep scan --config .semgrep.yml . --error --quiet
@@ -142,8 +147,10 @@ jobs:
           java-version: "25"
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
       - run: cp gradle.properties.example gradle.properties
-      - run: ./gradlew detekt :app:lintDebug :app:testDebugUnitTest :app:jacocoUnitTestCoverageVerification
-      - run: ./gradlew assembleDebug
+      # 单次调用：两段分开是两次 daemon 冷启动 + 两次全量配置（实测 CI 上这段
+      # 171s 为全部 android 门的最大杆）；org.gradle.caching 已开，未变任务命中
+      # 缓存后这里只剩增量编译与测试执行。
+      - run: ./gradlew detekt :app:lintDebug :app:testDebugUnitTest :app:jacocoUnitTestCoverageVerification assembleDebug
 
   security:
     runs-on: ubuntu-latest
@@ -161,6 +168,8 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
+          cache: pip
+          cache-dependency-path: server/requirements.txt
       - run: pip install pip-audit
       - run: pip-audit -r requirements.txt -r requirements-dev.txt
         working-directory: server
