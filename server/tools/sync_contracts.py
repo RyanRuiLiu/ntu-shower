@@ -57,6 +57,9 @@ KOTLIN_REASONS = REPO_ROOT / "android/app/src/main/java/com/ryanliu/ntushower/tr
 KOTLIN_OTA = REPO_ROOT / "android/app/src/main/java/com/ryanliu/ntushower/transport/OtaContract.kt"
 KOTLIN_DEFAULTS = REPO_ROOT / "android/app/src/main/java/com/ryanliu/ntushower/core/config/ConfigDefaults.kt"
 WEB_CONTRACT = REPO_ROOT / "server/web/src/api/contract.ts"
+# 旧版界面（/legacy，main.py 挂载的部署树）持有同一份契约常量：内容与新版逐字节
+# 相同，一并纳入逐字节守卫——漏掉它，改了服务端取值后旧版界面静默显示原始英文。
+WEB_LEGACY_CONTRACT = REPO_ROOT / "server/web/legacy/core/contract.js"
 
 #: 生成物都带这一行，避免有人手改后被下一轮生成悄悄覆盖。
 GENERATED_MARK = "由 tools/sync_contracts.py 生成"
@@ -374,6 +377,7 @@ def artifacts() -> dict[Path, str]:
         KOTLIN_OTA: _kotlin_ota(),
         KOTLIN_DEFAULTS: _kotlin_config_defaults(),
         WEB_CONTRACT: _javascript(),
+        WEB_LEGACY_CONTRACT: _javascript(),
     }
     return {path: content.rstrip() + "\n" for path, content in raw.items()}
 
