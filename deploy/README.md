@@ -11,12 +11,19 @@
 | `nginx/ntu-shower.conf` | `/etc/nginx/sites-enabled/<public-domain>.conf`（**独立文件，非软链**：sites-available 与 enabled 是两份拷贝，只写 enabled 才生效） | `nginx -t && systemctl reload nginx` |
 | `publish_apk.ps1` | **不上服务器**：本地工具 | `.\deploy\publish_apk.ps1 -Token <admin 的 API Bearer 凭据>` |
 
-## 部署（标准 compose 命令，无自建脚本）
+## 部署（自动为主，手动兜底）
+
+**自动路径（默认）**：main 合并 → `docker` workflow 构建推送镜像 → `deploy` job 以专用部署密钥
+（GitHub secrets `DEPLOY_SSH_KEY`/`DEPLOY_HOST`/`DEPLOY_USER`，公钥在服务器 authorized_keys，注释
+`ntu-shower-deploy-ci`）执行 pull → `up -d` → healthz 探测（最长 60 秒，失败即 CI 红）。部署序列
+与下方手动步骤一致，只是由 CI 代为执行。
+
+**手动路径（回滚、CD 不可用时）**：
 
 ```bash
 scp compose.yaml deploy@<deploy-host>:/opt/ntu-shower/compose.yaml
 scp deploy/litestream.yml deploy@<deploy-host>:/etc/ntu-shower/litestream.yml
-ssh deploy@<deploy-host> "cd /opt/ntu-shower && NTU_SHOWER_TAG=sha-<短哈希> docker compose up -d"
+ssh deploy@<deploy-host> "cd /opt/ntu-shower && NTU_SHOWER_TAG=sha-<短哈希> docker compose pull ntu-shower && NTU_SHOWER_TAG=sha-<短哈希> docker compose up -d"
 ssh deploy@<deploy-host> "curl -s http://127.0.0.1:8110/healthz"
 ```
 
