@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://<public-domain>/schema/session.command.json",
+  "$id": "https://<public-domain>/schema/device.command.json",
   "title": "Server command to device",
   "allOf": [
     {
@@ -10,7 +10,7 @@
       "type": "object",
       "properties": {
         "type": {
-          "const": "session.command"
+          "const": "device.command"
         },
         "payload": {
           "type": "object",

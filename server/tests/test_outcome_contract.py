@@ -13,7 +13,7 @@ from typing import Any, cast
 from app.core import outcomes
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCHEMA_PATH = REPO_ROOT / "protocol" / "schema" / "session.command_result.json"
+SCHEMA_PATH = REPO_ROOT / "protocol" / "schema" / "device.command_result.json"
 ANDROID_SRC = REPO_ROOT / "android" / "app" / "src" / "main" / "java" / "com" / "ryanliu" / "ntushower"
 
 #: 设备端构造结果状态用的字面量，形如 `CommandOutcome(id, "ok", ...)`。

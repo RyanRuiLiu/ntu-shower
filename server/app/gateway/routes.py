@@ -356,7 +356,7 @@ async def _handle_frame(
                 reply_to=frame_id,
             )
         )
-    elif mtype == "session.command_result":
+    elif mtype == "device.command_result":
         if not trusted:
             return
         if not device_actions.resolve(text_of(msg, "reply_to"), payload):
