@@ -71,8 +71,8 @@ async def close_valve(device_id: str, req: WaterDoorRequest, session: Session = 
     )
 
 
-@router.post(
-    "/{device_id}/water/status", dependencies=[Security(caller, scopes=["water:read"]), Depends(device_scope_guard)]
+@router.get(
+    "/{device_id}/water-status", dependencies=[Security(caller, scopes=["water:read"]), Depends(device_scope_guard)]
 )
 async def read_status(device_id: str, session: Session = Depends(get_db)) -> CommandOutcome:
     """读该设备 waterList 里每块板的配置与状态。
