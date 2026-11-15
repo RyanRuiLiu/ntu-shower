@@ -5,7 +5,7 @@ audit 域的只读出口。三张表都是只追加的时间序列，因此每�
 保留策略按表分别设定（登记与执行见 audit_middleware 的 RETENTIONS 与
 api_calls.prune）。
 
-JobRun 的 session_id 外键指向 usage_sessions（字符串表名，不需要 import 会话模型）：
+JobRun 的 session_id 外键指向 door_sessions（字符串表名，不需要 import 会话模型）：
 审计行引用业务行，业务行不反向依赖审计层。
 """
 
@@ -86,7 +86,7 @@ class JobRun(Base):
     occurred_at: Mapped[datetime] = mapped_column(UtcDateTime, index=True)
     device_id: Mapped[str | None] = mapped_column(String(64), default=None)
     door_no: Mapped[int] = mapped_column(Integer)
-    session_id: Mapped[int | None] = mapped_column(ForeignKey("usage_sessions.id", ondelete="SET NULL"), default=None)
+    session_id: Mapped[int | None] = mapped_column(ForeignKey("door_sessions.id", ondelete="SET NULL"), default=None)
     cert_no: Mapped[str] = mapped_column(String(32), default="")
     job: Mapped[str] = mapped_column(String(32))
     action: Mapped[str | None] = mapped_column(String(32), default=None)

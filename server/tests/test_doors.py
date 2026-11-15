@@ -117,7 +117,7 @@ def test_snapshot_updates_live_state_and_records_events(fresh_db: str) -> None:
     session = sessions[0]
     assert session["card_no"] == 2001
     assert session["ended_at"] != ""
-    assert session["flow_s"] == 60  # t1 到 t2 那一段：上一帧还在出水，计入
+    assert session["total_flow_s"] == 60  # t1 到 t2 那一段：上一帧还在出水，计入
     assert session["assigned_at"] == t0  # 这台设备没回过 pong、无偏差可平移，起点落在本帧
     # 设备从没报过 bath_time_s，我们却观测到 60 秒出水——两边对不上，完整性为假。
     # 它表达的正是这件事：我们的段之和与设备的累计值不一致。
@@ -126,7 +126,7 @@ def test_snapshot_updates_live_state_and_records_events(fresh_db: str) -> None:
     segments = door_link.list_segments_of(session["id"])
     assert len(segments) == 1
     assert segments[0]["opened_at"] == t1  # 无偏差可平移，开阀时刻退回首次观测到出水的那一帧
-    assert segments[0]["flow_s"] == session["flow_s"]  # 会话时长就是段之和
+    assert segments[0]["flow_s"] == session["total_flow_s"]  # 会话时长就是段之和
 
 
 def test_live_time_fields_are_on_the_server_axis(fresh_db: str) -> None:
@@ -497,7 +497,7 @@ def test_gap_beyond_session_limit_is_not_counted(fresh_db: str) -> None:
     door_link.feed(device_id, _snapshot([_door(1, card_no=1, cert_no="A", in_time=t0)], far))
 
     row = door_link.list_sessions(device_id)[0]
-    assert row["flow_s"] == 0
+    assert row["total_flow_s"] == 0
 
 
 def test_session_survives_process_restart(fresh_db: str) -> None:
@@ -523,7 +523,7 @@ def test_session_survives_process_restart(fresh_db: str) -> None:
     rows = door_link.list_sessions(device_id)
     assert len(rows) == 1, "重启不该把同一次占用重开成两条会话"
     assert rows[0]["assigned_at"] == t0, "起点仍是原来那一帧"
-    assert rows[0]["flow_s"] == 60, "上一帧在出水的证据跨重启仍然有效"
+    assert rows[0]["total_flow_s"] == 60, "上一帧在出水的证据跨重启仍然有效"
 
 
 def test_door_no_must_be_a_strict_in_range_integer(fresh_db: str) -> None:
