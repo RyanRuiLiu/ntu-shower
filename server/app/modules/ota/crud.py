@@ -2,7 +2,7 @@
 
 - `latest_for` 先按 `version_code` 降序，再看是否大于设备当前版本
 - `force` 发布无视版本号，但已确认安装过就不再推（防重装循环）
-- `target` 是 `all` 或逗号分隔的设备白名单
+- `target` 是目标设备列表：`["*"]` 表示全部设备，其余按 device_id 精确匹配
 """
 
 from __future__ import annotations
@@ -23,9 +23,8 @@ def _device(session: Session, device_id: str) -> Device | None:
 
 
 def _targets(release: OtaRelease, device_id: str) -> bool:
-    if release.target == "all":
-        return True
-    return device_id in {item.strip() for item in release.target.split(",") if item.strip()}
+    targets = release.target
+    return "*" in targets or device_id in targets
 
 
 def insert_release(
@@ -33,9 +32,8 @@ def insert_release(
     version: str,
     version_code: int,
     sha256: str,
-    mandatory: bool,
     force: bool,
-    target: str,
+    target: list[str],
 ) -> None:
     row = session.scalars(select(OtaRelease).where(OtaRelease.version == version)).one_or_none()
     if row is None:
@@ -44,7 +42,6 @@ def insert_release(
                 version=version,
                 version_code=version_code,
                 sha256=sha256,
-                mandatory=mandatory,
                 force=force,
                 target=target,
             )
@@ -52,7 +49,6 @@ def insert_release(
     else:
         row.version_code = version_code
         row.sha256 = sha256
-        row.mandatory = mandatory
         row.force = force
         row.target = target
     session.commit()
@@ -79,7 +75,6 @@ def latest_for(session: Session, device_id: str, current_version_code: int) -> J
                 "version": release.version,
                 "version_code": int(release.version_code),
                 "sha256": release.sha256,
-                "mandatory": bool(release.mandatory),
                 "force": bool(release.force),
             }
     return None
@@ -152,9 +147,8 @@ def as_record(row: OtaRelease) -> ReleaseRecord:
         "version": row.version,
         "version_code": int(row.version_code),
         "sha256": row.sha256,
-        "mandatory": bool(row.mandatory),
         "force": bool(row.force),
-        "target": row.target,
+        "target": list(row.target),
         "created_at": format_rfc3339(row.created_at),
     }
     return record

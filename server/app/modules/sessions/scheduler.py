@@ -67,7 +67,6 @@ from app.db.base import utcnow
 from app.db.session import session_scope
 from app.modules.config import store as config_store
 from app.modules.config.schemas import ConfigPushNotice
-from app.modules.devices import actions as device_actions
 from app.modules.doors import service as doors_service
 from app.persistence import audit as audit_store
 
@@ -371,32 +370,16 @@ def reload() -> None:
         reschedule(device_id)
 
 
-async def on_config_change(revision: int, device_ids: Sequence[str]) -> list[ConfigPushNotice]:
-    """配置保存后的下游行为（经 config.notifier 在组合根注册）。
+async def on_config_change(_revision: int, _device_ids: Sequence[str]) -> list[ConfigPushNotice]:
+    """配置保存后的下游行为之一（经 config.notifier 在组合根注册）。
 
     定时器重算无条件执行：服务端自己的键（阈值、名单）也在配置里，保存即生效。
-    设备推送只针对调用方给出的清单——那是「这次改动真的动了设备域的键」时调用方
-    算出来的目标设备；逐台并发推送，单台慢设备不拖慢整批。
+    设备推送是另一个订阅者（devices.push.on_config_change）——两个职责两个模块，
+    删掉 sessions 不影响配置推送，反之亦然。参数是订阅者协议的统一形状（推送
+    订阅者要用），本订阅者只重载定时器，不消费它们。
     """
     reload()
-    if not device_ids:
-        return []
-
-    async def _push(device_id: str) -> ConfigPushNotice:
-        with session_scope() as session:
-            values = config_store.device_effective(session, device_id)
-        result = await device_actions.push_config_update(device_id, revision, values)
-        notice: ConfigPushNotice = {
-            "device_id": device_id,
-            "notified": bool(result.get("notified", False)),
-            "applied": bool(result.get("applied", False)),
-        }
-        reason = result.get("reason")
-        if reason:
-            notice["reason"] = str(reason)
-        return notice
-
-    return list(await asyncio.gather(*(_push(device_id) for device_id in device_ids)))
+    return []
 
 
 def reschedule(device_id: str) -> None:

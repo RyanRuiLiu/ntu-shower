@@ -125,6 +125,21 @@ class CommandStatus(StrEnum):
     REJECTED = "rejected"
 
 
+class DeliveryStatus(StrEnum):
+    """一次语音投递的生命周期状态。
+
+    `PENDING` 是认领后、设备回执前的在途态；终态沿用命令结果四值（voice.play
+    的 outcome.status 原样落列，词汇不另造一套）。与 CommandStatus 的关系由
+    测试对账：四个终态值必须与 CommandStatus 完全一致。
+    """
+
+    PENDING = "pending"
+    OK = "ok"
+    FAILED = "failed"
+    TIMEOUT = "timeout"
+    REJECTED = "rejected"
+
+
 class CommandOutcome(TypedDict):
     """设备命令的终态结果。
 
@@ -280,14 +295,13 @@ class DoorView(TypedDict):
 
 
 class ReleaseRecord(TypedDict):
-    """一条已注册的发布。"""
+    """一条已注册的发布。`target` 是目标设备列表：`["*"]` 表示全部设备。"""
 
     version: str
     version_code: int
     sha256: str
-    mandatory: bool
     force: bool
-    target: str
+    target: list[str]
     created_at: str
 
 
