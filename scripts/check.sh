@@ -12,7 +12,9 @@ cd "$(dirname "$0")/../server"
 .venv/Scripts/pre-commit.exe run semgrep-sast --hook-stage manual
 .venv/Scripts/pre-commit.exe run semgrep-project --hook-stage manual
 .venv/Scripts/python.exe -m pytest -q --cov=app --cov-report=term-missing
-# 网页端（React/TS）的门禁由 pnpm 执行：tsc 类型检查 + eslint + vitest 单测，
-# 与 CI 的 web job 逐条一致。构建（tsc -b && vite build）在 docker 镜像里跑。
-( cd web && pnpm exec tsc -b && pnpm exec eslint src --config eslint.config.mjs && pnpm exec vitest run )
+# 网页端门禁由 pnpm 执行：新版（React/TS）走 tsc + eslint + vitest；旧版
+# （legacy/，零构建 JS）走 eslint no-undef + stylelint CSS 令牌纪律——检查写了
+# 却没人跑等于没有（2026-11-10 漏导入事故的教训）。与 CI 的 web job 逐条一致。
+# 构建在 docker 镜像里跑。
+( cd web && pnpm exec tsc -b && pnpm exec eslint src --config eslint.config.mjs && pnpm exec eslint legacy --config legacy/eslint.config.mjs && pnpm exec stylelint "legacy/style/*.css" --config legacy/.stylelintrc.json && pnpm exec vitest run )
 ( cd .. && npx --yes markdownlint-cli2@0.20.0 "*.md" "docs/*.md" "docs/adr/*.md" "deploy/*.md" ".github/*.md" --config .markdownlint.json )
