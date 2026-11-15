@@ -34,7 +34,7 @@ def test_device_list_is_public_and_anonymous_actions_are_empty(client: TestClien
 
     assert r.status_code == 200
     listed = next(item for item in r.json() if item["device_id"] == DEVICE_ID)
-    assert set(listed) == {"device_id", "name", "online", "actions"}
+    assert set(listed) == {"device_id", "name", "online", "retired", "actions"}
     assert listed["online"] is False
     assert listed["actions"] == []
 
@@ -104,6 +104,7 @@ def test_runtime_returns_full_record(client: TestClient, admin_headers: dict[str
         "device_id",
         "name",
         "trusted",
+        "retired",
         "app_version",
         "version_code",
         "os_version",
@@ -149,6 +150,26 @@ def test_patch_device_updates_only_provided_fields(
     assert noop.json()["name"] == "二楼浴室"
 
 
+def test_patch_retired_flags_device_and_list_reflects_it(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    fresh_db: str,
+) -> None:
+    """停用/恢复：档案位翻转，设备清单与单设备档案都如实反映。"""
+    device_link.register_trusted_device(DEVICE_ID)
+
+    r = client.patch(f"/api/v1/devices/{DEVICE_ID}", headers=admin_headers, json={"retired": True})
+    assert r.status_code == 200
+    assert r.json()["retired"] is True
+
+    listing = client.get("/api/v1/devices", headers=admin_headers)
+    assert [item["retired"] for item in listing.json() if item["device_id"] == DEVICE_ID] == [True]
+
+    restore = client.patch(f"/api/v1/devices/{DEVICE_ID}", headers=admin_headers, json={"retired": False})
+    assert restore.status_code == 200
+    assert restore.json()["retired"] is False
+
+
 def test_patch_unknown_device_returns_not_found(
     client: TestClient,
     admin_headers: dict[str, str],
@@ -177,7 +198,7 @@ def test_patch_publishes_trimmed_device_update(
 
     assert message["type"] == "device.update"
     payload = message["payload"]
-    assert set(payload) == {"device_id", "name", "online", "at"}
+    assert set(payload) == {"device_id", "name", "online", "retired", "at"}
     assert payload["device_id"] == DEVICE_ID
     assert payload["name"] == "改名触发推送"
 

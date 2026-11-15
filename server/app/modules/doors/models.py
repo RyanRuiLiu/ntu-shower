@@ -28,7 +28,7 @@ class DoorState(Base):
     __table_args__ = (UniqueConstraint("device_id", "door_no", name="uq_door_states_device_id_door_no"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    device_id: Mapped[str] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"), index=True)
+    device_id: Mapped[str] = mapped_column(ForeignKey("devices.id", ondelete="RESTRICT"), index=True)
     door_no: Mapped[int] = mapped_column(Integer)
     state: Mapped[DoorStateEnum] = mapped_column(enum_column(DoorStateEnum, "door_state"))
     card_no: Mapped[int] = mapped_column(Integer, default=0)
@@ -67,7 +67,7 @@ class DoorStateEvent(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    device_id: Mapped[str] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"))
+    device_id: Mapped[str] = mapped_column(ForeignKey("devices.id", ondelete="RESTRICT"))
     door_no: Mapped[int] = mapped_column(Integer)
     from_state: Mapped[DoorStateEnum] = mapped_column(enum_column(DoorStateEnum, "door_state_from"))
     to_state: Mapped[DoorStateEnum] = mapped_column(enum_column(DoorStateEnum, "door_state_to"))
@@ -89,7 +89,7 @@ class DoorSnapshot(Base):
     __table_args__ = (UniqueConstraint("device_id", "snapshot_id", name="uq_door_snapshots_device_id_snapshot_id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    device_id: Mapped[str] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"), index=True)
+    device_id: Mapped[str] = mapped_column(ForeignKey("devices.id", ondelete="RESTRICT"), index=True)
     #: 设备为这一帧生成的标识，用于幂等去重
     snapshot_id: Mapped[str] = mapped_column(String(64))
     seq: Mapped[int | None] = mapped_column(Integer, default=None)

@@ -106,6 +106,19 @@ def test_enroll_rotates_the_credential(
     assert ack["type"] == "link.hello_ack"
 
 
+def test_enroll_rejects_a_retired_device(
+    client: TestClient, enroll_settings: None, admin_headers: dict[str, str]
+) -> None:
+    """已停用设备不能凭 claim 重新注册：恢复的唯一入口在管理台。"""
+    assert _enroll(client, ENROLL_BODY).status_code == 200
+    client.patch("/api/v1/devices/dev-new-enroll", headers=admin_headers, json={"retired": True})
+
+    r = _enroll(client, ENROLL_BODY)
+
+    assert r.status_code == 422
+    assert r.json()["type"].endswith("/problems/validation-failed")
+
+
 def test_enroll_rejects_a_wrong_claim(client: TestClient, enroll_settings: None) -> None:
     r = _enroll(client, ENROLL_BODY, claim="not-the-claim")
     assert r.status_code == 401

@@ -25,8 +25,6 @@ from app.core import config as config_module
 from app.modules.config.models import AppSettings  # noqa: F401
 from app.modules.devices.models import (  # noqa: F401
     Device,
-    DeviceClockShift,
-    DeviceConfig,
     DeviceCredential,
     DeviceLinkEvent,
     DeviceLog,

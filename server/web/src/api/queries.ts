@@ -78,7 +78,7 @@ export const usersApi = {
 export const devicesApi = {
   list: () => get<DeviceListItem[]>(`${API_V1}/devices`),
   runtime: (deviceId: string) => get<DeviceRecord>(devicePath(deviceId)),
-  patch: (deviceId: string, value: { name?: string; trusted?: boolean }) =>
+  patch: (deviceId: string, value: { name?: string; trusted?: boolean; retired?: boolean }) =>
     patch<DeviceRecord>(devicePath(deviceId), value),
   order: (order: string[]) => patch<{ order: string[] }>(`${API_V1}/devices`, { order }),
   logs: (deviceId: string, kind: string) =>

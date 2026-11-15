@@ -42,7 +42,9 @@ function renderTable() {
         <td class="mono">${esc(device.app_version)} <span class="muted">(${esc(device.version_code)})</span></td>
         <td class="mono">${esc(device.os_version)}</td>
         <td>${device.online ? '<span class="badge badge-green">在线</span>' : '<span class="badge badge-red">离线</span>'}</td>
-        <td>${device.trusted ? '<span class="badge badge-green">已信任</span>' : '<span class="badge badge-amber">未信任</span>'}</td>
+        <td>${device.trusted ? '<span class="badge badge-green">已信任</span>' : '<span class="badge badge-amber">未信任</span>'}${
+          device.retired ? ' <span class="badge badge-red">已停用</span>' : ''
+        }</td>
         <td class="mono" title="${esc((device.capabilities || []).join(', '))}">${esc(
           (device.capabilities || []).length > 0 ? device.capabilities.length : '未声明',
         )}</td>
@@ -53,6 +55,7 @@ function renderTable() {
             <button type="button" class="btn btn-ghost btn-sm" data-act="down" title="下移" ${index === store.runtime.length - 1 ? 'disabled' : ''}>↓</button>
             <button type="button" class="btn btn-ghost btn-sm" data-act="rename">重命名</button>
             <button type="button" class="btn btn-ghost btn-sm" data-act="trust">${device.trusted ? '撤销信任' : '授予信任'}</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-act="retire">${device.retired ? '恢复' : '停用'}</button>
           </div>
         </td>
       </tr>`,
@@ -128,6 +131,17 @@ async function toggleTrust(deviceId) {
     await api.patchDevice(deviceId, { trusted: !device?.trusted })
     await refreshRuntime()
     toast(device?.trusted ? '已撤销信任' : '已授予信任')
+  } catch (error) {
+    report('maintResult', problemText(error), 'err')
+  }
+}
+
+async function toggleRetired(deviceId) {
+  const device = store.runtime.find((item) => item.device_id === deviceId)
+  try {
+    await api.patchDevice(deviceId, { retired: !device?.retired })
+    await refreshRuntime()
+    toast(device?.retired ? '已恢复' : '已停用，设备不会再上报数据')
   } catch (error) {
     report('maintResult', problemText(error), 'err')
   }
@@ -585,6 +599,7 @@ export const devicesView = {
         const deviceId = button.closest('tr').dataset.id
         if (button.dataset.act === 'rename') rename(deviceId)
         else if (button.dataset.act === 'up' || button.dataset.act === 'down') moveDevice(deviceId, button.dataset.act)
+        else if (button.dataset.act === 'retire') toggleRetired(deviceId)
         else toggleTrust(deviceId)
       }),
     )
