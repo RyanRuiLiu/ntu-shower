@@ -260,8 +260,7 @@ def test_offline_gap_does_not_inflate_flow(fresh_db: str) -> None:
     """离线 8 小时后仍在出水：那 8 小时不可知，一秒都不计。
 
     盲区远超一次占用的物理上限，所以前后是**两次会话**：前一场在我们最后看见它的时刻收尾，
-    本帧另起一场。并成一场的话它永远不结束、`flow_s` 还会把 8 小时算进去——旧实现用
-    "当前时刻减 in_time"，实测出现过 24 小时的脏值，而且只增不减。
+    本帧另起一场。并成一场的话它永远不结束、`total_flow_s` 还会把 8 小时算进去。
     """
     device_id = "dev-offline-gap"
     door_link.feed(device_id, _frame([_door(acc_no="A", cert_no="C", in_time=IN)], T0))
@@ -465,8 +464,8 @@ def test_takeover_session_duration_stays_within_its_span(fresh_db: str) -> None:
     起点只能落到本帧，它是**观测下界**；而时长只累加我们看见的那一段——两边都从"我们看见
     它的那一刻"起算，所以 `flow_s ≤ ended_at − assigned_at` 恒成立。
 
-    设备累计的那 600 秒不在里面：我们不知道它的起止，只在 `device_flow_s` 里留痕。旧实现
-    把那 600 秒并进 `flow_s`，于是时长大于跨度；现在两者各归各位。
+    设备累计的那 600 秒不在里面：我们不知道它的起止，只在 `device_flow_s` 里留痕——
+    它不该并进 `total_flow_s`，否则时长大于跨度。
     """
     device_id = "dev-takeover-span"
     door_link.feed(

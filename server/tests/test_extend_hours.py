@@ -99,7 +99,7 @@ def _clear_door(captured_at: str, door_no: int = 3) -> None:
 def _record_shift(device_id: str, shifted_at: str, assignments: list[dict[str, object]]) -> None:
     """测试种子：登记设备并把 RFC 3339 文本时刻写成一行拨钟状态。
 
-    新层的行跟着设备走（外键），所以登记是种子的前提；时刻转 datetime 落库，
+    行跟着设备走（外键），所以登记是种子的前提；时刻转 datetime 落库，
     读回来仍是同一字符串（format_rfc3339 往返）。
     """
     device_link.register_trusted_device(device_id)

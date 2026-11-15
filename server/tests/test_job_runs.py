@@ -285,7 +285,7 @@ def real_rows(fresh_db: str) -> None:
     一个往返内就有（网关在 `link.hello` 之后立刻 ping），而且偏差跨重启持久化。
     """
     device_clock.load("dev-1", 0.0)
-    # 新层的行经外键挂设备：播种前先登记（与线上握手先行的次序一致）
+    # 行经外键挂设备：播种前先登记（与线上握手先行的次序一致）
     device_link.register_trusted_device("dev-1")
     _seed()
 
