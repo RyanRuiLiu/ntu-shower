@@ -1,0 +1,12 @@
+/* 减少动态效果：系统声明 prefers-reduced-motion 时，关闭动画与过渡的持续时间。
+ * 放在样式表最后加载，保证覆盖按域拆分的规则；不使用强制覆盖。 */
+@media (prefers-reduced-motion: reduce) {
+  :root *,
+  :root *::before,
+  :root *::after {
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
+    scroll-behavior: auto;
+  }
+}

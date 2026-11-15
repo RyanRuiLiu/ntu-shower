@@ -1,0 +1,804 @@
+/* 组件：按钮、字段、结果区、徽标、标签值、信息面板、表格、喷头卡片、KPI、节点树。
+ *
+ * 命名一律用 `.块` 与 `.块-元素`，状态用 `.is-*` 或语义化后缀。八个视图共用这一份，
+ * 视图里不得再自造按钮或表格样式。
+ */
+
+/* ── 按钮 ───────────────────────────────────────────────── */
+
+.btn {
+  padding: 6px 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-on);
+  font: 600 var(--fs-body) var(--font-ui);
+  cursor: pointer;
+  transition: opacity var(--transition);
+}
+
+.btn:hover {
+  opacity: 0.85;
+}
+
+.btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.btn-ghost {
+  background: var(--elevated);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.btn-ghost:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  opacity: 1;
+}
+
+.btn-danger {
+  background: var(--red-bg);
+  color: var(--red);
+  border-color: var(--red);
+}
+
+.btn-danger:hover {
+  background: var(--red);
+  color: var(--on-strong);
+  opacity: 1;
+}
+
+.btn-sm {
+  padding: 3px 10px;
+  font-size: var(--fs-chip);
+  font-weight: 500;
+}
+
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+/* 分段按钮组：一组互斥选项连成一个整体 */
+.btn-group {
+  display: inline-flex;
+  flex-shrink: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.btn-group .btn {
+  border: none;
+  border-radius: 0;
+}
+
+.btn-group .btn + .btn {
+  border-left: 1px solid var(--border);
+}
+
+.btn-group .btn.is-active {
+  background: var(--accent-bg-strong);
+  color: var(--accent);
+}
+
+.btn-block {
+  width: 100%;
+}
+
+/* 按钮行后面直接跟一个字段（如「渲染效果」区）时，按钮与字段标题贴在一起；
+   字段自身只有下边距，这里补上这一种相邻关系的上间距 */
+.panel-body .btn-row + .field {
+  margin-top: var(--sp-3);
+}
+
+/* ── 字段 ───────────────────────────────────────────────── */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-3);
+}
+
+.field-row {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+/* 勾选组：标题/说明一行，选项在 .btn-row 里自动换行；组与组之间留 8px。 */
+.check-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.check-group + .check-group {
+  margin-top: var(--sp-2);
+}
+
+/* 勾选框不吃 flex:1：被拉伸的勾选框会把方块悬在行中间、文字推到右边 */
+.field-row input:not([type='checkbox']),
+.field-row select {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 星期复选框：一行放不下就换行，不把文字挤成竖排 */
+.weekday-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.weekday-option {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+/* 语音规则的生效时段：每条时段一块，日期和时间在窄屏自动换行 */
+.time-windows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.time-window {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.rule-time {
+  margin-top: var(--sp-1);
+  color: var(--muted);
+  font-size: var(--fs-chip);
+}
+
+/* ── 结果区：每个能出错的操作都要有一块 ─────────────────── */
+
+.result {
+  min-height: 18px;
+  margin-top: var(--sp-2);
+  font-size: var(--fs-small);
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+/* 空着的时候不占位置。
+   结果区在"还没执行过任何操作"时是一块空白，而它下面往往还有别的东西（下一组按钮、
+   下一段控件），那些会被这片空白白白推下去——一张卡里两个空结果区就是 52px。
+   min-height 本想防内容出现时的跳动，但那个跳动发生在操作之后、人正在等结果，
+   比一直空着一块地方要好。 */
+.result:empty {
+  display: none;
+}
+
+.result.ok {
+  color: var(--green);
+}
+
+.result.err {
+  color: var(--red);
+}
+
+.result.info {
+  color: var(--dim);
+}
+
+/* ── 徽标 ───────────────────────────────────────────────── */
+
+.badge {
+  display: inline-block;
+  white-space: nowrap;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--elevated);
+  font: var(--fs-chip) var(--font-mono);
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.badge-green {
+  color: var(--green);
+  border-color: var(--green);
+  background: var(--green-bg);
+}
+
+.badge-red {
+  color: var(--red);
+  border-color: var(--red);
+  background: var(--red-bg);
+}
+
+.badge-amber {
+  color: var(--amber);
+  border-color: var(--amber);
+  background: var(--amber-bg);
+}
+
+.badge-blue {
+  color: var(--blue);
+  border-color: var(--blue);
+  background: var(--blue-bg);
+}
+
+/* ── 标签 + 值的一行 ────────────────────────────────────── */
+
+/*
+ * 喷头卡片里的六格与设备信息面板里的各行是同一个视觉结构：左边一个次要色的标签，
+ * 右边一个等宽字体的值。只留这一份，两处才不会分叉。
+ */
+.kv {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  font-size: var(--fs-small);
+  line-height: 1.6;
+}
+
+.kv .k {
+  flex-shrink: 0;
+  color: var(--dim);
+}
+
+.kv .v {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 检视页属性列表：同一个标签值结构的紧凑左对齐变体（长值折行，不省略） */
+.kv.is-compact {
+  justify-content: flex-start;
+  gap: var(--sp-2);
+  padding: 2px 0;
+  font-size: var(--fs-chip);
+  line-height: 17px;
+}
+
+.kv.is-compact .k {
+  width: 6ch;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+}
+
+.kv.is-compact .v {
+  overflow: visible;
+  color: var(--dim);
+  font: var(--fs-micro) var(--font-mono);
+  text-align: left;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* ── 配置页：小卡片分模块网格 + 页签 ───────────────── */
+
+/* 页签组：一个 panel-head 里有两组（顶层的分区、设备分区里的编辑目标），
+   各自排成一行；外层是 flex，这里也得是——否则标签退化成行内元素，下划线画法就变了 */
+.cfg-tabs {
+  display: flex;
+  align-items: center;
+}
+
+/* 页签（服务端业务/设备下发，以及设备那页的全部设备/单台设备），样式与审计页标签同族。
+   元素是 button：Enter 与空格原生可用；背景与边框清零，外观仍由本类决定 */
+.cfg-tab {
+  padding: 4px 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: var(--fs-small);
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--transition);
+}
+
+.cfg-tab:hover {
+  color: var(--text);
+}
+
+.cfg-tab.is-active {
+  border-bottom-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 小卡片网格：一模块一小卡，auto-fill 自动多列；卡内键少，一眼看完一个模块。
+   最小轨道宽度取 `min(300px, 100%)`：窄屏落成一列，而不是撑破容器横向溢出 */
+.cfg-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
+  gap: var(--sp-3);
+  /* 同一行卡片等高拉伸（align-items 默认 stretch），高矮随内容自适应但排列整齐 */
+  align-items: stretch;
+}
+
+.cfg-card {
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.cfg-card-title {
+  margin-bottom: var(--sp-2);
+  color: var(--dim);
+  font-size: var(--fs-chip);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.cfg-card .field {
+  margin-bottom: var(--sp-2);
+}
+
+/* 键的说明文字：次要色小字，跟在控件下方 */
+.cfg-desc {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: var(--fs-chip);
+  line-height: 1.5;
+}
+
+/* 继承/覆盖徽标：键处于哪一级一目了然（业界设置继承模式） */
+.cfg-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: var(--radius-xs);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  vertical-align: 1px;
+}
+
+.cfg-inherit {
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.cfg-override {
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+
+/* 回落按钮：仅覆盖态的键有。放在字段标题行里时靠右，与标题拉开 */
+.cfg-reset {
+  margin-left: 6px;
+  padding: 1px 6px;
+  vertical-align: 1px;
+}
+
+.field-row .cfg-reset {
+  margin-left: auto;
+}
+
+/* 大区分隔：服务端业务 / 设备下发，各自一套小卡片网格；标题由页签承担 */
+.cfg-section {
+  margin-bottom: var(--sp-4);
+}
+
+.cfg-card .field:last-of-type {
+  margin-bottom: 0;
+}
+
+/* ── 审计页：标签、行选中、详情卡与主从分栏 ────────────── */
+
+/*
+ * 主从分栏：左列表右详情，**视口高度内各自滚动**。详情放右栏常驻而不是页面底部，
+ * 比对几行时眼睛不用上下跑。窄屏上下堆叠（此时详情回到下方是可接受的，
+ * 因为屏幕本来就得滚动），规则在 style/narrow.css。
+ */
+.audit-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 460px);
+  gap: var(--sp-4);
+  /* 高度由 flex 分配（.view 是列向 flex 容器），不写 `calc(100vh - 顶栏高度)`：
+     顶栏在窄屏是两行，那个减数会在几处同时失准 */
+  flex: 1 1 0;
+  min-height: 0;
+  align-items: stretch;
+}
+
+.audit-split > .panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.audit-split > .panel > .panel-body.flush {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* 详情面板内容区同样受限滚动：条目多了在面板内滚，不撑破分栏 */
+#detailPanel > .panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* 标签组：一排可切换的审计类别 */
+.audit-tabs {
+  display: flex;
+  align-items: center;
+}
+
+/* 标签：面板头里的两组数据源切换，激活项用主色下边线标出。
+   元素是 button：Enter 与空格原生可用；背景与边框清零，外观仍由本类决定 */
+.audit-tab {
+  padding: 4px 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: var(--fs-small);
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--transition);
+}
+
+.audit-tab:hover {
+  color: var(--text);
+}
+
+.audit-tab.is-active {
+  border-bottom-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 可选中的审计行：hover 预示可点，选中行用主色底标出对应关系 */
+tr.audit-row {
+  cursor: pointer;
+}
+
+tr.audit-row:hover td {
+  background: var(--accent-bg);
+}
+
+tr.audit-row.is-selected td {
+  background: var(--accent-bg-strong);
+}
+
+/* 行可聚焦：外框画在行内缘，避免把相邻行挤开 */
+tr.audit-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* 详情卡：标签 + 全量折行的值（长值省略号一截就失去了可比对性），点卡复制。
+   详情面板在右栏，列宽窄，卡片改单列纵向排 */
+#detailPanel .detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-2);
+}
+
+/* 详情卡是按钮：点与回车都复制，元素形态不再靠 div 模拟 */
+.detail-card {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--transition);
+}
+
+.detail-card:hover {
+  border-color: var(--muted);
+}
+
+.detail-card .k {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.detail-card .v {
+  display: block;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: var(--fs-chip);
+  white-space: normal;
+}
+
+/* ── 设备信息面板 ───────────────────────────────────────── */
+
+/*
+ * 顶栏那个按钮点开的浮层。放设备 ID、IP、版本这些**排障时才看**的字段——它们常驻
+ * 显示会挤掉真正需要一直盯着的东西（在线状态、身份）。
+ */
+.info-panel {
+  position: absolute;
+  top: calc(100% + var(--sp-2));
+  right: 0;
+  z-index: 10;
+  display: grid;
+  gap: 6px;
+  min-width: 340px;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--elevated);
+  box-shadow: var(--shadow-overlay);
+  /* 顶栏整体禁用了选中（防拖拽），但这里的字段**正是**要复制去搜日志的 */
+  user-select: text;
+}
+
+/* `hidden` 属性的默认 `display: none` 会被上面那条 `display: grid` 盖掉 */
+.info-panel[hidden] {
+  display: none;
+}
+
+/*
+ * 登录对话框。不复用 .info-panel：那个类自带 display: grid，会盖掉浏览器对
+ * 未打开 <dialog> 的 display: none（作者样式优先于 UA 样式），对话框于是常驻
+ * 渲染在页面顶层（2026-11-10 生产事故）。dialog 的显隐走标准语义——showModal()
+ * 打开、close() 关闭，浏览器自己切换 display；这里只给外观与定位。
+ *
+ * 居中是显式的：全局 reset（base.css 的 * { margin: 0 }）会盖掉浏览器给 dialog
+ * 的 margin: auto，不写回来对话框就钉在左上角（同一事故的第二症状）。表单内部
+ * 复用既有组件：.field（标签在上、输入在下）与 .btn-row（按钮一行），不自造。
+ */
+#loginDialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(360px, calc(100vw - 2 * var(--sp-3)));
+  height: fit-content;
+  padding: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--elevated);
+  box-shadow: var(--shadow-overlay);
+}
+
+#loginDialog::backdrop {
+  background: var(--overlay-dialog);
+}
+
+/* 就地错误与按钮行的间距对齐字段节奏（.field 的 margin-bottom 同值） */
+#loginDialog .result {
+  margin-bottom: var(--sp-3);
+}
+
+/*
+ * 面板里的值允许换行。设备 ID 与 IP 是定长串，用省略号截掉它们，这个面板就没有
+ * 存在的意义了——那些字符正是要拿去搜日志的东西。
+ */
+.info-panel .v {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: break-all;
+}
+
+/* 设备动作明细：跟在「设备动作」计数行下，逐项列出设备声明的动作。
+   左对齐排列——它是一组并列项，不是与标签成对的值 */
+.info-caps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* 功能行：上面那些行是"看"的，这一行是"做"的，用一条线分开 */
+.info-actions {
+  margin-top: var(--sp-1);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--border);
+}
+
+/* ── 表格：设备、身份、发布、审计都用它 ─────────────────── */
+
+/* 表格容器：不在 flush 面板里的表格也要能横向滚动，列才不会被压缩换行。 */
+.table-wrap {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-small);
+}
+
+.table th {
+  padding: var(--sp-2) var(--sp-3);
+  text-align: left;
+  font-weight: 600;
+  color: var(--dim);
+  background: var(--elevated);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.table td {
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.table tr:last-child td {
+  border-bottom: none;
+}
+
+.table tbody tr:hover {
+  background: var(--elevated);
+}
+
+/* 动作列按内容收窄，剩余宽度留给主数据列；1% 是表格 auto 布局的收敛写法。
+   不固定在右侧：固定列会在表格溢出容器时压住相邻的数据列（半宽面板与手机都会
+   发生），而且动作按钮越多盖得越宽。动作随表格一起横向滚动，数据优先可见。 */
+.table .col-actions {
+  width: 1%;
+  white-space: nowrap;
+  background: var(--surface);
+}
+
+.table th.col-actions {
+  background: var(--elevated);
+}
+
+.table tbody tr:hover td.col-actions {
+  background: var(--elevated);
+}
+
+.table tbody tr.is-selected td.col-actions {
+  background-color: var(--surface);
+  background-image: linear-gradient(var(--accent-bg-strong), var(--accent-bg-strong));
+}
+
+/* 行尾动作保持一行：窄屏让表格整体横向滚动，不把按钮逐个挤成竖排 */
+.table .btn-row {
+  flex-wrap: nowrap;
+}
+
+.table .btn-row .btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* 行选中态：与页面其他区域联动的行（如身份页正在编辑的那一行）用它标出对应关系。
+   只换背景色不动结构，选中与取消都不引起列宽行高变化 */
+.table tbody tr.is-selected td {
+  background: var(--accent-bg-strong);
+}
+
+.table code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-chip);
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+/* 数字、时间、ID 等单值单元格不换行；窄屏由表格整体横向滚动 */
+.table .mono {
+  white-space: nowrap;
+}
+
+/* ── 代码块：命令输出、配置 JSON ────────────────────────── */
+
+.code {
+  max-height: 320px;
+  overflow: auto;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font: var(--fs-small) var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ── 浮层提示 ───────────────────────────────────────────── */
+
+.toast {
+  position: fixed;
+  bottom: var(--sp-5);
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  padding: var(--sp-2) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--elevated);
+  color: var(--text);
+  font-size: var(--fs-small);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition), transform var(--transition);
+}
+
+.toast.is-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* ── 语音分段编辑器 ─────────────────────────────────────── */
+
+/*
+ * 第一行两栏同高：上传区按内容定高，素材列表用 contain 不参与行高计算，
+ * 再拉伸到同一高度，素材多时只在列表内部滚动。
+ */
+.voice-top {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+}
+
+.voice-top > .panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.voice-top > .panel:first-child {
+  contain: size;
+}
+
+.voice-top > .panel > .panel-body.flush {
+  flex: 1;
+  min-height: 0;
+}
+
+.voice-asset-table {
+  max-height: var(--list-max-height);
+}
+
+.seg-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.seg-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+  padding: var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.seg-kind {
+  flex: 0 0 auto;
+  min-width: 2.5rem;
+  color: var(--dim);
+  font-size: var(--fs-chip);
+}
+
+.seg-row select,
+.seg-row input {
+  flex: 1 1 7rem;
+  min-width: 0;
+}
+
+.seg-row .btn-row {
+  flex: 0 0 auto;
+}
