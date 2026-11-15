@@ -367,7 +367,7 @@ def test_stream_pushes_device_update(client: TestClient, fresh_db: str) -> None:
 
     assert message["type"] == "device.update"
     payload = message["payload"]
-    assert set(payload) == {"device_id", "name", "online", "at"}
+    assert set(payload) == {"device_id", "name", "online", "retired", "at"}
     assert payload["device_id"] == device_id
     assert payload["online"] is True
 

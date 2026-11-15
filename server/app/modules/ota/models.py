@@ -40,7 +40,7 @@ class OtaReleaseInstall(Base):
     __tablename__ = "ota_release_installs"
 
     release_id: Mapped[int] = mapped_column(ForeignKey("ota_releases.id", ondelete="CASCADE"), primary_key=True)
-    device_id: Mapped[str] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"), primary_key=True, index=True)
+    device_id: Mapped[str] = mapped_column(ForeignKey("devices.id", ondelete="RESTRICT"), primary_key=True, index=True)
     applied_at: Mapped[datetime] = mapped_column(UtcDateTime)
 
 
