@@ -30,7 +30,7 @@ admin_router = APIRouter(
 )
 
 
-@admin_router.get("/status", response_model=schemas.JobsStatus)
+@admin_router.get("/status", response_model=schemas.JobsStatus, summary="后台任务看板")
 def jobs_status(session: Session = Depends(get_db)) -> schemas.JobsStatus:
     """后台任务的当前态：开关与名单、延长中的设备、调度器的即时计划。
 

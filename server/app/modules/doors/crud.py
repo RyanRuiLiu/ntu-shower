@@ -23,6 +23,7 @@ from app.modules.doors.models import (
     DoorState,
     DoorStateEvent,
 )
+from app.modules.doors.schemas import DoorLiveView, DoorSegmentView, DoorSessionView
 
 _RUN_WALK_LIMIT = 50
 
@@ -31,11 +32,11 @@ def _ts(value: datetime | None) -> str:
     return format_rfc3339(value) if value is not None else ""
 
 
-def _live_view(row: DoorState, device_id: str) -> dict[str, Any]:
+def _live_view(row: DoorState, device_id: str) -> DoorLiveView:
     return {
         "device_id": device_id,
         "door_no": int(row.door_no),
-        "state": str(row.state),
+        "state": row.state,
         "card_no": int(row.card_no),
         "cert_no": row.cert_no,
         "acc_no": row.acc_no,
@@ -48,7 +49,7 @@ def _live_view(row: DoorState, device_id: str) -> dict[str, Any]:
     }
 
 
-def _session_view(row: DoorSession, device_id: str) -> dict[str, Any]:
+def _session_view(row: DoorSession, device_id: str) -> DoorSessionView:
     return {
         "id": int(row.id),
         "device_id": device_id,
@@ -66,7 +67,7 @@ def _session_view(row: DoorSession, device_id: str) -> dict[str, Any]:
     }
 
 
-def _segment_view(row: DoorSegment, device_id: str) -> dict[str, Any]:
+def _segment_view(row: DoorSegment, device_id: str) -> DoorSegmentView:
     return {
         "id": int(row.id),
         "session_id": int(row.session_id),
@@ -84,19 +85,19 @@ def _segment_view(row: DoorSegment, device_id: str) -> dict[str, Any]:
 # ── 现态 ──
 
 
-def get_all_live(session: Session, device_id: str) -> dict[int, dict[str, Any]]:
+def get_all_live(session: Session, device_id: str) -> dict[int, DoorLiveView]:
     rows = session.scalars(select(DoorState).where(DoorState.device_id == device_id)).all()
     return {int(row.door_no): _live_view(row, device_id) for row in rows}
 
 
-def get_door_live(session: Session, device_id: str, door_no: int) -> dict[str, Any] | None:
+def get_door_live(session: Session, device_id: str, door_no: int) -> DoorLiveView | None:
     row = session.scalars(
         select(DoorState).where(DoorState.device_id == device_id, DoorState.door_no == door_no)
     ).one_or_none()
     return _live_view(row, device_id) if row is not None else None
 
 
-def get_occupied_by_cert(session: Session, device_id: str, cert_no: str) -> dict[str, Any] | None:
+def get_occupied_by_cert(session: Session, device_id: str, cert_no: str) -> DoorLiveView | None:
     occupied = [DoorStateEnum(name) for name in OCCUPIED_STATES]
     row = session.scalars(
         select(DoorState)
@@ -217,7 +218,7 @@ def insert_event(
 # ── 会话 ──
 
 
-def get_open_session(session: Session, device_id: str, door_no: int) -> dict[str, Any] | None:
+def get_open_session(session: Session, device_id: str, door_no: int) -> DoorSessionView | None:
     row = session.scalars(
         select(DoorSession)
         .where(
@@ -231,7 +232,11 @@ def get_open_session(session: Session, device_id: str, door_no: int) -> dict[str
     return _session_view(row, device_id) if row is not None else None
 
 
-def get_session(session: Session, session_id: int) -> dict[str, Any] | None:
+def get_session(session: Session, session_id: int) -> DoorSessionView | None:
+    """一场会话的读出形状。
+
+    生产路径暂无消费者：会话事实的读者是派生测试与后续统计——它是本域的读原语。
+    """
     row = session.get(DoorSession, session_id)
     if row is None:
         return None
@@ -294,7 +299,7 @@ def close_session(session: Session, session_id: int, ended_at: datetime, segment
     session.commit()
 
 
-def get_active_by_cert(session: Session, device_id: str, cert_no: str) -> dict[str, Any] | None:
+def get_active_by_cert(session: Session, device_id: str, cert_no: str) -> DoorSessionView | None:
     row = session.scalars(
         select(DoorSession)
         .where(
@@ -308,7 +313,7 @@ def get_active_by_cert(session: Session, device_id: str, cert_no: str) -> dict[s
     return _session_view(row, device_id) if row is not None else None
 
 
-def list_open_sessions_of(session: Session, device_id: str) -> list[dict[str, Any]]:
+def list_open_sessions_of(session: Session, device_id: str) -> list[DoorSessionView]:
     rows = session.scalars(
         select(DoorSession)
         .where(DoorSession.device_id == device_id, DoorSession.ended_at.is_(None))
@@ -347,7 +352,7 @@ def run_started_at(session: Session, device_id: str, door_no: int, cert_no: str,
 # ── 出水段 ──
 
 
-def get_open_segment(session: Session, device_id: str, door_no: int) -> dict[str, Any] | None:
+def get_open_segment(session: Session, device_id: str, door_no: int) -> DoorSegmentView | None:
     row = session.scalars(
         select(DoorSegment)
         .where(
@@ -441,11 +446,11 @@ def add_derived_segment(
     return int(row.id)
 
 
-def segments_of_session(session: Session, session_id: int) -> list[dict[str, Any]]:
+def segments_of_session(session: Session, session_id: int) -> list[DoorSegmentView]:
     rows = session.scalars(
         select(DoorSegment).where(DoorSegment.session_id == session_id).order_by(DoorSegment.opened_at, DoorSegment.id)
     ).all()
-    result: list[dict[str, Any]] = []
+    result: list[DoorSegmentView] = []
     for row in rows:
         result.append(_segment_view(row, str(row.device_id)))
     return result
@@ -477,7 +482,7 @@ def latest_usage_by_door(session: Session) -> dict[tuple[str, int], dict[str, An
     }
 
 
-def list_sessions(session: Session, device_id: str) -> list[dict[str, Any]]:
+def list_sessions(session: Session, device_id: str) -> list[DoorSessionView]:
     """这台设备的全部占用会话，按 id 升序（读模型与统计/核对共用）。"""
     rows = session.scalars(select(DoorSession).where(DoorSession.device_id == device_id).order_by(DoorSession.id)).all()
     return [_session_view(row, device_id) for row in rows]
