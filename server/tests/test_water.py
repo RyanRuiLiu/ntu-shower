@@ -72,7 +72,7 @@ def test_status_sends_no_business_params(
     sent: list[tuple[str, str, dict[str, int], float]] = []
     _stub_action(monkeypatch, sent)
 
-    response = client.get(f"/api/v1/devices/{DEVICE}/water-status", headers=admin_headers)
+    response = client.get(f"/api/v1/devices/{DEVICE}/water", headers=admin_headers)
 
     assert response.status_code == 200
     assert sent == [(DEVICE, actions.WATER_STATUS, {}, routes.WATER_ACTION_TIMEOUT_S)]
@@ -85,7 +85,7 @@ def test_water_endpoints_need_admin(client: TestClient, path: str) -> None:
 
 
 def test_water_status_needs_admin(client: TestClient) -> None:
-    response = client.get(f"/api/v1/devices/{DEVICE}/water-status")
+    response = client.get(f"/api/v1/devices/{DEVICE}/water")
     assert response.status_code == 401
 
 

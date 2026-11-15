@@ -21,9 +21,9 @@ object MessageTypes {
     const val DOOR_SNAPSHOT = "door.snapshot"
     const val DOOR_SNAPSHOT_ACK = "door.snapshot_ack"
 
-    // ── 淋浴会话 ──
-    const val SESSION_COMMAND = "session.command"
-    const val SESSION_COMMAND_RESULT = "session.command_result"
+    // ── 设备命令 ──
+    const val DEVICE_COMMAND = "device.command"
+    const val DEVICE_COMMAND_RESULT = "device.command_result"
 
     // ── 配置 ──
     const val CONFIG_UPDATE = "config.update"
@@ -52,8 +52,8 @@ object MessageTypes {
         LINK_ERROR,
         DOOR_SNAPSHOT,
         DOOR_SNAPSHOT_ACK,
-        SESSION_COMMAND,
-        SESSION_COMMAND_RESULT,
+        DEVICE_COMMAND,
+        DEVICE_COMMAND_RESULT,
         CONFIG_UPDATE,
         CONFIG_ACK,
         STATUS_LINE_UPDATE,

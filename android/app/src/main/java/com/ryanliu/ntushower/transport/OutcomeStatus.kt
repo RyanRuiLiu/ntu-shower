@@ -1,7 +1,7 @@
 package com.ryanliu.ntushower.transport
 
 /**
- * 命令结果状态（协议 `session.command_result.status` 的取值）。
+ * 命令结果状态（协议 `device.command_result.status` 的取值）。
  *
  * **本文件由 tools/sync_contracts.py 生成，不要手改**——改了会在下一轮生成时被覆盖，
  * 而 `tests/test_contract_sync.py` 也会立刻失败。要动取值，改服务端的
