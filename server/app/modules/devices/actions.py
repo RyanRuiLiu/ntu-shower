@@ -182,7 +182,7 @@ async def _send_and_wait(
     params: JsonObject,
     timeout_s: float = DEFAULT_TIMEOUT_S,
 ) -> CommandOutcome:
-    """下发 session.command 并等待结果或超时。
+    """下发 device.command 并等待结果或超时。
 
     同通道内串行排队，后来者等前面那条做完；仅当队列满时拒绝（过载信号）。
     """
@@ -308,7 +308,7 @@ async def _dispatch(
 
     try:
         envelope = protocol.envelope(
-            "session.command",
+            "device.command",
             {
                 "action": action,
                 "params": params,
@@ -408,7 +408,7 @@ def audit_data(action: str, data: object) -> dict[str, object] | None:
 
 
 def resolve(command_id: str, payload: JsonObject) -> bool:
-    """网关收到 session.command_result 时回填挂起中的 Future。"""
+    """网关收到 device.command_result 时回填挂起中的 Future。"""
     pending = _pending.pop(command_id, None)
     if pending is None:
         return False
