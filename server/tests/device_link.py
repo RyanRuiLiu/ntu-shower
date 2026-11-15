@@ -90,7 +90,7 @@ class DeadGatewayWS:
 
 @contextmanager
 def db() -> Iterator[Any]:
-    """测试里直接操作设备档案（新层）的短会话。"""
+    """测试里直接操作设备档案的短会话。"""
     from app.db.session import session_scope
 
     with session_scope() as session:

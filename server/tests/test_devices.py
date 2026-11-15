@@ -213,8 +213,8 @@ def test_set_name_unknown_device_returns_false(fresh_db: str) -> None:
 def test_corrupt_capabilities_are_read_as_empty(fresh_db: str) -> None:
     """capabilities 列被写成非数组形状时读为空列表（未声明态）。
 
-    旧表的 TEXT 列可能出现损坏 JSON；新表的 JSON 类型由 ORM 保证，只有「外部写成
-    非数组」这一种畸形在 as_record 里按未声明态处理。
+    JSON 类型由 ORM 保证，只有「外部写成非数组」这一种畸形在 as_record 里按
+    未声明态处理。
     """
     from sqlalchemy import text
 
