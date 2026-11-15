@@ -16,17 +16,17 @@
 `tests/test_jobs.py` 把这几处的对应关系钉住。
 """
 
-from app.modules.config.spec import GROUPS
+from app.modules.config.spec import EXTEND_HOURS_STUDENTS_KEY, GROUPS
 from app.modules.sessions import decision
 
 _TITLES: dict[str, str] = {group.key: group.title for group in GROUPS}
 
-#: [extend_hours] 不在 `JOBS`（判据表）里，所以它的键只有这一处。
+#: [extend_hours] 不在 `JOBS`（判据表）里，所以它的开关键只有这一处。
 _EXTEND_HOURS_KEY = "extend_hours"
 
 #: 看板行 = (任务键, 开关键, 名单键)。登记顺序即接口返回顺序，与配置页
-# 「后台任务」页签的顺序一致。
+# 「后台任务」页签的顺序一致。名单键取 spec 的常量（跨模块引用不写字面量）。
 JOBS: tuple[tuple[str, str, str], ...] = (
     *((spec.key, spec.enabled_key, spec.students_key) for spec in decision.JOBS),
-    (_EXTEND_HOURS_KEY, "extend_hours_enabled", "extend_hours_students"),
+    (_EXTEND_HOURS_KEY, "extend_hours_enabled", EXTEND_HOURS_STUDENTS_KEY),
 )

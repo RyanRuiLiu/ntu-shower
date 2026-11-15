@@ -101,7 +101,7 @@ def to_local(value: object, offset_minutes: int) -> datetime | None:
 
     偏移用**固定分钟数**而不是 IANA 时区名：服务对象所在的时区不实行夏令时，
     用固定偏移就不必引入 tz 数据库，也不会在切换日算错一小时。偏移的方向是
-    「本地 − UTC」（UTC+8 即 480），与 `extend_hours_zone_offset_minutes` 一致；
+    「本地 − UTC」（UTC+8 即 480），与 `server_zone_offset_minutes` 一致；
     JavaScript 的 `Date.getTimezoneOffset()` 给的是**反的**，调用方传进来之前要取负。
     """
     moment = parse_rfc3339(value)
