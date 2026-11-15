@@ -49,6 +49,7 @@ from app.modules.config import store as config_store
 from app.modules.devices import crud as devices_store
 
 from . import schemas, service
+from .actions import reject_overloaded
 from .dependencies import DEVICE_ACTION_TIMEOUT_S, device_action
 from .schemas import (
     DeviceClockSetRequest,
@@ -296,6 +297,22 @@ async def capture_screen(device_id: str, session: Session = Depends(get_db)) -> 
     screencap 均取不到画面（硬件合成器直出）。
     """
     return await device_action(session, device_id, actions.SCREEN_CAPTURE, {}, DEVICE_ACTION_TIMEOUT_S)
+
+
+@router.post(
+    "/devices/{device_id}/photo",
+    dependencies=[Security(caller, scopes=["devices:photo"]), Depends(device_scope_guard)],
+    summary="摄像头拍照",
+    responses=problem_responses(401, 403, 404, 409),
+)
+async def photo(device_id: str, session: Session = Depends(get_db)) -> CommandOutcome:
+    """摄像头拍照。要求 devices:photo 且设备在密钥作用域内。
+
+    挂在设备域：拍照是设备能力，与它操作的是哪场会话无关；屏幕抓取（/capture）
+    与摄像头拍照（/photo）在这里并列。
+    """
+    outcome = await device_action(session, device_id, actions.CAMERA_CAPTURE, {}, settings.photo_timeout_s)
+    return reject_overloaded(outcome)
 
 
 @device_router.post("/{device_id}/restart-app", summary="重启应用进程")

@@ -282,6 +282,19 @@ def test_device_action_endpoints_require_devices_write(client: TestClient) -> No
     assert client.post(f"/api/v1/devices/{DEVICE_ID}/exec", json={"command": "id"}).status_code == 401
 
 
+def test_photo_rejects_offline_device(client: TestClient, admin_headers: dict[str, str]) -> None:
+    """摄像头拍照（devices:photo 能力位）与屏幕抓取同守卫：已信任但离线 409，无请求体。"""
+    from app.modules.devices import crud as devices_store
+
+    assert client.post(f"/api/v1/devices/{DEVICE_ID}/photo", headers=admin_headers).status_code == 404
+
+    device_link.register_device_raw(DEVICE_ID)
+    with device_link.db() as session:
+        devices_store.set_trusted(session, DEVICE_ID, True)
+    assert client.post(f"/api/v1/devices/{DEVICE_ID}/photo", headers=admin_headers).status_code == 409
+    assert client.post(f"/api/v1/devices/{DEVICE_ID}/photo").status_code == 401
+
+
 @pytest.mark.parametrize(
     ("path", "action", "payload"),
     [
