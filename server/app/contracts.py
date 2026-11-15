@@ -191,6 +191,9 @@ class DeviceRecord(TypedDict):
     device_id: str
     name: str
     trusted: bool
+    retired: bool
+    """已停用：非真即正常在用。停用设备拒绝握手与自注册，历史数据全部保留。"""
+
     app_version: str
     version_code: int
     os_version: str

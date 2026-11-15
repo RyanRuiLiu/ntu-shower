@@ -45,6 +45,22 @@ def test_hello_with_wrong_protocol_version_is_rejected(client: TestClient, fresh
         assert err["payload"]["code"] == "proto.version_mismatch"
 
 
+def test_retired_device_handshake_is_rejected(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:
+    """已停用设备握手即拒：回 device.retired 并按策略码关闭（1008）。
+
+    停用的意义就在这里：设备还开着旧 APK 也收不上来数据——hello 在注册档案
+    之前就被拒，业务帧永远进不来。
+    """
+    device_link.register_trusted_device("dev-retired")
+    r = client.patch("/api/v1/devices/dev-retired", headers=admin_headers, json={"retired": True})
+    assert r.status_code == 200
+
+    with client.websocket_connect("/gateway/device") as ws:
+        ws.send_text(frames.hello_frame("dev-retired"))
+        err = frames.recv_until(ws, "link.error")
+        assert err["payload"]["code"] == "device.retired"
+
+
 def test_frame_with_wrong_protocol_version_closes_the_link(
     client: TestClient, admin_headers: dict[str, str], fresh_db: str
 ) -> None:
@@ -375,7 +391,7 @@ def test_device_update_push_is_trimmed_summary(fresh_db: str) -> None:
 
     assert message["type"] == "device.update"
     payload = message["payload"]
-    assert set(payload) == {"device_id", "name", "online", "at"}
+    assert set(payload) == {"device_id", "name", "online", "retired", "at"}
     assert payload["online"] is False
 
 

@@ -8,11 +8,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.modules.config.models import AppSettings
-from app.modules.devices.models import DeviceConfig
+from app.modules.devices.models import Device
 
 GLOBAL_ROW_ID = 1
 #: 库里还没有这一行时（全新安装、尚未写过任何覆盖）对外呈现的修订号：
@@ -38,25 +37,19 @@ def put_global(session: Session, revision: int, values: dict[str, Any]) -> None:
 
 
 def get_device(session: Session, device_id: str) -> tuple[int, dict[str, Any]] | None:
-    row = session.scalars(select(DeviceConfig).where(DeviceConfig.device_id == device_id)).one_or_none()
-    if row is None:
+    """设备的覆盖差异；从未覆盖过（修订号 0）时给 None——两者是同一件事。"""
+    row = session.get(Device, device_id)
+    if row is None or row.config_revision == 0:
         return None
-    return (int(row.revision), dict(row.config))
+    return (int(row.config_revision), dict(row.config_override or {}))
 
 
 def put_device(session: Session, device_id: str, revision: int, values: dict[str, Any]) -> None:
-    row = session.scalars(select(DeviceConfig).where(DeviceConfig.device_id == device_id)).one_or_none()
+    row = session.get(Device, device_id)
     if row is None:
-        session.add(
-            DeviceConfig(
-                device_id=device_id,
-                revision=revision,
-                config=values,
-            )
-        )
-    else:
-        row.revision = revision
-        row.config = values
+        return
+    row.config_revision = revision
+    row.config_override = values
     session.commit()
 
 

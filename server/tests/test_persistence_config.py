@@ -58,17 +58,12 @@ def test_device_override_roundtrip(session: Session) -> None:
     assert config.get_device(session, "dev-a") == (2, {"voice.volume": 4})
 
 
-def test_missing_device_config_is_rejected(session: Session) -> None:
-    """未登记设备的配置写入被外键拒绝。
+def test_missing_device_config_write_is_a_no_op(session: Session) -> None:
+    """未登记设备的配置写入是 no-op。
 
-    配置是每台设备的运行状态（FK CASCADE）：设备除档后配置随之消失，不存在
-    "未登记也照写"的形态。与审计事实表（无外键、事实保留）刻意不同。
+    覆盖记在设备影子行上：没有设备就没有可写的行。HTTP 路径到不了这里
+    （device_scope_guard 先挡），这一层只是不给自己造行。
     """
-    import pytest
-    from sqlalchemy.exc import IntegrityError
-
     assert config.get_device(session, "missing") is None
-    with pytest.raises(IntegrityError):
-        config.put_device(session, "missing", 1, {"x": 1})
-    session.rollback()
+    config.put_device(session, "missing", 1, {"x": 1})
     assert config.get_device(session, "missing") is None
