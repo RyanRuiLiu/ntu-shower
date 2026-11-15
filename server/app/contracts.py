@@ -180,25 +180,32 @@ class JobRun(TypedDict):
     threshold_s: int | None
 
 
-class DeviceRecord(TypedDict):
-    """一台设备的档案。
+class DeviceSummary(TypedDict):
+    """设备的精简视图：可辨识、在场状态与停用位，用户面与实时推送共用。
 
-    除 online 外各字段对应 repository 的 _DEVICE_COLUMNS；trusted 的 0/1 到布尔的
-    转换在 repository 完成。online 不在档案表里，由 devices.service 从内存连接表
-    填入：只有经过 service 的记录才带正确的值。
+    版本、来源 IP 等运维诊断字段不在此列，只出现在完整档案（DeviceRecord）与
+    管理面接口里。device.update 的载荷即本形状加 `at` 一项（见 devices.service）。
     """
 
     device_id: str
     name: str
-    trusted: bool
+    online: bool
     retired: bool
     """已停用：非真即正常在用。停用设备拒绝握手与自注册，历史数据全部保留。"""
 
+
+class DeviceRecord(DeviceSummary):
+    """一台设备的档案（= DeviceSummary + 运维诊断字段）。
+
+    trusted 的 0/1 到布尔的转换在 repository 完成。online 不在档案表里，由
+    devices.service 从内存连接表填入：只有经过 service 的记录才带正确的值。
+    """
+
+    trusted: bool
     app_version: str
     version_code: int
     os_version: str
     capabilities: list[str]
-    online: bool
     last_seen_at: str
     last_ip: str
     booted_at: str
@@ -339,6 +346,7 @@ __all__: list[str] = [
     "CommandStatus",
     "DeviceLogKind",
     "DeviceRecord",
+    "DeviceSummary",
     "DoorState",
     "DoorView",
     "JobOutcome",
