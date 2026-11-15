@@ -8,9 +8,9 @@ reported 部分共用它。"设备不存在"以 404（DEVICE_NOT_FOUND）表达�
 from typing import Literal
 
 from pydantic import BaseModel, Field
-from typing_extensions import TypedDict
 
 from app.contracts import DeviceRecord as DeviceRecord
+from app.contracts import DeviceSummary as DeviceSummary
 
 #: 链路事件的两种取值。
 #:
@@ -19,19 +19,6 @@ from app.contracts import DeviceRecord as DeviceRecord
 #: （见 gateway 的存活探针）。
 LINK_ONLINE = "online"
 LINK_OFFLINE = "offline"
-
-
-class DeviceSummary(TypedDict):
-    """设备的精简视图：可辨识与在场状态，用户面与实时推送共用。
-
-    版本、来源 IP 等运维诊断字段不在此列，只出现在完整档案（DeviceRecord）与
-    管理面接口里。device.update 的载荷即本形状加 `at` 一项（见 devices.service）。
-    """
-
-    device_id: str
-    name: str
-    online: bool
-    retired: bool
 
 
 class DeviceListItem(DeviceSummary):

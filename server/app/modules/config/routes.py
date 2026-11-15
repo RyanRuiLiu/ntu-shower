@@ -66,7 +66,7 @@ def _validated_device_overrides(values: ConfigValues) -> ConfigValues:
     return checked
 
 
-@admin_router.get("/config/spec", dependencies=[Security(caller, scopes=["config:read"])])
+@admin_router.get("/config/spec", dependencies=[Security(caller, scopes=["config:read"])], summary="配置登记表")
 def get_config_spec() -> ConfigSpecCatalog:
     """配置登记表：每个键的类型、范围、默认值、归属、分组与说明。
 
@@ -79,14 +79,14 @@ def get_config_spec() -> ConfigSpecCatalog:
     }
 
 
-@admin_router.get("/config", dependencies=[Security(caller, scopes=["config:read"])])
+@admin_router.get("/config", dependencies=[Security(caller, scopes=["config:read"])], summary="全局配置现值")
 def get_global_config(session: Session = Depends(get_db)) -> GlobalConfigView:
     """全局配置的当前有效值（默认值叠加全局覆盖）。"""
     revision, _overrides = store.get_global_overrides(session)
     return {"revision": revision, "config": store.global_effective(session)}
 
 
-@admin_router.put("/config", dependencies=[Security(caller, scopes=["config:write"])])
+@admin_router.put("/config", dependencies=[Security(caller, scopes=["config:write"])], summary="更新全局配置并推送")
 async def put_global_config(req: ConfigUpdateRequest, session: Session = Depends(get_db)) -> GlobalConfigUpdateReport:
     """更新全局覆盖，并把新的有效配置推送给所有在线设备。"""
     _before_revision, before = store.get_global_overrides(session)
@@ -114,6 +114,7 @@ async def put_global_config(req: ConfigUpdateRequest, session: Session = Depends
 
 @admin_router.get(
     "/devices/{device_id}/config",
+    summary="单台设备配置",
     dependencies=[Security(caller, scopes=["config:read"]), Depends(device_scope_guard)],
 )
 def get_device_config(device_id: str, session: Session = Depends(get_db)) -> DeviceConfigView:
@@ -133,6 +134,7 @@ def get_device_config(device_id: str, session: Session = Depends(get_db)) -> Dev
 @admin_router.put(
     "/devices/{device_id}/config",
     dependencies=[Security(caller, scopes=["config:write"]), Depends(device_scope_guard)],
+    summary="设置单台覆盖并推送",
 )
 async def put_device_config(
     device_id: str, req: ConfigUpdateRequest, session: Session = Depends(get_db)

@@ -14,10 +14,10 @@ from sqlalchemy import JSON, Boolean, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.contracts import DeviceLogKind, LinkEvent
-from app.db.base import Base, UtcDateTime, enum_column, utcnow
+from app.db.base import Base, CreatedAtMixin, TimestampMixin, UtcDateTime, enum_column
 
 
-class Device(Base):
+class Device(TimestampMixin, Base):
     """一台中控设备的影子行。"""
 
     __tablename__ = "devices"
@@ -48,11 +48,9 @@ class Device(Base):
     #: 停用位：非空即已除档。停用设备拒绝握手与自注册，历史数据全部保留。
     retired_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow, onupdate=utcnow)
 
 
-class DeviceCredential(Base):
+class DeviceCredential(CreatedAtMixin, Base):
     """设备接入凭证。
 
     只存哈希，不存明文：数据库泄露不等于设备被接管。
@@ -66,11 +64,10 @@ class DeviceCredential(Base):
     #: SHA-256(token)；token 本身是 32 字节随机串，熵足够，不需要慢哈希
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     label: Mapped[str] = mapped_column(String(64), default="")
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
     revoked_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
 
 
-class DeviceLog(Base):
+class DeviceLog(CreatedAtMixin, Base):
     """设备上送的日志，每个（设备，kind）只留最近 `LOG_KEEP` 份（见 devices.crud）。"""
 
     __tablename__ = "device_logs"
@@ -81,10 +78,9 @@ class DeviceLog(Base):
     kind: Mapped[DeviceLogKind] = mapped_column(enum_column(DeviceLogKind, "device_log_kind"))
     content: Mapped[str] = mapped_column(Text)
     uploaded_at: Mapped[datetime] = mapped_column(UtcDateTime)
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
 
 
-class DeviceLinkEvent(Base):
+class DeviceLinkEvent(CreatedAtMixin, Base):
     """设备上下线事件，保留 90 天。"""
 
     __tablename__ = "device_link_events"
@@ -95,4 +91,3 @@ class DeviceLinkEvent(Base):
     occurred_at: Mapped[datetime] = mapped_column(UtcDateTime, index=True)
     event: Mapped[LinkEvent] = mapped_column(enum_column(LinkEvent, "link_event"))
     reason: Mapped[str] = mapped_column(String(128), default="")
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
