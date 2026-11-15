@@ -244,7 +244,7 @@ class AgentService : Service() {
                     sender.onAcked(envelope.payload.optString("snapshot_id"), client)
                 }
 
-                MessageTypes.SESSION_COMMAND -> dispatchCommand(envelope)
+                MessageTypes.DEVICE_COMMAND -> dispatchCommand(envelope)
 
                 MessageTypes.CONFIG_UPDATE -> applyConfig(envelope)
 
@@ -518,7 +518,7 @@ class AgentService : Service() {
             TAG,
             "command result: id=${outcome.commandId} status=${outcome.status} reason=${outcome.reasonCode}",
         )
-        client.send(MessageTypes.SESSION_COMMAND_RESULT, payload, replyTo = outcome.commandId)
+        client.send(MessageTypes.DEVICE_COMMAND_RESULT, payload, replyTo = outcome.commandId)
     }
 
     /**

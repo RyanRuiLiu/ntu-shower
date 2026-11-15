@@ -12,7 +12,7 @@ import com.ryanliu.ntushower.transport.ReasonCodes
 import org.json.JSONObject
 import java.io.File
 
-/** 一条语音命令的执行结果，与 `session.command_result` 的字段对应。 */
+/** 一条语音命令的执行结果，与 `device.command_result` 的字段对应。 */
 data class VoiceResult(val status: String, val reasonCode: String, val message: String, val data: JSONObject? = null)
 
 /**

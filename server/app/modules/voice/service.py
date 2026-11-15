@@ -713,7 +713,7 @@ def _clip_from_row(row: dict[str, Any]) -> ClipPlan:
 
 
 def _clip_payload(clip: ClipPlan) -> dict[str, object]:
-    """协议面（session.command 参数）与预下载面（VOICE_PREPARE 参数）共用的片段四字段。"""
+    """协议面（device.command 参数）与预下载面（VOICE_PREPARE 参数）共用的片段四字段。"""
     return {
         "clip_id": clip.clip_id,
         "sha256": clip.sha256,
