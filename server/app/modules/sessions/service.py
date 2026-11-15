@@ -1,25 +1,24 @@
-"""会话域服务：分配、结算、拍照的领域入口（HTTP 与后台任务共用）。
+"""会话域服务：分配、结算的领域入口（HTTP 与后台任务共用）。
 
 从 routes 下沉的原因：scheduler（自动结算/续期）与 extend_hours（延长服务）
 复用同一套「预检 + 下发 + 过载拒绝」，领域入口不该住在 HTTP 层里——否则
 scheduler 与他模块的 service 反向 import routes，导入顺序脆弱且有循环。
 
-命令传输（下发、排队、审计、等待）在 devices.actions：那是设备 I/O，不属于
-任何单个业务功能。
+命令传输（下发、排队、审计、等待）与过载转换（reject_overloaded）都在
+devices.actions：那是设备 I/O，不属于任何单个业务功能。
 """
 
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import require_trusted_online_device
 from app.contracts import CommandOutcome
-from app.core import actions, outcomes
+from app.core import actions
 from app.core.config import settings
 from app.core.problems import (
     DOOR_NOT_FOUND,
     DOOR_NOT_FREE,
     DUPLICATE_SESSION,
     NO_OCCUPIED_DOOR,
-    SERVER_OVERLOADED,
     ApiProblemError,
 )
 from app.modules.devices import actions as device_actions
@@ -49,17 +48,6 @@ def _reject_duplicate_session(session: Session, device_id: str, cert_no: str) ->
         raise ApiProblemError(DUPLICATE_SESSION, f"该学号已在喷头 {door_no} 有进行中的会话")
 
 
-def _reject_overload(result: CommandOutcome) -> CommandOutcome:
-    """通道排队满时把拒绝转成领域异常（HTTP 层转 409）。
-
-    这不是"设备忙"：同通道的先后命令会排队执行，只有队满才拒。前者说明设备正
-    忙、等一会就好；后者说明积压已多、该换个时间再来。
-    """
-    if result.get("status") == outcomes.REJECTED.value:
-        raise ApiProblemError(SERVER_OVERLOADED, f"原因码：{result.get('reason_code')}")
-    return result
-
-
 async def perform_assign(session: Session, device_id: str, req: AssignRequest) -> CommandOutcome:
     """分配喷头的领域逻辑，所有调用方共用。"""
     require_trusted_online_device(device_id, session)
@@ -72,7 +60,7 @@ async def perform_assign(session: Session, device_id: str, req: AssignRequest) -
         {"door_no": req.door_no, "cert_no": req.cert_no, "password": req.password},
         timeout_s=settings.assign_timeout_s,
     )
-    return _reject_overload(result)
+    return device_actions.reject_overloaded(result)
 
 
 async def perform_settle(session: Session, device_id: str, req: SettleRequest) -> CommandOutcome:
@@ -87,17 +75,4 @@ async def perform_settle(session: Session, device_id: str, req: SettleRequest) -
         {"cert_no": req.cert_no, "password": req.password},
         timeout_s=settings.settle_timeout_s,
     )
-    return _reject_overload(result)
-
-
-async def perform_photo(session: Session, device_id: str) -> CommandOutcome:
-    """拍照的领域逻辑。"""
-    require_trusted_online_device(device_id, session)
-    result = await device_actions.send_command_and_wait(
-        session,
-        device_id,
-        actions.CAMERA_CAPTURE,
-        {},
-        timeout_s=settings.photo_timeout_s,
-    )
-    return _reject_overload(result)
+    return device_actions.reject_overloaded(result)
