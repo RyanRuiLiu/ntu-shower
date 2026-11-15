@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.dependencies import caller, device_scope_guard, require_trusted_online_device
 from app.core.connections import manager
+from app.core.errors import problem_responses
 from app.core.logging import log_event
 from app.core.problems import INVALID_CONFIG, ApiProblemError
 from app.db.deps import get_db
@@ -29,7 +30,7 @@ from .schemas import (
 )
 from .spec import GROUPS, SECTIONS, SERVER, SPECS_BY_KEY
 
-admin_router = APIRouter(prefix="/api/v1", tags=["config"])
+admin_router = APIRouter(prefix="/api/v1", tags=["config"], responses=problem_responses(401, 403, 422))
 
 
 class ConfigUpdateRequest(BaseModel):
@@ -118,10 +119,10 @@ async def put_global_config(req: ConfigUpdateRequest, session: Session = Depends
     dependencies=[Security(caller, scopes=["config:read"]), Depends(device_scope_guard)],
 )
 def get_device_config(device_id: str, session: Session = Depends(get_db)) -> DeviceConfigView:
-    """该设备的有效配置与它自己的覆盖项（区分"被特殊设置过"与"跟随全局"）。
+    """该设备的有效配置与它自己的覆盖项（区分「已单独覆盖」与「跟随全局」）。
 
-    `revision` 是**这台设备自己的覆盖修订号**，没有覆盖时为 0；它与全局那个各自计数、
-    不能比大小。要看全局的走 `GET /api/v1/config`。
+    `revision` 是**这台设备自身的覆盖修订号**，没有覆盖时为 0；它与全局修订号
+    各自独立计数，不可相互比较。全局有效值见 `GET /api/v1/config`。
     """
     override = store.get_device_overrides(session, device_id)
     return {
@@ -135,6 +136,7 @@ def get_device_config(device_id: str, session: Session = Depends(get_db)) -> Dev
     "/devices/{device_id}/config",
     dependencies=[Security(caller, scopes=["config:write"]), Depends(device_scope_guard)],
     summary="设置单台覆盖并推送",
+    responses=problem_responses(404, 409),
 )
 async def put_device_config(
     device_id: str, req: ConfigUpdateRequest, session: Session = Depends(get_db)

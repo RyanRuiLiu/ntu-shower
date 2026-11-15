@@ -23,17 +23,17 @@ Student = Annotated[str, StringConstraints(strip_whitespace=True, pattern=r"^[\x
 class FreelistRequest(BaseModel):
     """整份替换免费名单。
 
-    空列表是合法输入：名单为空即没人免费，那是设备上那份原件的既有语义（不是"没填"）。
+    空列表是合法输入：名单为空即无免费人员，这是设备上原件的既有语义（不是「未填写」）。
     """
 
-    students: list[Student] = Field(description="名单，一行一个学号；空列表表示没人免费")
+    students: list[Student] = Field(description="名单，每行一个学号；空列表表示无免费人员")
 
 
 class FreelistRead(TypedDict):
     """读免费名单的结果：命令结果三项 + 拆好的行。
 
-    status 非 ok 时 students 为空，而**空列表不等于"读不到"**：空名单是一个合法且
-    有意义的状态（没人免费），两者混在一起会让人以为名单被清空了。
+    status 非 ok 时 students 为空，而**空列表不等于「读不到」**：空名单是一个合法且
+    有意义的状态（无免费人员），两者混在一起会使调用方误以为名单已被清空。
     """
 
     status: str

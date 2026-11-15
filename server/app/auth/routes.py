@@ -28,6 +28,7 @@ from fastapi import APIRouter, Depends, Request, Response, Security
 from sqlalchemy.orm import Session
 
 from app.contracts import Caller
+from app.core.errors import problem_responses
 from app.core.logging import log_event
 from app.core.problems import (
     KEY_NOT_FOUND,
@@ -69,10 +70,11 @@ admin_router = APIRouter(
     prefix="/api/v1/users",
     dependencies=[Security(caller, scopes=["users:write"])],
     tags=["users-admin"],
+    responses=problem_responses(401, 403, 404, 422),
 )
 
 
-@router.post("/login", status_code=204, summary="口令登录")
+@router.post("/login", status_code=204, summary="口令登录", responses=problem_responses(401, 422))
 def login(request: Request, body: LoginRequest, session: Session = Depends(get_db)) -> Response:
     """口令校验通过即签发会话（204 无体：账号事实由 GET /users/me 提供）。
 
@@ -91,13 +93,13 @@ def login(request: Request, body: LoginRequest, session: Session = Depends(get_d
 
 @router.post("/logout", status_code=204, summary="退出登录")
 def logout(request: Request) -> None:
-    """注销即清空会话：SessionMiddleware 把置空后的会话下发成一条过期 Cookie。"""
+    """注销即清空会话：SessionMiddleware 将置空后的会话下发为过期 Cookie。"""
     request.session.clear()
 
 
-@identity_router.get("/me", response_model=MeView, summary="当前调用方身份")
+@identity_router.get("/me", response_model=MeView, summary="当前调用方身份", responses=problem_responses(401))
 def who(caller: Caller = Depends(caller)) -> MeView:
-    """调用方自身视图：我是谁、我有什么权限。外部调用方据此验证自己的密钥。"""
+    """调用方自身视图：账号身份与权限集合。外部调用方据此验证自己的密钥。"""
     return MeView(
         username=caller["username"],
         name=caller["name"],
@@ -118,7 +120,7 @@ def list_users(session: Session = Depends(get_db)) -> UserCatalog:
 
 @admin_router.post("", response_model=UserView, summary="登记用户")
 def create_user(req: UserCreate, session: Session = Depends(get_db)) -> UserView:
-    """登记一个用户。username 撞上既有用户整体拒绝（编辑请用 PUT）。"""
+    """登记一个用户。username 与既有用户重名时整体拒绝（编辑请用 PUT）。"""
     if crud.find_row(session, req.username) is not None:
         raise ApiProblemError(VALIDATION_FAILED, "该用户名已存在，编辑请用 PUT")
     user = crud.create_user(session, req.username, req.name, req.password)
@@ -149,7 +151,7 @@ def delete_user(username: str, caller: Caller = Depends(caller), session: Sessio
 
 @admin_router.post("/{username}/keys", response_model=KeyIssued, summary="签发密钥")
 def issue_key(username: str, req: KeyCreate, session: Session = Depends(get_db)) -> KeyIssued:
-    """给用户签发一枚密钥：权限集 + 设备作用域都附在密钥上，明文只此一次。"""
+    """为用户签发一枚密钥：权限集与设备作用域均附于密钥，明文仅出现一次。"""
     _validated_scopes(req.scopes)
     _validated_device_scope(session, req.device_scope)
     issued = crud.issue_key(session, username, req.name, req.scopes, req.device_scope)
@@ -162,7 +164,7 @@ def issue_key(username: str, req: KeyCreate, session: Session = Depends(get_db))
 
 @admin_router.get("/{username}/keys", response_model=UserKeys, summary="用户的密钥清单")
 def list_keys(username: str, session: Session = Depends(get_db)) -> UserKeys:
-    """该用户的全部密钥（含已吊销——吊销历史本身是要看的事实）。"""
+    """该用户的全部密钥（含已吊销：吊销历史本身即为需要保留的事实）。"""
     if crud.find_row(session, username) is None:
         raise ApiProblemError(USER_NOT_FOUND, username)
     return UserKeys(keys=[KeyView(**key) for key in crud.list_keys(session, username)])
@@ -189,7 +191,7 @@ def update_key(username: str, key_id: int, req: KeyUpdate, session: Session = De
 
 @admin_router.delete("/{username}/keys/{key_id}", status_code=204, summary="吊销密钥")
 def revoke_key(username: str, key_id: int, session: Session = Depends(get_db)) -> Response:
-    """吊销单枚密钥：该枚下一次请求即 401，同用户其他密钥不受影响。幂等。"""
+    """吊销单枚密钥：该密钥自下一次请求起返回 401，同一用户的其他密钥不受影响。幂等。"""
     crud.revoke_key(session, username, key_id)
     return Response(status_code=204)
 
