@@ -285,7 +285,6 @@ def upgrade() -> None:
         sa.UniqueConstraint("device_id", "snapshot_id", name="uq_door_snapshots_device_id_snapshot_id"),
     )
     with op.batch_alter_table("door_snapshots", schema=None) as batch_op:
-        batch_op.create_index(batch_op.f("ix_door_snapshots_device_id"), ["device_id"], unique=False)
         batch_op.create_index(batch_op.f("ix_door_snapshots_received_at"), ["received_at"], unique=False)
 
     op.create_table(
@@ -382,8 +381,6 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id", name=op.f("pk_door_states")),
         sa.UniqueConstraint("device_id", "door_no", name="uq_door_states_device_id_door_no"),
     )
-    with op.batch_alter_table("door_states", schema=None) as batch_op:
-        batch_op.create_index(batch_op.f("ix_door_states_device_id"), ["device_id"], unique=False)
 
     op.create_table(
         "ota_release_installs",
@@ -438,7 +435,6 @@ def upgrade() -> None:
     )
     with op.batch_alter_table("door_sessions", schema=None) as batch_op:
         batch_op.create_index(batch_op.f("ix_door_sessions_cert_no"), ["cert_no"], unique=False)
-        batch_op.create_index(batch_op.f("ix_door_sessions_device_id"), ["device_id"], unique=False)
         batch_op.create_index(
             "ix_door_sessions_device_id_door_no_assigned_at", ["device_id", "door_no", "assigned_at"], unique=False
         )
@@ -604,7 +600,6 @@ def downgrade() -> None:
     op.drop_table("voice_deliveries")
     with op.batch_alter_table("door_sessions", schema=None) as batch_op:
         batch_op.drop_index("ix_door_sessions_device_id_door_no_assigned_at")
-        batch_op.drop_index(batch_op.f("ix_door_sessions_device_id"))
         batch_op.drop_index(batch_op.f("ix_door_sessions_cert_no"))
 
     op.drop_table("door_sessions")
