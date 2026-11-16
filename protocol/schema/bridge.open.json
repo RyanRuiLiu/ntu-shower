@@ -1,10 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://<public-domain>/schema/bridge.open.json",
+  "$id": "https://example.com/schema/bridge.open.json",
   "title": "Server request to open the device ADB bridge tunnel",
   "allOf": [
     {
-      "$ref": "https://<public-domain>/schema/envelope.json"
+      "$ref": "https://example.com/schema/envelope.json"
     },
     {
       "type": "object",
