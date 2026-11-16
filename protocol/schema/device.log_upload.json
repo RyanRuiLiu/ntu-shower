@@ -1,10 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://<public-domain>/schema/device.log_upload.json",
+  "$id": "https://example.com/schema/device.log_upload.json",
   "title": "Device log upload (device to server)",
   "allOf": [
     {
-      "$ref": "https://<public-domain>/schema/envelope.json"
+      "$ref": "https://example.com/schema/envelope.json"
     },
     {
       "type": "object",

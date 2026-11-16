@@ -1,10 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://<public-domain>/schema/link.ping.json",
+  "$id": "https://example.com/schema/link.ping.json",
   "title": "Heartbeat ping (either side)",
   "allOf": [
     {
-      "$ref": "https://<public-domain>/schema/envelope.json"
+      "$ref": "https://example.com/schema/envelope.json"
     },
     {
       "type": "object",
@@ -19,7 +19,7 @@
           ],
           "properties": {
             "sender_time": {
-              "$ref": "https://<public-domain>/schema/envelope.json#/$defs/rfc3339"
+              "$ref": "https://example.com/schema/envelope.json#/$defs/rfc3339"
             }
           }
         }
