@@ -19,10 +19,13 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: RyanRuiLiu/.github/.github/workflows/docker.yml@50f1db0fe86a340270ec29c107af14d17e173998
+    uses: RyanRuiLiu/.github/.github/workflows/docker.yml@06c241f9da2252fa739a8e98652d7c718f4a765c
+    # registry/namespace 是部署侧私有值（同 compose 的 NTU_SHOWER_IMAGE）：以
+    # secrets 传入，不落在任何公开文件里。共享仓对空输入回退合法 local 名，
+    # fork PR 拿不到 secrets 也能完成 build-only 校验。
     with:
-      acr_registry: <registry>
-      acr_namespace: <namespace>
+      acr_registry: ${{ secrets.ACR_REGISTRY }}
+      acr_namespace: ${{ secrets.ACR_NAMESPACE }}
     secrets:
       ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
       ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
