@@ -8,7 +8,7 @@
 |---|---|---|
 | 根目录 `compose.yaml` | `/opt/ntu-shower/compose.yaml` | `NTU_SHOWER_TAG=<tag> docker compose -f /opt/ntu-shower/compose.yaml up -d` |
 | `litestream.yml` | `/etc/ntu-shower/litestream.yml` | `docker compose restart litestream` |
-| `nginx/ntu-shower.conf` | `/etc/nginx/sites-enabled/<public-domain>.conf`（**独立文件，非软链**：sites-available 与 enabled 是两份拷贝，只写 enabled 才生效） | `nginx -t && systemctl reload nginx` |
+| `nginx/ntu-shower.conf` | `/etc/nginx/sites-enabled/<public-domain>.conf`（**独立文件，非软链**：sites-available 与 enabled 是两份拷贝，只写 enabled 才生效） | 见下方「nginx 同步程序」（reload 在本机曾静默失效，以 restart 兜底） |
 | `publish_apk.ps1` | **不上服务器**：本地工具 | `.\deploy\publish_apk.ps1 -Token <admin 的 API Bearer 凭据>` |
 
 ## 部署（自动为主，手动兜底）
@@ -26,6 +26,27 @@ scp deploy/litestream.yml <deploy-user>@<deploy-host>:/etc/ntu-shower/litestream
 ssh <deploy-user>@<deploy-host> "cd /opt/ntu-shower && NTU_SHOWER_TAG=sha-<短哈希> docker compose pull ntu-shower && NTU_SHOWER_TAG=sha-<短哈希> docker compose up -d"
 ssh <deploy-user>@<deploy-host> "curl -s http://127.0.0.1:8110/healthz"
 ```
+
+## nginx 同步程序（2026-11-17 实测修订）
+
+```bash
+# 1. 仓库事实源 → 真实值（占位符 <public-domain>/<deploy-host> 填服务器实值），scp 到 /tmp
+# 2. 备份现网配置——必须落在 sites-enabled 之外（include 通配会把备份一并加载）
+ssh <deploy-user>@<deploy-host> "mkdir -p /var/backups/manual/nginx && cp /etc/nginx/sites-enabled/<public-domain>.conf /var/backups/manual/nginx/conf.bak-$(date +%Y%m%d)"
+# 3. 替换 + 语法测试 + 重载
+ssh <deploy-user>@<deploy-host> "cp /tmp/ntu-conf-new.conf /etc/nginx/sites-enabled/<public-domain>.conf && nginx -t && (systemctl reload nginx || systemctl restart nginx)"
+```
+
+**生效必须用行为探针证明**，`nginx -t` 通过与 reload 退出码都不构成证据——本机曾出现
+reload 与直接 HUP 均返回成功、worker 进程却未更换的静默失效（2026-11-17 实证，改
+`systemctl restart` 解决，原因未明）：
+
+```bash
+ssh <deploy-user>@<deploy-host> "ps -o pid,lstart -C nginx --no-headers"   # worker 启动时间应为刚才
+# 限速变更：洪泛探针对照 burst 数字（如登录 1r/s burst=5 + 12 并发 = 6 放行 6 拒绝）
+```
+
+失败回滚：把备份 `cp` 回原位并 `systemctl restart nginx`。
 
 ## 备份与恢复（LiteStream，litestream.io v0.3）
 
