@@ -1,10 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://<public-domain>/schema/door.snapshot.json",
+  "$id": "https://example.com/schema/door.snapshot.json",
   "title": "Full door status snapshot from device (raw fields, no derivation)",
   "allOf": [
     {
-      "$ref": "https://<public-domain>/schema/envelope.json"
+      "$ref": "https://example.com/schema/envelope.json"
     },
     {
       "type": "object",
@@ -22,7 +22,7 @@
           ],
           "properties": {
             "snapshot_id": {
-              "$ref": "https://<public-domain>/schema/envelope.json#/$defs/uuid"
+              "$ref": "https://example.com/schema/envelope.json#/$defs/uuid"
             },
             "source": {
               "enum": [
@@ -107,7 +107,7 @@
     "null_or_time": {
       "oneOf": [
         {
-          "$ref": "https://<public-domain>/schema/envelope.json#/$defs/rfc3339"
+          "$ref": "https://example.com/schema/envelope.json#/$defs/rfc3339"
         },
         {
           "type": "null"
