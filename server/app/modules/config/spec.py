@@ -38,7 +38,10 @@ class ConfigKind(StrEnum):
 #: `HH:MM` 形式的一天内时刻，小时 00–23、分钟 00–59。时刻这个类型的全部知识都在下面
 #: 这两个函数里——怎么认它、怎么让它与分钟数互相换算。校验（[spec.py] 的范围）与测试
 #: （默认值在不在范围内）都要用它，写第二份的地方必然与第一份漂移。
-_TIME_PATTERN = re.compile(r"([01]\d|2[0-3]):([0-5]\d)")
+# `HH:MM` 的唯一出处：本模块 TIME 键与语音规则的生效时段共用同一形状。
+# 锚定形态同时服务 re.fullmatch 与 Pydantic Field(pattern=)。
+TIME_PATTERN = r"^([01]\d|2[0-3]):([0-5]\d)$"
+_TIME_RE = re.compile(TIME_PATTERN)
 
 #: 星期值的唯一形状：ASCII `1`–`7`。ISO 编号，周一=1、周日=7。
 _WEEKDAY_PATTERN = re.compile(r"[1-7]")
@@ -46,7 +49,7 @@ _WEEKDAY_PATTERN = re.compile(r"[1-7]")
 
 def parse_time(value: str) -> int | None:
     """`HH:MM` → 自 0 点起的分钟数；格式不对给 None。"""
-    matched = _TIME_PATTERN.fullmatch(value)
+    matched = _TIME_RE.fullmatch(value)
     if matched is None:
         return None
     return int(matched.group(1)) * 60 + int(matched.group(2))
@@ -179,6 +182,18 @@ WEEKDAYS = ConfigKind.WEEKDAYS
 #: 跨模块引用的配置键名。以字符串字面量散落在消费方迟早漂移（登记表改名一处、
 #: 消费方三处），跨模块引用一律取这里的常量。
 EXTEND_HOURS_STUDENTS_KEY = "extend_hours_students"
+SERVER_ZONE_OFFSET_MINUTES_KEY = "server_zone_offset_minutes"
+POWER_ON_AT_KEY = "power_on_at"
+POWER_OFF_AT_KEY = "power_off_at"
+EXTEND_SHIFT_MINUTES_KEY = "extend_shift_minutes"
+EXTEND_HOURS_ENABLED_KEY = "extend_hours_enabled"
+EXTEND_HOURS_AT_KEY = "extend_hours_at"
+TIME_SYNC_ENABLED_KEY = "time_sync_enabled"
+TIME_SYNC_THRESHOLD_S_KEY = "time_sync_threshold_s"
+BRIDGE_SSH_TARGET_KEY = "bridge_ssh_target"
+BRIDGE_MAX_LIFETIME_S_KEY = "bridge_max_lifetime_s"
+BRIDGE_PAIR_TIMEOUT_S_KEY = "bridge_pair_timeout_s"
+VOICE_EVENT_MAX_AGE_S_KEY = "voice_event_max_age_s"
 
 
 #: 全部配置键的规格。新增配置键时只改这里——服务端校验、客户端渲染、文档

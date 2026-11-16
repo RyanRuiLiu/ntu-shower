@@ -46,9 +46,8 @@ from app.core.tokens import extract_bearer, hash_token
 from app.db.base import utcnow
 from app.db.deps import get_db
 from app.modules.config import store as config_store
-from app.modules.devices import crud as devices_store
 
-from . import schemas, service
+from . import crud, schemas, service
 from .actions import reject_overloaded
 from .dependencies import DEVICE_ACTION_TIMEOUT_S, device_action
 from .schemas import (
@@ -93,11 +92,11 @@ def enroll_device(
     if not configured or claim is None or not hmac.compare_digest(hash_token(claim), hash_token(configured)):
         raise ApiProblemError(INVALID_DEVICE_CLAIM, "注册令牌缺失或无效")
 
-    existing = devices_store.get(session, req.device_id)
+    existing = crud.get(session, req.device_id)
     if existing is not None and existing["retired"]:
         raise ApiProblemError(VALIDATION_FAILED, "设备已停用，不能重新注册")
 
-    devices_store.register(
+    crud.register(
         session,
         device_id=req.device_id,
         app_version=req.app_version,
@@ -108,8 +107,8 @@ def enroll_device(
         booted_at=utcnow(),
         seen_at=utcnow(),
     )
-    devices_store.revoke_all(session, req.device_id)
-    token = devices_store.issue(session, req.device_id, label="自注册")
+    crud.revoke_all(session, req.device_id)
+    token = crud.issue(session, req.device_id, label="自注册")
     if token is None:  # register 刚确保了行存在，到这里为 None 只可能是并发除档
         raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {req.device_id} 刚被除档")
     return schemas.DeviceEnrollResult(device_id=req.device_id, token=token)

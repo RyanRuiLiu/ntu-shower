@@ -57,13 +57,12 @@ from typing import Protocol
 
 from sqlalchemy.orm import Session
 
-from app.contracts import CommandOutcome, DoorState, JobOutcome
+from app.contracts import CommandOutcome, DoorState
 from app.core import actions, outcomes, problems
 from app.core.clock import now_rfc3339, shift_rfc3339
 from app.core.logging import log_event
 from app.core.problems import ApiProblemError
 from app.core.protocol import JsonObject, as_int
-from app.db.base import utcnow
 from app.db.session import session_scope
 from app.modules.config import store as config_store
 from app.modules.config.schemas import ConfigPushNotice
@@ -245,38 +244,26 @@ def _record(
     reason: str = "",
     **extra: object,
 ) -> None:
-    """一次后台任务的终局：**日志与审计表在同一条路上写**。
-
-    收口成一处，是因为每个终局都要发生两次——散在各处写迟早出现"记了日志、没落表"，
-    而落表才是这张表存在的理由。`outcome` 用的是日志事件名的后缀（`job.<它>`），
-    两边同一套说法；`extra` 只进日志（状态码、设备原话这类给人看的细节）。
+    """一次后台任务的终局：委托 audit 的唯一写路径（日志与审计表同一条路）。
 
     待办的字段就是这一行要的字段（见 [_Auditable]）：`job` / `action` / `session_id`
     / `threshold_s` 都是落库的列，所以这里一处按类型或按功能的分叉都没有。
     """
-    log_event(
-        level,
-        f"job.{outcome}",
-        message,
+    audit_store.record_job_run(
+        event=f"job.{outcome}",
+        message=message,
+        level=level,
         device_id=subject.device_id,
         door_no=subject.door_no,
+        cert_no=subject.cert_no,
         job=subject.job,
-        **extra,
+        outcome=outcome,
+        action=subject.action,
+        session_id=subject.session_id,
+        reason=reason,
+        threshold_s=subject.threshold_s,
+        extra=extra,
     )
-    with session_scope() as session:
-        audit_store.insert_job_run(
-            session,
-            occurred_at=utcnow(),
-            device_id=subject.device_id,
-            door_no=subject.door_no,
-            cert_no=subject.cert_no,
-            job=subject.job,
-            outcome=JobOutcome(outcome),
-            action=subject.action,
-            session_id=subject.session_id,
-            reason=reason,
-            threshold_s=subject.threshold_s,
-        )
 
 
 def _worker(device_id: str) -> _DeviceWorker:

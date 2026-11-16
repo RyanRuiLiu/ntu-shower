@@ -39,7 +39,7 @@ from app.core.problems import (
     ApiProblemError,
 )
 from app.db.deps import get_db
-from app.modules.devices import crud as devices_store
+from app.modules.devices import crud as devices_crud
 
 from . import crud
 from .dependencies import caller
@@ -207,7 +207,7 @@ def _validated_scopes(scopes: list[str]) -> None:
 
 def _validated_device_scope(session: Session, device_scope: list[str]) -> None:
     """作用域里的设备必须真实存在：写错的授权永远执行不了。"""
-    known = {record["device_id"] for record in devices_store.list_all(session)}
+    known = {record["device_id"] for record in devices_crud.list_all(session)}
     unknown = sorted(set(device_scope) - known - {"*"})
     if unknown:
         raise ApiProblemError(VALIDATION_FAILED, f"作用域含未知设备：{unknown}")

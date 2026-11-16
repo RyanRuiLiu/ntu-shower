@@ -76,8 +76,9 @@ class VoiceDelivery(CreatedAtMixin, Base):
     door_no: Mapped[int] = mapped_column(Integer)
     cert_no: Mapped[str] = mapped_column(String(32))
     event: Mapped[str] = mapped_column(String(32))
-    #: 投递摘要文本（_plan_summary 的产物），审计页直接展示；不是播放清单
-    segments: Mapped[str] = mapped_column(Text, default="")
+    #: 投递摘要文本（_plan_summary 的产物，列名 summary 而非 segments——
+    #: 它不是播放清单，与规则段/协议段同名会歧义），审计页直接展示。
+    summary: Mapped[str] = mapped_column(Text, default="")
     segment_count: Mapped[int] = mapped_column(Integer)
     duration_ms: Mapped[int] = mapped_column(Integer)
     occurred_at: Mapped[datetime] = mapped_column(UtcDateTime)
