@@ -413,7 +413,7 @@ function renderTaskBoard(data) {
                   { ok: shift.past_midnight, yes: '午夜已过', no: '未过午夜' },
                   { ok: shift.idle, yes: '喷头空闲', no: '仍有会话' },
                 ]
-                  .map(({ ok, yes, no }) => `<span class="task-flag ${ok ? 'ok' : 'no'}">${ok ? '✓' : '✗'} ${ok ? yes : no}</span>`)
+                  .map(({ ok, yes, no }) => `<span class="task-flag ${ok ? 'ok' : 'no'}">${ok ? yes : no}</span>`)
                   .join('')
                   + (shift.past_midnight && shift.idle ? '<span class="task-flag ok">即将拨回</span>' : '')
                 const pending =
