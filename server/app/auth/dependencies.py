@@ -52,7 +52,7 @@ from app.core.problems import (
 )
 from app.core.tokens import extract_bearer
 from app.db.deps import get_db
-from app.modules.devices import crud as devices_store
+from app.modules.devices import crud as devices_crud
 
 from . import crud
 from .permissions import SCOPE_LABELS, Scope, scopes_satisfied
@@ -204,7 +204,7 @@ def require_trusted_online_device(device_id: str, session: Session) -> DeviceRec
     devices → config 就是包级循环。设备存在性与信任位经持久化层读取，在线与否看
     连接表，全程不 import devices 包。
     """
-    record = devices_store.get(session, device_id)
+    record = devices_crud.get(session, device_id)
     if record is None:
         raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {device_id} 不在档案里")
     if not record["trusted"]:

@@ -22,7 +22,9 @@ from app.contracts import ActorKind, ApiCallKind, CommandAuditRecord, CommandSta
 from app.contracts import JobRun as JobRunView
 from app.core import outcomes, reason_codes
 from app.core.clock import format_rfc3339
+from app.core.logging import log_event
 from app.db.base import Base, CreatedAtMixin, UtcDateTime, enum_column, utcnow
+from app.db.session import session_scope
 
 
 class ApiCall(CreatedAtMixin, Base):
@@ -210,6 +212,50 @@ def insert_job_run(
     session.commit()
 
 
+def record_job_run(
+    *,
+    event: str,
+    message: str,
+    device_id: str,
+    job: str,
+    outcome: str,
+    level: str = "INFO",
+    door_no: int = 0,
+    cert_no: str = "",
+    action: str | None = None,
+    session_id: int | None = None,
+    reason: str = "",
+    threshold_s: int | None = None,
+    extra: dict[str, object] | None = None,
+) -> None:
+    """后台任务终局的唯一写路径：日志与 job_runs 表同一条路。
+
+    sessions（自动结算/续期）与 extend_hours（延长服务）两个域共用——散在各域
+    各写一份迟早出现「记了日志、没落表」。`event` 是完整日志事件名（各域自带
+    前缀，如 `job.settled` / `extend-hours.shifted`）；`extra` 只进日志（状态码、
+    设备原话这类给人看的细节），door_no/cert_no 未显式传入 extra 时用参数值。
+    """
+    log_fields: dict[str, object] = {"device_id": device_id, "job": job, **(extra or {})}
+    log_fields.setdefault("door_no", door_no)
+    if cert_no:
+        log_fields.setdefault("cert_no", cert_no)
+    log_event(level, event, message, **log_fields)
+    with session_scope() as session:
+        insert_job_run(
+            session,
+            occurred_at=utcnow(),
+            device_id=device_id,
+            door_no=door_no,
+            cert_no=cert_no,
+            job=job,
+            outcome=JobOutcome(outcome),
+            action=action,
+            session_id=session_id,
+            reason=reason,
+            threshold_s=threshold_s,
+        )
+
+
 def list_job_runs(session: Session, device_id: str | None = None, limit: int = 50) -> list[JobRunView]:
     statement = select(JobRun).order_by(JobRun.id.desc()).limit(limit)
     if device_id:
@@ -348,4 +394,5 @@ __all__: list[str] = [
     "list_api_calls",
     "list_commands",
     "list_job_runs",
+    "record_job_run",
 ]

@@ -36,6 +36,7 @@ from app.db.deps import get_db
 from app.db.session import Database, session_scope
 from app.modules.bridge.schemas import BridgeClosed, BridgeOpened, BridgeStatus
 from app.modules.config import store as config_store
+from app.modules.config.spec import BRIDGE_MAX_LIFETIME_S_KEY, BRIDGE_PAIR_TIMEOUT_S_KEY, BRIDGE_SSH_TARGET_KEY
 from app.persistence import audit as command_audit
 
 from .manager import (
@@ -76,8 +77,8 @@ def _read_bridge_timeouts(ws: WebSocket) -> tuple[float, float]:
     database = cast("Database", ws.app.state.database)
     with database.new_session() as session:
         return (
-            _bridge_timeout_s(session, "bridge_max_lifetime_s"),
-            _bridge_timeout_s(session, "bridge_pair_timeout_s"),
+            _bridge_timeout_s(session, BRIDGE_MAX_LIFETIME_S_KEY),
+            _bridge_timeout_s(session, BRIDGE_PAIR_TIMEOUT_S_KEY),
         )
 
 
@@ -97,16 +98,6 @@ def _append(buffer: bytearray, data: bytes) -> None:
     buffer.extend(data)
     if len(buffer) > PENDING_MAX:
         del buffer[: len(buffer) - PENDING_MAX]
-
-
-async def _drain_and_close(ws: WebSocket, code: int) -> None:
-    """拒绝路径的规范关闭：服务端先发 close，再排掉客户端回执帧，避免握手竞态。
-
-    客户端可能不回执（或已消失），排水失败不影响关闭语义，故整体忽略。
-    """
-    await ws.close(code=code)
-    with contextlib.suppress(Exception):
-        await asyncio.wait_for(ws.receive(), timeout=2)
 
 
 @router.websocket("/gateway/bridge/{device_id}")
@@ -343,11 +334,11 @@ async def adb_status(device_id: str, session: Session = Depends(get_db)) -> Brid
     `ssh_target` 与桥的开启状态无关，桥关闭时同样返回：网页端依赖它组装本机
     连接命令。
     """
-    ssh_target = str(config_store.global_effective(session)["bridge_ssh_target"])
+    ssh_target = str(config_store.global_effective(session)[BRIDGE_SSH_TARGET_KEY])
     bridge = registry.get(device_id)
     if bridge is None:
         return {"device_id": device_id, "open": False, "ssh_target": ssh_target}
-    lifetime_s = _bridge_timeout_s(session, "bridge_max_lifetime_s")
+    lifetime_s = _bridge_timeout_s(session, BRIDGE_MAX_LIFETIME_S_KEY)
     remaining = max(0.0, lifetime_s - (asyncio.get_running_loop().time() - bridge.opened_at))
     return {
         "device_id": device_id,

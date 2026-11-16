@@ -10,16 +10,19 @@
 """
 
 import json
-import re
 from dataclasses import dataclass
 from datetime import datetime
+
+# 时间形状唯一出处：config.spec 的 TIME 键与语音时段共用同一个 `HH:MM`。
+# TIME_PATTERN 是显式再导出：语音请求模型的 Field(pattern=) 消费它。
+from app.modules.config.spec import TIME_PATTERN as TIME_PATTERN
+from app.modules.config.spec import format_time
+from app.modules.config.spec import parse_time as _parse_hhmm
 
 MINUTES_PER_DAY = 24 * 60
 MINUTES_PER_WEEK = 7 * MINUTES_PER_DAY
 MAX_TIME_WINDOWS_PER_RULE = 8
 
-TIME_PATTERN = r"^([01]\d|2[0-3]):([0-5]\d)$"
-_TIME_RE = re.compile(TIME_PATTERN)
 _DAY_LABELS = ("一", "二", "三", "四", "五", "六", "日")
 
 ERR_TIME = "时间必须是 HH:MM"
@@ -46,17 +49,16 @@ class Window:
 
 
 def parse_time(value: object) -> int:
-    """`HH:MM` → 当天分钟数；格式不合法时抛 ValueError。"""
+    """`HH:MM` → 当天分钟数；格式不合法时抛 ValueError。
+
+    解析核心单源在 config.spec（本包装补语音侧的异常语义）。
+    """
     if not isinstance(value, str):
         raise TypeError(ERR_TIME)
-    match = _TIME_RE.fullmatch(value)
-    if match is None:
+    minutes = _parse_hhmm(value)
+    if minutes is None:
         raise ValueError(ERR_TIME)
-    return int(match.group(1)) * 60 + int(match.group(2))
-
-
-def format_time(minutes: int) -> str:
-    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+    return minutes
 
 
 def normalize_days(values: object) -> tuple[int, ...]:

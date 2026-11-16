@@ -257,7 +257,7 @@ export interface VoiceDeliveryView {
   cert_no: string;
   event: string;
   door_no: number;
-  segments: string;
+  summary: string;
   segment_count: number;
   duration_ms: number;
   occurred_at: string;

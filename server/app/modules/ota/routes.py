@@ -28,7 +28,6 @@ from app.core.problems import (
 )
 from app.db.deps import get_db
 from app.modules.ota import apk_manifest, service
-from app.modules.ota import crud as repository
 from app.modules.ota.schemas import (
     OtaManifest,
     ReleasePublished,
@@ -38,6 +37,8 @@ from app.modules.ota.schemas import (
     ReleaseRemoved,
 )
 from app.modules.ota.service import VERSION_PATTERN
+
+from . import crud
 
 router = APIRouter(prefix="/api/v1/ota", tags=["ota"])
 
@@ -66,13 +67,13 @@ def _parse_targets(raw: str) -> list[str]:
 
 @router.get("/releases", summary="发布清单")
 def list_releases(session: Session = Depends(get_db)) -> list[ReleaseRecord]:
-    return repository.list_releases(session)
+    return crud.list_releases(session)
 
 
 @device_router.get("/ota/manifest", summary="设备升级清单（硬编码契约）", responses=problem_responses(422))
 def manifest(device_id: str, version_code: int, session: Session = Depends(get_db)) -> OtaManifest:
     """设备定期轮询：返回是否有可用更新及其元数据。路径为设备硬编码契约，冻结。"""
-    rel = repository.latest_for(session, device_id, version_code)
+    rel = crud.latest_for(session, device_id, version_code)
     if rel is None:
         return {"up_to_date": True}
     path = service.release_path(rel["version"])
@@ -119,7 +120,7 @@ def rearm_release(
     """清除安装确认：force 发布对该设备重新生效（调试重推）。目标设备在请求体里。"""
     device_id = req.device_id
     device_scope_guard(device_id, caller)
-    return {"version": version, "device_id": device_id, "rearmed": repository.rearm(session, device_id, version)}
+    return {"version": version, "device_id": device_id, "rearmed": crud.rearm(session, device_id, version)}
 
 
 @router.delete(
@@ -130,7 +131,7 @@ def rearm_release(
 )
 def delete_release(version: str, session: Session = Depends(get_db)) -> ReleaseRemoved:
     """下架发布（紧急止损，如终止 OTA 循环）。注册行与 APK 文件一并删除。"""
-    deleted = repository.delete_release(session, version)
+    deleted = crud.delete_release(session, version)
     file_removed = service.remove_release_file(version)
     if deleted or file_removed:
         log_event("INFO", "ota.release-deleted", "发布已下架", version=version, file_removed=file_removed)
@@ -186,7 +187,7 @@ async def upload_release(
         )
         raise ApiProblemError(OTA_APK_MISMATCH, detail)
     sha256 = service.store_release(version, data)
-    repository.insert_release(session, version, version_code, sha256, force, targets)
+    crud.insert_release(session, version, version_code, sha256, force, targets)
     notified = await service.notify_target_devices(version, version_code, targets)
     pruned = service.prune_releases(session, settings.ota_release_keep)
     if pruned:
