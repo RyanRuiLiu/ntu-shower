@@ -12,7 +12,7 @@ from app.modules.config.spec import SPECS_BY_KEY, ConfigKind, ConfigScope
 from app.modules.jobs.spec import _TITLES, JOBS
 from app.modules.sessions import decision
 
-CERT_NO = "2026000001"
+CERT_NO = "9999000001"
 
 
 # ── 登记表本身的唯一出处 ──

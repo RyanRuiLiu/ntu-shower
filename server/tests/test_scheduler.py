@@ -54,14 +54,14 @@ AUDIT_PATH = Path(audit_repository.__file__)
 #: 时长上限本身由 test_decision.py 的专用用例盯。
 CONFIG: dict[str, object] = {
     "renew_wait_enabled": True,
-    "renew_wait_students": {"2026000001": "000000"},
+    "renew_wait_students": {"9999999001": "000000"},
     "renew_wait_threshold_s": 270,
     "renew_wait_max_duration_s": 86_400,
     "renew_session_enabled": True,
-    "renew_session_students": {"2026000001": "000000"},
+    "renew_session_students": {"9999999001": "000000"},
     "renew_session_threshold_s": 1140,
     "auto_settle_enabled": True,
-    "auto_settle_students": {"2026000001": "000000"},
+    "auto_settle_students": {"9999999001": "000000"},
     "auto_settle_pause_threshold_s": 60,
 }
 
@@ -75,7 +75,7 @@ WAITING = Candidate(
     session_id=7,
     device_id="dev-1",
     door_no=3,
-    cert_no="2026000001",
+    cert_no="9999999001",
     state=DoorState.WAITING,
     assigned_at=_WAITING_AT,
     paused_at="",
@@ -217,7 +217,7 @@ def test_each_door_gets_exactly_one_timer(monkeypatch: pytest.MonkeyPatch) -> No
             session_id=7,
             device_id="dev-1",
             door_no=3,
-            cert_no="2026000001",
+            cert_no="9999999001",
             state=DoorState.PAUSED,
             assigned_at="2026-10-05T11:00:00.000Z",
             paused_at="2026-10-05T11:00:00.000Z",
@@ -322,7 +322,7 @@ def _assign_job(door_no: int = 3) -> scheduler._AssignJob:
     return scheduler._AssignJob(
         device_id="dev-1",
         door_no=door_no,
-        cert_no="2026000001",
+        cert_no="9999999001",
         password="000000",
         job=JOB_RENEW_WAIT,
         session_id=WAITING.session_id,
@@ -534,7 +534,7 @@ def _arm(monkeypatch: pytest.MonkeyPatch, **overrides: object) -> None:
     fields: dict[str, object] = {
         "device_id": "dev-1",
         "door_no": 3,
-        "cert_no": "2026000001",
+        "cert_no": "9999999001",
         "password": "000000",
         "job": JOB_RENEW_WAIT,
         "session_id": WAITING.session_id,
@@ -743,7 +743,7 @@ def _frame(captured_at: str = "2026-10-05T11:00:00.000Z", **door: object) -> Jso
         "snapshot_id": uuid.uuid4().hex,
         "source": "db_watch",
         "captured_at": captured_at,
-        "doors": [{"door_no": 3, "cert_no": "2026000001", **door}],
+        "doors": [{"door_no": 3, "cert_no": "9999999001", **door}],
     }
 
 
@@ -756,7 +756,7 @@ def test_snapshots_reads_only_the_derived_layer(fresh_db: str) -> None:
     assert len(found) == 1
     assert found[0].state is DoorState.WAITING
     assert found[0].door_no == 3
-    assert found[0].cert_no == "2026000001"
+    assert found[0].cert_no == "9999999001"
     assert found[0].assigned_at == "2026-10-05T11:00:00.000Z"
     assert found[0].run_started_at == "2026-10-05T11:00:00.000Z"
     assert found[0].session_id > 0
@@ -856,7 +856,7 @@ def test_a_frame_ends_in_a_settle_then_an_assign(
 
         # 结算发出去了，并且挂上了"等门空闲再补分配"
         assert [action for action, _params in calls] == ["session.settle"]
-        assert calls[0][1] == {"cert_no": "2026000001", "password": "000000"}
+        assert calls[0][1] == {"cert_no": "9999999001", "password": "000000"}
         assert ("dev-1", 3) in scheduler._pending_assigns
         assert ("dev-1", session_id, JOB_RENEW_WAIT) in scheduler._attempted
 
@@ -866,7 +866,7 @@ def test_a_frame_ends_in_a_settle_then_an_assign(
         await _let_the_loop_run()
 
         assert [action for action, _params in calls] == ["session.settle", "session.assign"]
-        assert calls[1][1] == {"door_no": 3, "cert_no": "2026000001", "password": "000000"}
+        assert calls[1][1] == {"door_no": 3, "cert_no": "9999999001", "password": "000000"}
         assert scheduler._pending_assigns == {}
 
     with device_link.trusted_online(client, "dev-1", admin_headers):
@@ -947,7 +947,7 @@ def test_a_student_outside_the_roster_is_never_touched(
 
     monkeypatch.setattr(scheduler.config_store, "effective", lambda _session, _device_id: CONFIG)
     monkeypatch.setattr(device_actions, "send_command_and_wait", fake_send)
-    door_link.feed("dev-1", _frame(captured_at=_ago(3600), card_no=1001, cert_no="2026000006", open_time=_ago(3600)))
+    door_link.feed("dev-1", _frame(captured_at=_ago(3600), card_no=1001, cert_no="9999000006", open_time=_ago(3600)))
 
     async def body() -> None:
         scheduler.start()
@@ -970,7 +970,7 @@ def test_snapshot_reports_scheduled_timers(fresh_db: str) -> None:
         session_id=1,
         device_id="dev-snap-status",
         door_no=3,
-        cert_no="2026000001",
+        cert_no="9999999001",
         state=DoorState.BATHING,
         assigned_at="2026-10-05T12:00:00.000Z",
         paused_at="",
@@ -996,7 +996,7 @@ def test_snapshot_reports_scheduled_timers(fresh_db: str) -> None:
             {
                 "device_id": "dev-snap-status",
                 "door_no": 3,
-                "cert_no": "2026000001",
+                "cert_no": "9999999001",
                 "job": "renew_session",
                 "at": rows[0]["at"],
                 "state": "bathing",
