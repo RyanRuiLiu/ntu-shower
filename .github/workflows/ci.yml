@@ -128,9 +128,9 @@ jobs:
       - name: Semgrep（SAST：p/python + p/security-audit）
         if: needs.changes.outputs.server == 'true'
         run: semgrep scan --config p/python --config p/security-audit app --error --quiet
-      - name: Semgrep（项目规则 .semgrep.yml）
+      - name: Semgrep（项目规则 .semgrep.yml，规则与扫描根都在仓库根）
         if: needs.changes.outputs.server == 'true'
-        run: semgrep scan --config .semgrep.yml . --error --quiet
+        run: semgrep scan --config ../.semgrep.yml ../ --error --quiet
 
   android:
     needs: changes
