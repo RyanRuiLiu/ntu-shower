@@ -1,8 +1,8 @@
 # Dependabot 自动合并（GitHub 官方模式，按 update-type 分档）：
 # https://docs.github.com/en/code-security/dependabot/working-with-dependabot/automating-dependabot-with-github-actions
-# 本仓无分支保护 required checks，官方 --auto 会在 CI 完成前合并——
-# 因此先等待全部 checks 通过再直接 squash，语义等价；等待窗口外或任一
-# check 失败一律不合并。major 与非 semver 升级不自动合并，留人工审阅。
+# 分支保护已有 required checks：patch/minor 升级用官方 --auto，由 GitHub 在
+# checks 全绿后自动合并——不再轮询 runner（旧行为每 PR 轮询数分钟，烧计费分钟）。
+# major 与非 semver 升级不自动合并，留人工审阅。
 name: dependabot-auto-merge
 
 on: pull_request
@@ -10,12 +10,6 @@ on: pull_request
 permissions:
   contents: write
   pull-requests: write
-  # gh pr checks 的 GraphQL 查询穿透到 checkSuite.workflowRun 与 commit
-  # status，需 actions:read 与 statuses:read；缺任一报
-  # "Resource not accessible by integration"（community#67181 / cli#6274）
-  checks: read
-  actions: read
-  statuses: read
 
 concurrency:
   group: dependabot-auto-merge-${{ github.event.pull_request.number }}
@@ -24,35 +18,15 @@ concurrency:
 jobs:
   automerge:
     if: github.event.pull_request.user.login == 'dependabot[bot]'
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - name: 解析更新类型
         id: metadata
         uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98  # v3.1.0
-      - name: 等待其余 checks 全绿后 squash 合并（patch/minor）
+      - name: patch/minor 升级交官方 --auto（required checks 由 GitHub 等待）
         if: steps.metadata.outputs.update-type == 'version-update:semver-patch' || steps.metadata.outputs.update-type == 'version-update:semver-minor'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
-        run: |
-          # 本 job 自身也是一个 check：轮询必须排除，否则等待自己完成构成死锁
-          for i in $(seq 1 60); do
-            out=$(gh pr checks "$PR_URL" 2>/dev/null || true)
-            others=$(printf '%s\n' "$out" | grep -v "^automerge")
-            if printf '%s\n' "$others" | grep -q "fail"; then
-              echo "存在失败 check，不合并" >&2
-              exit 1
-            fi
-            if printf '%s\n' "$others" | grep -q "pending"; then
-              sleep 30
-              continue
-            fi
-            if [ -n "$others" ]; then
-              gh pr merge "$PR_URL" --squash && exit 0
-              echo "合并命令失败" >&2
-              exit 1
-            fi
-            sleep 30
-          done
-          echo "checks 未在等待窗口内完成，不合并" >&2
-          exit 1
+        run: gh pr merge "$PR_URL" --auto --squash
