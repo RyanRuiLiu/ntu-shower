@@ -140,7 +140,7 @@ def audit(db_path: Path) -> int:
     if problems:
         print("结论：有问题")
         for problem in problems:
-            print(f"  ✗ {problem}")
+            print(f"  - {problem}")
         return 1
     print("结论：时间轴与派生结果自洽（无空值、无坏形状、无越界）")
     return 0
