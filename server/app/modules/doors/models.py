@@ -1,6 +1,6 @@
 """门域五张表：现态、状态迁移流水、原始帧、使用会话与出水段。
 
-`door_snapshots` 是原始层（设备说什么记什么，保留 30 天）；`door_states`、
+`door_snapshots` 是原始层（设备说什么记什么，保留期随 audit_retention_days）；`door_states`、
 `door_state_events`、`door_sessions`、`door_segments` 是从它派生的长期历史。
 派生可从原始层重算的前提是原始层还在——原始层清了，派生层就是唯一事实。
 """
@@ -78,7 +78,7 @@ class DoorStateEvent(CreatedAtMixin, Base):
 
 
 class DoorSnapshot(CreatedAtMixin, Base):
-    """设备上报的原始帧，保留 30 天。
+    """设备上报的原始帧，保留期随 audit_retention_days（统一单一旋钮）。
 
     清理任务按 `received_at` 删除，所以它必须有独立索引；复合索引的第一列不是它，
     用不上。

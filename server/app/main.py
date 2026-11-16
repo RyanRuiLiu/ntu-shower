@@ -142,6 +142,8 @@ def create_app() -> FastAPI:
         background.interval("extend-hours", extend_hours_service.TICK_INTERVAL_S, extend_hours_service.tick_once)
         background.interval("status-line", status_line_service.PUSH_INTERVAL_S, status_line_service.tick)
         background.interval("audit-prune", retention.PRUNE_INTERVAL_S, retention.prune_once)
+        # 库维护：设备夜间关机后的静默窗口里归还滚动删除留下的空闲页（VACUUM）
+        background.interval("maintenance", retention.VACUUM_INTERVAL_S, retention.maybe_vacuum)
         _abort_pending_commands()
         background.start()
         # 事件驱动型任务保持自己的模型：按设备惰性起 worker，不占统一循环。

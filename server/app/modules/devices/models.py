@@ -81,7 +81,7 @@ class DeviceLog(CreatedAtMixin, Base):
 
 
 class DeviceLinkEvent(CreatedAtMixin, Base):
-    """设备上下线事件，保留 90 天。"""
+    """设备上下线事件，保留期随 audit_retention_days（统一单一旋钮）。"""
 
     __tablename__ = "device_link_events"
     __table_args__ = (Index("ix_device_link_events_device_id_occurred_at", "device_id", "occurred_at"),)
