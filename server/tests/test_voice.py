@@ -810,7 +810,7 @@ def test_preview_resolves_digits_pauses_and_truncation(
     response = client.post(
         "/api/v1/voice/preview",
         headers=admin_headers,
-        json={"segments": segments, "event": "assigned", "door_no": 105, "cert_no": "A2026000057"},
+        json={"segments": segments, "event": "assigned", "door_no": 105, "cert_no": "A9999000057"},
     )
     assert response.status_code == 200, response.text
     body = response.json()

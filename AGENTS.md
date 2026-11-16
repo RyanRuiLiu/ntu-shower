@@ -90,7 +90,7 @@ AI 协作者的唯一入口。人类协作者从 [README.md](README.md) 开始�
 
 ## 生产边界
 
-- 生产机为 `deploy@<deploy-host>`，服务为 `ntu-shower`。
+- 生产机为 `<deploy-user>@<deploy-host>`，服务为 `ntu-shower`。
 - 生产机只读。允许的动作只有：读查询、看日志、`systemctl status`，以及 runbook 写明的运维动作与经明确授权的数据修正。
 - 不在生产机上运行测试、演练、重算或临时脚本。需要验证时把数据副本取回本地。
 - `deploy/` 是 nginx、systemd、备份与部署脚本的唯一事实来源；不得在服务器上直接改配置。
