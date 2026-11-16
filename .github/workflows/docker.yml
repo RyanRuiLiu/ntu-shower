@@ -19,13 +19,16 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: RyanRuiLiu/.github/.github/workflows/docker.yml@50f1db0fe86a340270ec29c107af14d17e173998
-    with:
-      acr_registry: <registry>
-      acr_namespace: <namespace>
+    uses: RyanRuiLiu/.github/.github/workflows/docker.yml@52617eaa392db38edad582cf088998fc7e63fdf2
+    # registry/namespace 是部署侧私有值（同 compose 的 NTU_SHOWER_IMAGE）：经
+    # secrets 块传入（workflow_call 的 with: 不支持 secrets 上下文），公开文件里
+    # 只剩表达式，值由仓库 secrets 持有。共享仓对空值回退合法 local 名——fork PR
+    # 拿不到 secrets 也能完成 build-only 校验。
     secrets:
       ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
       ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+      ACR_REGISTRY: ${{ secrets.ACR_REGISTRY }}
+      ACR_NAMESPACE: ${{ secrets.ACR_NAMESPACE }}
 
   # main 推送：镜像构建成功即滚动部署生产（pull → up → 健康探测，失败即红）。
   # 部署序列与 deploy/README.md 的人工步骤一致，只是由 CI 代为执行；镜像标签
