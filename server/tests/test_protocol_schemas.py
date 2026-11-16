@@ -43,7 +43,7 @@ KNOWN_TYPES = [
 SAMPLES: dict[str, dict[str, Any]] = {
     "link.hello": {
         "payload": {
-            "device_id": "<device-id>",
+            "device_id": "a1b2c3d4e5f60708",
             "app_version": "0.2.4",
             "os_version": "4.4.4",
             "capabilities": ["session.assign"],
@@ -78,7 +78,7 @@ SAMPLES: dict[str, dict[str, Any]] = {
     "status_line.update": {
         "payload": {
             "floors": [
-                {"device_id": "<device-id>", "name": "1F", "online": True, "free": 3},
+                {"device_id": "a1b2c3d4e5f60708", "name": "1F", "online": True, "free": 3},
                 {"device_id": "2c94310a536777d6", "name": "2F", "online": True, "free": 0},
                 {"device_id": "3c94310a536777d6", "name": "3F", "online": False, "free": None},
             ]
@@ -92,7 +92,7 @@ SAMPLES: dict[str, dict[str, Any]] = {
         }
     },
     "ota.progress": {"payload": {"version": "0.2.4", "stage": "downloading", "detail": ""}},
-    "bridge.open": {"payload": {"device_id": "<device-id>", "nonce": "8f14e45fceea167a"}},
+    "bridge.open": {"payload": {"device_id": "a1b2c3d4e5f60708", "nonce": "8f14e45fceea167a"}},
     "device.log_upload": {"payload": {"kind": "device", "content": "line1\nline2\n"}},
     "bridge.close": {"payload": {}},
 }
