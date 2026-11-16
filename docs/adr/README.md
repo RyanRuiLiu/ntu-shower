@@ -26,3 +26,4 @@
 | [ADR-0020](0020-device-enrollment.md) | 设备接入采用 claim 自注册（fleet provisioning by claim） | Accepted |
 | [ADR-0021](0021-gateway-1008.md) | 网关凭据校验在 accept 之后，以 RFC 6455 1008 关闭 | Accepted |
 | [ADR-0022](0022-android-api19-freeze.md) | 设备端依赖冻结：API 19 兼容线 | Accepted |
+| [ADR-0023](0023-permission-rewrite.md) | 权限体系重写——用户与密钥分离、resource:action scopes、长期密钥 | Accepted |
