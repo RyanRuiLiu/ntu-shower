@@ -23,6 +23,7 @@ from app.modules.extend_hours import crud as repository
 from app.modules.extend_hours import service as extend_hours
 from app.modules.sessions.decision import students_of
 from app.modules.sessions.schemas import AssignRequest
+from app.persistence import audit as audit_store
 from test_scheduler import _frame
 
 DEVICE = "dev-extend"
@@ -266,6 +267,7 @@ def test_shift_landing_guard_refuses_to_land_inside_the_hostile_window(
     monkeypatch.setitem(CONFIG, "extend_shift_minutes", 5)
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", sent)
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
+    monkeypatch.setattr(audit_store, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
     _with_session("2026-10-05T23:40:00.000Z")
 
     _tick()
@@ -487,6 +489,7 @@ def test_every_shift_is_logged_for_the_operator(fresh_db: str, monkeypatch: pyte
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z")
     _with_session("2026-10-05T23:40:00.000Z")
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
+    monkeypatch.setattr(audit_store, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
 
     _tick()
 
@@ -518,6 +521,7 @@ def test_power_failure_after_shift_keeps_the_row_and_retries(fresh_db: str, monk
     sent: list[tuple[str, object]] = []
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", sent)
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
+    monkeypatch.setattr(audit_store, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
     _record_shift(
         DEVICE,
         shift_rfc3339("2026-10-05T23:50:00.000Z", -ZONE_MINUTES * 60 - 120) or "",
@@ -548,6 +552,7 @@ def test_restore_rearm_failure_keeps_the_row_for_retry(fresh_db: str, monkeypatc
     # shifted_at 是真实轴上的拨钟时刻（10 月 5 日 23:49:30 北京）：午夜已过
     _prepare(monkeypatch, "2026-10-06T00:45:00.000Z", sent, skew_s=SKEW_FAST_S)
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
+    monkeypatch.setattr(audit_store, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
     _record_shift(DEVICE, "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2026000001"}])
 
     async def half(_session: object, _device_id: str, action: str, params: object, **_kw: object) -> object:
@@ -605,6 +610,7 @@ def test_reassign_reports_a_failed_command(fresh_db: str, monkeypatch: pytest.Mo
     events: list[str] = []
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z")
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
+    monkeypatch.setattr(audit_store, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
     _record_shift(DEVICE, "2026-10-05T23:50:00.000Z", [{"door_no": 3, "cert_no": "2026000001"}])
 
     async def failed(_session: object, _device_id: str, _req: AssignRequest) -> dict[str, object]:
@@ -630,6 +636,7 @@ def test_a_refused_command_is_not_marked_as_a_failure(fresh_db: str, monkeypatch
     events: list[str] = []
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z")
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
+    monkeypatch.setattr(audit_store, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
     _record_shift(DEVICE, "2026-10-05T23:50:00.000Z", [{"door_no": 3, "cert_no": "2026000001"}])
 
     async def refusing(_session: object, _device_id: str, _req: AssignRequest) -> object:
@@ -763,6 +770,7 @@ def test_runtime_correction_failure_is_logged(fresh_db: str, monkeypatch: pytest
     events: list[str] = []
     _prepare(monkeypatch, "2026-10-06T00:45:00.000Z", skew_s=SKEW_FAST_S)
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
+    monkeypatch.setattr(audit_store, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
 
     async def failing(_session: object, _device_id: str, _action: str, _params: object, **_kw: object) -> object:
         return {"status": "failed", "reason_code": "device.offline", "terminal_message": "", "data": None}
@@ -792,6 +800,7 @@ def test_set_clock_warns_without_skew_record(fresh_db: str, monkeypatch: pytest.
     events: list[str] = []
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", skew_s=SKEW_FAST_S)
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
+    monkeypatch.setattr(audit_store, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
     device_clock.clear()
 
     ok = _set_clock_with_db(3600, 480)
@@ -805,6 +814,7 @@ def test_set_clock_warns_on_command_failure(fresh_db: str, monkeypatch: pytest.M
     events: list[str] = []
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", skew_s=SKEW_FAST_S)
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
+    monkeypatch.setattr(audit_store, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
 
     async def failing(_session: object, _device_id: str, _action: str, _params: object, **_kw: object) -> object:
         return {"status": "failed", "reason_code": "device.offline", "terminal_message": "", "data": None}
@@ -823,6 +833,7 @@ def test_roll_power_warns_without_skew_record(fresh_db: str, monkeypatch: pytest
     sent: list[tuple[str, object]] = []
     _prepare(monkeypatch, "2026-10-06T00:50:00.000Z", sent, skew_s=SKEW_FAST_S)
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
+    monkeypatch.setattr(audit_store, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
     device_clock.clear()
     _record_shift(DEVICE, "2026-10-05T15:49:30.000Z", [{"door_no": 3, "cert_no": "2026000001"}])
 
@@ -839,6 +850,7 @@ def test_maybe_shift_warns_without_skew_record(fresh_db: str, monkeypatch: pytes
     sent: list[tuple[str, object]] = []
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", sent, skew_s=SKEW_FAST_S)
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
+    monkeypatch.setattr(audit_store, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
     device_clock.clear()
     _with_session("2026-10-05T23:40:00.000Z")
 

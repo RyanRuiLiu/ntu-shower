@@ -21,13 +21,13 @@ from app.core.problems import DEVICE_NOT_FOUND, ApiProblemError
 from app.core.protocol import as_int
 from app.db.base import utcnow
 from app.modules.config import store as config_store
-from app.modules.devices import crud as repository
 
+from . import crud
 from .schemas import DeviceRecord, DeviceSummary
 
 
 def get_device(session: Session, device_id: str) -> DeviceRecord | None:
-    record = repository.get(session, device_id)
+    record = crud.get(session, device_id)
     if record is None:
         return None
     record["online"] = manager.is_online(device_id)
@@ -35,7 +35,7 @@ def get_device(session: Session, device_id: str) -> DeviceRecord | None:
 
 
 def list_devices(session: Session) -> list[DeviceRecord]:
-    records = repository.list_all(session)
+    records = crud.list_all(session)
     for record in records:
         record["online"] = manager.is_online(record["device_id"])
     return records
@@ -46,11 +46,11 @@ def set_order(session: Session, device_ids: list[str]) -> None:
 
     清单里出现未知设备（已拆除的、拼错的）整体拒绝：半排序比不排序更难看。
     """
-    known = {str(record["device_id"]) for record in repository.list_all(session)}
+    known = {str(record["device_id"]) for record in crud.list_all(session)}
     unknown = [item for item in device_ids if item not in known]
     if unknown:
         raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {unknown[0]}")
-    repository.set_order(session, device_ids)
+    crud.set_order(session, device_ids)
 
 
 def to_summary(record: DeviceRecord) -> DeviceSummary:
@@ -84,7 +84,7 @@ def register_device(
     ip: str,
     booted_at: str,
 ) -> None:
-    repository.register(
+    crud.register(
         session,
         device_id=device_id,
         app_version=app_version,
@@ -98,13 +98,13 @@ def register_device(
 
 
 def touch_seen(session: Session, device_id: str) -> None:
-    """记下刚收到该设备的一帧（心跳粒度，见 repository.touch_seen）。"""
-    repository.touch_seen(session, device_id, utcnow())
+    """记下刚收到该设备的一帧（心跳粒度，见 crud.touch_seen）。"""
+    crud.touch_seen(session, device_id, utcnow())
 
 
 def set_device_offline(session: Session, device_id: str) -> None:
     """断开收尾：刷新"最后见到"时刻（列的语义是"最后见到"，不分心跳还是断开）。"""
-    repository.touch_seen(session, device_id, utcnow())
+    crud.touch_seen(session, device_id, utcnow())
 
 
 def shift_clock_skew(session: Session, device_id: str, seconds: float) -> None:
@@ -119,7 +119,7 @@ def shift_clock_skew(session: Session, device_id: str, seconds: float) -> None:
         return  # 没有记录就无从改：拨钟本来就以"有记录"为前提
     skew = device_clock.get(device_id) - seconds
     device_clock.load(device_id, skew)
-    repository.set_clock_skew(session, device_id, skew)
+    crud.set_clock_skew(session, device_id, skew)
 
 
 def record_link_event(session: Session, device_id: str, event: str, reason: str = "") -> None:
@@ -129,17 +129,17 @@ def record_link_event(session: Session, device_id: str, event: str, reason: str 
     这个留下一串历史，回答"这台设备什么时候在线过"——它是设备利用率的分母，也是
     "这段时间为什么没有数据"唯一能给出的答案。
     """
-    repository.insert_link_event(session, device_id, LinkEvent(event), utcnow(), reason)
+    crud.insert_link_event(session, device_id, LinkEvent(event), utcnow(), reason)
 
 
 def record_log_upload(session: Session, device_id: str, kind: str, content: str) -> None:
-    """落一份设备日志上送（见 repository.append_device_log 的保留规则）。"""
-    repository.append_device_log(session, device_id, DeviceLogKind(kind), content, utcnow())
+    """落一份设备日志上送（见 crud.append_device_log 的保留规则）。"""
+    crud.append_device_log(session, device_id, DeviceLogKind(kind), content, utcnow())
 
 
 def latest_device_log(session: Session, device_id: str, kind: str) -> dict[str, str] | None:
     """最新的日志上送（设备页查看器）；没有则 None。"""
-    return repository.latest_device_log(session, device_id, DeviceLogKind(kind))
+    return crud.latest_device_log(session, device_id, DeviceLogKind(kind))
 
 
 def load_clock_skew(session: Session, device_id: str) -> None:
@@ -148,7 +148,7 @@ def load_clock_skew(session: Session, device_id: str) -> None:
     不载入的话，从上线到首次 pong 之间偏差读出来是 0，等于这段时间不做平移——而
     "我们刚接手、那边还被占着"恰恰最常发生在这个窗口里。
     """
-    device_clock.load(device_id, repository.get_clock_skew(session, device_id))
+    device_clock.load(device_id, crud.get_clock_skew(session, device_id))
 
 
 def update_clock_skew(session: Session, device_id: str, device_time: object, received_at: str) -> None:
@@ -159,11 +159,11 @@ def update_clock_skew(session: Session, device_id: str, device_time: object, rec
     """
     threshold = as_int(config_store.effective(session, device_id).get("clock_jump_threshold_s"), default=60)
     skew = device_clock.update(device_id, device_time, received_at, threshold)
-    repository.set_clock_skew(session, device_id, skew)
+    crud.set_clock_skew(session, device_id, skew)
 
 
 def rename_device(session: Session, device_id: str, name: str) -> bool:
-    return repository.set_name(session, device_id, name)
+    return crud.set_name(session, device_id, name)
 
 
 def set_trusted(session: Session, device_id: str, trusted: bool) -> bool:
@@ -174,7 +174,7 @@ def set_trusted(session: Session, device_id: str, trusted: bool) -> bool:
     表现是「设备在线、功能全坏」（2026-10-06 首台新设备入网实测）。所以调用方（信任
     路由）改完必须**掐断现有连接**让设备重新握手，见 `routes.patch_device`。
     """
-    return repository.set_trusted(session, device_id, trusted)
+    return crud.set_trusted(session, device_id, trusted)
 
 
 def set_retired(session: Session, device_id: str, retired: bool) -> bool:
@@ -183,7 +183,7 @@ def set_retired(session: Session, device_id: str, retired: bool) -> bool:
     执行语义在网关与自注册：握手与 enroll 即刻拒绝。调用方改完必须掐断现有
     连接——在线设备的业务帧不会因这个位自动停下（与信任位同一处置）。
     """
-    return repository.set_retired(session, device_id, retired)
+    return crud.set_retired(session, device_id, retired)
 
 
 def is_online(device_id: str) -> bool:

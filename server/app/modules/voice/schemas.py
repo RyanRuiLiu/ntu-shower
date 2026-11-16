@@ -265,7 +265,7 @@ class VoiceDeliveryView(BaseModel):
     cert_no: str
     event: DoorEventKind
     door_no: int
-    segments: str
+    summary: str
     segment_count: int
     duration_ms: int
     occurred_at: str

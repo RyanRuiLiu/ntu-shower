@@ -250,7 +250,7 @@ class DeviceRecord(DeviceSummary):
 
     sort_order: int
     """展示顺序：设备下拉、管理台设备表、统计接口全部按它排。管理员在设备页调整，
-    新设备排到末尾；同序回落到名字的自然排序（见 repository.list_all）。"""
+    新设备排到末尾；同序回落到名字的自然排序（见 devices 域 crud.list_all）。"""
 
 
 class DoorView(TypedDict):

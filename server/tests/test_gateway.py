@@ -580,7 +580,7 @@ def test_snapshot_that_cannot_be_stored_gets_no_ack(
     def boom(*_args: object, **_kwargs: object) -> object:
         raise failure
 
-    monkeypatch.setattr(doors_service.repository, "insert_snapshot", boom)
+    monkeypatch.setattr(doors_service.crud, "insert_snapshot", boom)
 
     with device_link.trusted_online(client, "dev-snap-not-stored", admin_headers) as ws:
         ws.send_text(frames.frame("door.snapshot", {"snapshot_id": "not-stored-1", "doors": [{"door_no": 1}]}))

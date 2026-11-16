@@ -31,8 +31,6 @@ _READ_RESPONSES = problem_responses(401, 403)
 #: 写出口的公共错误面（含请求体校验）。
 _WRITE_RESPONSES = problem_responses(401, 403, 422)
 
-_ASSET_ID = re.compile(r"[0-9a-f]{64}")
-
 
 @admin_router.get(
     "/voice/spec",
@@ -130,7 +128,7 @@ def delete_asset(asset_id: str, session: Session = Depends(get_db)) -> None:
 
 @router.get("/voice/assets/{asset_id}.mp3", summary="下载素材（设备硬编码契约）", responses=problem_responses(404, 422))
 def download_asset(asset_id: str, session: Session = Depends(get_db)) -> FileResponse:
-    if _ASSET_ID.fullmatch(asset_id) is None:
+    if re.fullmatch(schemas.ASSET_ID, asset_id) is None:
         raise ApiProblemError(VOICE_ASSET_NOT_FOUND, asset_id)
     path = service.asset_file(session, asset_id)
     return FileResponse(

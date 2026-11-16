@@ -1,7 +1,7 @@
 """事件 → 规则匹配：一次设备事件命中哪条启用规则。
 
 时段解析、优先级排序与歧义拒绝是业务规则——「哪条规则更紧」不是存储的事。
-持久化层只负责把启用规则行交出来（repository.list_enabled_rules），匹配是纯读
+持久化层只负责把启用规则行交出来（crud.list_enabled_rules），匹配是纯读
 判定，供 service._dispatch_event 调用。
 """
 
@@ -13,8 +13,8 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.logging import log_event
-from app.modules.voice import crud as repository
 
+from . import crud
 from . import time_windows as time_rules
 from .priority import rule_priority
 
@@ -28,7 +28,7 @@ def matching_rules(
 ) -> list[dict[str, Any]]:
     """一次事件命中的启用规则，按优先级排序；完全同优先级时拒绝替用户挑一条。"""
     hits: list[tuple[tuple[int, int, int, int, int, int], dict[str, Any]]] = []
-    for view in repository.list_enabled_rules(session):
+    for view in crud.list_enabled_rules(session):
         if event not in view["events"]:
             continue
         devices = view["devices"]
