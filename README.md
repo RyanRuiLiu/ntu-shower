@@ -34,6 +34,7 @@ cd server
 python3.13 -m venv .venv
 python3.13 -m pip install -r requirements-dev.txt
 cp .env.example .env
+.venv/bin/alembic upgrade head                      # 首次运行先建 schema（Windows: .venv\Scripts\alembic.exe）
 .venv/bin/uvicorn app.main:app --reload --port 8000   # Windows: .venv\Scripts\uvicorn.exe
 ```
 
