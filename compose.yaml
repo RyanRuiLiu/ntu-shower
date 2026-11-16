@@ -1,6 +1,6 @@
 services:
   migrate:
-    image: crpi-5rhaq5x8z5ec9tig.cn-hangzhou.personal.cr.aliyuncs.com/ryanruiliu/ntu-shower:${NTU_SHOWER_TAG:?NTU_SHOWER_TAG must be set}
+    image: ${NTU_SHOWER_IMAGE:?NTU_SHOWER_IMAGE must be set (registry path of the app image)}:${NTU_SHOWER_TAG:?NTU_SHOWER_TAG must be set}
     restart: "no"
     user: "997:997"
     env_file:
@@ -19,7 +19,7 @@ services:
     command: ["alembic", "upgrade", "head"]
 
   ntu-shower:
-    image: crpi-5rhaq5x8z5ec9tig.cn-hangzhou.personal.cr.aliyuncs.com/ryanruiliu/ntu-shower:${NTU_SHOWER_TAG:?NTU_SHOWER_TAG must be set}
+    image: ${NTU_SHOWER_IMAGE:?NTU_SHOWER_IMAGE must be set (registry path of the app image)}:${NTU_SHOWER_TAG:?NTU_SHOWER_TAG must be set}
     container_name: ntu-shower
     depends_on:
       migrate:

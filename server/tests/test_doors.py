@@ -346,7 +346,7 @@ def test_stream_door_update_carries_full_state_matching_rest(client: TestClient,
     """door.update 载荷是该设备完整现态行，与 GET /doors 逐字节同构（单一来源证明）。"""
     device_id = "dev-stream-door"
     with client.websocket_connect("/api/v1/stream") as ws:
-        door_link.feed(device_id, _snapshot([_door(1, card_no=1001, cert_no="2026000001")]))
+        door_link.feed(device_id, _snapshot([_door(1, card_no=1001, cert_no="9999000001")]))
         message = json.loads(ws.receive_text())
 
     assert message["type"] == "door.update"

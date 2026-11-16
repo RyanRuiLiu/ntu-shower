@@ -15,7 +15,7 @@ param(
     [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$Token,
     [switch]$SkipBuild,
     [string]$Target = "all",
-    [string]$BaseUrl = "https://ntu-shower.iseekdream.com"
+    [string]$BaseUrl = "https://<public-domain>"
 )
 
 # 严格模式：未定义变量与拼错成员名当场终止，而不是静默走 $null。
