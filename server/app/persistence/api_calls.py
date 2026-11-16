@@ -20,7 +20,6 @@ from app.db.base import utcnow
 from app.db.session import session_scope
 
 from . import audit as audit_store
-from .audit import ApiCall, CommandAudit
 
 
 class ApiCallRecord(TypedDict):
@@ -112,19 +111,20 @@ def list_calls(
         )
 
 
-def prune(session: Session, retention_days: int, retentions: tuple[tuple[Any, Any, int], ...]) -> int:
-    """删除超过各自保留期的行，返回删除总行数。
+def prune(session: Session, retention_days: int, retentions: tuple[tuple[Any, Any], ...]) -> int:
+    """删除超过统一保留期的行，返回删除总行数。
 
-    `retention_days` 是 api_call/command_audit 的可配期限（audit_retention_days）；
-    其余表用各自声明值，不随该配置变。全部 DELETE 共用一个事务：要么都清、
-    要么都不清，各表保留期才不会错开。库文件不复缩，页复用即可。
+    保留期统一单一数值：全部表跟随 `retention_days`（audit_retention_days），
+    不按表分散——改一处即全库生效。全部 DELETE 共用一个事务：要么都清、
+    要么都不清。各表时刻列均有索引，DELETE 只触及本轮 aged-out 的增量行；
+    空闲页的归还由 retention.maybe_vacuum 的夜间窗口承担。
 
     `retentions` 由调用方（app 根的 retention）传入：保留期清单横跨各域的
     表，持久化层不得反向 import 各域模型，清单住在装配侧。
     """
     removed = 0
-    for table, column, days in retentions:
-        cutoff = utcnow() - timedelta(days=days if table not in (ApiCall, CommandAudit) else retention_days)
+    for table, column in retentions:
+        cutoff = utcnow() - timedelta(days=retention_days)
         result = session.execute(delete(table).where(column < cutoff))
         removed += int(getattr(result, "rowcount", 0) or 0)
     session.commit()
