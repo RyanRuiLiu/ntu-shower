@@ -103,9 +103,9 @@ com.ryanliu.ntushower
 
 | 场景 | 拉起者 | 恢复实测 |
 |---|---|---|
-| 开机 | 系统重绑无障碍 → A11yService 自举 AgentService（本 ROM 不投递开机广播） | ✅ 30 秒 |
-| OTA/手动重装 | MY_PACKAGE_REPLACED（stopped 状态也送达） | ✅ 两次 OTA + 桥上 install -r |
-| 进程被杀 | 看门狗告警（进程死后系统侧仍存活） | ✅ ~60 秒 |
+| 开机 | 系统重绑无障碍 → A11yService 自举 AgentService（本 ROM 不投递开机广播） | 30 秒 |
+| OTA/手动重装 | MY_PACKAGE_REPLACED（stopped 状态也送达） | 两次 OTA + 桥上 install -r |
+| 进程被杀 | 看门狗告警（进程死后系统侧仍存活） | ~60 秒 |
 | 崩溃 | ShowerApp 未捕获异常 → 1 秒告警重启 | 实现（机理同看门狗） |
 | 浴室 App 被杀 | A11yService 事件流 → BathAppGuard 决策拉起 | 实现并单测 |
 
