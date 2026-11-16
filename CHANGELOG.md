@@ -6,6 +6,13 @@
 > 0.6.3 直接升到 0.6.5（提交 d9e29d2），该节原为一次记档性条目。其内容已并入
 > 下方 0.6.5 的 Fixed；不保留一个没有对应版本状态的版本号。
 
+## [0.7.4] - 2026-11-15
+
+### Changed
+
+- 协议帧 `session.command` / `session.command_result` 更名 `device.command` / `device.command_result`：24 种设备操作里只有 2 种与 session 有关，session 一词无语义；与 `device.log_upload` 统一设备域 namespace（帧内 `action` 字段取值不变，连接侧零配置改动）。
+- 失败码 `door.no_occupied` → `door.unoccupied`（语法规范化）。两端契约生成物同步重生成，versionCode 122 → 123，全部设备经 OTA 自动升级。
+
 ## [0.7.3] - 2026-11-15
 
 ### Added
