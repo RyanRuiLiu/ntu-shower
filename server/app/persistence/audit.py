@@ -2,7 +2,8 @@
 
 审计是横切基础设施，不是业务模块：写入方是全部模块与网关生命周期，读取方是
 audit 域的只读出口。三张表都是只追加的时间序列，因此每条都有时刻列与索引；
-保留策略按表分别设定（登记与执行见 app/retention.py 的 RETENTIONS 与
+保留期统一单一数值（全部表跟随 audit_retention_days，登记与执行见
+app/retention.py 的 RETENTIONS 与
 api_calls.prune）。
 
 JobRun 的 session_id 外键指向 door_sessions（字符串表名，不需要 import 会话模型）：
@@ -28,7 +29,7 @@ from app.db.session import session_scope
 
 
 class ApiCall(CreatedAtMixin, Base):
-    """一次 HTTP 调用的审计行，保留 90 天。"""
+    """一次 HTTP 调用的审计行，保留期随 audit_retention_days（统一单一旋钮）。"""
 
     __tablename__ = "api_calls"
     __table_args__ = (Index("ix_api_calls_device_id_requested_at", "device_id", "requested_at"),)
@@ -79,7 +80,7 @@ class CommandAudit(CreatedAtMixin, Base):
 
 
 class JobRun(CreatedAtMixin, Base):
-    """后台任务的一次执行记录，保留 180 天。"""
+    """后台任务的一次执行记录，保留期随 audit_retention_days（统一单一旋钮）。"""
 
     __tablename__ = "job_runs"
     __table_args__ = (Index("ix_job_runs_device_id_occurred_at", "device_id", "occurred_at"),)

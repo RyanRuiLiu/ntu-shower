@@ -60,7 +60,7 @@ class VoiceUnit(Base):
 
 
 class VoiceDelivery(CreatedAtMixin, Base):
-    """一次播报投递，保留 90 天。
+    """一次播报投递，保留期随 audit_retention_days（统一单一旋钮）。
 
     `event_key` 是幂等身份：重复派生或重复投递不会播第二遍。
     `status` 是闭集（DeliveryStatus）：pending 为在途态，终态沿用命令结果四值。
