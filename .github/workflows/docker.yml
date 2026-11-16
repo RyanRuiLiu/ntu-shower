@@ -19,7 +19,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: RyanRuiLiu/.github/.github/workflows/docker.yml@97a1ce79839dbe935d5c33cba5a4a80c1eec26f2
+    uses: RyanRuiLiu/.github/.github/workflows/docker.yml@97a1ce79839da8faf87f491248422aafd6c5c342
     # registry/namespace 是部署侧私有值（同 compose 的 NTU_SHOWER_IMAGE）：经
     # secrets 块传入（workflow_call 的 with: 不支持 secrets 上下文），公开文件里
     # 只剩表达式，值由仓库 secrets 持有。共享仓对空值回退合法 local 名——fork PR
