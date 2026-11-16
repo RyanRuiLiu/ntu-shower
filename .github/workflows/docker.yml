@@ -14,6 +14,11 @@ on:
     tags: ["v*"]
   pull_request:
 
+# 顶层零权限：docker job 的 packages: write 自行声明；deploy 用不到 GITHUB_TOKEN
+# （SSH 凭据走 secrets），其余 job 一律不领令牌——依赖 Actions 默认值的继承面
+# 是权限审计的盲区，显式声明为零。
+permissions: {}
+
 jobs:
   docker:
     permissions:
@@ -37,6 +42,8 @@ jobs:
     needs: docker
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    # 部署序列实测 40~70 秒（pull + up + healthz 探测 60s 上限）；挂起按额定分钟烧。
+    timeout-minutes: 10
     steps:
       - name: Deploy to production
         uses: appleboy/ssh-action@823bd89e131d8d508129f9443cad5855e9ba96f0  # v1.2.4
