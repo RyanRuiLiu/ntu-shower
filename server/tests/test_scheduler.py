@@ -27,6 +27,7 @@ from app.core.problems import ApiProblemError, Problem
 from app.core.protocol import JsonObject
 from app.db.session import session_scope
 from app.modules.devices import actions as device_actions
+from app.modules.extend_hours import service as extend_hours_service
 from app.modules.sessions import scheduler
 from app.modules.sessions.decision import (
     JOB_AUTO_SETTLE,
@@ -45,6 +46,8 @@ def _read_snapshots(device_id: str) -> list:
 
 
 SCHEDULER_PATH = Path(scheduler.__file__)
+EXTEND_HOURS_PATH = Path(extend_hours_service.__file__)
+AUDIT_PATH = Path(audit_repository.__file__)
 
 #: 这一层测的是**编排**，所以把时长上限放得极大：下面那些夹具动辄是"一小时前分配"，
 #: 撞上真实默认值（900 秒）的话判据会先停手，测到的是"没动手"而不是"编排对不对"。
@@ -335,10 +338,15 @@ def test_terminal_outcomes_are_recorded_on_one_path() -> None:
     所以它们直接写日志——这份白名单就是它们，多一个都要在这里说清楚。
     """
     source = SCHEDULER_PATH.read_text(encoding="utf-8")
+    extend_source = EXTEND_HOURS_PATH.read_text(encoding="utf-8")
+    audit_source = AUDIT_PATH.read_text(encoding="utf-8")
 
     literals = sorted(re.findall(r'"job\.([a-z-]+)"', source))
     assert literals == ["started", "stopped"], f"还有别处直接写终局日志：{literals}"
-    assert source.count("insert_job_run(") == 1, "落表必须只有一处"
+    # 落表收口后的形态：两个域都委托 audit.record_job_run，全项目落表恰好一处。
+    assert source.count("insert_job_run(") == 0, "本文件不得直接落表（收口 audit.record_job_run）"
+    assert extend_source.count("insert_job_run(") == 0, "延长服务不得直接落表（收口 audit.record_job_run）"
+    assert audit_source.count("def insert_job_run(") == 1, "全项目落表定义必须恰好一处（audit.record_job_run）"
 
 
 def test_settle_lands_in_the_audit_table_with_its_own_fields(monkeypatch: pytest.MonkeyPatch, fresh_db: str) -> None:
@@ -484,7 +492,11 @@ def test_domain_rejections_are_split_into_normal_and_noteworthy(fresh_db: str, m
     _seed_session(WAITING)  # 审计行的 session_id 是真外键
 
     events: list[tuple[str, str]] = []
-    monkeypatch.setattr(scheduler, "log_event", lambda level, event, *_a, **_kw: events.append((level, event)))
+    monkeypatch.setattr(
+        audit_repository,
+        "record_job_run",
+        lambda **kw: events.append((kw.get("level", "INFO"), kw["event"])),
+    )
 
     def problem(code: str) -> ApiProblemError:
         return ApiProblemError(Problem(code, 409, "x"), "细节")

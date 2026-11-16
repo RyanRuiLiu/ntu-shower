@@ -273,7 +273,7 @@ function renderDeliveries() {
         <td>${codeCell(item.cert_no)}</td>
         <td><span class="badge badge-blue" title="${esc(event.description)}">${esc(event.label)}</span></td>
         <td class="mono">${esc(String(item.door_no))}</td>
-        <td><div class="muted" title="${esc(item.segments)}">${esc(item.segments)}</div></td>
+        <td><div class="muted" title="${esc(item.summary)}">${esc(item.summary)}</div></td>
         <td class="mono">${esc(fmtMs(item.duration_ms))}</td>
         <td><span title="${esc(item.detail || '')}">${deliveryBadge(item.status)}</span></td>
       </tr>`

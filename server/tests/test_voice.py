@@ -905,7 +905,7 @@ def test_push_records_manual_delivery(
     delivery = deliveries[0]
     assert delivery["source"] == "manual"
     assert delivery["status"] == "ok"
-    assert delivery["segments"] == "停顿 0.5 秒 · 请到 · 一"
+    assert delivery["summary"] == "停顿 0.5 秒 · 请到 · 一"
     assert delivery["detail"] == "手动推送："
 
     assert (
@@ -1121,7 +1121,7 @@ def test_handle_events_delivers_once(
     assert delivery["cert_no"] == "C1"
     assert delivery["event"] == "assigned"
     assert delivery["door_no"] == 5
-    assert delivery["segments"] == "请到 · 停顿 0.5 秒 · 五"
+    assert delivery["summary"] == "请到 · 停顿 0.5 秒 · 五"
     assert delivery["segment_count"] == 3
     assert delivery["status"] == "ok"
     assert delivery["downloaded"] is True

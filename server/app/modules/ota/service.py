@@ -13,7 +13,8 @@ from sqlalchemy.orm import Session
 from app.core import protocol
 from app.core.config import settings
 from app.core.connections import manager
-from app.modules.ota import crud as repository
+
+from . import crud
 
 # 发布版本号格式：SemVer 三段数字的严格子集。
 # 该约束同时承担安全职责——版本号最终拼入文件路径，字符集必须排除
@@ -66,13 +67,13 @@ def prune_releases(session: Session, keep: int) -> list[str]:
     （盘上有、注册表里没有）一并清，"不积累垃圾"才算完整。
     """
     removed: list[str] = []
-    for rel in repository.list_releases(session)[max(keep, 0) :]:
+    for rel in crud.list_releases(session)[max(keep, 0) :]:
         version = rel["version"]
         remove_release_file(version)
-        repository.delete_release(session, version)
+        crud.delete_release(session, version)
         removed.append(version)
 
-    known = {rel["version"] for rel in repository.list_releases(session)}
+    known = {rel["version"] for rel in crud.list_releases(session)}
     for path in sorted(Path(settings.ota_dir).glob("*.apk")):
         if path.stem not in known:
             path.unlink()

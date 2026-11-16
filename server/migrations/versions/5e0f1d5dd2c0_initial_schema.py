@@ -451,7 +451,7 @@ def upgrade() -> None:
         sa.Column("door_no", sa.Integer(), nullable=False),
         sa.Column("cert_no", sa.String(length=32), nullable=False),
         sa.Column("event", sa.String(length=32), nullable=False),
-        sa.Column("segments", sa.Text(), nullable=False),
+        sa.Column("summary", sa.Text(), nullable=False),
         sa.Column("segment_count", sa.Integer(), nullable=False),
         sa.Column("duration_ms", sa.Integer(), nullable=False),
         sa.Column("occurred_at", UtcDateTime(), nullable=False),
