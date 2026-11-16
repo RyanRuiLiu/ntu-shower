@@ -59,7 +59,7 @@ MCU 的断电截止是**钟面时刻**——钟被拨动，截止就在真实时
 `sessions/scheduler` 的候选是**每个喷头一个**（`FEATURES` 那张表的 `states` / `start`
 全是喷头级），而这里问的是"**整台设备**上还有没有名单里的人"。粒度不同，硬塞进去要在
 那张表里放一个不成立的形状。另外三条还有一个更实在的差别：它们的记忆在内存里，丢了
-只是少续一次；这一个丢了设备钟会一直偏着，所以状态落库（见 `repository.py`）。
+只是少续一次；这一个丢了设备钟会一直偏着，所以状态落库（见 `crud.py`）。
 
 ## 与另外三条的边界只有一处
 
@@ -74,7 +74,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.contracts import DeviceRecord, JobOutcome
+from app.contracts import DeviceRecord
 from app.core import actions, device_clock, outcomes
 from app.core.clock import now_rfc3339, parse_rfc3339, shift_rfc3339, to_local, wall_clock_text
 from app.core.logging import log_event
@@ -84,21 +84,32 @@ from app.db.base import utcnow
 from app.db.session import session_scope
 from app.modules.config import store as config_store
 from app.modules.config.schemas import ConfigValues
-from app.modules.config.spec import EXTEND_HOURS_STUDENTS_KEY
+from app.modules.config.spec import (
+    EXTEND_HOURS_AT_KEY,
+    EXTEND_HOURS_ENABLED_KEY,
+    EXTEND_HOURS_STUDENTS_KEY,
+    EXTEND_SHIFT_MINUTES_KEY,
+    POWER_OFF_AT_KEY,
+    POWER_ON_AT_KEY,
+    SERVER_ZONE_OFFSET_MINUTES_KEY,
+    TIME_SYNC_ENABLED_KEY,
+    TIME_SYNC_THRESHOLD_S_KEY,
+)
 from app.modules.devices import actions as device_actions
 from app.modules.devices import service as devices_service
 from app.modules.doors import service as doors_service
-from app.modules.extend_hours import crud as repository
 from app.modules.sessions import service as sessions_service
 from app.modules.sessions.decision import students_of
 from app.modules.sessions.schemas import AssignRequest
 from app.persistence import audit as audit_store
 
+from . import crud
+
 
 #: 拨钟拨走的时长按 `extend_shift_minutes` 现算（秒）：落点必须跨过午夜，才能一次
 #: 跳过 23:50 起的新人关闭窗口、23:58 的断电，以及两者之间的全部释放判定。
 def _shift_s(config: ConfigValues) -> int:
-    return as_int(config["extend_shift_minutes"]) * 60
+    return as_int(config[EXTEND_SHIFT_MINUTES_KEY]) * 60
 
 
 #: 扫表间隔。它要远小于"到点"与"浴室 App 放人"之间那几分钟余量（`extend_hours_at`
@@ -152,24 +163,21 @@ class Shift:
 
 
 def _record(outcome: str, message: str, device_id: str, *, level: str = "INFO", **extra: object) -> None:
-    """延长服务的一次终局：**日志与审计表在同一条路上写**。
+    """延长服务的一次终局：委托 audit 的唯一写路径（日志与审计表同一条路）。
 
-    与 sessions/scheduler._record 同构：收口成一处，每个终局只发生一次——散在各处写
-    迟早出现「记了日志、没落表」。`outcome` 取日志事件名后缀（`extend-hours.<它>`），
-    与 JobOutcome 的延长服务取值同一套说法；运维看板（/jobs/status 与
-    /audit/job-runs）据此一处看全四个后台任务。`extra` 只进日志（给人看的细节）。
+    `outcome` 取日志事件名后缀（`extend-hours.<它>`），与 JobOutcome 的延长服务
+    取值同一套说法；运维看板（/jobs/status 与 /audit/job-runs）据此一处看全
+    四个后台任务。`extra` 只进日志（给人看的细节）。
     """
-    log_event(level, f"extend-hours.{outcome}", message, device_id=device_id, **extra)
-    with session_scope() as session:
-        audit_store.insert_job_run(
-            session,
-            device_id=device_id,
-            door_no=0,
-            cert_no="",
-            job="extend_hours",
-            outcome=JobOutcome(outcome),
-            occurred_at=utcnow(),
-        )
+    audit_store.record_job_run(
+        event=f"extend-hours.{outcome}",
+        message=message,
+        level=level,
+        device_id=device_id,
+        job="extend_hours",
+        outcome=outcome,
+        extra=extra,
+    )
 
 
 # ── 取数：一律经别人的公开功能 ──────────────────────────────────────────────
@@ -242,10 +250,10 @@ def current_shifts(session: Session) -> list[dict[str, object]]:
     尚未放回的人：浴室端收回谁，谁就是走了，不再重新预约。
     """
     rows: list[dict[str, object]] = []
-    for row in repository.list_shifted(session):
+    for row in crud.list_shifted(session):
         shift = _as_shift(row)
         config = config_store.effective(session, shift.device_id)
-        zone = as_int(config["server_zone_offset_minutes"])
+        zone = as_int(config[SERVER_ZONE_OFFSET_MINUTES_KEY])
         shift_local = to_local(shift.shifted_at, zone)
         now_local = to_local(now_rfc3339(), zone)
         past_midnight = shift_local is not None and now_local is not None and now_local.date() > shift_local.date()
@@ -258,7 +266,7 @@ def current_shifts(session: Session) -> list[dict[str, object]]:
         rows.append(
             {
                 "device_id": shift.device_id,
-                "shift_minutes": as_int(config["extend_shift_minutes"]),
+                "shift_minutes": as_int(config[EXTEND_SHIFT_MINUTES_KEY]),
                 "shifted_at": shift.shifted_at,
                 "total": len(shift.assignments),
                 "reassigned_count": len(shift.assignments) - len(pending),
@@ -352,14 +360,14 @@ def _roll_target(device_id: str, config: ConfigValues, pre_shift: bool) -> tuple
     钟越过未补偿的截止，当场断电（实测）。上电目标恒为 `power_on_at`（设备端按
     "断电时刻之后第一个上电时刻"换算）。
     """
-    local_now = _local_now(device_id, as_int(config["server_zone_offset_minutes"]))
+    local_now = _local_now(device_id, as_int(config[SERVER_ZONE_OFFSET_MINUTES_KEY]))
     if local_now is None:
         return None
     shift_comp = _shift_s(config) if pre_shift else 0
     off_wall = wall_clock_text(shift_rfc3339(local_now, shift_comp + ROLL_WINDOW_MIN * 60))
     if off_wall is None:
         return None
-    return off_wall[11:16], str(config["power_on_at"])
+    return off_wall[11:16], str(config[POWER_ON_AT_KEY])
 
 
 async def _roll_power(session: Session, device_id: str, config: ConfigValues, pre_shift: bool) -> bool:
@@ -390,19 +398,19 @@ async def _maybe_correct_clock(session: Session, device_id: str, config: ConfigV
     故意的，拨快本来就是流程的一部分）、**有人在占用不校**（判定与 `_restore_due` 同源）、
     **还没有偏差记录不校**（首次 pong 之前无从判）。
     """
-    if not config["time_sync_enabled"]:
+    if not config[TIME_SYNC_ENABLED_KEY]:
         return
-    if repository.get(session, device_id) is not None:
+    if crud.get(session, device_id) is not None:
         return  # 延长中：偏差是故意的
     if not device_clock.has(device_id):
         return  # 还没有偏差记录（首次 pong 之前），无从判
     if doors_service.open_sessions(session, device_id):
         return  # 有人占用：校钟的跳变会清掉会话，等人走再校
     skew = device_clock.get(device_id)  # 服务端 − 设备（秒）
-    threshold = as_int(config["time_sync_threshold_s"])
+    threshold = as_int(config[TIME_SYNC_THRESHOLD_S_KEY])
     if abs(skew) < threshold:
         return
-    zone = as_int(config["server_zone_offset_minutes"])
+    zone = as_int(config[SERVER_ZONE_OFFSET_MINUTES_KEY])
     text = wall_clock_text(shift_rfc3339(now_rfc3339(), zone * 60))
     if text is None:
         return
@@ -436,15 +444,15 @@ async def _maybe_shift(session: Session, device_id: str) -> None:
     一次；命令失败时清掉它，于是下一轮照常重试。
     """
     config = config_store.effective(session, device_id)
-    if not config["extend_hours_enabled"]:
+    if not config[EXTEND_HOURS_ENABLED_KEY]:
         return
-    if repository.get(session, device_id) is not None:
+    if crud.get(session, device_id) is not None:
         return  # 已经在延长中
     students = students_of(config, EXTEND_HOURS_STUDENTS_KEY)
     if not students:
         return
     if not _reached(
-        _local_now(device_id, as_int(config["server_zone_offset_minutes"])), str(config["extend_hours_at"])
+        _local_now(device_id, as_int(config[SERVER_ZONE_OFFSET_MINUTES_KEY])), str(config[EXTEND_HOURS_AT_KEY])
     ):
         return
     present = _present(session, device_id, students)
@@ -455,7 +463,7 @@ async def _maybe_shift(session: Session, device_id: str) -> None:
     # "他原来在哪个喷头"。
     assignments = [{"door_no": door_no, "cert_no": cert_no} for door_no, cert_no in present]
     shift_s = _shift_s(config)
-    zone = as_int(config["server_zone_offset_minutes"])
+    zone = as_int(config[SERVER_ZONE_OFFSET_MINUTES_KEY])
     local_now = _local_now(device_id, zone)
     if local_now is None:
         log_event("WARNING", "extend-hours.no-skew", "还没有这台设备的钟偏差记录，不动它", device_id=device_id)
@@ -474,17 +482,17 @@ async def _maybe_shift(session: Session, device_id: str) -> None:
             landing=landing,
         )
         return
-    repository.record(session, device_id, utcnow(), assignments)
+    crud.record(session, device_id, utcnow(), assignments)
     if not await _roll_power(session, device_id, config, pre_shift=True):
-        repository.clear(session, device_id)
+        crud.clear(session, device_id)
         _record("shift-failed", "保护性重布没成功，下一轮再试", device_id, level="WARNING")
         return
     if not await _set_clock(session, device_id, shift_s, zone):
-        repository.clear(session, device_id)
+        crud.clear(session, device_id)
         _record("shift-failed", "拨钟没成功，下一轮再试", device_id, level="WARNING")
         return
     # shifted_at 以**拨成功那一刻**为准：恢复条件（被跳过的断电时刻已过）从它起算。
-    repository.record(session, device_id, utcnow(), assignments)
+    crud.record(session, device_id, utcnow(), assignments)
     _record("shifted", "已延长服务时间", device_id, students=len(present))
 
 
@@ -503,7 +511,7 @@ def on_frame(device_id: str) -> None:
     下发两条命令。
     """
     with session_scope() as session:
-        row = repository.get(session, device_id)
+        row = crud.get(session, device_id)
         if row is None:
             return
         shift = _as_shift(row)
@@ -631,7 +639,7 @@ async def _advance_extensions(session: Session, devices: list[DeviceRecord]) -> 
     滚动续写、推分配、看恢复条件。正在延长的只在 clock_shifted_at 有值的那些上。"""
     for record in devices:
         await _maybe_shift(session, record["device_id"])
-    for row in repository.list_shifted(session):
+    for row in crud.list_shifted(session):
         shift = _as_shift(row)
         # 行跟着设备走（外键 CASCADE）：设备除档时这一行随之消失，不会有残行。
         await _advance(session, shift, config_store.effective(session, shift.device_id))
@@ -668,7 +676,7 @@ def _restore_due(session: Session, shift: Shift, config: ConfigValues) -> bool:
     两个条件缺一不可——时刻没到，延长还在服务窗口里；有会话在（预约未开阀的、
     淋浴中的），拨回的钟跳会清掉这些会话。"尽可能连续不被打断"由这两条共同保证。
     """
-    zone = as_int(config["server_zone_offset_minutes"])
+    zone = as_int(config[SERVER_ZONE_OFFSET_MINUTES_KEY])
     shift_local = to_local(shift.shifted_at, zone)
     now_local = to_local(now_rfc3339(), zone)
     if shift_local is None or now_local is None:
@@ -687,18 +695,18 @@ async def _restore(session: Session, shift: Shift, config: ConfigValues) -> bool
     拨回成功而重布失败时**保留那一行**：钟已经归位，但 MCU 里的截止还是滚动窗口留下
     的旧值，下一轮滚动会续写、本函数也会重试重布，直到成功。
     """
-    zone_offset_minutes = as_int(config["server_zone_offset_minutes"])
+    zone_offset_minutes = as_int(config[SERVER_ZONE_OFFSET_MINUTES_KEY])
     if not await _set_clock(session, shift.device_id, -_shift_s(config), zone_offset_minutes):
         _record("restore-failed", "调回没成功，下一轮再试", shift.device_id, level="WARNING")
         return False
     rearmed = await _schedule_power(
         session,
         shift.device_id,
-        str(config["power_off_at"]),
-        str(config["power_on_at"]),
+        str(config[POWER_OFF_AT_KEY]),
+        str(config[POWER_ON_AT_KEY]),
     )
     if rearmed:
-        repository.clear(session, shift.device_id)
+        crud.clear(session, shift.device_id)
         _forget_failures(shift.device_id)
         _record("restored", "设备钟已调回，节奏已恢复", shift.device_id)
     else:

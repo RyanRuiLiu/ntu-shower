@@ -14,8 +14,7 @@ from typing import NoReturn
 
 from sqlalchemy.orm import Session
 
-from app.modules.config import crud as config_store_persistence
-
+from . import crud
 from .schemas import ConfigSpecView, ConfigValues
 from .spec import (
     CONFIG_SPECS,
@@ -152,7 +151,7 @@ def _known(values: ConfigValues) -> ConfigValues:
 
 def get_global_overrides(session: Session) -> tuple[int, ConfigValues]:
     """全局覆盖项（不含默认值）与修订号。"""
-    revision, config = config_store_persistence.get_global(session)
+    revision, config = crud.get_global(session)
     return (revision, _known(config))
 
 
@@ -162,7 +161,7 @@ def put_global_overrides(session: Session, values: ConfigValues) -> tuple[int, C
         revision, _previous = get_global_overrides(session)
         overrides = _as_overrides(values)
         new_revision = revision + 1
-        config_store_persistence.put_global(session, new_revision, overrides)
+        crud.put_global(session, new_revision, overrides)
         return new_revision, overrides
 
 
@@ -196,7 +195,7 @@ def _device_scoped(values: ConfigValues) -> ConfigValues:
 
 
 def get_device_overrides(session: Session, device_id: str) -> tuple[int, ConfigValues] | None:
-    row = config_store_persistence.get_device(session, device_id)
+    row = crud.get_device(session, device_id)
     return (row[0], _device_scoped(_known(row[1]))) if row else None
 
 
@@ -204,7 +203,7 @@ def put_device_overrides(session: Session, device_id: str, values: ConfigValues)
     existing = get_device_overrides(session, device_id)
     overrides = _as_overrides(values)
     new_revision = (existing[0] if existing else 0) + 1
-    config_store_persistence.put_device(session, device_id, new_revision, overrides)
+    crud.put_device(session, device_id, new_revision, overrides)
     return new_revision, overrides
 
 

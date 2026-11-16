@@ -16,7 +16,7 @@
 `tests/test_jobs.py` 把这几处的对应关系钉住。
 """
 
-from app.modules.config.spec import EXTEND_HOURS_STUDENTS_KEY, GROUPS
+from app.modules.config.spec import EXTEND_HOURS_ENABLED_KEY, EXTEND_HOURS_STUDENTS_KEY, GROUPS
 from app.modules.sessions import decision
 
 _TITLES: dict[str, str] = {group.key: group.title for group in GROUPS}
@@ -28,5 +28,5 @@ _EXTEND_HOURS_KEY = "extend_hours"
 # 「后台任务」页签的顺序一致。名单键取 spec 的常量（跨模块引用不写字面量）。
 JOBS: tuple[tuple[str, str, str], ...] = (
     *((spec.key, spec.enabled_key, spec.students_key) for spec in decision.JOBS),
-    (_EXTEND_HOURS_KEY, "extend_hours_enabled", EXTEND_HOURS_STUDENTS_KEY),
+    (_EXTEND_HOURS_KEY, EXTEND_HOURS_ENABLED_KEY, EXTEND_HOURS_STUDENTS_KEY),
 )

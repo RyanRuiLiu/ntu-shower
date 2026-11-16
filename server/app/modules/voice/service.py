@@ -33,12 +33,12 @@ from app.core.problems import (
 )
 from app.db.base import utcnow
 from app.modules.config import store as config_store
+from app.modules.config.spec import SERVER_ZONE_OFFSET_MINUTES_KEY, VOICE_EVENT_MAX_AGE_S_KEY
 from app.modules.devices import actions as device_actions
 from app.modules.devices import service as devices_service
 from app.modules.doors.events import DoorEvent, DoorEventKind
-from app.modules.voice import crud as repository
 
-from . import audio, matching, numbers, schemas
+from . import audio, crud, matching, numbers, schemas
 from . import time_windows as time_rules
 from .priority import rule_priority
 
@@ -113,7 +113,7 @@ def asset_url(asset_id: str) -> str:
 
 def _asset_view(session: Session, row: dict[str, Any]) -> schemas.VoiceAssetView:
     asset_id = str(row["asset_id"])
-    unit_row = repository.get_unit_by_asset(session, asset_id)
+    unit_row = crud.get_unit_by_asset(session, asset_id)
     return schemas.VoiceAssetView(
         asset_id=asset_id,
         name=str(row["name"]),
@@ -128,13 +128,13 @@ def _asset_view(session: Session, row: dict[str, Any]) -> schemas.VoiceAssetView
 
 
 def list_assets(session: Session) -> list[schemas.VoiceAssetView]:
-    return [_asset_view(session, row) for row in repository.list_assets(session)]
+    return [_asset_view(session, row) for row in crud.list_assets(session)]
 
 
 def _digit_rows(session: Session) -> dict[int, dict[str, Any]]:
     return {
         int(row["digit"]): row
-        for row in repository.list_assets(session)
+        for row in crud.list_assets(session)
         if row["digit"] is not None and 0 <= int(row["digit"]) <= 9
     }
 
@@ -144,7 +144,7 @@ def _digit_set(session: Session) -> list[int]:
 
 
 def _unit_rows(session: Session) -> dict[str, dict[str, Any]]:
-    return repository.unit_rows(session)
+    return crud.unit_rows(session)
 
 
 def _unit_set(session: Session) -> list[str]:
@@ -154,7 +154,7 @@ def _unit_set(session: Session) -> list[str]:
 
 def status(session: Session) -> schemas.VoiceStatusView:
     return schemas.VoiceStatusView(
-        asset_count=len(repository.list_assets(session)),
+        asset_count=len(crud.list_assets(session)),
         digits=_digit_set(session),
         units=_unit_set(session),
     )
@@ -175,7 +175,7 @@ def spec(session: Session) -> schemas.VoiceSpecView:
             minimum=schemas.VOLUME_MIN, maximum=schemas.VOLUME_MAX, default=schemas.VOLUME_DEFAULT
         ),
         digits=_digit_set(session),
-        asset_count=len(repository.list_assets(session)),
+        asset_count=len(crud.list_assets(session)),
         max_segments=schemas.MAX_SEGMENTS_PER_RULE,
         max_time_windows=time_rules.MAX_TIME_WINDOWS_PER_RULE,
         max_pause_ms=schemas.MAX_PAUSE_MS,
@@ -202,9 +202,9 @@ def create_asset(
         _reject_asset("文件为空")
     if len(data) > MAX_UPLOAD_BYTES:
         _reject_asset(f"文件超过 {MAX_UPLOAD_BYTES // (1024 * 1024)}MB")
-    if repository.get_asset_by_name(session, clean) is not None:
+    if crud.get_asset_by_name(session, clean) is not None:
         _reject_asset(f"素材名称已存在：{clean}")
-    if digit is not None and repository.get_asset_by_digit(session, digit) is not None:
+    if digit is not None and crud.get_asset_by_digit(session, digit) is not None:
         _reject_asset(f"数字 {digit} 已有素材")
     if unit is not None and unit in _unit_rows(session):
         _reject_asset(f"单位「{unit}」已有素材")
@@ -215,7 +215,7 @@ def create_asset(
         source.write_bytes(data)
         duration_ms = audio.validate_mp3(source)
         asset_id = audio.sha256_file(source)
-        existing = repository.get_asset(session, asset_id)
+        existing = crud.get_asset(session, asset_id)
         if existing is not None:
             _reject_asset(f"相同音频已存在：{existing['name']}")
         final = audio.asset_path(asset_id)
@@ -224,18 +224,18 @@ def create_asset(
         if created_final:
             source.replace(final)
         try:
-            repository.insert_asset(session, asset_id, clean, digit, duration_ms, final.stat().st_size)
+            crud.insert_asset(session, asset_id, clean, digit, duration_ms, final.stat().st_size)
             if unit is not None:
-                repository.insert_unit(session, unit, asset_id)
+                crud.insert_unit(session, unit, asset_id)
         except Exception:
-            repository.delete_unit(session, asset_id)
-            repository.delete_asset(session, asset_id)
+            crud.delete_unit(session, asset_id)
+            crud.delete_asset(session, asset_id)
             if created_final:
                 final.unlink(missing_ok=True)
             raise
-        row = repository.get_asset(session, asset_id)
+        row = crud.get_asset(session, asset_id)
         if row is None:
-            repository.delete_asset(session, asset_id)
+            crud.delete_asset(session, asset_id)
             if created_final:
                 final.unlink(missing_ok=True)
             _reject_asset("素材写入后读不到")
@@ -251,19 +251,19 @@ def rename_asset(session: Session, asset_id: str, name: str) -> schemas.VoiceAss
     clean = name.strip()
     if not clean or len(clean) > schemas.MAX_NAME_LENGTH:
         _reject_asset(f"名称必须为 1–{schemas.MAX_NAME_LENGTH} 个字符")
-    existing = repository.get_asset_by_name(session, clean)
+    existing = crud.get_asset_by_name(session, clean)
     if existing is not None and str(existing["asset_id"]) != asset_id:
         _reject_asset(f"素材名称已存在：{clean}")
-    if repository.rename_asset(session, asset_id, clean) is False:
+    if crud.rename_asset(session, asset_id, clean) is False:
         raise ApiProblemError(VOICE_ASSET_NOT_FOUND, asset_id)
-    row = repository.get_asset(session, asset_id)
+    row = crud.get_asset(session, asset_id)
     if row is None:
         raise ApiProblemError(VOICE_ASSET_NOT_FOUND, asset_id)
     return _asset_view(session, row)
 
 
 def _rules_using_asset(session: Session, asset_id: str, digit: int | None, unit: str | None) -> bool:
-    for row in repository.list_rules(session):
+    for row in crud.list_rules(session):
         for item in row["segments"]:
             if item.get("kind") == "asset" and item.get("asset_id") == asset_id:
                 return True
@@ -277,21 +277,21 @@ def _rules_using_asset(session: Session, asset_id: str, digit: int | None, unit:
 
 
 def delete_asset(session: Session, asset_id: str) -> None:
-    row = repository.get_asset(session, asset_id)
+    row = crud.get_asset(session, asset_id)
     if row is None:
         raise ApiProblemError(VOICE_ASSET_NOT_FOUND, asset_id)
     digit = int(row["digit"]) if row["digit"] is not None else None
-    unit_row = repository.get_unit_by_asset(session, asset_id)
+    unit_row = crud.get_unit_by_asset(session, asset_id)
     unit = str(unit_row["unit"]) if unit_row is not None else None
     if _rules_using_asset(session, asset_id, digit, unit):
         raise ApiProblemError(VOICE_ASSET_IN_USE, f"「{row['name']}」正在被规则使用")
-    repository.delete_unit(session, asset_id)
-    repository.delete_asset(session, asset_id)
+    crud.delete_unit(session, asset_id)
+    crud.delete_asset(session, asset_id)
     audio.asset_path(asset_id).unlink(missing_ok=True)
 
 
 def asset_file(session: Session, asset_id: str) -> Path:
-    row = repository.get_asset(session, asset_id)
+    row = crud.get_asset(session, asset_id)
     path = audio.asset_path(asset_id)
     if row is None or not path.is_file():
         raise ApiProblemError(VOICE_ASSET_NOT_FOUND, asset_id)
@@ -318,7 +318,7 @@ def _validate_segments(session: Session, segments: list[schemas.Segment]) -> Non
     if not segments:
         _reject("至少需要一个分段")
     asset_ids = [segment.asset_id for segment in segments if isinstance(segment, schemas.AssetSegment)]
-    missing = [asset_id for asset_id in set(asset_ids) if repository.get_asset(session, asset_id) is None]
+    missing = [asset_id for asset_id in set(asset_ids) if crud.get_asset(session, asset_id) is None]
     if missing:
         _reject(f"素材不存在：{missing[0]}")
     for segment in segments:
@@ -357,7 +357,7 @@ def _segment_summary(segments: list[schemas.Segment], assets: dict[str, dict[str
 def _rule_view(session: Session, row: dict[str, Any]) -> schemas.VoiceRuleView:
     segments = [_segment_from_dict(value) for value in row["segments"]]
     asset_ids = [segment.asset_id for segment in segments if isinstance(segment, schemas.AssetSegment)]
-    assets = repository.asset_rows_by_ids(session, asset_ids)
+    assets = crud.asset_rows_by_ids(session, asset_ids)
     try:
         windows = time_rules.parse_json(row["time_windows"])
     except ValueError as exc:
@@ -442,7 +442,7 @@ def _duplicate_rule(
     target_events = {event.value for event in events}
     target_windows = [window.to_window() for window in time_windows]
     priority = rule_priority(devices, certs, target_windows)
-    for row in repository.list_rules(session):
+    for row in crud.list_rules(session):
         if exclude_id is not None and int(row["id"]) == exclude_id:
             continue
         row_devices = set(row["devices"])
@@ -503,7 +503,7 @@ def create_rule(session: Session, req: schemas.VoiceRuleBody) -> schemas.VoiceRu
     devices, certs, events, windows, segments, exempt = _normalize_rule(
         session, req.devices, req.certs, req.events, req.time_windows, req.segments, req.exempt_cert_nos, None
     )
-    rule_id = repository.insert_rule(
+    rule_id = crud.insert_rule(
         session,
         devices,
         certs,
@@ -524,7 +524,7 @@ def update_rule(session: Session, rule_id: int, req: schemas.VoiceRuleBody) -> s
         session, req.devices, req.certs, req.events, req.time_windows, req.segments, req.exempt_cert_nos, rule_id
     )
     if (
-        repository.update_rule(
+        crud.update_rule(
             session,
             rule_id,
             devices,
@@ -544,13 +544,13 @@ def update_rule(session: Session, rule_id: int, req: schemas.VoiceRuleBody) -> s
 
 
 def set_enabled(session: Session, rule_id: int, enabled: bool) -> schemas.VoiceRuleView:
-    if repository.set_enabled(session, rule_id, enabled, utcnow()) is False:
+    if crud.set_enabled(session, rule_id, enabled, utcnow()) is False:
         raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
     return _rule_view(session, _rule_row_or_404(session, rule_id))
 
 
 def delete_rule(session: Session, rule_id: int) -> None:
-    if repository.delete_rule(session, rule_id) is False:
+    if crud.delete_rule(session, rule_id) is False:
         raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
 
 
@@ -570,7 +570,7 @@ def _rule_order(session: Session, view: schemas.VoiceRuleView) -> tuple[bool, st
 
 def list_rules(session: Session) -> list[schemas.VoiceRuleView]:
     return sorted(
-        (_rule_view(session, row) for row in repository.list_rules(session)),
+        (_rule_view(session, row) for row in crud.list_rules(session)),
         key=lambda view: _rule_order(session, view),
     )
 
@@ -585,7 +585,7 @@ def _resolve(session: Session, segments: list[schemas.Segment], door_no: int, ce
     # 数字/单位素材也要档案：door_no 段按"百""十"展开到对应素材
     asset_ids.update(unit["asset_id"] for unit in _unit_rows(session).values())
     asset_ids.update(digit["asset_id"] for digit in _digit_rows(session).values())
-    assets = repository.asset_rows_by_ids(session, sorted(asset_ids))
+    assets = crud.asset_rows_by_ids(session, sorted(asset_ids))
     digits = _digit_rows(session)
     units = _unit_rows(session)
 
@@ -638,7 +638,7 @@ def _play_params(plan: list[PlanItem], volume: int) -> dict[str, object]:
 
 
 def _plan_summary(session: Session, plan: list[PlanItem]) -> str:
-    assets = repository.asset_rows_by_ids(session, [item.clip_id for item in plan if isinstance(item, ClipPlan)])
+    assets = crud.asset_rows_by_ids(session, [item.clip_id for item in plan if isinstance(item, ClipPlan)])
     parts: list[str] = []
     for item in plan:
         if isinstance(item, ClipPlan):
@@ -650,7 +650,7 @@ def _plan_summary(session: Session, plan: list[PlanItem]) -> str:
 
 
 def _preview(session: Session, plan: list[PlanItem]) -> schemas.VoicePreviewView:
-    assets = repository.asset_rows_by_ids(session, [item.clip_id for item in plan if isinstance(item, ClipPlan)])
+    assets = crud.asset_rows_by_ids(session, [item.clip_id for item in plan if isinstance(item, ClipPlan)])
     segments: list[schemas.ResolvedSegment] = []
     for item in plan:
         if isinstance(item, ClipPlan):
@@ -695,7 +695,7 @@ def _sample_event(row: dict[str, Any]) -> DoorEventKind:
 
 def _rule_row_or_404(session: Session, rule_id: int) -> dict[str, Any]:
     """取规则行；不存在即领域异常（HTTP 层转 404）。"""
-    row = repository.get_rule(session, rule_id)
+    row = crud.get_rule(session, rule_id)
     if row is None:
         raise ApiProblemError(VOICE_RULE_NOT_FOUND, str(rule_id))
     return row
@@ -724,7 +724,7 @@ def _clip_payload(clip: ClipPlan) -> dict[str, object]:
 
 def _claim_delivery(session: Session, event: DoorEvent, rule_id: int, plan: list[PlanItem], duration_ms: int) -> bool:
     """幂等认领投递权：event_key 是唯一键，重复事件只有第一次拿到。"""
-    return repository.claim_delivery(
+    return crud.claim_delivery(
         session,
         event.event_key,
         rule_id,
@@ -753,7 +753,7 @@ async def _send_play(session: Session, device_id: str, plan: list[PlanItem], vol
 
 def _finish_delivery(session: Session, event_key: str, outcome: CommandOutcome, detail: str) -> None:
     """落回执：状态、说明与下载标记写入投递记录。终态即命令结果四值（DeliveryStatus）。"""
-    repository.finish_delivery(
+    crud.finish_delivery(
         session,
         event_key,
         utcnow(),
@@ -810,7 +810,7 @@ def _clips_for_rule(session: Session, row: dict[str, Any]) -> list[dict[str, obj
         asset_ids.update(str(digit_row["asset_id"]) for digit_row in _digit_rows(session).values())
     if any(segment.source == "door_no" for segment in digit_segments):
         asset_ids.update(str(unit_row["asset_id"]) for unit_row in _unit_rows(session).values())
-    rows = repository.asset_rows_by_ids(session, sorted(asset_ids))
+    rows = crud.asset_rows_by_ids(session, sorted(asset_ids))
     return [
         _clip_payload(_clip_from_row(asset)) for asset in sorted(rows.values(), key=lambda item: str(item["asset_id"]))
     ]
@@ -868,7 +868,7 @@ async def _prepare(session: Session, device_id: str, params: dict[str, object], 
 def schedule_rule_prepare(session: Session, view: schemas.VoiceRuleView) -> None:
     if not view.enabled:
         return
-    row = repository.get_rule(session, view.id)
+    row = crud.get_rule(session, view.id)
     if row is None:
         return
     clips = _clips_for_rule(session, row)
@@ -910,7 +910,7 @@ async def handle_events(events: tuple[DoorEvent, ...]) -> None:
     from app.db.session import session_scope
 
     with session_scope() as session:
-        value = config_store.global_effective(session)["voice_event_max_age_s"]
+        value = config_store.global_effective(session)[VOICE_EVENT_MAX_AGE_S_KEY]
         max_age = value if isinstance(value, int) else 0
         for event in events:
             try:
@@ -940,7 +940,7 @@ async def _dispatch_event(session: Session, event: DoorEvent, max_age: int) -> N
         return
     if not event.cert_no:
         return
-    zone_offset = config_store.global_effective(session)["server_zone_offset_minutes"]
+    zone_offset = config_store.global_effective(session)[SERVER_ZONE_OFFSET_MINUTES_KEY]
     if not isinstance(zone_offset, int):
         log_event(
             "ERROR",
@@ -999,7 +999,7 @@ async def _dispatch_event(session: Session, event: DoorEvent, max_age: int) -> N
 
 def list_deliveries(session: Session, limit: int) -> list[schemas.VoiceDeliveryView]:
     deliveries: list[schemas.VoiceDeliveryView] = []
-    for row in repository.list_deliveries(session, limit):
+    for row in crud.list_deliveries(session, limit):
         event_key = str(row["event_key"])
         deliveries.append(
             schemas.VoiceDeliveryView(
@@ -1010,7 +1010,7 @@ def list_deliveries(session: Session, limit: int) -> list[schemas.VoiceDeliveryV
                 cert_no=str(row["cert_no"]),
                 event=DoorEventKind(str(row["event"])),
                 door_no=int(row["door_no"]),
-                segments=str(row["segments"]),
+                summary=str(row["summary"]),
                 segment_count=int(row["segment_count"]),
                 duration_ms=int(row["duration_ms"]),
                 occurred_at=str(row["occurred_at"]),

@@ -532,48 +532,6 @@ def list_snapshots(session: Session, device_id: str) -> list[dict[str, Any]]:
 # 调用方不碰存储形状。
 
 
-def door_count(session: Session, device_id: str) -> int:
-    """这台设备上报过现态的喷头数。"""
-    return int(session.scalar(select(func.count()).select_from(DoorState).where(DoorState.device_id == device_id)) or 0)
-
-
-def door_count_in_state(session: Session, device_id: str, state: str) -> int:
-    """这台设备处于指定状态的喷头数。"""
-    return int(
-        session.scalar(
-            select(func.count())
-            .select_from(DoorState)
-            .where(DoorState.device_id == device_id, DoorState.state == state)
-        )
-        or 0
-    )
-
-
-def last_closed_by_door(session: Session, device_id: str, before: str) -> list[dict[str, Any]]:
-    """每扇门在 `before` 之前的最后一次关阀（段联会话取占用者）。"""
-    high = _parse_moment(before)
-    ranked = (
-        select(
-            DoorSegment.door_no,
-            DoorSegment.closed_at,
-            DoorSession.cert_no,
-            func.row_number().over(partition_by=DoorSegment.door_no, order_by=DoorSegment.closed_at.desc()).label("rn"),
-        )
-        .join(DoorSession, DoorSession.id == DoorSegment.session_id)
-        .where(DoorSegment.device_id == device_id, DoorSegment.closed_at.is_not(None), DoorSegment.closed_at < high)
-        .subquery()
-    )
-    rows = session.execute(
-        select(ranked.c.door_no, ranked.c.closed_at, ranked.c.cert_no)
-        .where(ranked.c.rn == 1)
-        .order_by(ranked.c.door_no)
-    ).all()
-    return [
-        {"door_no": int(door_no), "closed_at": _ts(closed_at), "cert_no": str(cert_no)}
-        for door_no, closed_at, cert_no in rows
-    ]
-
-
 def _parse_moment(value: str) -> datetime:
     """窗口端点的转换：统计层的窗口端点必然是合法 RFC 3339，坏值在调用方就挡了。"""
     moment = parse_rfc3339(value)
