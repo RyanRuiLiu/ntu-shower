@@ -1,10 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://<public-domain>/schema/status_line.update.json",
+  "$id": "https://example.com/schema/status_line.update.json",
   "title": "Fleet free-door status line",
   "allOf": [
     {
-      "$ref": "https://<public-domain>/schema/envelope.json"
+      "$ref": "https://example.com/schema/envelope.json"
     },
     {
       "type": "object",
