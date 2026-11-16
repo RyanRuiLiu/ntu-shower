@@ -7,7 +7,7 @@
         │ root sqlite 读取
         ▼
 ┌─────────────────┐   WSS /gateway/device   ┌─────────────────────────┐
-│  设备 APK        │◀═══════════════════════▶│  ntu-shower.iseekdream.com │
+│  设备 APK        │◀═══════════════════════▶│  <public-domain> │
 │  (Android 4.4.4) │   HTTPS /api/v1/*       │  nginx 443 唯一公网入口    │
 │  ANDROID_ID 标识 │   /ota/manifest       │  ┌───────────────────┐  │
 │  自更新/自管理    │                         │  │ FastAPI 单服务进程  │  │

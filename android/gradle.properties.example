@@ -5,7 +5,7 @@ org.gradle.jvmargs=-Xmx2048m
 android.useAndroidX=false
 
 # 设备端唯一锚点：服务域名（构建期注入 BuildConfig）
-serverDomain=ntu-shower.iseekdream.com
+serverDomain=<public-domain>
 
 # 设备自注册的 claim 令牌：与生产 env 的 DEVICE_ENROLL_TOKEN 同值。留空 = 注册
 # 通道干净关闭（设备凭据丢失时无法自注册，需人工处理）——**不要填占位文本**：

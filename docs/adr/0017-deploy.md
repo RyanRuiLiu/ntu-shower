@@ -13,7 +13,7 @@
 
 - **443 统一入口，nginx 按路径分流**，服务器只暴露 80/443/22。证书一张、防火墙规则最少；
   代价是 nginx 进入关键路径。
-- **域名 `ntu-shower.iseekdream.com`，单张通配符证书**。设备实测支持 ECDHE-ECDSA（见
+- **域名 `<public-domain>`，单张通配符证书**。设备实测支持 ECDHE-ECDSA（见
   `docs/architecture.md`「已定稿的传输层事实」），所以旧系统为迁就 4.4 而维护的 RSA 证书
   不再需要；续期依赖 Let's Encrypt。
 - **网页端是零构建静态文件**（`server/web/`），由服务端本身托管在根路径，合并了旧系统的调试

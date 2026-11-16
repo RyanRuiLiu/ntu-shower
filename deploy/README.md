@@ -8,7 +8,7 @@
 |---|---|---|
 | 根目录 `compose.yaml` | `/opt/ntu-shower/compose.yaml` | `NTU_SHOWER_TAG=<tag> docker compose -f /opt/ntu-shower/compose.yaml up -d` |
 | `litestream.yml` | `/etc/ntu-shower/litestream.yml` | `docker compose restart litestream` |
-| `nginx/ntu-shower.conf` | `/etc/nginx/sites-enabled/ntu-shower.iseekdream.com.conf`（**独立文件，非软链**：sites-available 与 enabled 是两份拷贝，只写 enabled 才生效） | `nginx -t && systemctl reload nginx` |
+| `nginx/ntu-shower.conf` | `/etc/nginx/sites-enabled/<public-domain>.conf`（**独立文件，非软链**：sites-available 与 enabled 是两份拷贝，只写 enabled 才生效） | `nginx -t && systemctl reload nginx` |
 | `publish_apk.ps1` | **不上服务器**：本地工具 | `.\deploy\publish_apk.ps1 -Token <admin 的 API Bearer 凭据>` |
 
 ## 部署（自动为主，手动兜底）
@@ -21,17 +21,17 @@
 **手动路径（回滚、CD 不可用时）**：
 
 ```bash
-scp compose.yaml root@iseekdream.com:/opt/ntu-shower/compose.yaml
-scp deploy/litestream.yml root@iseekdream.com:/etc/ntu-shower/litestream.yml
-ssh root@iseekdream.com "cd /opt/ntu-shower && NTU_SHOWER_TAG=sha-<短哈希> docker compose pull ntu-shower && NTU_SHOWER_TAG=sha-<短哈希> docker compose up -d"
-ssh root@iseekdream.com "curl -s http://127.0.0.1:8110/healthz"
+scp compose.yaml <deploy-user>@<deploy-host>:/opt/ntu-shower/compose.yaml
+scp deploy/litestream.yml <deploy-user>@<deploy-host>:/etc/ntu-shower/litestream.yml
+ssh <deploy-user>@<deploy-host> "cd /opt/ntu-shower && NTU_SHOWER_TAG=sha-<短哈希> docker compose pull ntu-shower && NTU_SHOWER_TAG=sha-<短哈希> docker compose up -d"
+ssh <deploy-user>@<deploy-host> "curl -s http://127.0.0.1:8110/healthz"
 ```
 
 ## 备份与恢复（LiteStream，litestream.io v0.3）
 
 ```bash
-ssh root@iseekdream.com "docker exec ntu-shower-litestream litestream replicas -config /etc/ntu-shower/litestream.yml"
-ssh root@iseekdream.com "docker run --rm -v /var/lib/ntu-shower:/var/lib/ntu-shower -v /var/backups/ntu-shower/litestream:/var/backups/ntu-shower/litestream litestream/litestream:0.3 restore -o /var/lib/ntu-shower/ntu-shower.db file:///var/backups/ntu-shower/litestream"
+ssh <deploy-user>@<deploy-host> "docker exec ntu-shower-litestream litestream replicas -config /etc/ntu-shower/litestream.yml"
+ssh <deploy-user>@<deploy-host> "docker run --rm -v /var/lib/ntu-shower:/var/lib/ntu-shower -v /var/backups/ntu-shower/litestream:/var/backups/ntu-shower/litestream litestream/litestream:0.3 restore -o /var/lib/ntu-shower/ntu-shower.db file:///var/backups/ntu-shower/litestream"
 ```
 
 ## 要点（改配置前先读）
