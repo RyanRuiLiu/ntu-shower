@@ -127,7 +127,7 @@ jobs:
         run: pip install semgrep==1.184.0
       - name: Semgrep（SAST：p/python + p/security-audit）
         if: needs.changes.outputs.server == 'true'
-        run: semgrep scan --config p/python --config p/security-audit server/app --error --quiet
+        run: semgrep scan --config p/python --config p/security-audit app --error --quiet
       - name: Semgrep（项目规则 .semgrep.yml）
         if: needs.changes.outputs.server == 'true'
         run: semgrep scan --config .semgrep.yml . --error --quiet
