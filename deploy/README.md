@@ -21,17 +21,17 @@
 **手动路径（回滚、CD 不可用时）**：
 
 ```bash
-scp compose.yaml deploy@<deploy-host>:/opt/ntu-shower/compose.yaml
-scp deploy/litestream.yml deploy@<deploy-host>:/etc/ntu-shower/litestream.yml
-ssh deploy@<deploy-host> "cd /opt/ntu-shower && NTU_SHOWER_TAG=sha-<短哈希> docker compose pull ntu-shower && NTU_SHOWER_TAG=sha-<短哈希> docker compose up -d"
-ssh deploy@<deploy-host> "curl -s http://127.0.0.1:8110/healthz"
+scp compose.yaml <deploy-user>@<deploy-host>:/opt/ntu-shower/compose.yaml
+scp deploy/litestream.yml <deploy-user>@<deploy-host>:/etc/ntu-shower/litestream.yml
+ssh <deploy-user>@<deploy-host> "cd /opt/ntu-shower && NTU_SHOWER_TAG=sha-<短哈希> docker compose pull ntu-shower && NTU_SHOWER_TAG=sha-<短哈希> docker compose up -d"
+ssh <deploy-user>@<deploy-host> "curl -s http://127.0.0.1:8110/healthz"
 ```
 
 ## 备份与恢复（LiteStream，litestream.io v0.3）
 
 ```bash
-ssh deploy@<deploy-host> "docker exec ntu-shower-litestream litestream replicas -config /etc/ntu-shower/litestream.yml"
-ssh deploy@<deploy-host> "docker run --rm -v /var/lib/ntu-shower:/var/lib/ntu-shower -v /var/backups/ntu-shower/litestream:/var/backups/ntu-shower/litestream litestream/litestream:0.3 restore -o /var/lib/ntu-shower/ntu-shower.db file:///var/backups/ntu-shower/litestream"
+ssh <deploy-user>@<deploy-host> "docker exec ntu-shower-litestream litestream replicas -config /etc/ntu-shower/litestream.yml"
+ssh <deploy-user>@<deploy-host> "docker run --rm -v /var/lib/ntu-shower:/var/lib/ntu-shower -v /var/backups/ntu-shower/litestream:/var/backups/ntu-shower/litestream litestream/litestream:0.3 restore -o /var/lib/ntu-shower/ntu-shower.db file:///var/backups/ntu-shower/litestream"
 ```
 
 ## 要点（改配置前先读）

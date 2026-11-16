@@ -48,23 +48,23 @@ def test_update_global_keeps_the_keys_it_did_not_touch(fresh_db: str) -> None:
     """
     with session_scope() as session:
         store.put_global_overrides(
-            session, {"auto_settle_enabled": True, "auto_settle_students": {"2026000001": "000000"}}
+            session, {"auto_settle_enabled": True, "auto_settle_students": {"9999999001": "000000"}}
         )
 
         store.update_global(
             session,
-            lambda config: {**config, "auto_settle_students": {"2026000001": "000000", "2026000003": "111111"}},
+            lambda config: {**config, "auto_settle_students": {"9999999001": "000000", "9999999003": "111111"}},
         )
 
         effective = store.global_effective(session)
         assert effective["auto_settle_enabled"] is True
-        assert effective["auto_settle_students"] == {"2026000001": "000000", "2026000003": "111111"}
+        assert effective["auto_settle_students"] == {"9999999001": "000000", "9999999003": "111111"}
 
 
 def test_update_global_drops_a_roster_emptied_back_to_default(fresh_db: str) -> None:
     """名单清空到等于默认值时那个键从覆盖里消失，回落默认——语义相同。"""
     with session_scope() as session:
-        store.put_global_overrides(session, {"auto_settle_students": {"2026000001": "000000"}})
+        store.put_global_overrides(session, {"auto_settle_students": {"9999999001": "000000"}})
 
         store.update_global(session, lambda config: {**config, "auto_settle_students": {}})
 
@@ -85,10 +85,10 @@ PRODUCTION_OVERRIDES = {
     "extend_hours_enabled": True,
     "automation_trace_enabled": True,
     "time_sync_enabled": True,
-    "auto_settle_students": {"2026000001": "000000"},
-    "renew_session_students": {"2026000003": "111111"},
-    "renew_wait_students": {"2026000002": "000000"},
-    "extend_hours_students": {"2026000004": "111111"},
+    "auto_settle_students": {"9999999001": "000000"},
+    "renew_session_students": {"9999999003": "111111"},
+    "renew_wait_students": {"9999000002": "000000"},
+    "extend_hours_students": {"9999000004": "111111"},
 }
 
 
@@ -102,7 +102,7 @@ def test_update_global_keeps_every_override_that_production_actually_has(fresh_d
         before = store.get_global_overrides(session)[1]
         assert before == PRODUCTION_OVERRIDES, "夹具没能完整写进库里，后面的比对就不成立"
 
-        new_cert = "2026000005"
+        new_cert = "9999000005"
         store.update_global(
             session,
             lambda config: {

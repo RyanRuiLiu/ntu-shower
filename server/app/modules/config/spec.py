@@ -942,11 +942,12 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "bridge_ssh_target",
         TEXT,
         SERVER,
-        "deploy@<deploy-host>",
+        "<user>@<server-host>",
         "调试通道的 SSH 目标",
         "网页端生成本机连接命令时用的 `用户@主机`。它是现场那台电脑要 ssh 过去的地方，"
         "与网页自己的域名不是一回事——网页挂在 ntu-shower 子域上，而 ssh 连的是主域，"
-        "所以推不出来，只能配。见 docs/runbook.md 的连接指引。",
+        "所以推不出来，只能配。默认值是占位符，部署时在配置页改成现场的实际值。"
+        "见 docs/runbook.md 的连接指引。",
         group="server_bridge",
     ),
     ConfigSpec(

@@ -37,7 +37,7 @@ REAL_SESSIONS: tuple[tuple[object, ...], ...] = (
     # 分配后从没出水：最近八场里有六场是这个形状
     (
         1,
-        "2026000001",
+        "9999000001",
         "2026-10-03T21:57:02.488Z",
         "inferred",
         "continuous",
@@ -49,7 +49,7 @@ REAL_SESSIONS: tuple[tuple[object, ...], ...] = (
     ),
     (
         1,
-        "2026000001",
+        "9999000001",
         "2026-10-03T21:23:40.816Z",
         "observed",
         "continuous",
@@ -62,7 +62,7 @@ REAL_SESSIONS: tuple[tuple[object, ...], ...] = (
     # 同一个喷头上连着三场（间隔 92 秒与 12 秒）：这就是"同一串"的真实样子
     (
         3,
-        "2026000001",
+        "9999000001",
         "2026-10-03T18:50:22.210Z",
         "inferred",
         "continuous",
@@ -74,7 +74,7 @@ REAL_SESSIONS: tuple[tuple[object, ...], ...] = (
     ),
     (
         3,
-        "2026000001",
+        "9999000001",
         "2026-10-03T18:52:18.233Z",
         "inferred",
         "continuous",
@@ -86,7 +86,7 @@ REAL_SESSIONS: tuple[tuple[object, ...], ...] = (
     ),
     (
         3,
-        "2026000001",
+        "9999000001",
         "2026-10-03T18:53:23.728Z",
         "inferred",
         "continuous",
@@ -99,7 +99,7 @@ REAL_SESSIONS: tuple[tuple[object, ...], ...] = (
     # 真洗了：两段，段长都是 measured，累计 426 秒
     (
         6,
-        "2026000002",
+        "9999000002",
         "2026-10-03T16:53:57.213Z",
         "inferred",
         "continuous",
@@ -112,7 +112,7 @@ REAL_SESSIONS: tuple[tuple[object, ...], ...] = (
     # 只出了 4 秒
     (
         7,
-        "2026000002",
+        "9999000002",
         "2026-10-03T16:37:09.213Z",
         "inferred",
         "continuous",
@@ -125,7 +125,7 @@ REAL_SESSIONS: tuple[tuple[object, ...], ...] = (
     # 中间断了很久：段没记齐、设备报的累计值远大于段之和
     (
         2,
-        "2026000002",
+        "9999000002",
         "2026-09-29T11:02:00.000Z",
         "observed",
         "gap",
@@ -151,14 +151,14 @@ _OLDEST_ASSIGNED_AT = min(row[2] for row in REAL_SESSIONS)
 _RUN_AGE_S = seconds_between(_OLDEST_ASSIGNED_AT, now_rfc3339()) + 3600
 CONFIG: dict[str, object] = {
     "renew_wait_enabled": True,
-    "renew_wait_students": {"2026000001": "000000", "2026000002": "111111"},
+    "renew_wait_students": {"9999000001": "000000", "9999000002": "111111"},
     "renew_wait_threshold_s": 270,
     "renew_wait_max_duration_s": _RUN_AGE_S,
     "renew_session_enabled": True,
-    "renew_session_students": {"2026000001": "000000", "2026000002": "111111"},
+    "renew_session_students": {"9999000001": "000000", "9999000002": "111111"},
     "renew_session_threshold_s": 1140,
     "auto_settle_enabled": True,
-    "auto_settle_students": {"2026000001": "000000", "2026000002": "111111"},
+    "auto_settle_students": {"9999000001": "000000", "9999000002": "111111"},
     "auto_settle_pause_threshold_s": 60,
 }
 
@@ -169,7 +169,7 @@ CONFIG: dict[str, object] = {
 REAL_SEGMENTS: tuple[tuple[object, ...], ...] = (
     (
         6,
-        "2026000002",
+        "9999000002",
         "2026-10-03T16:54:15.213Z",
         "2026-10-03T16:58:27.568Z",
         251,
@@ -179,7 +179,7 @@ REAL_SEGMENTS: tuple[tuple[object, ...], ...] = (
     ),
     (
         6,
-        "2026000002",
+        "9999000002",
         "2026-10-03T16:59:31.213Z",
         "2026-10-03T17:02:27.196Z",
         175,
@@ -189,7 +189,7 @@ REAL_SEGMENTS: tuple[tuple[object, ...], ...] = (
     ),
     (
         7,
-        "2026000002",
+        "9999000002",
         "2026-10-03T16:37:21.213Z",
         "2026-10-03T16:37:27.140Z",
         4,
@@ -342,11 +342,11 @@ def test_run_started_at_on_the_real_consecutive_run(real_rows: None) -> None:
 
     with session_scope() as session:
         # 同一喷头同一学号：间隔 92 秒仍落在 300 秒那条线以内，起点是最早那场
-        assert doors_store.run_started_at(session, "dev-1", 3, "2026000001", 300) == "2026-10-03T18:50:22.210Z"
+        assert doors_store.run_started_at(session, "dev-1", 3, "9999000001", 300) == "2026-10-03T18:50:22.210Z"
         # 把那条线收到 60 秒：92 秒那一跳被划断，起点跟着挪到最后两场里最早的那一场
-        assert doors_store.run_started_at(session, "dev-1", 3, "2026000001", 60) == "2026-10-03T18:52:18.233Z"
+        assert doors_store.run_started_at(session, "dev-1", 3, "9999000001", 60) == "2026-10-03T18:52:18.233Z"
         # 另一个喷头、另一个学号：只有一场，它自己就是起点
-        assert doors_store.run_started_at(session, "dev-1", 6, "2026000002", 300) == "2026-10-03T16:53:57.213Z"
+        assert doors_store.run_started_at(session, "dev-1", 6, "9999000002", 300) == "2026-10-03T16:53:57.213Z"
 
 
 def _candidate(door_no: int, cert_no: str, state: DoorState, assigned_at: str, paused_at: str = "") -> Candidate:
@@ -365,7 +365,7 @@ def _candidate(door_no: int, cert_no: str, state: DoorState, assigned_at: str, p
 def test_decide_on_a_real_never_watered_session() -> None:
     """真实形状（门 1）：分配后一直没开阀 → 预约续期。"""
     trigger = decide(
-        _candidate(1, "2026000001", DoorState.WAITING, "2026-10-03T21:57:02.488Z"),
+        _candidate(1, "9999000001", DoorState.WAITING, "2026-10-03T21:57:02.488Z"),
         CONFIG,
         "2026-10-03T21:58:02.488Z",
     )
@@ -378,7 +378,7 @@ def test_decide_on_a_real_never_watered_session() -> None:
 def test_decide_on_a_real_two_segment_session() -> None:
     """真实形状（门 6）：真洗了、正在淋浴中 → 会话续期，从分配时刻起算。"""
     trigger = decide(
-        _candidate(6, "2026000002", DoorState.BATHING, "2026-10-03T16:53:57.213Z"),
+        _candidate(6, "9999000002", DoorState.BATHING, "2026-10-03T16:53:57.213Z"),
         CONFIG,
         "2026-10-03T16:58:00.000Z",
     )
@@ -391,7 +391,7 @@ def test_decide_on_a_real_two_segment_session() -> None:
 def test_decide_on_a_real_paused_session() -> None:
     """真实形状：门 6 第二次关阀在 17:02:27.196（会话的 `last_seen_at` 就是那一刻）。"""
     trigger = decide(
-        _candidate(6, "2026000002", DoorState.PAUSED, "2026-10-03T16:53:57.213Z", "2026-10-03T17:02:27.196Z"),
+        _candidate(6, "9999000002", DoorState.PAUSED, "2026-10-03T16:53:57.213Z", "2026-10-03T17:02:27.196Z"),
         CONFIG,
         "2026-10-03T17:03:30.196Z",
     )
@@ -426,7 +426,7 @@ def test_snapshots_walks_real_rows_and_the_live_view(real_rows: None) -> None:
             DoorSession(
                 device_id=_device_pk(),
                 door_no=1,
-                cert_no="2026000001",
+                cert_no="9999000001",
                 assigned_at=_moment("2026-10-03T21:57:02.488Z"),
                 assigned_source="inferred",
                 observed_span="continuous",
@@ -443,7 +443,7 @@ def test_snapshots_walks_real_rows_and_the_live_view(real_rows: None) -> None:
         _frame(
             captured_at="2026-10-03T21:57:03.244Z",
             card_no=0,
-            cert_no="2026000001",
+            cert_no="9999000001",
             acc_no="7000000001",
             open_time="2026-10-03T21:56:56.000Z",
         ),
@@ -453,7 +453,7 @@ def test_snapshots_walks_real_rows_and_the_live_view(real_rows: None) -> None:
 
     assert len(found) == 1
     assert found[0].state is DoorState.WAITING  # 分配了、还没开阀
-    assert found[0].cert_no == "2026000001"
+    assert found[0].cert_no == "9999000001"
     assert found[0].paused_at == ""  # 没暂停过
     assert found[0].run_started_at == found[0].assigned_at  # 只此一场，起点就是它自己
 
@@ -479,7 +479,7 @@ def test_a_real_shape_ends_in_a_settle(
         _frame(
             captured_at="2026-10-03T21:57:03.244Z",
             card_no=0,
-            cert_no="2026000001",
+            cert_no="9999000001",
             acc_no="7000000001",
             open_time="2026-10-03T20:57:03.000Z",  # 一小时前分配、一直没开阀
         ),
