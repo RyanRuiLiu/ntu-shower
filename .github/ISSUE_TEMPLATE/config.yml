@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 安全漏洞
+    url: https://github.com/RyanRuiLiu/ntu-shower/blob/main/SECURITY.md
+    about: 漏洞不走公开 Issue，按安全政策经私密漏洞报告提交

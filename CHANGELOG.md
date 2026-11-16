@@ -6,6 +6,28 @@
 > 0.6.3 直接升到 0.6.5（提交 d9e29d2），该节原为一次记档性条目。其内容已并入
 > 下方 0.6.5 的 Fixed；不保留一个没有对应版本状态的版本号。
 
+## [Unreleased]
+
+### Added
+
+- 安全政策（`SECURITY.md`）：漏洞报告渠道（GitHub 私密漏洞报告）、确认时限、支持范围与设计立场；内部威胁模型仍归 `docs/security.md`，两份职责分离互相链接。
+- Issue 模板（`.github/ISSUE_TEMPLATE/`）：缺陷报告表单与分类入口；漏洞一律走安全政策渠道，不走公开 Issue。
+
+### Changed
+
+- CI 公开化前置加固：每个 job 全部声明 `timeout-minutes`（挂起按额定分钟计费，不再烧 GitHub 6 小时全局上限）；全部 checkout `persist-credentials: false`；semgrep 两步并入 server job；Dependabot 自动合并改官方 `gh pr merge --auto` 单步；main 推送跳过 ci（同一提交已在 PR 全量验证，main 由 build→deploy 链守卫）。
+- 全部文案去 emoji：文档、注释与界面提示的装饰性符号删去（功能性键盘字形与占位符不在禁列）。
+- 协议 schema 的 `$id`/`$ref` 文档 URI 换用 RFC 2606 保留域 `example.com`（占位符尖括号不是 RFC 3986 合法 URI 字符；`$id` 是静态文档 URI，不是部署期配置值）。
+- ACR 镜像仓库与命名空间改经仓库 secrets 传入（`ACR_REGISTRY` / `ACR_NAMESPACE`），共享构建 workflow 对空值回退合法 local 名——公开后 fork PR 拿不到 secrets 也能完成 build-only 校验。
+
+### Fixed
+
+- 历史重写期 `docker.yml` 的镜像引用被字面占位符化，构建链以 invalid tag 失效——随上一条 secrets 化恢复，build→deploy 链全绿。
+
+### Security
+
+- 现行树生产标识占位符化：compose 镜像仓库、nginx 域名与证书路径、发布脚本默认域、`gradle.properties.example` 服务域名、`bridge_ssh_target` 默认值、全部测试样例学号（2026 段 → 9999 段合成值）；部署侧真实值由服务器私有配置持有。
+
 ## [0.7.4] - 2026-11-15
 
 ### Changed
