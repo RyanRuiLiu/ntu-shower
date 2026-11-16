@@ -123,7 +123,7 @@ cd android
 | 项 | 规则 |
 |---|---|
 | 类型 | `feat`、`fix`、`docs`、`refactor`、`test`、`build`、`ci`、`chore`、`perf`、`style`、`revert` |
-| 范围 | 小写领域名，例如 `server`、`web`、`android`、`protocol`、`deploy`、`docs` |
+| 范围 | 小写领域名，字符集 `[a-z0-9-]`（下划线与逗号不合钩子规则），例如 `server`、`web`、`android`、`protocol`、`deploy`、`docs` |
 | 摘要 | 中文，祈使式，说明“做了什么”，不超过 72 个字符，不以句号结尾 |
 | 正文 | 说明“为什么”和“影响”，不逐行复述代码 |
 | 页脚 | `BREAKING CHANGE:`、`Refs:`、`Reviewed-by:` 等；破坏性变更必须标注 |
