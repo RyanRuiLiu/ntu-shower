@@ -1,10 +1,11 @@
 name: ci
 
 on:
-  push:
-    branches: [main]
   pull_request:
 
+# main 推送不再重复跑 CI：同一 commit 在 PR 上已全量验证过，main 由
+# docker→deploy 链守卫（构建+自动部署即发布门）。取舍：直推 main 不经
+# 测试——本仓工作流全部经 PR。
 permissions:
   contents: read
 
@@ -15,10 +16,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # PR 按改动面分发检查面；push 到 main 一律全量（主线安全网）。ci.yml 自身在
-  # android/server 清单里：门禁逻辑的变更也要全量验证。
+  # PR 按改动面分发检查面。ci.yml 自身在 android/server 清单里：门禁逻辑的
+  # 变更也要全量验证。
   changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: read
@@ -31,6 +33,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
         id: filter
         with:
@@ -51,6 +54,7 @@ jobs:
   server:
     needs: changes
     if: always()
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -59,6 +63,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Check commit messages
         if: github.event_name == 'pull_request'
         run: |
@@ -117,42 +122,40 @@ jobs:
           cd ..
           node web/node_modules/eslint/bin/eslint.js --config web-legacy/eslint.config.mjs web-legacy
           node web/node_modules/stylelint/bin/stylelint.mjs "web-legacy/style/*.css" --config web-legacy/.stylelintrc.json
-
-  semgrep:
-    needs: changes
-    if: needs.changes.outputs.server == 'true' || github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: "3.13"
-          cache: pip
-      - run: pip install semgrep==1.184.0
-      - run: semgrep scan --config p/python --config p/security-audit server/app --error --quiet
-      - run: semgrep scan --config .semgrep.yml . --error --quiet
+      - name: Semgrep（安装：不进应用 venv，见 requirements-dev.txt 的说明）
+        if: needs.changes.outputs.server == 'true'
+        run: pip install semgrep==1.184.0
+      - name: Semgrep（SAST：p/python + p/security-audit）
+        if: needs.changes.outputs.server == 'true'
+        run: semgrep scan --config p/python --config p/security-audit app --error --quiet
+      - name: Semgrep（项目规则 .semgrep.yml，规则与扫描根都在仓库根）
+        if: needs.changes.outputs.server == 'true'
+        run: semgrep scan --config ../.semgrep.yml ../ --error --quiet
 
   android:
     needs: changes
     if: needs.changes.outputs.android == 'true' || github.event_name != 'pull_request'
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: android
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version: "25"
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
       - run: cp gradle.properties.example gradle.properties
-      # 单次调用：两段分开是两次 daemon 冷启动 + 两次全量配置（实测 CI 上这段
-      # 171s 为全部 android 门的最大杆）；org.gradle.caching 已开，未变任务命中
-      # 缓存后这里只剩增量编译与测试执行。
+      # 单次调用：org.gradle.caching 已开，未变任务命中缓存后这里只剩增量
+      # 编译与测试执行（实测冷启动 171s 的最大杆已被缓存削平）。
       - run: ./gradlew detekt :app:lintDebug :app:testDebugUnitTest :app:jacocoUnitTestCoverageVerification assembleDebug
 
   security:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -161,6 +164,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
