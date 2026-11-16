@@ -59,6 +59,7 @@ cp gradle.properties.example gradle.properties
 | [`docs/reference.md`](docs/reference.md) | 状态派生规则、字段对照、取数口径与不变量 |
 | [`docs/runbook.md`](docs/runbook.md) | 部署、回滚、备份、恢复、故障处置 |
 | [`docs/security.md`](docs/security.md) | 资产、数据分级、信任边界、安全控制 |
+| [`SECURITY.md`](SECURITY.md) | 漏洞报告渠道与支持范围 |
 | [`docs/adr/`](docs/adr/) | 决策记录 |
 | [`docs/device-poweroff.md`](docs/device-poweroff.md) · [`docs/water-board.md`](docs/water-board.md) | 断电布防与水控板直控的现场依据 |
 | [`CHANGELOG.md`](CHANGELOG.md) | 发布历史 |

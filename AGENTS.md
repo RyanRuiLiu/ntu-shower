@@ -55,6 +55,7 @@ AI 协作者的唯一入口。人类协作者从 [README.md](README.md) 开始�
 | 状态派生规则、取数口径、不变量 | [docs/reference.md](docs/reference.md) |
 | 部署、回滚、备份、故障处置 | [docs/runbook.md](docs/runbook.md) |
 | 资产清单、数据分级、威胁模型 | [docs/security.md](docs/security.md) |
+| 漏洞报告渠道与支持范围 | [SECURITY.md](SECURITY.md) |
 | 设备断电与 MCU 布防的现场依据 | [docs/device-poweroff.md](docs/device-poweroff.md) |
 | 水控板直控的现场依据 | [docs/water-board.md](docs/water-board.md) |
 | 决策背景、备选方案、后果 | [docs/adr/](docs/adr/) |
