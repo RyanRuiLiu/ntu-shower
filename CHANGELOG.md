@@ -23,6 +23,7 @@
 ### Fixed
 
 - 历史重写期 `docker.yml` 的镜像引用被字面占位符化，构建链以 invalid tag 失效——随上一条 secrets 化恢复，build→deploy 链全绿。
+- 快速开始补 `alembic upgrade head`：fresh 库直接 uvicorn 启动即崩（lifespan 的未完成命令收尾查询先于 schema 存在），README 与 CONTRIBUTING 已按实测路径修正。
 
 ### Security
 

@@ -45,10 +45,11 @@ cd server
 python -m venv .venv
 .venv/Scripts/pip install -r requirements-dev.txt
 cp .env.example .env
+.venv/Scripts/alembic upgrade head
 .venv/Scripts/uvicorn app.main:app --reload --port 8000
 ```
 
-`server/.env` 只保存本地配置；生产 `.env` 由 Compose 的 `env_file` 注入，不进入仓库。本地开发库可以删除重建；生产库不得删除重建，数据变更按 `docs/runbook.md` 的「表结构变更的落地」执行。
+`server/.env` 只保存本地配置；生产 `.env` 由 Compose 的 `env_file` 注入，不进入仓库。本地开发库可以删除重建（`alembic upgrade head` 建 schema，应用启动不做建表——跳过这一步启动即崩）；生产库不得删除重建，数据变更按 `docs/runbook.md` 的「表结构变更的落地」执行。
 
 ## 设备端开发
 
