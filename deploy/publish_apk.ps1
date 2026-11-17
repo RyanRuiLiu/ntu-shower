@@ -15,8 +15,21 @@ param(
     [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$Token,
     [switch]$SkipBuild,
     [string]$Target = "all",
-    [string]$BaseUrl = "https://<public-domain>"
+    # 未显式传时从本地 gradle.properties 的 serverDomain 读（部署者本地文件，
+    # 随构建注入 APK 的同一锚点）——占位符形态说明该文件还没铺好。
+    [string]$BaseUrl = ""
 )
+
+if (-not $BaseUrl) {
+    $propsFile = Join-Path (Split-Path $PSScriptRoot -Parent) "android/gradle.properties"
+    if (-not (Test-Path $propsFile)) { throw "缺 -BaseUrl 且找不到 $propsFile（无法推导服务域名）" }
+    $props = Get-Content $propsFile -Raw
+    $m = [regex]::Match($props, 'serverDomain\s*=\s*(\S+)')
+    if (-not $m.Success -or $m.Groups[1].Value -like '*<*') {
+        throw "gradle.properties 里没有可用的 serverDomain——显式传 -BaseUrl 或先铺好本地文件"
+    }
+    $BaseUrl = "https://$($m.Groups[1].Value)"
+}
 
 # 严格模式：未定义变量与拼错成员名当场终止，而不是静默走 $null。
 Set-StrictMode -Version Latest
