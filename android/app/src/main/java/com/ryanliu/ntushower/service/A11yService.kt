@@ -18,7 +18,6 @@ import com.ryanliu.ntushower.core.a11y.A11yNodeSource
 import com.ryanliu.ntushower.core.a11y.A11yRuntime
 import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.AppConfig
-import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.log.DeviceLog
 import com.ryanliu.ntushower.core.shell.RootShell
 import com.ryanliu.ntushower.core.threading.MainThread
@@ -131,14 +130,14 @@ class A11yService :
      * 去向交给守护判断：退到桌面才拉回来，退到别的包是现场人员走调试通道，不碰。
      */
     private fun handleBathAppExit(leftToPackage: String) {
-        if (!RuntimeConfig.bathGuardEnabled) return
+        if (!BATH_GUARD_ENABLED) return
         val now = Uptime.nowMs()
         // 阈值每次从 RuntimeConfig 现取：远程配置改动即时生效，
         // 不必等服务因故重绑重建这个守护（构造期固化是曾经的缺陷）
         val params = BathAppGuard.Params(
-            windowMs = RuntimeConfig.bathExitWindowMs,
-            maxCount = RuntimeConfig.bathExitMaxCount,
-            cooldownMs = RuntimeConfig.bathExitCooldownMs,
+            windowMs = BATH_EXIT_WINDOW_MS,
+            maxCount = BATH_EXIT_MAX_COUNT,
+            cooldownMs = BATH_EXIT_COOLDOWN_MS,
         )
         when (guard.onBackground(now, leftToPackage, AppConfig.BATH_DESKTOP_PACKAGES, params)) {
             BathAppGuard.Action.RELAUNCH ->
@@ -148,7 +147,7 @@ class A11yService :
                 }
 
             BathAppGuard.Action.COOLDOWN ->
-                Log.w(TAG, "bath app exited too often, cooldown ${RuntimeConfig.bathExitCooldownMs}ms")
+                Log.w(TAG, "bath app exited too often, cooldown ${BATH_EXIT_COOLDOWN_MS}ms")
 
             BathAppGuard.Action.NONE -> Unit
         }
@@ -302,6 +301,11 @@ class A11yService :
     }
 
     companion object {
+        private const val BATH_GUARD_ENABLED = true
+        private const val BATH_EXIT_WINDOW_MS = 30_000L
+        private const val BATH_EXIT_MAX_COUNT = 3
+        private const val BATH_EXIT_COOLDOWN_MS = 600_000L
+
         private const val TAG = "A11yService"
 
         /** 剪贴板条目标签。 */

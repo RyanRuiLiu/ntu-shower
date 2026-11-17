@@ -7,7 +7,6 @@ package com.ryanliu.ntushower.features.doors
 import android.os.FileObserver
 import android.util.Log
 import com.ryanliu.ntushower.core.config.AppConfig
-import com.ryanliu.ntushower.core.config.RuntimeConfig
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -50,7 +49,7 @@ class DoorMonitor(private val onChange: () -> Unit) :
         Log.d(TAG, "db event 0x${event.toString(16)}, capture scheduled")
         executor.execute {
             try {
-                Thread.sleep(RuntimeConfig.reportDebounceMs)
+                Thread.sleep(REPORT_DEBOUNCE_MS)
                 // 防抖等待期间攒下的事件在这里一次消化掉
                 do {
                     pending.set(false)
@@ -74,6 +73,7 @@ class DoorMonitor(private val onChange: () -> Unit) :
     }
 
     companion object {
+        private const val REPORT_DEBOUNCE_MS = 1_000L
         private const val TAG = "DoorMonitor"
     }
 }

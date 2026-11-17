@@ -46,6 +46,9 @@ class Settings(BaseSettings):
 
     # ── 命令确认等待 ──
     config_ack_timeout_s: float = 15.0  # 等待设备 config.ack 的时限
+    #: 调试通道的 SSH 目标（部署侧事实，随部署改，不是运维旋钮）。曾是配置键，
+    #: 2026-11-17 移入部署配置——调试卡片经 bridge 状态端点读到它。
+    bridge_ssh_target: str = "<user>@<server-host>"
 
     # ── 管理台会话 ──
     # 会话签名密钥（Starlette SessionMiddleware / itsdangerous 的 secret_key）。

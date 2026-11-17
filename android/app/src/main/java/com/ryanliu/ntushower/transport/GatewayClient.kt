@@ -320,7 +320,7 @@ class GatewayClient(private val context: Context, private val callback: Callback
             }
         }
         heartbeatRunnable = runnable
-        handler.postDelayed(runnable, RuntimeConfig.heartbeatIntervalS * 1000L)
+        handler.postDelayed(runnable, HEARTBEAT_INTERVAL_MS)
     }
 
     /**
@@ -354,8 +354,8 @@ class GatewayClient(private val context: Context, private val callback: Callback
         reconnectAttempt++
         val delay = ReconnectBackoff.delayMs(
             reconnectAttempt,
-            RuntimeConfig.reconnectBaseMs,
-            RuntimeConfig.reconnectMaxMs,
+            RECONNECT_BASE_MS,
+            RECONNECT_MAX_MS,
         )
         Log.i(TAG, "reconnect in ${delay}ms (attempt=$reconnectAttempt)")
         handler.postDelayed({
@@ -365,6 +365,9 @@ class GatewayClient(private val context: Context, private val callback: Callback
     }
 
     companion object {
+        private const val HEARTBEAT_INTERVAL_MS = 30_000L
+        private const val RECONNECT_BASE_MS = 5_000L
+        private const val RECONNECT_MAX_MS = 60_000L
         private const val TAG = "GatewayClient"
 
         private const val CLOSE_NORMAL = 1000

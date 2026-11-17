@@ -167,14 +167,14 @@ class StatusLineController(
         enabled = RuntimeConfig.statusLineEnabled,
         textSizeSp = RuntimeConfig.statusLineTextSizeSp,
         textColor = RuntimeConfig.statusLineTextColor,
-        colorMode = RuntimeConfig.statusLineColorMode,
+        colorMode = COLOR_MODE,
         availableColor = RuntimeConfig.statusLineAvailableColor,
         unavailableColor = RuntimeConfig.statusLineUnavailableColor,
         background = RuntimeConfig.statusLineBackground,
         backgroundColor = RuntimeConfig.statusLineBackgroundColor,
-        align = RuntimeConfig.statusLineAlign,
-        centerOffsetDp = RuntimeConfig.statusLineCenterOffsetDp,
-        xDp = RuntimeConfig.statusLineXDp,
+        align = ALIGN,
+        centerOffsetDp = CENTER_OFFSET_DP,
+        xDp = X_DP,
         yDp = RuntimeConfig.statusLineYDp,
         condition = ConditionSettings(
             timeEnabled = RuntimeConfig.statusLineTimeEnabled,
@@ -232,6 +232,10 @@ class StatusLineController(
         private const val TAG = "StatusLineController"
 
         /** 服务端 30 秒保活；三倍没来即视为过期，隐藏而不是把旧数字留在屏幕上。 */
+        private const val COLOR_MODE = "按状态"
+        private const val ALIGN = "居中"
+        private const val CENTER_OFFSET_DP = 0
+        private const val X_DP = 0
         private const val STALE_MS = 90_000L
     }
 }

@@ -116,7 +116,7 @@ _channel_locks: dict[tuple[str, str], asyncio.Lock] = {}
 CHANNEL_QUEUE_MAX = 8
 
 # device_id → 挂起中的配置确认（一设备同时至多一个待确认推送，后到覆盖先到）
-_config_pending: dict[str, PendingResult] = {}
+_config_pending: dict[str, tuple[PendingResult, int]] = {}
 
 
 def is_device_busy(device_id: str, channel: str) -> bool:
@@ -439,7 +439,7 @@ async def push_config_update(
         timeout_s = settings.config_ack_timeout_s
     loop = asyncio.get_running_loop()
     pending = PendingResult(loop, loop.create_future())
-    _config_pending[device_id] = pending
+    _config_pending[device_id] = (pending, revision)
 
     try:
         envelope = protocol.envelope(
@@ -460,8 +460,27 @@ async def push_config_update(
 
 
 def resolve_config_ack(device_id: str, revision: int) -> bool:
-    """网关收到 config.ack 时回填挂起中的配置推送。"""
-    pending = _config_pending.pop(device_id, None)
-    if pending is None:
+    """网关收到 config.ack 时回填挂起中的配置推送。
+
+    回执的修订号必须与推送一致：不一致说明设备端守卫拒了旧值或乱序，不回填——
+    让调用方走 ack timeout 的失败路径（真实结果以设备侧日志为准）。
+    """
+    entry = _config_pending.pop(device_id, None)
+    if entry is None:
+        return False
+    pending, expected = entry
+    try:
+        revision = int(revision)
+    except (TypeError, ValueError):
+        return False
+    if revision != expected:
+        log_event(
+            "WARNING",
+            "config.ack-revision-mismatch",
+            "设备回执的修订号与推送不一致",
+            device_id=device_id,
+            expected=expected,
+            received=revision,
+        )
         return False
     return pending.resolve({"revision": revision})

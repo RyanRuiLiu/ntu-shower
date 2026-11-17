@@ -32,6 +32,7 @@ import java.io.File
  */
 object BathDbArchiver {
 
+    private const val ARCHIVE_THRESHOLD_MB = 10L
     private const val TAG = "BathDbArchiver"
 
     private val deviceLog = DeviceLog(File(AppConfig.WORK_DIR))
@@ -41,7 +42,7 @@ object BathDbArchiver {
         if (!RuntimeConfig.bathDbArchiveEnabled) return
         val db = File(AppConfig.BATH_DB_PATH)
         val size = if (db.exists()) db.length() else 0L
-        if (!BathDbArchivePolicy.shouldArchive(size, RuntimeConfig.bathDbArchiveThresholdMb)) return
+        if (!BathDbArchivePolicy.shouldArchive(size, ARCHIVE_THRESHOLD_MB)) return
         archive(size)
     }
 

@@ -411,8 +411,13 @@ async def _handle_frame(
         await ws.send_text(protocol.error(reason_codes.UNKNOWN_TYPE.code, f"不认识的消息类型：{mtype}"))
 
 
+#: 服务端 ping 周期（秒）。一个周期既确认链路存活，也把服务端时刻交给设备刷新
+#: 时间锚点。曾是配置键（运维从未改过，2026-11-17 精简收编为常量）。
+PING_INTERVAL_S = 60
+
+
 async def _server_ping_loop(ws: WebSocket, device_id: str, pong_seen: asyncio.Event, offline_reason: list[str]) -> None:
-    """按设备有效配置的间隔向设备发服务器 ping：判活，并给设备刷新时间锚点。
+    """按固定周期向设备发服务器 ping：判活，并给设备刷新时间锚点。
 
     两个职责共用同一条报文：ping 里带着服务端此刻的时刻，设备收到就更新自己的时间
     锚点（core/clock/ServerClock），它采集的每一帧都带上那个时刻。
@@ -425,8 +430,7 @@ async def _server_ping_loop(ws: WebSocket, device_id: str, pong_seen: asyncio.Ev
     连接关闭即正常退出；其他异常记录后退出，静默吞掉会让存活判定无声失效。
     """
     while True:
-        config = await _call(ws, config_store.effective, device_id)
-        interval = as_int(config.get("ping_interval_s"), default=60)
+        interval = PING_INTERVAL_S
         # 先等满一个周期再发首个 ping：刚握手成功的连接不需要立刻验证存活
         await asyncio.sleep(interval)
         pong_seen.clear()

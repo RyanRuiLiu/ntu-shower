@@ -18,9 +18,7 @@ from app.core import device_clock, events
 from app.core.clock import now_rfc3339, parse_rfc3339
 from app.core.connections import manager
 from app.core.problems import DEVICE_NOT_FOUND, ApiProblemError
-from app.core.protocol import as_int
 from app.db.base import utcnow
-from app.modules.config import store as config_store
 
 from . import crud
 from .schemas import DeviceRecord, DeviceSummary
@@ -151,13 +149,15 @@ def load_clock_skew(session: Session, device_id: str) -> None:
     device_clock.load(device_id, crud.get_clock_skew(session, device_id))
 
 
-def update_clock_skew(session: Session, device_id: str, device_time: object, received_at: str) -> None:
-    """用设备回 pong 时带的墙上时刻更新钟偏差，并落库。
+#: 设备钟跳变阈值（秒）：单次观测与当前值的差超过它，说明设备钟被动了（重启归零、
+#: 被手动改钟），直接采信新值而不平滑——继续平滑会让之后几次映射都按错误的偏差算。
+#: 曾是配置键（运维从未改过，2026-11-17 精简收编为常量）。
+CLOCK_JUMP_THRESHOLD_S = 60
 
-    阈值取自配置：单次观测与当前值差得超过它，说明设备钟被动了（重启归零、被手动改
-    钟），直接采信新值而不平滑——继续平滑会让之后几次映射都按错误的偏差算。
-    """
-    threshold = as_int(config_store.effective(session, device_id).get("clock_jump_threshold_s"), default=60)
+
+def update_clock_skew(session: Session, device_id: str, device_time: object, received_at: str) -> None:
+    """用设备回 pong 时带的墙上时刻更新钟偏差，并落库。"""
+    threshold = CLOCK_JUMP_THRESHOLD_S
     skew = device_clock.update(device_id, device_time, received_at, threshold)
     crud.set_clock_skew(session, device_id, skew)
 

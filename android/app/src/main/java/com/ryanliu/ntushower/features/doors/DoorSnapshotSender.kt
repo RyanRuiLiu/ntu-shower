@@ -7,7 +7,6 @@ import android.util.Log
 import com.ryanliu.ntushower.core.clock.Clock
 import com.ryanliu.ntushower.core.clock.ServerClock
 import com.ryanliu.ntushower.core.config.AppConfig
-import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.storage.AgentDatabase
 import com.ryanliu.ntushower.transport.GatewayClient
 import com.ryanliu.ntushower.transport.MessageTypes
@@ -116,7 +115,7 @@ class DoorSnapshotSender(context: Context, private val onDoorsRead: (DoorReading
     }
 
     /**
-     * 把发件箱压在 [RuntimeConfig.outboxMaxRows] 行以内，超出丢最旧的。
+     * 把发件箱压在 [OUTBOX_MAX_ROWS] 行以内，超出丢最旧的。
      *
      * 断网期间每有一次喷头状态变化就多一行，而只有收到 ack 才会删。上限是**配置项**（默认值与
      * 服务端登记表同源，那边刻意给得远超真实所需），因此正常情况下它一次也不会触发——留着
@@ -126,7 +125,7 @@ class DoorSnapshotSender(context: Context, private val onDoorsRead: (DoorReading
      * 丢最旧的而不是拒绝新的：越新的帧越接近当前实情，而服务端的现态本来就由最后一条决定。
      */
     private fun trimOutbox() {
-        val limit = RuntimeConfig.outboxMaxRows
+        val limit = OUTBOX_MAX_ROWS
         val total = countRows()
         if (total <= limit) return
         val excess = total - limit
@@ -210,6 +209,7 @@ class DoorSnapshotSender(context: Context, private val onDoorsRead: (DoorReading
         }
 
     companion object {
+        private const val OUTBOX_MAX_ROWS = 100_000L
         private const val TAG = "DoorSnapshotSender"
 
         /** 采集来源：浴室 App 写库触发，状态真的变了。 */

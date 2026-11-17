@@ -130,7 +130,7 @@ class NoticeController(context: Context, private val deviceLog: DeviceLog, priva
         textSizeSp = RuntimeConfig.noticeTextSizeSp,
         textColor = RuntimeConfig.noticeTextColor,
         align = RuntimeConfig.noticeAlign,
-        centerOffsetDp = RuntimeConfig.noticeCenterOffsetDp,
+        centerOffsetDp = NOTICE_CENTER_OFFSET_DP,
         xDp = RuntimeConfig.noticeXDp,
         yDp = RuntimeConfig.noticeYDp,
         condition = ConditionSettings(
@@ -173,6 +173,7 @@ class NoticeController(context: Context, private val deviceLog: DeviceLog, priva
     }
 
     companion object {
+        private const val NOTICE_CENTER_OFFSET_DP = 0
         private const val TAG = "NoticeController"
     }
 }

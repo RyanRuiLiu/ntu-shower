@@ -55,14 +55,10 @@ AUDIT_PATH = Path(audit_repository.__file__)
 CONFIG: dict[str, object] = {
     "renew_wait_enabled": True,
     "renew_wait_students": {"9999999001": "000000"},
-    "renew_wait_threshold_s": 270,
-    "renew_wait_max_duration_s": 86_400,
     "renew_session_enabled": True,
     "renew_session_students": {"9999999001": "000000"},
-    "renew_session_threshold_s": 1140,
     "auto_settle_enabled": True,
     "auto_settle_students": {"9999999001": "000000"},
-    "auto_settle_pause_threshold_s": 60,
 }
 
 # 候选的时刻用「相对导入时刻」构造，**不写死绝对值**：预约续期的链上限（夹具 CONFIG
@@ -825,9 +821,26 @@ async def _let_the_loop_run(ticks: int = 20) -> None:
         await asyncio.sleep(0)
 
 
+def _lift_renew_wait_cap(monkeypatch: pytest.MonkeyPatch, seconds: int = 86_400) -> None:
+    """renew_wait 的时长上限收编为常量（1200 秒）后，喂"1 小时前"会话的用例需要
+    把上限抬高——旧形态靠 CONFIG 里的 renew_wait_max_duration_s，键删除后改 patch
+    判据表。"""
+    from dataclasses import replace
+
+    import app.modules.sessions.decision as decision
+
+    jobs = tuple(
+        replace(spec, max_duration_s=seconds) if spec.key == JOB_RENEW_WAIT else spec for spec in decision.JOBS
+    )
+    monkeypatch.setattr(decision, "JOBS", jobs)
+    monkeypatch.setattr(decision, "JOBS_BY_KEY", {s.key: s for s in jobs})
+    monkeypatch.setattr(scheduler, "JOBS_BY_KEY", {s.key: s for s in jobs})
+
+
 def test_a_frame_ends_in_a_settle_then_an_assign(
     fresh_db: str, client: TestClient, admin_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    _lift_renew_wait_cap(monkeypatch)
     """全链路：帧 → 挂到点 → 到点复查 → 结算 → 门空了的那一帧 → 补分配。
 
     这是判据与机制之间的接缝：分段测过之后，还要证明它们接起来真的会把命令发出去。
@@ -876,6 +889,7 @@ def test_a_frame_ends_in_a_settle_then_an_assign(
 def test_the_same_session_is_settled_only_once(
     fresh_db: str, client: TestClient, admin_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    _lift_renew_wait_cap(monkeypatch)
     """单次执行：帧再来几次也不会为同一个会话再下一单。"""
     calls: list[tuple[str, JsonObject]] = []
 
@@ -934,6 +948,7 @@ def test_auto_settle_only_settles_and_never_reassigns(
 def test_a_student_outside_the_roster_is_never_touched(
     fresh_db: str, client: TestClient, admin_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    _lift_renew_wait_cap(monkeypatch)
     """名单是"允许对谁动手"的唯一出处：不在名单里，一帧下来什么都不发生。
 
     设备在这里也要**已信任且在线**——否则"什么都没发生"可能只是因为设备没被信任，
@@ -988,8 +1003,7 @@ def test_snapshot_reports_scheduled_timers(fresh_db: str) -> None:
             handle=loop.call_later(5.0, lambda: None),
         )
         try:
-            with session_scope() as session:
-                rows = scheduler.snapshot(session)
+            rows = scheduler.snapshot()
         finally:
             worker.timers.clear()
         assert rows == [

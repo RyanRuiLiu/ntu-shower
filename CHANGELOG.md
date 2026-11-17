@@ -29,6 +29,18 @@
 
 - 现行树生产标识占位符化：compose 镜像仓库、nginx 域名与证书路径、发布脚本默认域、`gradle.properties.example` 服务域名、`bridge_ssh_target` 默认值、全部测试样例学号（2026 段 → 9999 段合成值）；部署侧真实值由服务器私有配置持有。
 
+## [0.7.5] - 2026-11-17
+
+### Changed
+
+- **配置面精简**：86 键 → 47 键、24 组 → 12 组（生产实测 52 键从未被改动）。删诊断调参 10、一次性基建 11、遮罩 5、守护 4、未用布局 5、桥接超时 3、后台任务阈值 7（`renew_wait_threshold_s` 270、`renew_session_threshold_s` 1140、自动结算暂停 90 等钉为消费模块常量，取值均有物理出处）；`bridge_ssh_target` 移入部署侧 `.env`（与镜像仓库同类：部署期事实不是运维旋钮）；`notice_enabled` 保留（业主设置的关闭状态，不改语义）。所有删除值 = 现行默认值，生产行为仅两处可见：`auto_settle` 暂停结算阈值 60 → 90（真实 63 秒回归案例留余量）、`bath_db_archive_enabled` 默认开（自愈即默认）。
+- **配置修订号语义闭环**（AWS Shadow version 同型）：设备端拒应用 ≤ 已应用修订号的 config.update（乱序守卫）；服务端校验 config.ack 回执的修订号与推送一致，不符按失败处理并留 WARNING。
+- **配置页覆盖可见性**：设备视图按 scope 过滤（服务端键不再渲染为存不了值的空输入）、被覆盖键显示「已覆盖」徽标与「恢复全局」按钮、修订号真实显示；设备清单改走统一 api client。
+
+### Fixed
+
+- 快速开始补 `alembic upgrade head`：fresh 库直接 uvicorn 启动即崩（lifespan 的未完成命令收尾查询先于 schema 存在），README 与 CONTRIBUTING 已按实测路径修正。
+
 ## [0.7.4] - 2026-11-15
 
 ### Changed

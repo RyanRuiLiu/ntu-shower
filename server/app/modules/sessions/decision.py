@@ -24,7 +24,7 @@ from typing import Literal
 
 from app.contracts import DoorState
 from app.core.clock import seconds_between
-from app.core.protocol import JsonObject, as_int
+from app.core.protocol import JsonObject
 
 JOB_RENEW_WAIT = "renew_wait"
 JOB_RENEW_SESSION = "renew_session"
@@ -44,12 +44,19 @@ class JobSpec:
     students_key: str
     """名单在配置里、三份各自独立——同一个人可以只开其中一个功能。名单是"允许对谁动手"的
     唯一出处：不在名单里就什么都不做；凭证也跟着这份名单走（见 [students_of]）。"""
-    threshold_key: str
+    threshold_s: int
+    """到点阈值（秒）：起算时刻经过这么久就该动手。
+
+    曾是配置键（运维从未改过，2026-11-17 精简收编为常量）；取值有物理出处——
+    预约续期 270 = 浴室 App 无水释放 300 秒 − 30 秒提前量；会话续期 1140 =
+    SESSION_MAX_S（1200）− 60 秒提前量；自动结算 90 给"人走后回来"的实测间隔
+    （63 秒案例）留余量。"""
+
     states: tuple[DoorState, ...]
     """哪些状态下这个任务适用。"""
     start: Literal["assigned_at", "paused_at"]
     """从哪一刻起算：整场会话（浴室 App 那两条上限管着它）还是关阀那一刻。"""
-    max_duration_key: str | None
+    max_duration_s: int | None
     """时长上限的配置键；None 表示不限。从这一串第一场起算，到了就停。"""
     two_step: bool
     """续期是两步（先结算、等门空的那一帧再分配回同一个喷头）；自动结算只做前半步。"""
@@ -62,30 +69,30 @@ JOBS: tuple[JobSpec, ...] = (
         key=JOB_RENEW_WAIT,
         enabled_key="renew_wait_enabled",
         students_key="renew_wait_students",
-        threshold_key="renew_wait_threshold_s",
+        threshold_s=270,
         states=(DoorState.WAITING,),
         start="assigned_at",
-        max_duration_key="renew_wait_max_duration_s",
+        max_duration_s=1200,
         two_step=True,
     ),
     JobSpec(
         key=JOB_RENEW_SESSION,
         enabled_key="renew_session_enabled",
         students_key="renew_session_students",
-        threshold_key="renew_session_threshold_s",
+        threshold_s=1140,
         states=(DoorState.BATHING,),
         start="assigned_at",
-        max_duration_key=None,
+        max_duration_s=None,
         two_step=True,
     ),
     JobSpec(
         key=JOB_AUTO_SETTLE,
         enabled_key="auto_settle_enabled",
         students_key="auto_settle_students",
-        threshold_key="auto_settle_pause_threshold_s",
+        threshold_s=90,
         states=(DoorState.PAUSED,),
         start="paused_at",
-        max_duration_key=None,
+        max_duration_s=None,
         two_step=False,
     ),
 )
@@ -169,10 +176,10 @@ def decide(candidate: Candidate, config: JsonObject, now: str) -> Trigger | None
             continue
         if candidate.cert_no not in students_of(config, spec.students_key):
             continue
-        started = _started_at(candidate, spec, config, now)
+        started = _started_at(candidate, spec, now)
         if started is None:
             continue
-        threshold = as_int(config[spec.threshold_key])
+        threshold = spec.threshold_s
         hits.append(Trigger(job=spec.key, delay_s=threshold - seconds_between(started, now), threshold_s=threshold))
 
     if not hits:
@@ -180,7 +187,7 @@ def decide(candidate: Candidate, config: JsonObject, now: str) -> Trigger | None
     return min(hits, key=lambda hit: hit.delay_s)
 
 
-def _started_at(candidate: Candidate, spec: JobSpec, config: JsonObject, now: str) -> str | None:
+def _started_at(candidate: Candidate, spec: JobSpec, now: str) -> str | None:
     """这条判据从哪一刻起算；状态对不上或时长用尽就返回 None（不适用）。
 
     **三个功能的差异全在 [JobSpec] 里**，所以这里一处按功能的分叉都没有：适用状态、
@@ -192,9 +199,9 @@ def _started_at(candidate: Candidate, spec: JobSpec, config: JsonObject, now: st
     if candidate.state not in spec.states:
         return None
     if (
-        spec.max_duration_key is not None
+        spec.max_duration_s is not None
         and candidate.run_started_at
-        and seconds_between(candidate.run_started_at, now) >= as_int(config[spec.max_duration_key])
+        and seconds_between(candidate.run_started_at, now) >= spec.max_duration_s
     ):
         return None  # 续够了：停止续期，让浴室端正常释放
     started = candidate.assigned_at if spec.start == "assigned_at" else candidate.paused_at
@@ -221,7 +228,7 @@ def recheck(fresh: Candidate | None, expected: Candidate, trigger: Trigger, conf
         return "换了人"
     if fresh.state is not expected.state:
         return f"状态已变（{expected.state.value} → {fresh.state.value}）"
-    if _started_at(fresh, JOBS_BY_KEY[trigger.job], config, now) is None:
+    if _started_at(fresh, JOBS_BY_KEY[trigger.job], now) is None:
         return "判据已不适用（起算点为空或时长上限用尽）"
     return still_allowed(fresh.cert_no, trigger.job, config)
 

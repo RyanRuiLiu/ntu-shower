@@ -62,7 +62,6 @@ from app.core import actions, outcomes, problems
 from app.core.clock import now_rfc3339, shift_rfc3339
 from app.core.logging import log_event
 from app.core.problems import ApiProblemError
-from app.core.protocol import JsonObject, as_int
 from app.db.session import session_scope
 from app.modules.config import store as config_store
 from app.modules.config.schemas import ConfigPushNotice
@@ -415,7 +414,7 @@ def _forget_closed_sessions(session: Session, device_id: str) -> None:
         _attempted.discard(key)
 
 
-def snapshot(session: Session) -> list[dict[str, object]]:
+def snapshot() -> list[dict[str, object]]:
     """调度器此刻的即时计划：每个已排定的到点，连同"为什么是这一刻"的细节。
 
     给运维可见性用（概览页的后台任务卡）：**只读**——计划由 `reschedule` 维护，这里只
@@ -431,14 +430,12 @@ def snapshot(session: Session) -> list[dict[str, object]]:
         for door_no, planned in worker.timers.items()
     )
     rows: list[dict[str, object]] = []
-    configs: dict[str, JsonObject] = {}
     for at, device_id, door_no, candidate, trigger in entries:
         spec = JOBS_BY_KEY[trigger.job]
         started = candidate.assigned_at if spec.start == "assigned_at" else candidate.paused_at
         # 本轮链的用量上限随功能而定（预约续期有、其余没有）；连同起算时刻一起给，
-        # 面板才能回答"这一轮什么时候到头"。同一设备的配置取一次，不逐行读库。
-        config = configs.setdefault(device_id, config_store.effective(session, device_id))
-        max_duration = as_int(config[spec.max_duration_key]) if spec.max_duration_key is not None else None
+        # 面板才能回答"这一轮什么时候到头"。上限收编为常量后这里不再读配置。
+        max_duration = spec.max_duration_s
         rows.append(
             {
                 "device_id": device_id,

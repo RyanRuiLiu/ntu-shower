@@ -102,7 +102,7 @@ class AgentService : Service() {
     private var monitor: DoorMonitor? = null
 
     /** 已处理命令的结果缓存（幂等接收者，见 CommandResultCache）。 */
-    private val recentOutcomes = CommandResultCache(RuntimeConfig.commandDedupMaxCount.toInt())
+    private val recentOutcomes = CommandResultCache(COMMAND_DEDUP_MAX_COUNT)
 
     /** 设备统一日志（见 core.log.DeviceLog）：与服务端审计同事件族。 */
     private val deviceLog = DeviceLog(File(AppConfig.WORK_DIR))
@@ -340,8 +340,8 @@ class AgentService : Service() {
      */
     private fun syncConfigDependents() {
         // 输出上限要在命令下发之前同步到通道上，之后设就晚了：读超了的部分已经在内存里
-        RootShell.command.maxOutputBytes = RuntimeConfig.deviceExecMaxOutputBytes.toInt()
-        recentOutcomes.setCapacity(RuntimeConfig.commandDedupMaxCount.toInt())
+        RootShell.command.maxOutputBytes = DEVICE_EXEC_MAX_OUTPUT_BYTES
+        recentOutcomes.setCapacity(COMMAND_DEDUP_MAX_COUNT)
         notice.onConfigChanged()
         statusLine.onConfigChanged()
         // hasReading 表示收到过完整读数：读失败不算，每次看门狗 tick 都会再补一次，
@@ -357,6 +357,13 @@ class AgentService : Service() {
     private fun applyConfig(envelope: Envelope) {
         val config = envelope.payload.optJSONObject("config") ?: JSONObject()
         val revision = envelope.payload.optInt("revision", 0)
+        // 修订号单调守卫（AWS Shadow version 同型）：乱序的旧配置直接回执不应用——
+        // 跨连接无序（新连接 hello_ack 与在途 push 竞争）时，后到的旧值会把新值抹掉
+        if (revision <= configRevision && revision > 0) {
+            client.send(MessageTypes.CONFIG_ACK, JSONObject().put("revision", revision), replyTo = envelope.id)
+            deviceLog.lifecycle("config.stale", "revision=$revision 已应用 $configRevision，回执不应用")
+            return
+        }
         // 配置统一入口：全部键回写 RuntimeConfig，随后刷新依赖配置的组件并存一份给下次启动
         RuntimeConfig.apply(config)
         worker.execute { ConfigCache.save(this, config) }
@@ -369,7 +376,7 @@ class AgentService : Service() {
         restartDoorMonitor()
         client.send(MessageTypes.CONFIG_ACK, JSONObject().put("revision", revision), replyTo = envelope.id)
         deviceLog.lifecycle("config.applied", "revision=$revision")
-        Log.i(TAG, "config applied revision=$revision heartbeat=${RuntimeConfig.heartbeatIntervalS}s")
+        Log.i(TAG, "config applied revision=$revision")
     }
 
     /**
@@ -428,7 +435,7 @@ class AgentService : Service() {
         otaCheckFuture = otaScheduler.scheduleWithFixedDelay(
             { worker.execute { otaUpdater?.checkAndInstall() } },
             FIRST_OTA_CHECK_DELAY_S,
-            RuntimeConfig.otaCheckIntervalS.toLong(),
+            OTA_CHECK_INTERVAL_S,
             TimeUnit.SECONDS,
         )
     }
@@ -542,7 +549,7 @@ class AgentService : Service() {
             Intent(this, WatchdogReceiver::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val intervalMs = RuntimeConfig.watchdogIntervalS * 1000
+        val intervalMs = WATCHDOG_INTERVAL_S * 1000
         alarm.setExact(
             AlarmManager.ELAPSED_REALTIME_WAKEUP,
             Uptime.nowMs() + intervalMs,
@@ -577,6 +584,10 @@ class AgentService : Service() {
         private const val TAG = "AgentService"
 
         /** 首次 OTA 检查的延迟：覆盖安装后尽快对齐版本，之后按配置间隔。 */
+        private const val WATCHDOG_INTERVAL_S = 60L
+        private const val COMMAND_DEDUP_MAX_COUNT = 1_024
+        private const val DEVICE_EXEC_MAX_OUTPUT_BYTES = 32_768
+        private const val OTA_CHECK_INTERVAL_S = 3_600L
         private const val FIRST_OTA_CHECK_DELAY_S = 30L
 
         /** 日志上送检查周期。 */

@@ -55,5 +55,5 @@ def jobs_status(session: Session = Depends(get_db)) -> schemas.JobsStatus:
     return schemas.JobsStatus(
         jobs=jobs,
         extending=cast("list[schemas.ExtendingDevice]", extend_hours_service.current_shifts(session)),
-        scheduled=cast("list[schemas.ScheduledAction]", sessions_scheduler.snapshot(session)),
+        scheduled=cast("list[schemas.ScheduledAction]", sessions_scheduler.snapshot()),
     )

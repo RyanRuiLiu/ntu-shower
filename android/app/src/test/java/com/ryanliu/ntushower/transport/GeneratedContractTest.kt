@@ -61,11 +61,11 @@ class GeneratedContractTest {
     fun `config defaults are present and usable`() {
         // 这些值直接进 RuntimeConfig 的初值。任何一个为空都会让设备在**拿到下发的配置
         // 之前**处于「配置缺失」状态——那段时间很短，但正好覆盖进程刚起来的那一瞬。
-        assertTrue("遮罩文案不能为空", ConfigDefaults.OVERLAY_MESSAGE.isNotBlank())
-        assertTrue("颜色要是十六进制写法", ConfigDefaults.OVERLAY_TEXT_COLOR.startsWith("#"))
-        assertTrue(ConfigDefaults.HEARTBEAT_INTERVAL_S > 0)
-        assertTrue(ConfigDefaults.DEVICE_EXEC_MAX_OUTPUT_BYTES > 0)
-        assertTrue(ConfigDefaults.OVERLAY_TEXT_SIZE_SP > 0)
-        assertTrue(ConfigDefaults.RECONNECT_MAX_MS >= ConfigDefaults.RECONNECT_BASE_MS)
+        assertTrue("提示文字的默认值为空是刻意的（空文案不显示），其余键必须非默认零值", ConfigDefaults.NOTICE_TEXT.isBlank())
+        assertTrue("颜色要是十六进制写法", ConfigDefaults.NOTICE_TEXT_COLOR.startsWith("#"))
+        assertTrue(ConfigDefaults.POWER_OFF_AT.isNotBlank())
+        assertTrue(ConfigDefaults.POWER_ON_AT.isNotBlank())
+        assertTrue(ConfigDefaults.NOTICE_TEXT_SIZE_SP > 0)
+        assertTrue(ConfigDefaults.STATUS_LINE_TEXT_SIZE_SP > 0)
     }
 }

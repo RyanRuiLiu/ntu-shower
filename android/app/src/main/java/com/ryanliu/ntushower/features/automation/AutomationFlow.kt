@@ -4,7 +4,6 @@ import android.util.Log
 import com.ryanliu.ntushower.core.a11y.A11yNodeSource
 import com.ryanliu.ntushower.core.a11y.A11yRuntime
 import com.ryanliu.ntushower.core.clock.Uptime
-import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.shell.RootShell
 import com.ryanliu.ntushower.transport.ReasonCodes
 
@@ -58,13 +57,13 @@ object AutomationFlow {
         BathAppPage.refresh()
         trace?.mark("refresh-page")
         // 1 回首页
-        if (!BathAppNavigator.navigateToHome(a11y, RuntimeConfig.homeBudgetMs)) {
+        if (!BathAppNavigator.navigateToHome(a11y, HOME_BUDGET_MS)) {
             trace?.end("home_unreachable")
             return FlowOutcome(error = FlowError(ReasonCodes.DEVICE_HOME_UNREACHABLE, "无法回到首页"))
         }
         trace?.mark("navigate-home")
         // 2 遮盖层（可经配置关闭；文案取运行时配置）
-        if (RuntimeConfig.overlayEnabled) overlay.show()
+        if (CoverOverlay.OVERLAY_ENABLED) overlay.show()
         trace?.mark("overlay-show")
         try {
             // 3 命令动作
@@ -76,7 +75,7 @@ object AutomationFlow {
             trace?.mark("perform-action")
 
             // 4 等待验证页
-            if (!BathAppNavigator.waitForPage(a11y, PageState.ID_VERIFY, RuntimeConfig.idVerifyWaitMs)) {
+            if (!BathAppNavigator.waitForPage(a11y, PageState.ID_VERIFY, CERT_VERIFY_WAIT_MS)) {
                 overlay.hide()
                 trace?.end("verify_page_timeout")
                 return FlowOutcome(error = FlowError(ReasonCodes.DEVICE_VERIFY_PAGE_TIMEOUT, "无法进入验证页面"))
@@ -151,8 +150,13 @@ object AutomationFlow {
     }
 
     /** 点击后的静默窗口。`ui_click_delay_ms` 允许为 0，此时用轮询间隔兜住最小等待。 */
-    internal fun uiSettleMs(): Long = RuntimeConfig.uiClickDelayMs.takeIf { it > 0 } ?: RuntimeConfig.pollIntervalMs
+    internal fun uiSettleMs(): Long = UI_SETTLE_MS
 
+    private const val HOME_BUDGET_MS = 15_000L
+    private const val CERT_VERIFY_WAIT_MS = 5_000L
+    private const val BATH_RESPONSE_TIMEOUT_MS = 10_000L
+    private const val UI_POLL_INTERVAL_MS = 60L
+    private const val UI_SETTLE_MS = 200L
     private const val FINISH_SETTLE_TIMEOUT_MS = 2_000L
 
     private data class Terminal(val reached: Boolean, val message: String = "")
@@ -179,7 +183,7 @@ object AutomationFlow {
         var leftForeground = false
         var rebuiltAfterLeave = false
         var unknownRounds = 0
-        while (Uptime.nowMs() - start < RuntimeConfig.serverResponseTimeoutMs) {
+        while (Uptime.nowMs() - start < BATH_RESPONSE_TIMEOUT_MS) {
             val mark = A11yRuntime.pageChangeMark()
             val inForeground = A11yRuntime.bathAppInForeground
             if (!inForeground) leftForeground = true
@@ -206,7 +210,7 @@ object AutomationFlow {
                     // 反复被切走不会被误判成"落在无法识别的页面"。
                     if (!inForeground) {
                         BathAppNavigator.ensureForeground(a11y)
-                        A11yRuntime.awaitPageChangeAfter(mark, RuntimeConfig.pollIntervalMs)
+                        A11yRuntime.awaitPageChangeAfter(mark, UI_POLL_INTERVAL_MS)
                         continue
                     }
                     // 这三类页面不会自己变成 HOME：预约页要人点，UNKNOWN 通常是启动闪屏或
@@ -217,14 +221,14 @@ object AutomationFlow {
                     // 于是一次失败被记成成功。主动导航出去的结果只有我们自己知道。
                     unknownRounds++
                     if (unknownRounds >= UNKNOWN_ROUNDS_BEFORE_FAIL) {
-                        BathAppNavigator.navigateToHome(a11y, RuntimeConfig.homeBudgetMs)
+                        BathAppNavigator.navigateToHome(a11y, HOME_BUDGET_MS)
                         return Terminal(false, "落在无法识别的页面")
                     }
                 }
             }
-            A11yRuntime.awaitPageChangeAfter(mark, RuntimeConfig.pollIntervalMs)
+            A11yRuntime.awaitPageChangeAfter(mark, UI_POLL_INTERVAL_MS)
         }
-        BathAppNavigator.navigateToHome(a11y, RuntimeConfig.homeBudgetMs)
+        BathAppNavigator.navigateToHome(a11y, HOME_BUDGET_MS)
         return Terminal(false, "服务器响应超时")
     }
 

@@ -5,7 +5,6 @@ import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
 import com.ryanliu.ntushower.core.clock.Uptime
-import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.log.DeviceLog
 import com.ryanliu.ntushower.transport.OutcomeStatus
 import com.ryanliu.ntushower.transport.ReasonCodes
@@ -139,7 +138,7 @@ class VoicePlayer(context: Context, private val store: VoiceClipStore, private v
      * 具体 App——提示音结束即开口。等待放在改音量之前，避免占着音量改动等。
      */
     private fun waitForBathAudio(): Long {
-        val gate = BathAudioGate(BATH_AUDIO_START_GRACE_MS, RuntimeConfig.voiceBathWaitMaxMs)
+        val gate = BathAudioGate(BATH_AUDIO_START_GRACE_MS, VOICE_BATH_WAIT_MAX_MS)
         val start = Uptime.nowMs()
         while (true) {
             if (shuttingDown) return -1
@@ -295,6 +294,7 @@ class VoicePlayer(context: Context, private val store: VoiceClipStore, private v
         private const val PCM_BYTES_PER_SAMPLE = 2
 
         /** 浴室 App 的提示音通常与事件同时开始；等这段时间还没起来就当没有提示音。 */
+        private const val VOICE_BATH_WAIT_MAX_MS = 15_000L
         private const val BATH_AUDIO_START_GRACE_MS = 1_500L
 
         private const val BATH_AUDIO_POLL_MS = 250L

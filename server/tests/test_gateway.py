@@ -258,11 +258,11 @@ def test_trust_flow_and_device_listing(client: TestClient, admin_headers: dict[s
         ws.send_text(frames.hello_frame(device_id))
         ack = frames.recv_until(ws, "link.hello_ack")
         assert ack["payload"]["trusted"] is False
-        assert ack["payload"]["config"]["heartbeat_interval_s"] == 30
+        assert ack["payload"]["config"]["notice_text_size_sp"] == 24
         # 只给设备端消费的键——服务端自己的键不占设备的解析路径。这条与 `config.update`
         # 那条路必须一致，否则设备连上与连上之后看到的键集不同。
         assert "renew_wait_students" not in ack["payload"]["config"]
-        assert "auto_settle_pause_threshold_s" not in ack["payload"]["config"]
+        assert "renew_wait_enabled" not in ack["payload"]["config"]
 
         ws.send_text(frames.frame("link.ping", {"sender_time": "2026-09-30T12:00:01.000Z"}))
         frames.recv_until(ws, "link.pong")
@@ -484,7 +484,7 @@ def test_server_ping_loop_probes_and_enforces_pong(
 ) -> None:
     """服务端按配置间隔主动 ping：回 pong 则链路保持，一个周期无 pong 则主动关链。"""
     # 间隔给 0.2 秒：两个完整周期亚秒级跑完，行为与真实间隔无关
-    monkeypatch.setattr("app.modules.config.store.effective", lambda _session, _device_id: {"ping_interval_s": 0.2})
+    monkeypatch.setattr("app.gateway.routes.PING_INTERVAL_S", 0.2)
     device_id = "dev-ping-loop"
     with client.websocket_connect("/gateway/device") as ws:
         ws.send_text(frames.hello_frame(device_id))
