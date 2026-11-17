@@ -149,17 +149,29 @@ _OLDEST_ASSIGNED_AT = min(row[2] for row in REAL_SESSIONS)
 #: 再加一小时余量，每次导入重算——行龄以天计，余量以小时计，永远够用。
 #: 上限本身由 test_decision.py 盯。
 _RUN_AGE_S = seconds_between(_OLDEST_ASSIGNED_AT, now_rfc3339()) + 3600
+
+
+def _lift_renew_wait_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """时长上限收编为常量后，真实行（月龄）需要把 renew_wait 上限抬到 _RUN_AGE_S。
+    上限本身的取值逻辑由 test_decision.py 盯。"""
+    from dataclasses import replace
+
+    import app.modules.sessions.decision as decision
+
+    jobs = tuple(
+        replace(spec, max_duration_s=_RUN_AGE_S) if spec.key == JOB_RENEW_WAIT else spec for spec in decision.JOBS
+    )
+    monkeypatch.setattr(decision, "JOBS", jobs)
+    monkeypatch.setattr(decision, "JOBS_BY_KEY", {s.key: s for s in jobs})
+
+
 CONFIG: dict[str, object] = {
     "renew_wait_enabled": True,
     "renew_wait_students": {"9999000001": "000000", "9999000002": "111111"},
-    "renew_wait_threshold_s": 270,
-    "renew_wait_max_duration_s": _RUN_AGE_S,
     "renew_session_enabled": True,
     "renew_session_students": {"9999000001": "000000", "9999000002": "111111"},
-    "renew_session_threshold_s": 1140,
     "auto_settle_enabled": True,
     "auto_settle_students": {"9999000001": "000000", "9999000002": "111111"},
-    "auto_settle_pause_threshold_s": 60,
 }
 
 #: 最老一场分配到此刻的距离（秒），加一小时余量后作为 renew_wait 的时长上限。
@@ -388,7 +400,8 @@ def test_decide_on_a_real_two_segment_session() -> None:
     assert trigger.delay_s == 898.0  # 1140 − 242（`seconds_between` 截断）
 
 
-def test_decide_on_a_real_paused_session() -> None:
+def test_decide_on_a_real_paused_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    _lift_renew_wait_cap(monkeypatch)
     """真实形状：门 6 第二次关阀在 17:02:27.196（会话的 `last_seen_at` 就是那一刻）。"""
     trigger = decide(
         _candidate(6, "9999000002", DoorState.PAUSED, "2026-10-03T16:53:57.213Z", "2026-10-03T17:02:27.196Z"),
@@ -398,7 +411,7 @@ def test_decide_on_a_real_paused_session() -> None:
 
     assert trigger is not None
     assert trigger.job == JOB_AUTO_SETTLE
-    assert trigger.delay_s == pytest.approx(-3.0, abs=0.01)  # 关阀后 63 秒，阈值 60
+    assert trigger.delay_s == pytest.approx(27.0, abs=0.01)  # 关阀后 63 秒，阈值 90
 
 
 def test_code_reads_what_the_tables_hold() -> None:
@@ -461,6 +474,7 @@ def test_snapshots_walks_real_rows_and_the_live_view(real_rows: None) -> None:
 def test_a_real_shape_ends_in_a_settle(
     real_rows: None, client: TestClient, admin_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    _lift_renew_wait_cap(monkeypatch)
     """拿真实形状跑全链路：一帧进来，到命令出去。
 
     领域层的两个入口在这里**真跑**（前置检查、守卫都在），只把命令下发换成可控的桩。

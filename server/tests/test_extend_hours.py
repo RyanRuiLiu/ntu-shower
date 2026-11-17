@@ -31,14 +31,12 @@ DEVICE = "dev-extend"
 #: 名单里有两个人，其中只有一个占着喷头——另一份名单项用来验"没占用的人不被分配"。
 CONFIG: dict[str, object] = {
     "extend_hours_enabled": True,
-    "extend_hours_at": "23:49",
     "extend_shift_minutes": 15,
     "server_zone_offset_minutes": 480,
     "extend_hours_students": {"9999999001": "000000", "9999999003": "111111"},
     "power_off_at": "23:58",
     "power_on_at": "10:55",
     "time_sync_enabled": True,
-    "time_sync_threshold_s": 60,
 }
 
 #: 设备钟快 15 分钟（延长拨快后的状态）：偏差 = 服务端 − 设备 = -900 秒。
@@ -264,7 +262,7 @@ def test_shift_landing_guard_refuses_to_land_inside_the_hostile_window(
     23:50-23:58 的敌对窗口里）就本轮放弃，并记一句操作员能看懂的警告。"""
     events: list[str] = []
     sent: list[tuple[str, object]] = []
-    monkeypatch.setitem(CONFIG, "extend_shift_minutes", 5)
+    monkeypatch.setattr("app.modules.extend_hours.service.EXTEND_SHIFT_MINUTES", 5)
     _prepare(monkeypatch, "2026-10-05T23:50:00.000Z", sent)
     monkeypatch.setattr(extend_hours, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
     monkeypatch.setattr(audit_store, "log_event", lambda _level, event, *_a, **_kw: events.append(event))
@@ -875,7 +873,6 @@ def test_tick_advances_each_extending_device_with_its_own_config(
         "extend_shift_minutes": 15,
         "extend_hours_students": {},
         "time_sync_enabled": False,
-        "time_sync_threshold_s": 60,
         "power_off_at": "23:58",
     }
     configs = {

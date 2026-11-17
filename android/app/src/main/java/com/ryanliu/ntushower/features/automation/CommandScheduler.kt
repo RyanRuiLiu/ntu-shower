@@ -4,7 +4,6 @@ import android.util.Log
 import com.ryanliu.ntushower.core.a11y.A11yNodeSource
 import com.ryanliu.ntushower.core.a11y.A11yRuntime
 import com.ryanliu.ntushower.core.clock.Uptime
-import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.features.remote.ScreenCapture
 import com.ryanliu.ntushower.features.voice.VoicePlaySpec
 import com.ryanliu.ntushower.features.voice.VoicePlayer
@@ -531,12 +530,13 @@ class CommandScheduler(
      * 但风险远大于便利）。无障碍不在时如实失败，不给一个更差的替代。
      */
     private fun exportTree(command: Command): CommandOutcome {
-        val tree = A11yRuntime.source?.let { UiTreeCodec.export(it, RuntimeConfig.uiDumpMaxNodes.toInt()) }
+        val tree = A11yRuntime.source?.let { UiTreeCodec.export(it, UI_DUMP_MAX_NODES.toInt()) }
             ?: return CommandOutcome(command.id, OutcomeStatus.FAILED, ReasonCodes.UI_NO_WINDOW, "无障碍服务不可用或未能读取窗口")
         return CommandOutcome(command.id, OutcomeStatus.OK, "", "", JSONObject().put("xml", tree))
     }
 
     companion object {
+        private const val UI_DUMP_MAX_NODES = 2_000L
         private const val TAG = "CommandScheduler"
 
         /**

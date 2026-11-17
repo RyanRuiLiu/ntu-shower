@@ -50,7 +50,7 @@ object UiTreeCodec {
     /**
      * 导出当前窗口，返回与 `uiautomator dump` 同格式的 XML。
      *
-     * 单次导出的节点上限由调用方传入（`RuntimeConfig.uiDumpMaxNodes`，可调）。
+     * 单次导出的节点上限由调用方传入（CommandScheduler 的 UI_DUMP_MAX_NODES）。
      * 无法读取根节点时返回 null——调用方据此报错，而不是返回空文档让远端
      * 以为"这个界面真的什么都没有"。
      */

@@ -24,19 +24,18 @@ def test_defaults_come_from_spec_registry(fresh_db: str) -> None:
         assert revision == 1
         assert overrides == {}
         effective = store.global_effective(session)
-        assert effective["heartbeat_interval_s"] == 30
-        assert effective["overlay_enabled"] is True
+        assert effective["notice_text_size_sp"] == 24
+        assert effective["status_line_enabled"] is True
 
 
 def test_put_global_stores_only_differences(fresh_db: str) -> None:
     """提交整个表单也只留下真正的差异：默认值保持可演进。"""
     with session_scope() as session:
-        revision, overrides = store.put_global_overrides(
-            session, {"heartbeat_interval_s": 15, "ota_check_interval_s": 3600}
-        )
+        revision, overrides = store.put_global_overrides(session, {"notice_text_size_sp": 15, "notice_y_dp": 6})
 
         assert revision == 2
-        assert overrides == {"heartbeat_interval_s": 15}
+        # notice_y_dp 等于默认值，被剔除——只留真正的差异
+        assert overrides == {"notice_text_size_sp": 15}
 
 
 def test_update_global_keeps_the_keys_it_did_not_touch(fresh_db: str) -> None:
@@ -161,13 +160,11 @@ def test_device_overrides_drop_server_keys(fresh_db: str) -> None:
     device_link.register_device_raw("dev-A")
     with session_scope() as session:
         # 走持久化层直接落库，绕过 store 的写入口校验——它本来就该拒掉服务端键
-        config_store_persistence.put_device(
-            session, "dev-A", 7, {"overlay_enabled": False, "auto_settle_enabled": False}
-        )
+        config_store_persistence.put_device(session, "dev-A", 7, {"notice_y_dp": 15, "auto_settle_enabled": False})
 
         _revision, overrides = store.get_device_overrides(session, "dev-A")
 
-        assert overrides == {"overlay_enabled": False}
+        assert overrides == {"notice_y_dp": 15}
         assert (
             store.effective(session, "dev-A")["auto_settle_enabled"]
             == store.global_effective(session)["auto_settle_enabled"]
@@ -179,33 +176,33 @@ def test_default_change_reaches_devices_with_overrides(fresh_db: str) -> None:
     device_link.register_device_raw("dev-A")
     device_link.register_device_raw("dev-B")
     with session_scope() as session:
-        store.put_device_overrides(session, "dev-A", {"overlay_enabled": False})
-        store.put_global_overrides(session, {"heartbeat_interval_s": 20})
+        store.put_device_overrides(session, "dev-A", {"notice_y_dp": 15})
+        store.put_global_overrides(session, {"notice_text_size_sp": 20})
 
-        assert store.effective(session, "dev-A")["heartbeat_interval_s"] == 20
-        assert store.effective(session, "dev-B")["heartbeat_interval_s"] == 20
-        assert store.effective(session, "dev-A")["overlay_enabled"] is False
+        assert store.effective(session, "dev-A")["notice_text_size_sp"] == 20
+        assert store.effective(session, "dev-B")["notice_text_size_sp"] == 20
+        assert store.effective(session, "dev-A")["notice_y_dp"] == 15
 
 
 def test_device_override_wins_over_global(fresh_db: str) -> None:
     device_link.register_device_raw("dev-1")
     with session_scope() as session:
-        store.put_global_overrides(session, {"heartbeat_interval_s": 15})
-        store.put_device_overrides(session, "dev-1", {"heartbeat_interval_s": 10})
+        store.put_global_overrides(session, {"notice_text_size_sp": 15})
+        store.put_device_overrides(session, "dev-1", {"notice_text_size_sp": 20})
 
-        assert store.effective(session, "dev-1")["heartbeat_interval_s"] == 10
-        assert store.effective(session, "dev-other")["heartbeat_interval_s"] == 15
+        assert store.effective(session, "dev-1")["notice_text_size_sp"] == 20
+        assert store.effective(session, "dev-other")["notice_text_size_sp"] == 15
 
 
 def test_device_override_leaves_other_keys_following_global(fresh_db: str) -> None:
     device_link.register_device_raw("dev-1")
     with session_scope() as session:
-        store.put_global_overrides(session, {"ota_check_interval_s": 7200})
-        store.put_device_overrides(session, "dev-1", {"heartbeat_interval_s": 10})
+        store.put_global_overrides(session, {"notice_x_dp": 10})
+        store.put_device_overrides(session, "dev-1", {"notice_text_size_sp": 20})
 
         effective = store.effective(session, "dev-1")
-        assert effective["heartbeat_interval_s"] == 10
-        assert effective["ota_check_interval_s"] == 7200
+        assert effective["notice_text_size_sp"] == 20
+        assert effective["notice_x_dp"] == 10
 
 
 def test_device_effective_excludes_server_only_keys(fresh_db: str) -> None:
@@ -213,9 +210,9 @@ def test_device_effective_excludes_server_only_keys(fresh_db: str) -> None:
     with session_scope() as session:
         device_view = store.device_effective(session, "dev-1")
 
-        assert "renew_session_threshold_s" not in device_view
-        assert "ping_interval_s" not in device_view
-        assert "heartbeat_interval_s" in device_view
+        assert "renew_wait_enabled" not in device_view
+        assert "time_sync_enabled" not in device_view
+        assert "notice_text_size_sp" in device_view
 
 
 def test_unknown_keys_in_stored_overrides_are_ignored(fresh_db: str) -> None:
@@ -229,20 +226,20 @@ def test_unknown_keys_in_stored_overrides_are_ignored(fresh_db: str) -> None:
     "表变了、库没变"。
     """
     with session_scope() as session:
-        store.put_global_overrides(session, {"heartbeat_interval_s": 45})
-        config_store_persistence.put_global(session, 1, {"heartbeat_interval_s": 45, "gone_key": 1})
+        store.put_global_overrides(session, {"notice_text_size_sp": 45})
+        config_store_persistence.put_global(session, 1, {"notice_text_size_sp": 45, "gone_key": 1})
 
         effective = store.global_effective(session)
-        assert effective["heartbeat_interval_s"] == 45
+        assert effective["notice_text_size_sp"] == 45
         assert "gone_key" not in effective
-        assert store.device_effective(session, "dev-1")["heartbeat_interval_s"] == 45
+        assert store.device_effective(session, "dev-1")["notice_text_size_sp"] == 45
 
 
 def test_put_device_override_bumps_revision(fresh_db: str) -> None:
     device_link.register_device_raw("dev-1")
     with session_scope() as session:
-        rev1, _ = store.put_device_overrides(session, "dev-1", {"heartbeat_interval_s": 10})
-        rev2, _ = store.put_device_overrides(session, "dev-1", {"heartbeat_interval_s": 11})
+        rev1, _ = store.put_device_overrides(session, "dev-1", {"notice_text_size_sp": 20})
+        rev2, _ = store.put_device_overrides(session, "dev-1", {"notice_text_size_sp": 21})
 
         assert rev2 > rev1
 
@@ -255,15 +252,15 @@ def test_validate_rejects_invalid_values(fresh_db: str) -> None:
     with pytest.raises(store.InvalidConfigError, match="未知配置键"):
         store.validate({"bogus_key": 1})
     with pytest.raises(store.InvalidConfigError, match="不得小于"):
-        store.validate({"heartbeat_interval_s": 0})
+        store.validate({"notice_text_size_sp": 0})
     with pytest.raises(store.InvalidConfigError, match="不得大于"):
-        store.validate({"heartbeat_interval_s": 99999})
+        store.validate({"notice_text_size_sp": 99999})
     with pytest.raises(store.InvalidConfigError, match="需要整数"):
-        store.validate({"heartbeat_interval_s": True})
+        store.validate({"notice_text_size_sp": True})
     with pytest.raises(store.InvalidConfigError, match="需要布尔值"):
-        store.validate({"overlay_enabled": "yes"})
+        store.validate({"status_line_background": "yes"})
     with pytest.raises(store.InvalidConfigError, match="需要文本"):
-        store.validate({"overlay_message": 42})
+        store.validate({"notice_text": 42})
     with pytest.raises(store.InvalidConfigError, match="需要映射"):
         store.validate({"renew_wait_students": ["not", "a", "map"]})
     with pytest.raises(store.InvalidConfigError, match="都必须是文本"):
@@ -273,17 +270,17 @@ def test_validate_rejects_invalid_values(fresh_db: str) -> None:
 def test_validate_passes_normalized_values(fresh_db: str) -> None:
     checked = store.validate(
         {
-            "heartbeat_interval_s": 45,
-            "overlay_enabled": False,
-            "overlay_message": "处理中",
+            "notice_text_size_sp": 45,
+            "status_line_background": False,
+            "notice_text": "处理中",
             "renew_wait_students": {"2021001": "pw"},
         }
     )
 
     assert checked == {
-        "heartbeat_interval_s": 45,
-        "overlay_enabled": False,
-        "overlay_message": "处理中",
+        "notice_text_size_sp": 45,
+        "status_line_background": False,
+        "notice_text": "处理中",
         "renew_wait_students": {"2021001": "pw"},
     }
 
@@ -294,16 +291,14 @@ def test_validate_accepts_and_rejects_times(fresh_db: str) -> None:
     分开报是有用的：填错格式（`23:60`）与填得太早（`22:59`）是两种失误，混成一句
     "不在范围内"会让人去范围里找问题，而问题在写法上。
     """
-    assert store.validate({"extend_hours_at": "23:49"}) == {"extend_hours_at": "23:49"}
+    assert store.validate({"power_off_at": "23:58"}) == {"power_off_at": "23:58"}
 
     with pytest.raises(store.InvalidConfigError, match="HH:MM"):
-        store.validate({"extend_hours_at": "23:60"})
+        store.validate({"power_on_at": "23:60"})
     with pytest.raises(store.InvalidConfigError, match="HH:MM"):
-        store.validate({"extend_hours_at": "2349"})
+        store.validate({"power_on_at": "2349"})
     with pytest.raises(store.InvalidConfigError, match="需要时刻文本"):
-        store.validate({"extend_hours_at": 2349})
-    with pytest.raises(store.InvalidConfigError, match="不得早于 23:00"):
-        store.validate({"extend_hours_at": "22:59"})
+        store.validate({"power_on_at": 2349})
 
 
 def test_validate_accepts_and_rejects_weekdays(fresh_db: str) -> None:
@@ -330,10 +325,10 @@ def test_notice_defaults_are_registered(fresh_db: str) -> None:
 
         assert effective["notice_enabled"] is False
         assert effective["notice_text"] == ""
-        assert effective["notice_text_size_sp"] == 48
-        assert effective["notice_text_color"] == "#d94f16"
-        assert effective["notice_x_dp"] == 40
-        assert effective["notice_y_dp"] == 40
+        assert effective["notice_text_size_sp"] == 24
+        assert effective["notice_text_color"] == "#de523f"
+        assert effective["notice_x_dp"] == 10
+        assert effective["notice_y_dp"] == 6
         assert effective["notice_time_enabled"] is False
         assert effective["notice_time_start"] == "22:00"
         assert effective["notice_time_end"] == "23:00"
@@ -372,15 +367,15 @@ def test_config_spec_rendering_contract(client: TestClient, admin_headers: dict[
     assert [s["key"] for s in spec["sections"]] == ["server", "device"]
     assert [s["title"] for s in spec["sections"]] == ["后台任务", "设备下发"]
     groups = {g["key"]: g for g in spec["groups"]}
-    assert groups["gateway"]["section"] == "device"
+    assert groups["notice"]["section"] == "device"
     assert groups["renew_wait"]["section"] == "server"
-    assert groups["server_bridge"]["section"] == "server"
-    heartbeat = next(item for item in spec["specs"] if item["key"] == "heartbeat_interval_s")
-    assert heartbeat["kind"] == "int"
-    assert heartbeat["scope"] == "device"
-    assert heartbeat["minimum"] == 5
-    assert heartbeat["unit"] == "秒"
-    assert heartbeat["group"] == "gateway"
+    assert groups["extend_hours"]["section"] == "server"
+    size = next(item for item in spec["specs"] if item["key"] == "notice_text_size_sp")
+    assert size["kind"] == "int"
+    assert size["scope"] == "device"
+    assert size["minimum"] == 10
+    assert size["unit"] == "sp"
+    assert size["group"] == "notice"
 
 
 def test_device_override_rejects_server_only_keys(
@@ -411,11 +406,11 @@ def test_device_override_rejects_server_only_keys(
         accepted = client.put(
             f"/api/v1/devices/{device_id}/config",
             headers=admin_headers,
-            json={"config": {"heartbeat_interval_s": 20}},
+            json={"config": {"notice_text_size_sp": 20}},
         )
         assert accepted.status_code == 200
         override = client.get(f"/api/v1/devices/{device_id}/config", headers=admin_headers).json()
-        assert override["overrides"] == {"heartbeat_interval_s": 20}
+        assert override["overrides"] == {"notice_text_size_sp": 20}
 
 
 def test_config_surface_requires_admin(client: TestClient, ops_headers: dict[str, str]) -> None:
@@ -430,13 +425,13 @@ def test_global_config_roundtrip(client: TestClient, admin_headers: dict[str, st
     assert r.status_code == 200
     assert r.json()["revision"] == 1
 
-    updated = client.put("/api/v1/config", headers=admin_headers, json={"config": {"heartbeat_interval_s": 45}})
+    updated = client.put("/api/v1/config", headers=admin_headers, json={"config": {"notice_text_size_sp": 45}})
     assert updated.status_code == 200
     assert updated.json()["revision"] == 2
 
     global_cfg = client.get("/api/v1/config", headers=admin_headers).json()
-    assert global_cfg["config"]["heartbeat_interval_s"] == 45
-    assert global_cfg["config"]["ota_check_interval_s"] == 3600  # 未覆盖的键仍是默认值
+    assert global_cfg["config"]["notice_text_size_sp"] == 45
+    assert global_cfg["config"]["power_on_at"] == "10:55"  # 未覆盖的键仍是默认值
 
 
 def test_global_update_rejects_invalid_values(client: TestClient, admin_headers: dict[str, str]) -> None:
@@ -444,7 +439,7 @@ def test_global_update_rejects_invalid_values(client: TestClient, admin_headers:
     assert unknown.status_code == 422
     assert unknown.json()["type"].endswith("/problems/invalid-config")
 
-    out_of_range = client.put("/api/v1/config", headers=admin_headers, json={"config": {"heartbeat_interval_s": 0}})
+    out_of_range = client.put("/api/v1/config", headers=admin_headers, json={"config": {"notice_text_size_sp": 0}})
     assert out_of_range.status_code == 422
 
 
@@ -456,16 +451,16 @@ def test_global_update_returns_noticed_devices(
     """PUT /config 返回 notified 数组：每个在线设备一条推送回执，没有在线设备则为空。"""
     monkeypatch.setattr(config_module.settings, "config_ack_timeout_s", 0.2)
 
-    empty = client.put("/api/v1/config", headers=admin_headers, json={"config": {"heartbeat_interval_s": 44}})
+    empty = client.put("/api/v1/config", headers=admin_headers, json={"config": {"notice_text_size_sp": 44}})
     assert empty.status_code == 200
     assert empty.json()["notified"] == []
 
     from app.core.connections import manager
 
     monkeypatch.setattr(manager, "_connections", {"dev-cfg-anon": device_link.FakeGatewayWS()})
-    notified = client.put(
-        "/api/v1/config", headers=admin_headers, json={"config": {"heartbeat_interval_s": 45}}
-    ).json()["notified"]
+    notified = client.put("/api/v1/config", headers=admin_headers, json={"config": {"notice_text_size_sp": 45}}).json()[
+        "notified"
+    ]
     assert notified == [{"device_id": "dev-cfg-anon", "notified": True, "applied": False, "reason": "ack timeout"}]
 
 
@@ -484,7 +479,7 @@ def test_device_config_ack_round_trip(
             outcome["r"] = client.put(
                 "/api/v1/devices/dev-cfg-ack/config",
                 headers=admin_headers,
-                json={"config": {"heartbeat_interval_s": 20}},
+                json={"config": {"notice_text_size_sp": 20}},
             )
 
         thread = threading.Thread(target=call)
@@ -500,7 +495,7 @@ def test_device_config_ack_round_trip(
     assert outcome["r"].status_code == 200
     assert body["notified"] is True
     assert body["applied"] is True
-    assert body["config"]["heartbeat_interval_s"] == 20
+    assert body["config"]["notice_text_size_sp"] == 20
 
 
 def test_device_config_lifecycle_without_ack(
@@ -515,7 +510,7 @@ def test_device_config_lifecycle_without_ack(
         r = client.put(
             "/api/v1/devices/dev-cfg-1/config",
             headers=admin_headers,
-            json={"config": {"heartbeat_interval_s": 20}},
+            json={"config": {"notice_text_size_sp": 20}},
         )
         body = r.json()
         assert {k: body[k] for k in ("device_id", "revision", "notified", "applied", "reason")} == {
@@ -527,8 +522,8 @@ def test_device_config_lifecycle_without_ack(
         }
 
         override = client.get("/api/v1/devices/dev-cfg-1/config", headers=admin_headers).json()
-        assert override["overrides"] == {"heartbeat_interval_s": 20}
-        assert override["config"]["heartbeat_interval_s"] == 20
+        assert override["overrides"] == {"notice_text_size_sp": 20}
+        assert override["config"]["notice_text_size_sp"] == 20
 
 
 def test_device_config_rejected_when_offline(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:

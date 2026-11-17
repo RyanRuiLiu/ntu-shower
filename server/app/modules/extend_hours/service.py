@@ -85,15 +85,14 @@ from app.db.session import session_scope
 from app.modules.config import store as config_store
 from app.modules.config.schemas import ConfigValues
 from app.modules.config.spec import (
-    EXTEND_HOURS_AT_KEY,
     EXTEND_HOURS_ENABLED_KEY,
     EXTEND_HOURS_STUDENTS_KEY,
-    EXTEND_SHIFT_MINUTES_KEY,
     POWER_OFF_AT_KEY,
     POWER_ON_AT_KEY,
     SERVER_ZONE_OFFSET_MINUTES_KEY,
     TIME_SYNC_ENABLED_KEY,
-    TIME_SYNC_THRESHOLD_S_KEY,
+    format_time,
+    parse_time,
 )
 from app.modules.devices import actions as device_actions
 from app.modules.devices import service as devices_service
@@ -105,15 +104,38 @@ from app.persistence import audit as audit_store
 
 from . import crud
 
+#: 拨钟拨走的时长（秒）。落点必须跨过午夜，才能一次跳过 23:50 起的新人关闭窗口、
+#: 23:58 的断电，以及两者之间的全部释放判定。曾是配置键（运维从未改过，
+#: 2026-11-17 精简收编为常量）。
+EXTEND_SHIFT_MINUTES = 15
 
-#: 拨钟拨走的时长按 `extend_shift_minutes` 现算（秒）：落点必须跨过午夜，才能一次
-#: 跳过 23:50 起的新人关闭窗口、23:58 的断电，以及两者之间的全部释放判定。
-def _shift_s(config: ConfigValues) -> int:
-    return as_int(config[EXTEND_SHIFT_MINUTES_KEY]) * 60
+
+def _shift_s(_config: ConfigValues) -> int:
+    return EXTEND_SHIFT_MINUTES * 60
 
 
-#: 扫表间隔。它要远小于"到点"与"浴室 App 放人"之间那几分钟余量（`extend_hours_at`
-#: 默认 23:49，放人线 23:53）。
+def _extend_hours_at(config: ConfigValues) -> str:
+    """拨钟时刻：断电时刻前移固定余量。断电时刻的单一出处是 power_off_at。"""
+    power_off = str(config[POWER_OFF_AT_KEY])
+    minutes = parse_time(power_off)
+    if minutes is None:
+        return power_off
+    shifted = minutes - EXTEND_HOURS_BEFORE_POWER_OFF_MIN
+    return format_time(max(shifted, 0))
+
+
+#: 拨钟时刻 = 断电时刻 − 这个余量（分钟）。断电时刻的唯一出处是 power_off_at 配置键
+#: （浴室 App autoCloseTime 同值），拨钟必须落在它之前、且在"关机前 5 分钟放人线"
+#: （23:53 = 23:58 − 5）之前再留出操作余量——23:58 − 9 = 23:49。曾是独立配置键
+#: `extend_hours_at`（运维从未改过，2026-11-17 改为派生：改断电时刻拨钟自动跟）。
+EXTEND_HOURS_BEFORE_POWER_OFF_MIN = 9
+
+#: 自动校时的偏差阈值（秒）：设备钟晶振日漂移秒级，累积数日才到 60 秒——避免为小
+#: 偏差频繁拨钟。曾是配置键（运维从未改过，2026-11-17 精简收编为常量）。
+TIME_SYNC_THRESHOLD_S = 60
+
+#: 扫表间隔。它要远小于"到点"与"浴室 App 放人"之间那几分钟余量（拨钟默认 23:49，
+#: 放人线 23:53）。
 TICK_INTERVAL_S = 30.0
 
 #: 滚动续写间隔。窗口 10 分钟、续写 2 分钟意味着截止永远领先至少 8 分钟；续写失败
@@ -266,7 +288,7 @@ def current_shifts(session: Session) -> list[dict[str, object]]:
         rows.append(
             {
                 "device_id": shift.device_id,
-                "shift_minutes": as_int(config[EXTEND_SHIFT_MINUTES_KEY]),
+                "shift_minutes": EXTEND_SHIFT_MINUTES,
                 "shifted_at": shift.shifted_at,
                 "total": len(shift.assignments),
                 "reassigned_count": len(shift.assignments) - len(pending),
@@ -407,7 +429,7 @@ async def _maybe_correct_clock(session: Session, device_id: str, config: ConfigV
     if doors_service.open_sessions(session, device_id):
         return  # 有人占用：校钟的跳变会清掉会话，等人走再校
     skew = device_clock.get(device_id)  # 服务端 − 设备（秒）
-    threshold = as_int(config[TIME_SYNC_THRESHOLD_S_KEY])
+    threshold = TIME_SYNC_THRESHOLD_S
     if abs(skew) < threshold:
         return
     zone = as_int(config[SERVER_ZONE_OFFSET_MINUTES_KEY])
@@ -451,9 +473,7 @@ async def _maybe_shift(session: Session, device_id: str) -> None:
     students = students_of(config, EXTEND_HOURS_STUDENTS_KEY)
     if not students:
         return
-    if not _reached(
-        _local_now(device_id, as_int(config[SERVER_ZONE_OFFSET_MINUTES_KEY])), str(config[EXTEND_HOURS_AT_KEY])
-    ):
+    if not _reached(_local_now(device_id, as_int(config[SERVER_ZONE_OFFSET_MINUTES_KEY])), _extend_hours_at(config)):
         return
     present = _present(session, device_id, students)
     if not present:

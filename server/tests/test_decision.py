@@ -26,14 +26,10 @@ NOW = "2026-10-05T12:00:00.000Z"
 BASE_CONFIG: dict[str, object] = {
     "renew_wait_enabled": True,
     "renew_wait_students": {"9999999001": "000000", "9999000002": "111111"},
-    "renew_wait_threshold_s": 270,
-    "renew_wait_max_duration_s": 1200,
     "renew_session_enabled": True,
     "renew_session_students": {"9999999001": "000000"},
-    "renew_session_threshold_s": 1140,
     "auto_settle_enabled": True,
     "auto_settle_students": {"9999999001": "000000"},
-    "auto_settle_pause_threshold_s": 60,
 }
 
 
@@ -159,7 +155,7 @@ def test_auto_settle_counts_from_valve_close_not_from_assignment() -> None:
     """暂停从关阀那一刻起算：分配时刻早在几十分钟前，拿它算等于立刻结算。"""
     trigger = decide(candidate(state=DoorState.PAUSED, paused_at="2026-10-05T11:59:30.000Z"), BASE_CONFIG, NOW)
 
-    assert trigger == Trigger(JOB_AUTO_SETTLE, delay_s=30.0, threshold_s=60)
+    assert trigger == Trigger(JOB_AUTO_SETTLE, delay_s=60.0, threshold_s=90)
 
 
 def test_auto_settle_needs_a_close_time() -> None:
@@ -199,7 +195,7 @@ def test_paused_belongs_to_auto_settle_alone() -> None:
     """
     trigger = decide(candidate(state=DoorState.PAUSED, paused_at="2026-10-05T11:59:00.000Z"), BASE_CONFIG, NOW)
 
-    assert trigger == Trigger(JOB_AUTO_SETTLE, delay_s=0.0, threshold_s=60)
+    assert trigger == Trigger(JOB_AUTO_SETTLE, delay_s=30.0, threshold_s=90)
 
 
 def test_a_session_nearly_full_that_just_closed_the_valve_still_settles() -> None:
@@ -216,7 +212,7 @@ def test_a_session_nearly_full_that_just_closed_the_valve_still_settles() -> Non
         paused_at="2026-10-05T11:59:50.000Z",  # 结算还要 50 秒
     )
 
-    assert decide(just_closed, BASE_CONFIG, NOW) == Trigger(JOB_AUTO_SETTLE, delay_s=50.0, threshold_s=60)
+    assert decide(just_closed, BASE_CONFIG, NOW) == Trigger(JOB_AUTO_SETTLE, delay_s=80.0, threshold_s=90)
 
 
 # ── 到点复查 ──

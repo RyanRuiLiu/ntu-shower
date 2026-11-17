@@ -14,39 +14,6 @@ import org.json.JSONObject
  * 启动后的头几百毫秒里它一定没到，于是表现为偶发的、难以复现的行为差异。
  */
 object ConfigDefaults {
-    /** 心跳间隔 */
-    const val HEARTBEAT_INTERVAL_S = 30L
-
-    /** 重连退避基准 */
-    const val RECONNECT_BASE_MS = 5000L
-
-    /** 重连退避上限 */
-    const val RECONNECT_MAX_MS = 60000L
-
-    /** 看门狗间隔 */
-    const val WATCHDOG_INTERVAL_S = 60L
-
-    /** 上报去抖窗口 */
-    const val DOOR_REPORT_DEBOUNCE_MS = 1000L
-
-    /** 发件箱行数上限 */
-    const val OUTBOX_MAX_ROWS = 100000L
-
-    /** 显示操作遮罩 */
-    const val OVERLAY_ENABLED = true
-
-    /** 操作遮罩文字 */
-    const val OVERLAY_MESSAGE = "网络连接中，请稍后重试..."
-
-    /** 遮罩文字字号 */
-    const val OVERLAY_TEXT_SIZE_SP = 80L
-
-    /** 遮罩文字颜色 */
-    const val OVERLAY_TEXT_COLOR = "#d94f16"
-
-    /** 遮罩文字左边距 */
-    const val OVERLAY_MARGIN_LEFT_DP = 600L
-
     /** 显示屏幕提示 */
     const val NOTICE_ENABLED = false
 
@@ -54,22 +21,19 @@ object ConfigDefaults {
     const val NOTICE_TEXT = ""
 
     /** 提示字号 */
-    const val NOTICE_TEXT_SIZE_SP = 48L
+    const val NOTICE_TEXT_SIZE_SP = 24L
 
     /** 提示文字颜色 */
-    const val NOTICE_TEXT_COLOR = "#d94f16"
+    const val NOTICE_TEXT_COLOR = "#de523f"
 
     /** 提示水平对齐 */
-    const val NOTICE_ALIGN = "左对齐"
-
-    /** 提示居中偏移 */
-    const val NOTICE_CENTER_OFFSET_DP = 0L
+    const val NOTICE_ALIGN = "靠右"
 
     /** 提示水平边距 */
-    const val NOTICE_X_DP = 40L
+    const val NOTICE_X_DP = 10L
 
     /** 提示上边距 */
-    const val NOTICE_Y_DP = 40L
+    const val NOTICE_Y_DP = 6L
 
     /** 启用时间条件 */
     const val NOTICE_TIME_ENABLED = false
@@ -96,37 +60,25 @@ object ConfigDefaults {
     const val STATUS_LINE_ENABLED = true
 
     /** 状态行字号 */
-    const val STATUS_LINE_TEXT_SIZE_SP = 13L
+    const val STATUS_LINE_TEXT_SIZE_SP = 28L
 
     /** 状态行文字颜色 */
-    const val STATUS_LINE_TEXT_COLOR = "#ffffff"
-
-    /** 状态行的配色方式 */
-    const val STATUS_LINE_COLOR_MODE = "按状态"
+    const val STATUS_LINE_TEXT_COLOR = "#00cc66"
 
     /** 空闲楼层颜色 */
-    const val STATUS_LINE_AVAILABLE_COLOR = "#6bc600"
+    const val STATUS_LINE_AVAILABLE_COLOR = "#00cc66"
 
     /** 不可用楼层颜色 */
     const val STATUS_LINE_UNAVAILABLE_COLOR = "#999999"
 
     /** 显示状态行背景 */
-    const val STATUS_LINE_BACKGROUND = true
+    const val STATUS_LINE_BACKGROUND = false
 
     /** 状态行背景颜色 */
-    const val STATUS_LINE_BACKGROUND_COLOR = "#cc0066cc"
-
-    /** 状态行水平对齐 */
-    const val STATUS_LINE_ALIGN = "居中"
-
-    /** 状态行居中偏移 */
-    const val STATUS_LINE_CENTER_OFFSET_DP = 0L
-
-    /** 状态行水平边距 */
-    const val STATUS_LINE_X_DP = 0L
+    const val STATUS_LINE_BACKGROUND_COLOR = "#110066cc"
 
     /** 状态行上边距 */
-    const val STATUS_LINE_Y_DP = 8L
+    const val STATUS_LINE_Y_DP = 0L
 
     /** 启用时间条件 */
     const val STATUS_LINE_TIME_ENABLED = false
@@ -164,38 +116,8 @@ object ConfigDefaults {
     /** 回首页预算 */
     const val HOME_TIMEOUT_MS = 15000L
 
-    /** 界面轮询间隔 */
-    const val UI_POLL_INTERVAL_MS = 60L
-
-    /** 点击后延迟 */
-    const val UI_CLICK_DELAY_MS = 200L
-
-    /** 节点导出上限 */
-    const val UI_DUMP_MAX_NODES = 2000L
-
-    /** 命令输出上限 */
-    const val DEVICE_EXEC_MAX_OUTPUT_BYTES = 32768L
-
-    /** 检查更新间隔 */
-    const val OTA_CHECK_INTERVAL_S = 3600L
-
-    /** 崩溃后拉起浴室 App */
-    const val BATH_APP_GUARD_ENABLED = true
-
-    /** 退出计数窗口 */
-    const val BATH_APP_EXIT_WINDOW_MS = 30000L
-
-    /** 窗口内最多退出次数 */
-    const val BATH_APP_EXIT_MAX_COUNT = 3L
-
-    /** 异常后的冷却时长 */
-    const val BATH_APP_EXIT_COOLDOWN_MS = 600000L
-
     /** 启用数据库归档 */
-    const val BATH_DB_ARCHIVE_ENABLED = false
-
-    /** 归档触发阈值 */
-    const val BATH_DB_ARCHIVE_THRESHOLD_MB = 10L
+    const val BATH_DB_ARCHIVE_ENABLED = true
 
     /** 每日断电时刻 */
     const val POWER_OFF_AT = "23:58"
@@ -203,28 +125,13 @@ object ConfigDefaults {
     /** 每日上电时刻 */
     const val POWER_ON_AT = "10:55"
 
-    /** 等待浴室提示结束 */
-    const val VOICE_BATH_WAIT_MAX_MS = 15000L
-
     /** 全部默认值拼成一个对象，供 `RuntimeConfig.resetToDefaults` 复位用。 */
     fun asJson(): JSONObject = JSONObject()
-        .put("heartbeat_interval_s", HEARTBEAT_INTERVAL_S)
-        .put("reconnect_base_ms", RECONNECT_BASE_MS)
-        .put("reconnect_max_ms", RECONNECT_MAX_MS)
-        .put("watchdog_interval_s", WATCHDOG_INTERVAL_S)
-        .put("door_report_debounce_ms", DOOR_REPORT_DEBOUNCE_MS)
-        .put("outbox_max_rows", OUTBOX_MAX_ROWS)
-        .put("overlay_enabled", OVERLAY_ENABLED)
-        .put("overlay_message", OVERLAY_MESSAGE)
-        .put("overlay_text_size_sp", OVERLAY_TEXT_SIZE_SP)
-        .put("overlay_text_color", OVERLAY_TEXT_COLOR)
-        .put("overlay_margin_left_dp", OVERLAY_MARGIN_LEFT_DP)
         .put("notice_enabled", NOTICE_ENABLED)
         .put("notice_text", NOTICE_TEXT)
         .put("notice_text_size_sp", NOTICE_TEXT_SIZE_SP)
         .put("notice_text_color", NOTICE_TEXT_COLOR)
         .put("notice_align", NOTICE_ALIGN)
-        .put("notice_center_offset_dp", NOTICE_CENTER_OFFSET_DP)
         .put("notice_x_dp", NOTICE_X_DP)
         .put("notice_y_dp", NOTICE_Y_DP)
         .put("notice_time_enabled", NOTICE_TIME_ENABLED)
@@ -237,14 +144,10 @@ object ConfigDefaults {
         .put("status_line_enabled", STATUS_LINE_ENABLED)
         .put("status_line_text_size_sp", STATUS_LINE_TEXT_SIZE_SP)
         .put("status_line_text_color", STATUS_LINE_TEXT_COLOR)
-        .put("status_line_color_mode", STATUS_LINE_COLOR_MODE)
         .put("status_line_available_color", STATUS_LINE_AVAILABLE_COLOR)
         .put("status_line_unavailable_color", STATUS_LINE_UNAVAILABLE_COLOR)
         .put("status_line_background", STATUS_LINE_BACKGROUND)
         .put("status_line_background_color", STATUS_LINE_BACKGROUND_COLOR)
-        .put("status_line_align", STATUS_LINE_ALIGN)
-        .put("status_line_center_offset_dp", STATUS_LINE_CENTER_OFFSET_DP)
-        .put("status_line_x_dp", STATUS_LINE_X_DP)
         .put("status_line_y_dp", STATUS_LINE_Y_DP)
         .put("status_line_time_enabled", STATUS_LINE_TIME_ENABLED)
         .put("status_line_time_start", STATUS_LINE_TIME_START)
@@ -258,18 +161,7 @@ object ConfigDefaults {
         .put("bath_response_timeout_ms", BATH_RESPONSE_TIMEOUT_MS)
         .put("cert_verify_wait_ms", CERT_VERIFY_WAIT_MS)
         .put("home_timeout_ms", HOME_TIMEOUT_MS)
-        .put("ui_poll_interval_ms", UI_POLL_INTERVAL_MS)
-        .put("ui_click_delay_ms", UI_CLICK_DELAY_MS)
-        .put("ui_dump_max_nodes", UI_DUMP_MAX_NODES)
-        .put("device_exec_max_output_bytes", DEVICE_EXEC_MAX_OUTPUT_BYTES)
-        .put("ota_check_interval_s", OTA_CHECK_INTERVAL_S)
-        .put("bath_app_guard_enabled", BATH_APP_GUARD_ENABLED)
-        .put("bath_app_exit_window_ms", BATH_APP_EXIT_WINDOW_MS)
-        .put("bath_app_exit_max_count", BATH_APP_EXIT_MAX_COUNT)
-        .put("bath_app_exit_cooldown_ms", BATH_APP_EXIT_COOLDOWN_MS)
         .put("bath_db_archive_enabled", BATH_DB_ARCHIVE_ENABLED)
-        .put("bath_db_archive_threshold_mb", BATH_DB_ARCHIVE_THRESHOLD_MB)
         .put("power_off_at", POWER_OFF_AT)
         .put("power_on_at", POWER_ON_AT)
-        .put("voice_bath_wait_max_ms", VOICE_BATH_WAIT_MAX_MS)
 }

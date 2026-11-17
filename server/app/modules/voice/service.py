@@ -33,7 +33,7 @@ from app.core.problems import (
 )
 from app.db.base import utcnow
 from app.modules.config import store as config_store
-from app.modules.config.spec import SERVER_ZONE_OFFSET_MINUTES_KEY, VOICE_EVENT_MAX_AGE_S_KEY
+from app.modules.config.spec import SERVER_ZONE_OFFSET_MINUTES_KEY
 from app.modules.devices import actions as device_actions
 from app.modules.devices import service as devices_service
 from app.modules.doors.events import DoorEvent, DoorEventKind
@@ -41,6 +41,10 @@ from app.modules.doors.events import DoorEvent, DoorEventKind
 from . import audio, crud, matching, numbers, schemas
 from . import time_windows as time_rules
 from .priority import rule_priority
+
+#: 投递记录的过期秒数：超过它的事件不再补播。曾是配置键（运维从未改过，
+#: 2026-11-17 精简收编为常量）。
+VOICE_EVENT_MAX_AGE_S = 60
 
 #: 预下载命令只让设备排入后台队列，不等待实际下载。预留 0.1 Mbps 链路下
 #: 命令帧与回执的往返时间；它走独立通道，超时只影响后续预下载，不阻塞播放。
@@ -910,7 +914,7 @@ async def handle_events(events: tuple[DoorEvent, ...]) -> None:
     from app.db.session import session_scope
 
     with session_scope() as session:
-        value = config_store.global_effective(session)[VOICE_EVENT_MAX_AGE_S_KEY]
+        value = VOICE_EVENT_MAX_AGE_S
         max_age = value if isinstance(value, int) else 0
         for event in events:
             try:

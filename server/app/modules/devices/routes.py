@@ -45,7 +45,6 @@ from app.core.protocol import as_int
 from app.core.tokens import extract_bearer, hash_token
 from app.db.base import utcnow
 from app.db.deps import get_db
-from app.modules.config import store as config_store
 
 from . import crud, schemas, service
 from .actions import reject_overloaded
@@ -137,16 +136,13 @@ device_read_router = APIRouter(
 )
 
 
-def _ui_timeout_s(session: Session, device_id: str) -> float:
-    """界面操作的等待上限，取该设备的配置项 `ui_operation_timeout_s`。
+def _ui_timeout_s() -> float:
+    """界面操作的等待上限。
 
     每个 `ui.*` 命令都要等设备完成一次节点遍历或一次手势注入，耗时随界面复杂度
-    变化；做成配置项后现场改一次即对全部设备生效。
+    变化。曾是配置键（运维从未改过，2026-11-17 精简收编为常量）。
     """
-    timeout_s = as_int(
-        config_store.effective(session, device_id)["ui_operation_timeout_s"], int(DEVICE_ACTION_TIMEOUT_S)
-    )
-    return float(timeout_s)
+    return float(DEVICE_ACTION_TIMEOUT_S)
 
 
 # ── 查询 ──
@@ -351,7 +347,7 @@ async def dump_ui_tree(device_id: str, session: Session = Depends(get_db)) -> Co
 
     格式与 uiautomator dump 一致；节点上限取配置项 ui_dump_max_nodes。
     """
-    return await device_action(session, device_id, actions.UI_DUMP, {}, _ui_timeout_s(session, device_id))
+    return await device_action(session, device_id, actions.UI_DUMP, {}, _ui_timeout_s())
 
 
 @device_router.post("/{device_id}/ui-touch", summary="按坐标点击或滑动")
@@ -366,13 +362,13 @@ async def touch(device_id: str, req: DeviceUiTouchRequest, session: Session = De
         params["to_y"] = req.to_y
     if req.duration_ms is not None:
         params["duration_ms"] = req.duration_ms
-    return await device_action(session, device_id, actions.UI_TOUCH, params, _ui_timeout_s(session, device_id))
+    return await device_action(session, device_id, actions.UI_TOUCH, params, _ui_timeout_s())
 
 
 @device_router.post("/{device_id}/ui-key", summary="发送系统按键")
 async def send_key(device_id: str, req: DeviceUiKeyRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """发送系统按键（闭集，路由层以 422 拒绝非法值）。"""
-    return await device_action(session, device_id, actions.UI_KEY, {"key": req.key}, _ui_timeout_s(session, device_id))
+    return await device_action(session, device_id, actions.UI_KEY, {"key": req.key}, _ui_timeout_s())
 
 
 @device_router.post("/{device_id}/ui-input", summary="注入文本")
@@ -383,7 +379,7 @@ async def input_text(device_id: str, req: DeviceUiTextRequest, session: Session 
         device_id,
         actions.UI_INPUT,
         {"text": req.text, "channel": req.channel},
-        _ui_timeout_s(session, device_id),
+        _ui_timeout_s(),
     )
 
 

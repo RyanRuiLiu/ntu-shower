@@ -12,7 +12,6 @@ import com.ryanliu.ntushower.core.a11y.A11yNodeSource
 import com.ryanliu.ntushower.core.a11y.A11yRuntime
 import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.AppConfig
-import com.ryanliu.ntushower.core.config.RuntimeConfig
 
 /**
  * 浴室 App 的导航与元素操作。
@@ -25,6 +24,8 @@ import com.ryanliu.ntushower.core.config.RuntimeConfig
  */
 @Suppress("TooManyFunctions") // 页面导航原语集合：查找/操作/状态三组共享同一套资源 ID 与节点遍历上下文
 object BathAppNavigator {
+
+    private const val UI_POLL_INTERVAL_MS = 60L
 
     // ── 导航 ──
 
@@ -50,7 +51,7 @@ object BathAppNavigator {
 
                 PageState.HINT, PageState.VF_RESULT -> Unit // 等待自动消失
             }
-            A11yRuntime.awaitPageChangeAfter(mark, RuntimeConfig.pollIntervalMs)
+            A11yRuntime.awaitPageChangeAfter(mark, UI_POLL_INTERVAL_MS)
         }
         return false
     }
@@ -93,7 +94,7 @@ object BathAppNavigator {
         }
         if (pkg == AppConfig.BATH_APP_PACKAGE) return
         a11y.sendBroadcast(Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS))
-        A11yRuntime.awaitPageChange(RuntimeConfig.pollIntervalMs)
+        A11yRuntime.awaitPageChange(UI_POLL_INTERVAL_MS)
         a11y.launchBathApp()
     }
 
@@ -129,10 +130,10 @@ object BathAppNavigator {
             if (BathAppPage.snapshot().state == target) return true
             if (!A11yRuntime.bathAppInForeground) {
                 ensureForeground(a11y)
-                A11yRuntime.awaitPageChangeAfter(mark, RuntimeConfig.pollIntervalMs)
+                A11yRuntime.awaitPageChangeAfter(mark, UI_POLL_INTERVAL_MS)
                 continue
             }
-            A11yRuntime.awaitPageChangeAfter(mark, RuntimeConfig.pollIntervalMs)
+            A11yRuntime.awaitPageChangeAfter(mark, UI_POLL_INTERVAL_MS)
         }
         return false
     }

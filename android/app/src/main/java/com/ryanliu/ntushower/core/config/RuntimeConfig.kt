@@ -34,49 +34,12 @@ object RuntimeConfig {
 
     private fun atLeastOne(value: Int): Int = value.coerceAtLeast(MIN_POSITIVE.toInt())
 
-    // ── 通信时序 ──
-    @Volatile var heartbeatIntervalS = ConfigDefaults.HEARTBEAT_INTERVAL_S.toInt()
-        private set
-
-    @Volatile var reconnectBaseMs = ConfigDefaults.RECONNECT_BASE_MS
-        private set
-
-    @Volatile var reconnectMaxMs = ConfigDefaults.RECONNECT_MAX_MS
-        private set
-
-    @Volatile var watchdogIntervalS = ConfigDefaults.WATCHDOG_INTERVAL_S
-        private set
-
-    // ── doors 采集 ──
-    @Volatile var reportDebounceMs = ConfigDefaults.DOOR_REPORT_DEBOUNCE_MS
-        private set
-
     /**
      * 发件箱的行数上限，超出即丢弃最旧的行。
      *
      * 默认值来自 [ConfigDefaults]（上游是服务端登记表 `spec.py`），那边刻意给得远超真实
      * 所需，于是它实际上不触发。**调小它是主动放弃历史**：帧丢了设备不会重发。
      */
-    @Volatile var outboxMaxRows = ConfigDefaults.OUTBOX_MAX_ROWS
-        private set
-
-    // ── 自动化 ──
-    @Volatile var overlayEnabled = ConfigDefaults.OVERLAY_ENABLED
-        private set
-
-    @Volatile var overlayMessage = ConfigDefaults.OVERLAY_MESSAGE
-        private set
-
-    // 遮罩的文字样式。默认值取自旧项目：目标设备是 1366x768 的横屏，字号小了在
-    // 一米外看不清；文字被推到 600dp 处，正好落在提示图右侧的空白区里。
-    @Volatile var overlayTextSizeSp = ConfigDefaults.OVERLAY_TEXT_SIZE_SP.toInt()
-        private set
-
-    @Volatile var overlayTextColor = ConfigDefaults.OVERLAY_TEXT_COLOR
-        private set
-
-    @Volatile var overlayMarginLeftDp = ConfigDefaults.OVERLAY_MARGIN_LEFT_DP.toInt()
-        private set
 
     // ── 屏幕提示 ──
     // 配置面在服务端；显隐判定在设备端的 NoticeRule。这里只保存下发值。
@@ -93,9 +56,6 @@ object RuntimeConfig {
         private set
 
     @Volatile var noticeAlign = ConfigDefaults.NOTICE_ALIGN
-        private set
-
-    @Volatile var noticeCenterOffsetDp = ConfigDefaults.NOTICE_CENTER_OFFSET_DP.toInt()
         private set
 
     // x/y 与占用上下限的 0 是合法值，只挡住负数；字号则至少为 1。
@@ -137,9 +97,6 @@ object RuntimeConfig {
     @Volatile var statusLineTextColor = ConfigDefaults.STATUS_LINE_TEXT_COLOR
         private set
 
-    @Volatile var statusLineColorMode = ConfigDefaults.STATUS_LINE_COLOR_MODE
-        private set
-
     @Volatile var statusLineAvailableColor = ConfigDefaults.STATUS_LINE_AVAILABLE_COLOR
         private set
 
@@ -150,16 +107,6 @@ object RuntimeConfig {
         private set
 
     @Volatile var statusLineBackgroundColor = ConfigDefaults.STATUS_LINE_BACKGROUND_COLOR
-        private set
-
-    @Volatile var statusLineAlign = ConfigDefaults.STATUS_LINE_ALIGN
-        private set
-
-    @Volatile var statusLineCenterOffsetDp = ConfigDefaults.STATUS_LINE_CENTER_OFFSET_DP.toInt()
-        private set
-
-    // x/y 的 0 是合法值，只挡住负数；字号则至少为 1。
-    @Volatile var statusLineXDp = ConfigDefaults.STATUS_LINE_X_DP.toInt()
         private set
 
     @Volatile var statusLineYDp = ConfigDefaults.STATUS_LINE_Y_DP.toInt()
@@ -214,47 +161,8 @@ object RuntimeConfig {
     @Volatile var homeBudgetMs = ConfigDefaults.HOME_TIMEOUT_MS
         private set
 
-    @Volatile var pollIntervalMs = ConfigDefaults.UI_POLL_INTERVAL_MS
-        private set
-
-    @Volatile var uiClickDelayMs = ConfigDefaults.UI_CLICK_DELAY_MS
-        private set
-
-    // 界面节点树单次导出的节点上限。超出即截断——上限同时决定回传体积，
-    // 因此按实测的协议帧容量调整，而不是写死在代码里。
-    @Volatile var uiDumpMaxNodes = ConfigDefaults.UI_DUMP_MAX_NODES
-        private set
-
-    // 播报前等浴室 App 提示音结束的最长时间；见 VoicePlayer。
-    @Volatile var voiceBathWaitMaxMs = ConfigDefaults.VOICE_BATH_WAIT_MAX_MS
-        private set
-
-    // device.exec 单次回传的最大字节数，超出即截断。
-    @Volatile var deviceExecMaxOutputBytes = ConfigDefaults.DEVICE_EXEC_MAX_OUTPUT_BYTES
-        private set
-
-    // ── OTA ──
-    @Volatile var otaCheckIntervalS = ConfigDefaults.OTA_CHECK_INTERVAL_S.toInt()
-        private set
-
-    // ── 浴室 App 崩溃守护 ──
-    @Volatile var bathGuardEnabled = ConfigDefaults.BATH_APP_GUARD_ENABLED
-        private set
-
-    @Volatile var bathExitWindowMs = ConfigDefaults.BATH_APP_EXIT_WINDOW_MS
-        private set
-
-    @Volatile var bathExitMaxCount = ConfigDefaults.BATH_APP_EXIT_MAX_COUNT.toInt()
-        private set
-
-    @Volatile var bathExitCooldownMs = ConfigDefaults.BATH_APP_EXIT_COOLDOWN_MS
-        private set
-
     // ── 浴室 App 数据库 ──
     @Volatile var bathDbArchiveEnabled = ConfigDefaults.BATH_DB_ARCHIVE_ENABLED
-        private set
-
-    @Volatile var bathDbArchiveThresholdMb = ConfigDefaults.BATH_DB_ARCHIVE_THRESHOLD_MB
         private set
 
     // ── 电源计划 ──
@@ -290,33 +198,12 @@ object RuntimeConfig {
      * 每个时长与计数取值都经 atLeastOne 取下限：见类注释的"取值下限"。
      */
     private val appliers: Map<String, (JSONObject, String) -> Unit> = mapOf(
-        "heartbeat_interval_s" to
-            { c, key -> heartbeatIntervalS = atLeastOne(c.optInt(key, heartbeatIntervalS)) },
-        "reconnect_base_ms" to
-            { c, key -> reconnectBaseMs = atLeastOne(c.optLong(key, reconnectBaseMs)) },
-        "reconnect_max_ms" to
-            { c, key -> reconnectMaxMs = atLeastOne(c.optLong(key, reconnectMaxMs)) },
-        "watchdog_interval_s" to
-            { c, key -> watchdogIntervalS = atLeastOne(c.optLong(key, watchdogIntervalS)) },
-        "door_report_debounce_ms" to
-            { c, key -> reportDebounceMs = c.optLong(key, reportDebounceMs) },
-        "outbox_max_rows" to
-            { c, key -> outboxMaxRows = atLeastOne(c.optLong(key, outboxMaxRows)) },
-        "overlay_enabled" to { c, key -> overlayEnabled = c.optBoolean(key, overlayEnabled) },
-        "overlay_message" to { c, key -> overlayMessage = c.optString(key, overlayMessage) },
-        "overlay_text_size_sp" to
-            { c, key -> overlayTextSizeSp = atLeastOne(c.optInt(key, overlayTextSizeSp)) },
-        "overlay_text_color" to { c, key -> overlayTextColor = c.optString(key, overlayTextColor) },
-        "overlay_margin_left_dp" to
-            { c, key -> overlayMarginLeftDp = atLeastOne(c.optInt(key, overlayMarginLeftDp)) },
         "notice_enabled" to { c, key -> noticeEnabled = c.optBoolean(key, noticeEnabled) },
         "notice_text" to { c, key -> noticeText = c.optString(key, noticeText) },
         "notice_text_size_sp" to
             { c, key -> noticeTextSizeSp = atLeastOne(c.optInt(key, noticeTextSizeSp)) },
         "notice_text_color" to { c, key -> noticeTextColor = c.optString(key, noticeTextColor) },
         "notice_align" to { c, key -> noticeAlign = c.optString(key, noticeAlign) },
-        "notice_center_offset_dp" to
-            { c, key -> noticeCenterOffsetDp = c.optInt(key, noticeCenterOffsetDp) },
         "notice_x_dp" to { c, key -> noticeXDp = c.optInt(key, noticeXDp).coerceAtLeast(0) },
         "notice_y_dp" to { c, key -> noticeYDp = c.optInt(key, noticeYDp).coerceAtLeast(0) },
         "notice_time_enabled" to
@@ -336,8 +223,6 @@ object RuntimeConfig {
             { c, key -> statusLineTextSizeSp = atLeastOne(c.optInt(key, statusLineTextSizeSp)) },
         "status_line_text_color" to
             { c, key -> statusLineTextColor = c.optString(key, statusLineTextColor) },
-        "status_line_color_mode" to
-            { c, key -> statusLineColorMode = c.optString(key, statusLineColorMode) },
         "status_line_available_color" to
             { c, key -> statusLineAvailableColor = c.optString(key, statusLineAvailableColor) },
         "status_line_unavailable_color" to
@@ -346,12 +231,6 @@ object RuntimeConfig {
             { c, key -> statusLineBackground = c.optBoolean(key, statusLineBackground) },
         "status_line_background_color" to
             { c, key -> statusLineBackgroundColor = c.optString(key, statusLineBackgroundColor) },
-        "status_line_align" to
-            { c, key -> statusLineAlign = c.optString(key, statusLineAlign) },
-        "status_line_center_offset_dp" to
-            { c, key -> statusLineCenterOffsetDp = c.optInt(key, statusLineCenterOffsetDp) },
-        "status_line_x_dp" to
-            { c, key -> statusLineXDp = c.optInt(key, statusLineXDp).coerceAtLeast(0) },
         "status_line_y_dp" to
             { c, key -> statusLineYDp = c.optInt(key, statusLineYDp).coerceAtLeast(0) },
         "status_line_time_enabled" to
@@ -378,30 +257,8 @@ object RuntimeConfig {
             { c, key -> idVerifyWaitMs = atLeastOne(c.optLong(key, idVerifyWaitMs)) },
         "home_timeout_ms" to
             { c, key -> homeBudgetMs = atLeastOne(c.optLong(key, homeBudgetMs)) },
-        "ui_poll_interval_ms" to
-            { c, key -> pollIntervalMs = atLeastOne(c.optLong(key, pollIntervalMs)) },
-        "ui_click_delay_ms" to
-            { c, key -> uiClickDelayMs = c.optLong(key, uiClickDelayMs) },
-        "ui_dump_max_nodes" to
-            { c, key -> uiDumpMaxNodes = atLeastOne(c.optLong(key, uiDumpMaxNodes)) },
-        "voice_bath_wait_max_ms" to
-            { c, key -> voiceBathWaitMaxMs = atLeastOne(c.optLong(key, voiceBathWaitMaxMs)) },
-        "device_exec_max_output_bytes" to
-            { c, key -> deviceExecMaxOutputBytes = atLeastOne(c.optLong(key, deviceExecMaxOutputBytes)) },
-        "ota_check_interval_s" to
-            { c, key -> otaCheckIntervalS = atLeastOne(c.optInt(key, otaCheckIntervalS)) },
-        "bath_app_guard_enabled" to
-            { c, key -> bathGuardEnabled = c.optBoolean(key, bathGuardEnabled) },
-        "bath_app_exit_window_ms" to
-            { c, key -> bathExitWindowMs = atLeastOne(c.optLong(key, bathExitWindowMs)) },
-        "bath_app_exit_max_count" to
-            { c, key -> bathExitMaxCount = atLeastOne(c.optInt(key, bathExitMaxCount)) },
-        "bath_app_exit_cooldown_ms" to
-            { c, key -> bathExitCooldownMs = atLeastOne(c.optLong(key, bathExitCooldownMs)) },
         "bath_db_archive_enabled" to
             { c, key -> bathDbArchiveEnabled = c.optBoolean(key, bathDbArchiveEnabled) },
-        "bath_db_archive_threshold_mb" to
-            { c, key -> bathDbArchiveThresholdMb = atLeastOne(c.optLong(key, bathDbArchiveThresholdMb)) },
         "power_off_at" to
             { c, key -> powerOffAt = c.optString(key, powerOffAt) },
         "power_on_at" to

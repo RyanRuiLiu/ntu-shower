@@ -147,26 +147,14 @@ GROUPS: tuple[GroupSpec, ...] = (
     GroupSpec("auto_settle", "自动结算", "server"),
     GroupSpec("extend_hours", "延长服务时间", "server"),
     GroupSpec("server_clock", "自动校时", "server"),
-    GroupSpec("server_link", "链路维持", "server"),
-    GroupSpec("server_ui", "界面操作超时", "server"),
-    GroupSpec("server_bridge", "调试通道", "server"),
-    GroupSpec("server_voice", "语音播报", "server"),
     # ── 设备下发：会推到设备，支持单台覆盖 ──
     GroupSpec("power", "电源计划", "device"),
-    GroupSpec("overlay", "操作遮罩", "device"),
     GroupSpec("notice", "屏幕提示", "device"),
     GroupSpec("notice_condition", "提示条件", "device"),
     GroupSpec("status_line", "楼层状态行", "device"),
     GroupSpec("status_line_condition", "状态行条件", "device"),
-    GroupSpec("doors", "喷头状态采集", "device"),
-    GroupSpec("ui", "界面操作", "device"),
     GroupSpec("automation", "自动化流程", "device"),
-    GroupSpec("voice", "播报时序", "device"),
     GroupSpec("bath_db", "浴室 App 数据库", "device"),
-    GroupSpec("gateway", "链路与心跳", "device"),
-    GroupSpec("guard", "崩溃守护", "device"),
-    GroupSpec("ota", "自更新", "device"),
-    GroupSpec("debug", "调试通道", "device"),
 )
 
 
@@ -185,15 +173,8 @@ EXTEND_HOURS_STUDENTS_KEY = "extend_hours_students"
 SERVER_ZONE_OFFSET_MINUTES_KEY = "server_zone_offset_minutes"
 POWER_ON_AT_KEY = "power_on_at"
 POWER_OFF_AT_KEY = "power_off_at"
-EXTEND_SHIFT_MINUTES_KEY = "extend_shift_minutes"
 EXTEND_HOURS_ENABLED_KEY = "extend_hours_enabled"
-EXTEND_HOURS_AT_KEY = "extend_hours_at"
 TIME_SYNC_ENABLED_KEY = "time_sync_enabled"
-TIME_SYNC_THRESHOLD_S_KEY = "time_sync_threshold_s"
-BRIDGE_SSH_TARGET_KEY = "bridge_ssh_target"
-BRIDGE_MAX_LIFETIME_S_KEY = "bridge_max_lifetime_s"
-BRIDGE_PAIR_TIMEOUT_S_KEY = "bridge_pair_timeout_s"
-VOICE_EVENT_MAX_AGE_S_KEY = "voice_event_max_age_s"
 
 
 #: 全部配置键的规格。新增配置键时只改这里——服务端校验、客户端渲染、文档
@@ -287,172 +268,8 @@ def _condition_specs(prefix: str, group: str, subject: str) -> list[ConfigSpec]:
 
 CONFIG_SPECS: tuple[ConfigSpec, ...] = (
     # ── 通信时序 ──
-    ConfigSpec(
-        "heartbeat_interval_s",
-        INT,
-        DEVICE,
-        30,
-        "心跳间隔",
-        "设备向服务端上报存活的时间间隔。调大它省电省流量，但服务端判定设备离线会更迟"
-        "（离线判据依赖心跳与 ping 双通道）；调小则链路更灵敏、开销更高。30 秒是真机"
-        "长期验证的平衡点",
-        minimum=5,
-        maximum=600,
-        unit="秒",
-        group="gateway",
-    ),
-    ConfigSpec(
-        "ping_interval_s",
-        INT,
-        SERVER,
-        60,
-        "服务端探测间隔",
-        "服务端按此间隔向设备发一次 link.ping：既确认链路还活着（一个周期内收不到 pong "
-        "就断开），也把服务端此刻的时刻交给设备——帧的产生时刻由设备侧的时间锚点推"
-        "出，而锚点正是从这条 ping 上取的，越新越准",
-        minimum=10,
-        maximum=1800,
-        unit="秒",
-        group="server_link",
-    ),
-    ConfigSpec(
-        "clock_jump_threshold_s",
-        INT,
-        SERVER,
-        60,
-        "设备钟跳变阈值",
-        "服务端把设备回 pong 时的墙上时刻与收到时刻相减，得到两个钟的偏差，再拿它把帧"
-        "里的 open_time / in_time 平移到服务端时间轴——那两个字段是「这次会话从什么时候"
-        "开始」的唯一线索，而设备钟的绝对值不可信（自然漂移 8.5 秒/天，还会被人为回拨"
-        "一小时）。漂移很慢所以取 EMA 平滑滤掉单次往返的抖动；而设备重启、被手动改钟这"
-        "类跳变是几十分钟级的，超过这个阈值就直接采信新值，继续平滑会让之后几次映射都按"
-        "错误的偏差来算。",
-        minimum=5,
-        maximum=3600,
-        unit="秒",
-        group="server_link",
-    ),
-    ConfigSpec(
-        "reconnect_base_ms",
-        INT,
-        DEVICE,
-        5000,
-        "重连退避基准",
-        "断线后首次重连等待的上限，随后按指数退避；各级实际等待带一半的随机抖动——"
-        "几十台设备共用一次断网时，同步的退避会变成同一波次的同时重连，抖动把它们摊开",
-        minimum=500,
-        maximum=60000,
-        unit="毫秒",
-        group="gateway",
-    ),
-    ConfigSpec(
-        "reconnect_max_ms",
-        INT,
-        DEVICE,
-        60000,
-        "重连退避上限",
-        "断线重连等待的封顶值，避免无限增长。与退避基准配套：5 秒起步、60 秒封顶意味着"
-        "连续失败五六次后就稳定在每半分钟到一分钟试一次——网络恢复后最多一分钟内自动回来，"
-        "又不会在网络长时间中断时打爆服务器",
-        minimum=5000,
-        maximum=600000,
-        unit="毫秒",
-        group="gateway",
-    ),
-    ConfigSpec(
-        "watchdog_interval_s",
-        INT,
-        DEVICE,
-        60,
-        "看门狗间隔",
-        "设备每隔这么久自己检查一次服务还活着没有，死了就重新拉起（活着就无事发生）。"
-        "这是设备能长期无人值守的关键一环。60 秒意味着最坏情况下一分钟内自愈",
-        minimum=30,
-        maximum=3600,
-        unit="秒",
-        group="gateway",
-    ),
     # ── 喷头状态采集 ──
-    ConfigSpec(
-        "door_report_debounce_ms",
-        INT,
-        DEVICE,
-        1000,
-        "上报去抖窗口",
-        "喷头状态变化后先等这么久再上报，把一小段时间里的连续变化合并成一条。"
-        "调大会让状态显示变迟钝，调小可能产生碎片数据；1 秒是实测的合理折中",
-        minimum=0,
-        maximum=60000,
-        unit="毫秒",
-        group="doors",
-    ),
-    ConfigSpec(
-        "outbox_max_rows",
-        INT,
-        DEVICE,
-        100_000,
-        "发件箱行数上限",
-        "断网期间，状态变化先存在设备上（发件箱），网络恢复后补发。这是存多少条的上限，"
-        "超出丢最旧的。默认十万条刻意给得远超所需（约 100MB，设备可用空间 11.9GB 的"
-        "百分之一都不到），正常永远不会触发。调小等于主动丢弃断网期间的历史",
-        minimum=1000,
-        maximum=1_000_000,
-        unit="行",
-        group="doors",
-    ),
     # ── 自动化遮盖 ──
-    ConfigSpec(
-        "overlay_enabled",
-        BOOL,
-        DEVICE,
-        True,
-        "显示操作遮罩",
-        "自动操作期间盖住屏幕，防止现场学生误触",
-        group="overlay",
-    ),
-    ConfigSpec(
-        "overlay_message",
-        TEXT,
-        DEVICE,
-        "网络连接中，请稍后重试...",
-        "操作遮罩文字",
-        "盖屏期间显示的文字。刻意不写「正在自动操作」——现场学生看到网络问题会安静等待，"
-        "看到「系统正在远程操作这台机器」则可能去拔电源或找来管理员",
-        group="overlay",
-    ),
-    ConfigSpec(
-        "overlay_text_size_sp",
-        INT,
-        DEVICE,
-        80,
-        "遮罩文字字号",
-        "单位为 sp。设备屏幕为 1366x768 横屏，字号小了看不清",
-        minimum=10,
-        maximum=200,
-        unit="sp",
-        group="overlay",
-    ),
-    ConfigSpec(
-        "overlay_text_color",
-        TEXT,
-        DEVICE,
-        "#d94f16",
-        "遮罩文字颜色",
-        "十六进制颜色，如 #d94f16；默认值与浴室 App 的提示色一致",
-        group="overlay",
-    ),
-    ConfigSpec(
-        "overlay_margin_left_dp",
-        INT,
-        DEVICE,
-        600,
-        "遮罩文字左边距",
-        "单位为 dp。文字落位在提示图的右侧空白处",
-        minimum=0,
-        maximum=2000,
-        unit="dp",
-        group="overlay",
-    ),
     # ── 屏幕提示 ──
     # 配置面在服务端，显隐判定在设备端：服务端只下发文字/样式/条件，设备用服务端
     # 时间轴与本地 t_doorlist 判断此刻是否显示。边界与理由见 docs/adr/。
@@ -478,7 +295,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "notice_text_size_sp",
         INT,
         DEVICE,
-        48,
+        24,
         "提示字号",
         "单位为 sp，跟随系统字体缩放。设备屏幕为 1366×768 横屏；默认 48sp 是操作遮罩 80sp 的六成，保证一米左右可读",
         minimum=10,
@@ -490,7 +307,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "notice_text_color",
         TEXT,
         DEVICE,
-        "#d94f16",
+        "#de523f",
         "提示文字颜色",
         "十六进制颜色，如 #d94f16；也可写 #AARRGGBB 带透明度。格式无法识别时显示白色，并在设备日志留痕",
         group="notice",
@@ -499,29 +316,17 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "notice_align",
         TEXT,
         DEVICE,
-        "左对齐",
+        "靠右",
         "提示水平对齐",
         "文字的基准位置：左对齐按左边距、靠右对齐按右边距、居中用居中偏移。上边距三种对齐都生效",
         choices=("左对齐", "居中", "靠右"),
         group="notice",
     ),
     ConfigSpec(
-        "notice_center_offset_dp",
-        INT,
-        DEVICE,
-        0,
-        "提示居中偏移",
-        "只在「居中」对齐时生效：正数向右、负数向左，0 为正中。单位为 dp；左对齐/靠右时不生效",
-        minimum=-1000,
-        maximum=1000,
-        unit="dp",
-        group="notice",
-    ),
-    ConfigSpec(
         "notice_x_dp",
         INT,
         DEVICE,
-        40,
+        10,
         "提示水平边距",
         "左对齐时是距屏幕左边缘的距离，靠右对齐时是距屏幕右边缘的距离，单位为 dp；"
         "居中时不生效。屏幕固定 1366×768；填到超过屏幕宽度的值会让文字落到屏幕外",
@@ -534,7 +339,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "notice_y_dp",
         INT,
         DEVICE,
-        40,
+        6,
         "提示上边距",
         "文字上边缘距屏幕顶部的距离，单位为 dp。屏幕固定 1366×768；填到超过屏幕高度的值会让文字落到屏幕外",
         minimum=0,
@@ -561,7 +366,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "status_line_text_size_sp",
         INT,
         DEVICE,
-        13,
+        28,
         "状态行字号",
         "单位为 sp，跟随系统字体缩放。默认 13sp 是辅助信息的大小——它常驻屏幕上，比操作遮罩和提示小，不抢注意力",
         minimum=10,
@@ -573,28 +378,17 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "status_line_text_color",
         TEXT,
         DEVICE,
-        "#ffffff",
+        "#00cc66",
         "状态行文字颜色",
         "十六进制颜色，如 #ffffff；也可写 #AARRGGBB 带透明度。它用于标题与分隔符；"
         "「按状态」配色时各楼层自己的数字另有颜色。格式无法识别时显示白色，并在设备日志留痕",
         group="status_line",
     ),
     ConfigSpec(
-        "status_line_color_mode",
-        TEXT,
-        DEVICE,
-        "按状态",
-        "状态行的配色方式",
-        "「按状态」：有空闲的楼层为绿色，0 个空闲与离线的楼层为灰色；"
-        "「统一」：整行都用文字颜色。颜色只表达有没有空位，不改变文字内容",
-        choices=("按状态", "统一"),
-        group="status_line",
-    ),
-    ConfigSpec(
         "status_line_available_color",
         TEXT,
         DEVICE,
-        "#6bc600",
+        "#00cc66",
         "空闲楼层颜色",
         "「按状态」配色下，空闲喷头数大于 0 的楼层文字颜色。十六进制颜色，如 #6bc600；"
         "也可写 #AARRGGBB 带透明度。默认取浴室 App 资源里的 `title_color` #6bc600；"
@@ -616,7 +410,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "status_line_background",
         BOOL,
         DEVICE,
-        True,
+        False,
         "显示状态行背景",
         "在文字后面加一层背景色，避免浅色浴室界面上文字看不清；关闭后只留文字",
         group="status_line",
@@ -625,7 +419,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "status_line_background_color",
         TEXT,
         DEVICE,
-        "#cc0066cc",
+        "#110066cc",
         "状态行背景颜色",
         "开启背景时使用的颜色，十六进制，可写 #AARRGGBB 带透明度。默认取浴室 App 资源里的"
         "`background_blue` #0066cc 加八成不透明度，让状态行融进浴室界面而不是一块黑底。"
@@ -633,45 +427,10 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         group="status_line",
     ),
     ConfigSpec(
-        "status_line_align",
-        TEXT,
-        DEVICE,
-        "居中",
-        "状态行水平对齐",
-        "文字的基准位置：左对齐按左边距、靠右对齐按右边距、居中用居中偏移。上边距三种对齐都生效",
-        choices=("左对齐", "居中", "靠右"),
-        group="status_line",
-    ),
-    ConfigSpec(
-        "status_line_center_offset_dp",
-        INT,
-        DEVICE,
-        0,
-        "状态行居中偏移",
-        "只在「居中」对齐时生效：正数向右、负数向左，0 为正中。单位为 dp；左对齐/靠右时不生效",
-        minimum=-1000,
-        maximum=1000,
-        unit="dp",
-        group="status_line",
-    ),
-    ConfigSpec(
-        "status_line_x_dp",
-        INT,
-        DEVICE,
-        0,
-        "状态行水平边距",
-        "左对齐时是距屏幕左边缘的距离，靠右对齐时是距屏幕右边缘的距离，单位为 dp；"
-        "居中时不生效。屏幕固定 1366×768；填到超过屏幕宽度的值会让文字落到屏幕外",
-        minimum=0,
-        maximum=2000,
-        unit="dp",
-        group="status_line",
-    ),
-    ConfigSpec(
         "status_line_y_dp",
         INT,
         DEVICE,
-        8,
+        0,
         "状态行上边距",
         "状态行上边缘距屏幕顶部的距离，单位为 dp。默认贴着顶部，与屏幕提示的 40dp 错开；"
         "屏幕固定 1366×768，填到超过屏幕高度的值会让文字落到屏幕外",
@@ -752,142 +511,14 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         unit="毫秒",
         group="automation",
     ),
-    ConfigSpec(
-        "ui_poll_interval_ms",
-        INT,
-        DEVICE,
-        60,
-        "界面轮询间隔",
-        "页面等待的节奏上限。等待本身是事件驱动的（界面一变就醒），这个值只在"
-        "「变化通知没来」时生效——所以它是最坏情况的上限，不是固定开销。"
-        "60 毫秒对浴室 App 的刷新频率够用",
-        minimum=50,
-        maximum=5000,
-        unit="毫秒",
-        group="ui",
-    ),
-    ConfigSpec(
-        "ui_click_delay_ms",
-        INT,
-        DEVICE,
-        200,
-        "点击后延迟",
-        "每次点击后的固定等待。0 是合法值：界面的响应判定是事件驱动的（页面一变就继续），"
-        "这个延迟只是给不触发页面变化的点击（如选中态切换）留的缓冲",
-        minimum=0,
-        maximum=5000,
-        unit="毫秒",
-        group="ui",
-    ),
-    ConfigSpec(
-        "ui_dump_max_nodes",
-        INT,
-        DEVICE,
-        2000,
-        "节点导出上限",
-        "「界面检视」读取设备画面控件列表时的数量上限，超出部分不返回。"
-        "调大能看全复杂界面，但传输变慢；2000 个对浴室 App 的界面绰绰有余",
-        minimum=100,
-        maximum=20000,
-        unit="个",
-        group="ui",
-    ),
-    ConfigSpec(
-        "ui_operation_timeout_s",
-        INT,
-        SERVER,
-        30,
-        "界面操作超时",
-        "在网页上做点击/按键/输入后，最多等这么久要结果；设备没响应时你等的就是这个时长。30 秒覆盖了设备卡顿时的慢响应",
-        minimum=5,
-        maximum=300,
-        unit="秒",
-        group="server_ui",
-    ),
-    ConfigSpec(
-        "device_exec_max_output_bytes",
-        INT,
-        DEVICE,
-        32768,
-        "命令输出上限",
-        "远程执行命令后，结果最多带回这么多字节，超出部分不显示。"
-        "调大能看更长输出，但占用更多设备内存与传输时间；32KB 够看绝大多数命令结果",
-        minimum=1024,
-        maximum=1048576,
-        unit="字节",
-        group="debug",
-    ),
     # ── 自更新 ──
-    ConfigSpec(
-        "ota_check_interval_s",
-        INT,
-        DEVICE,
-        3600,
-        "检查更新间隔",
-        "设备主动查询 /ota/manifest 的时间间隔。在线设备另有发布即时推送，这个轮询是"
-        "离线设备的补救通道——离线时错过的发布靠它补装。1 小时一次在「升级尽快生效」"
-        "与「查询开销」之间平衡；配合发布推送，实际升级延迟通常远小于它",
-        minimum=60,
-        maximum=86400,
-        unit="秒",
-        group="ota",
-    ),
     # ── 浴室 App 崩溃守护 ──
-    ConfigSpec(
-        "bath_app_guard_enabled",
-        BOOL,
-        DEVICE,
-        True,
-        "崩溃后拉起浴室 App",
-        "浴室 App 异常退出时是否自动重新拉起",
-        group="guard",
-    ),
-    ConfigSpec(
-        "bath_app_exit_window_ms",
-        INT,
-        DEVICE,
-        30000,
-        "退出计数窗口",
-        "在这个窗口内退出次数达到上限才判定为崩溃（单次退出可能只是用户按了主页）。"
-        "30 秒窗口 + 3 次阈值能区分「用户主动退出」与「App 反复崩溃」——后者才值得"
-        "自动拉起，前者拉起反而是打扰",
-        minimum=1000,
-        maximum=600000,
-        unit="毫秒",
-        group="guard",
-    ),
-    ConfigSpec(
-        "bath_app_exit_max_count",
-        INT,
-        DEVICE,
-        3,
-        "窗口内最多退出次数",
-        "在「退出计数窗口」内退出达到这个次数，就认定浴室 App 在反复崩溃，"
-        "自动拉起后会进入冷却期；默认 3 次已能区分误触主页与真崩溃",
-        minimum=1,
-        maximum=100,
-        unit="次",
-        group="guard",
-    ),
-    ConfigSpec(
-        "bath_app_exit_cooldown_ms",
-        INT,
-        DEVICE,
-        600000,
-        "异常后的冷却时长",
-        "确认浴室 App 反复崩溃后，暂停自动拉起这么久，给它自己恢复的机会——"
-        "持续强行拉起一个正在崩溃的 App 只会雪上加霜。10 分钟后若再崩溃会重新计数",
-        minimum=1000,
-        maximum=3600000,
-        unit="毫秒",
-        group="guard",
-    ),
     # ── 浴室 App 数据库 ──
     ConfigSpec(
         "bath_db_archive_enabled",
         BOOL,
         DEVICE,
-        False,
+        True,
         "启用数据库归档",
         "浴室 App 的 bath.db 随会话只增不减，涨大后 App 明显卡顿。开启后，本程序每次"
         "启动时检查库大小，攒到阈值即把它改名归档（**永久保留**，归档文件不带自动"
@@ -896,73 +527,7 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "是新库。默认关闭",
         group="bath_db",
     ),
-    ConfigSpec(
-        "bath_db_archive_threshold_mb",
-        INT,
-        DEVICE,
-        10,
-        "归档触发阈值",
-        "bath.db 攒到这个大小，本程序启动时就把它归档。设得小归档勤（新库更频繁，"
-        "历史库文件多），设得大归档懒（App 长期跑在一个大库上）。实测 8MB 约为三个月"
-        "的会话量",
-        minimum=5,
-        maximum=1024,
-        unit="MB",
-        group="bath_db",
-    ),
     # ── 调试通道 ──
-    ConfigSpec(
-        "bridge_max_lifetime_s",
-        INT,
-        SERVER,
-        3600,
-        "调试通道最长开启时长",
-        "从打开算起的最长存活时长，到点强制关闭。这是唯一的自动关闭条件：设备侧隧道连入"
-        "之后、本侧执行 `adb connect` 之前一个字节都不会发，空闲超时会误关正在使用的桥。"
-        "调试的节奏由人定，中途停下来想事情、去装 adb 都正常，不该被打断",
-        minimum=300,
-        maximum=86400,
-        unit="秒",
-        group="server_bridge",
-    ),
-    ConfigSpec(
-        "bridge_pair_timeout_s",
-        INT,
-        SERVER,
-        30,
-        "调试通道配对超时",
-        "点「开桥」后，设备建立隧道最多给这么长时间，超时就当这次没成功，"
-        "需要重新点开桥。30 秒覆盖设备启动 adb 服务的正常耗时",
-        minimum=5,
-        maximum=300,
-        unit="秒",
-        group="server_bridge",
-    ),
-    ConfigSpec(
-        "bridge_ssh_target",
-        TEXT,
-        SERVER,
-        "<user>@<server-host>",
-        "调试通道的 SSH 目标",
-        "网页端生成本机连接命令时用的 `用户@主机`。它是现场那台电脑要 ssh 过去的地方，"
-        "与网页自己的域名不是一回事——网页挂在 ntu-shower 子域上，而 ssh 连的是主域，"
-        "所以推不出来，只能配。默认值是占位符，部署时在配置页改成现场的实际值。"
-        "见 docs/runbook.md 的连接指引。",
-        group="server_bridge",
-    ),
-    ConfigSpec(
-        "voice_event_max_age_s",
-        INT,
-        SERVER,
-        60,
-        "语音播报事件时效",
-        "帧的采集时刻距服务端处理时刻超过这个秒数就不播报：设备离线或链路积压后补上来的"
-        "旧事件不补播。0 表示不限制。它只影响语音，不改变帧派生、会话与统计",
-        minimum=0,
-        maximum=3600,
-        unit="秒",
-        group="server_voice",
-    ),
     # ── 后台任务（服务端侧）：一个功能一块，块内按"开关 → 阈值 → 名单"排 ──
     ConfigSpec(
         "renew_wait_enabled",
@@ -973,32 +538,6 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "名单内学号的喷头完成分配后若一直未开阀，浴室 App 会在无水释放门槛到达时释放该喷头"
         "并结束本场会话。开启后，服务端在释放发生前结算并重新分配同一喷头，使这次分配得以保留；"
         "累计续期时长达到上限后不再续期",
-        group="renew_wait",
-    ),
-    ConfigSpec(
-        "renew_wait_threshold_s",
-        INT,
-        SERVER,
-        270,
-        "预约续期阈值",
-        "从分配时刻起算，过了这个时长还没开阀就续一次。上界是浴室 App 那条 300 秒的无水"
-        "释放门槛——设到 300 或更大，浴室端会先把它放掉，我们就不是续、而是重新开一场",
-        minimum=60,
-        maximum=300,
-        unit="秒",
-        group="renew_wait",
-    ),
-    ConfigSpec(
-        "renew_wait_max_duration_s",
-        INT,
-        SERVER,
-        1200,
-        "预约续期时长上限",
-        "从这一串的第一场（他自己那一次分配）算起，累计替他续了这么久就停，让他被浴室端"
-        "正常释放——他从没出过水，没有账要结。喷头空着超过 300 秒即算这一串结束、计时从头"
-        "开始。浴室端每 300 秒放一次、我们每 270 秒续一次，所以 1200 秒约合四场",
-        minimum=0,
-        unit="秒",
         group="renew_wait",
     ),
     ConfigSpec(
@@ -1023,20 +562,6 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         group="renew_session",
     ),
     ConfigSpec(
-        "renew_session_threshold_s",
-        INT,
-        SERVER,
-        1140,
-        "会话续期阈值",
-        "从分配时刻起算，过了这个时长就续一次（默认 1140 秒＝19 分钟）。上界 1200 是浴室 App"
-        "的强制释放点，留出的余量要盖住两条命令的本事（实测 5–10 秒）**再加上排队**——同一"
-        "台设备上的续期是一条接一条跑的，同校同时到点的人越多，最后一个动手越晚",
-        minimum=300,
-        maximum=1200,
-        unit="秒",
-        group="renew_session",
-    ),
-    ConfigSpec(
         "renew_session_students",
         TEXT_MAP,
         SERVER,
@@ -1057,20 +582,6 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         group="auto_settle",
     ),
     ConfigSpec(
-        "auto_settle_pause_threshold_s",
-        INT,
-        SERVER,
-        60,
-        "自动结算阈值",
-        "已暂停持续超过这个时长就结算一次。暂停时阀已经关着，所以这一步不会打断正在淋浴的"
-        "人；它结束的是这一场会话——他要是回来开阀，需要重新分配。按实测，暂停后还会回来"
-        "的人里有 15.2% 会在 60 秒之后才回来，调大它可以少打断一些，代价是喷头被占得久些",
-        minimum=15,
-        maximum=300,
-        unit="秒",
-        group="auto_settle",
-    ),
-    ConfigSpec(
         "auto_settle_students",
         TEXT_MAP,
         SERVER,
@@ -1088,32 +599,6 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "浴室 App 每日按时关机，并在关机前释放全部喷头。开启后，服务端在触发时刻先重布"
         "MCU 定时开关机（跳过当晚断电），再将设备时钟前移一段可配置的时间并清空喷头，"
         "把名单内学号重新分配回原喷头；喷头全部空闲且过了午夜后，设备时钟恢复原值",
-        group="extend_hours",
-    ),
-    ConfigSpec(
-        "extend_hours_at",
-        TIME,
-        SERVER,
-        "23:49",
-        "触发时刻",
-        "设备表盘上的哪一刻动手。**触发时刻 + 拨快幅度必须跨过午夜**：这样才能一次跳过"
-        "23:50 起的新人关闭窗口、23:58 的断电，以及两者之间的全部释放判定。浴室 App 实测"
-        "在 23:53 动手放人（关机前五分钟），所以触发时刻要在这之前留足余量",
-        minimum=23 * 60,
-        group="extend_hours",
-    ),
-    ConfigSpec(
-        "extend_shift_minutes",
-        INT,
-        SERVER,
-        15,
-        "拨快幅度",
-        "设备表盘从触发时刻向前跳过的分钟数。落点必须跨过午夜（触发时刻 + 幅度 ≥ 00:00），"
-        "这样才能一次跳过 23:50 起的新人关闭窗口、23:58 的断电，以及两者之间的全部释放判定。"
-        "默认 15 分钟：23:49 拨快落在 00:04",
-        minimum=10,
-        maximum=120,
-        unit="分钟",
         group="extend_hours",
     ),
     ConfigSpec(
@@ -1157,18 +642,6 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         group="server_clock",
     ),
     ConfigSpec(
-        "time_sync_threshold_s",
-        INT,
-        SERVER,
-        60,
-        "校时触发阈值",
-        "自动校时的门槛：设备时钟与服务端的偏差超过该秒数才执行校正并重布 MCU，"
-        "偏差在阈值内不动。仅在「启用自动校时」开启时生效",
-        minimum=60,
-        unit="秒",
-        group="server_clock",
-    ),
-    ConfigSpec(
         "power_off_at",
         TIME,
         DEVICE,
@@ -1186,20 +659,6 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         "每日上电时刻",
         "设备 MCU 每日定时上电的时刻。重布 MCU 时与「每日断电时刻」成对使用：开机延时从断电时刻起算，到这个时刻上电",
         group="power",
-    ),
-    ConfigSpec(
-        "voice_bath_wait_max_ms",
-        INT,
-        DEVICE,
-        15000,
-        "等待浴室提示结束",
-        "设备播放语音前检测浴室 App 的提示音是否还在播（它走 STREAM_MUSIC）："
-        "正在播就等它结束再播我们的。超过这个毫秒数仍未结束就照常播放，并在设备日志记一条"
-        " audio.bath-wait-timeout。设得比提示音时长（约 2–3 秒）长即可",
-        minimum=3000,
-        maximum=30000,
-        unit="毫秒",
-        group="voice",
     ),
 )
 

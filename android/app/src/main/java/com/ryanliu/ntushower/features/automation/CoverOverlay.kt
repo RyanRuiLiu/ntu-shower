@@ -96,8 +96,8 @@ class CoverOverlay(context: Context, private val onVisibilityChanged: (Boolean) 
         view.removeAllViews()
         // 文案为空时不放 TextView：设备拿到下发的配置之前 RuntimeConfig 里就是空的，
         // 那时只显示背景图，不在提示图上叠一行空白文字
-        if (RuntimeConfig.overlayMessage.isNotEmpty()) {
-            view.addView(buildMessage(RuntimeConfig.overlayMessage))
+        if (OVERLAY_MESSAGE.isNotEmpty()) {
+            view.addView(buildMessage(OVERLAY_MESSAGE))
         }
         try {
             wm.addView(view, coverLayoutParams())
@@ -118,15 +118,15 @@ class CoverOverlay(context: Context, private val onVisibilityChanged: (Boolean) 
         val density = view.resources.displayMetrics.density
         val textView = TextView(view.context).apply {
             text = message
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, RuntimeConfig.overlayTextSizeSp.toFloat())
-            setTextColor(parseColorSafely(RuntimeConfig.overlayTextColor))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, OVERLAY_TEXT_SIZE_SP.toFloat())
+            setTextColor(parseColorSafely(OVERLAY_TEXT_COLOR))
             gravity = Gravity.CENTER_VERTICAL
         }
         val params = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT,
             LinearLayout.LayoutParams.MATCH_PARENT,
         )
-        params.leftMargin = (RuntimeConfig.overlayMarginLeftDp * density).toInt()
+        params.leftMargin = (OVERLAY_MARGIN_LEFT_DP * density).toInt()
         textView.layoutParams = params
         return textView
     }
@@ -173,6 +173,11 @@ class CoverOverlay(context: Context, private val onVisibilityChanged: (Boolean) 
     }
 
     companion object {
+        const val OVERLAY_ENABLED = true
+        private const val OVERLAY_MESSAGE = "网络连接中，请稍后重试..."
+        private const val OVERLAY_TEXT_SIZE_SP = 80
+        private const val OVERLAY_TEXT_COLOR = "#d94f16"
+        private const val OVERLAY_MARGIN_LEFT_DP = 600
         private const val TAG = "CoverOverlay"
     }
 }

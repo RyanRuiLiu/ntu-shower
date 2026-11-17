@@ -22,7 +22,6 @@ from .spec import (
     ConfigKind,
     ConfigScope,
     defaults,
-    format_time,
     format_weekdays,
     parse_time,
     parse_weekdays,
@@ -103,16 +102,10 @@ def _check_value(
     if kind is ConfigKind.TIME:
         if not isinstance(value, str):
             _reject(f"{key} 需要时刻文本，收到 {type(value).__name__}")
-        # 先按格式收下再谈范围：不分两步的话 `23:99` 会被当成一个整数收走，
-        # 报出来的错就成了"不得晚于 23:59"而不是"格式不对"
+        # 先按格式收下：`23:99` 不能被当成整数收走，报错要说清是格式不对。
         minutes = parse_time(value)
         if minutes is None:
             _reject(f"{key} 需要 HH:MM 形式的时刻，收到 {value!r}")
-        # 范围只校验下限：`HH:MM` 的格式本身就把上界钉在 23:59 了，再声明一个
-        # "不得晚于 23:59" 是把同一件事写第二遍。将来真需要更早的上界（比如 23:30）
-        # 时再加那一支，那时它才有信息量。
-        if minimum is not None and minutes < minimum:
-            _reject(f"{key} 不得早于 {format_time(minimum)}（收到 {value}）")
         return value
 
     if kind is ConfigKind.WEEKDAYS:
