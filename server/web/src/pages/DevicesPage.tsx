@@ -78,7 +78,14 @@ function DeviceDetail({ deviceId }: { deviceId: string }) {
           <span>IP：{runtime.data.last_ip}</span>
           <span>最后上报：{fmtFullDateTime(runtime.data.last_seen_at)}</span>
           <span>钟偏差：{runtime.data.clock_skew_s.toFixed(2)}s</span>
-          <span>已运行：{fmtDuration(runtime.data.booted_at ? runtime.data.clock_skew_s : 0)}</span>
+          <span>
+            已运行：
+            {fmtDuration(
+              runtime.data.booted_at
+                ? Math.max(0, (Date.now() - new Date(runtime.data.booted_at).getTime()) / 1000)
+                : undefined,
+            )}
+          </span>
           <span>开机：{fmtFullDateTime(runtime.data.booted_at)}</span>
         </div>
       )}
