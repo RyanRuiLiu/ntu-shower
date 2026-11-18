@@ -431,7 +431,7 @@ class AgentService : Service() {
                 },
             )
         }
-        // 首次检查在服务启动后 30 秒（覆盖安装后尽快对齐版本），之后按配置间隔
+        // 首次检查在服务启动后 30 秒（覆盖安装后尽快对齐版本），之后按 OTA_CHECK_INTERVAL_S 周期
         otaCheckFuture = otaScheduler.scheduleWithFixedDelay(
             { worker.execute { otaUpdater?.checkAndInstall() } },
             FIRST_OTA_CHECK_DELAY_S,
@@ -529,7 +529,7 @@ class AgentService : Service() {
     }
 
     /**
-     * 看门狗：按配置间隔拉活服务（对存活服务为幂等 onStartCommand）。收到 tick 后由
+     * 看门狗：按固定间隔拉活服务（对存活服务为幂等 onStartCommand）。收到 tick 后由
      * onStartCommand 重排下一次——逐次排精确闹钟而不是 [AlarmManager.setRepeating]：
      * 后者受系统闹钟批处理影响会有分钟级漂移且不可纠正，逐次排是官方推荐的连续告警
      * 形态，漂移不累积。

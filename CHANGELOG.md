@@ -24,6 +24,7 @@
 
 - 历史重写期 `docker.yml` 的镜像引用被字面占位符化，构建链以 invalid tag 失效——随上一条 secrets 化恢复，build→deploy 链全绿。
 - 快速开始补 `alembic upgrade head`：fresh 库直接 uvicorn 启动即崩（lifespan 的未完成命令收尾查询先于 schema 存在），README 与 CONTRIBUTING 已按实测路径修正。
+- 0.7.5 配置面精简的收尾：注释与文档里指向已删配置键的引用全部改指现存常量（runbook 语音与桥接排查段、ADR-0007/0012/0013 按现行行为修订、两端代码注释、测试样例键）；遮盖层与崩溃守护钉死后的恒真开关与解析兜底按「不兜底」移除，行为零变化。
 
 ### Security
 
