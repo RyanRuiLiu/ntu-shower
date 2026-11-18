@@ -7,7 +7,7 @@ import org.json.JSONObject
  *
  * ## 取值下限
  *
- * 服务端按 `spec.CONFIG_SPECS` 做业务范围校验（例如心跳间隔 5~600 秒），设备端
+ * 服务端按 `spec.CONFIG_SPECS` 做业务范围校验（例如字号 10~200 sp），设备端
  * **不重复那套范围**——两处各写一份必然漂移。这里只兜住"失控"：0 或负数的时长
  * 会让 `postDelayed` 立即触发（心跳/重连风暴），所以一律抬到至少 1。
  *
@@ -24,22 +24,14 @@ object RuntimeConfig {
     /**
      * 时长与计数的下限：0 会让定时任务立即重复触发。
      *
-     * 只对"间隔/超时/窗口/计数"这类键使用。`ui_click_delay_ms` 与
-     * `door_report_debounce_ms` 的 0 是有意义的取值（不等待、不合并），服务端的
-     * 范围下界也是 0，不加钳制。
+     * 只对"间隔/超时/窗口/计数"这类键使用。x/y 边距与占用上下限的 0 是有意义的取值
+     * （贴边、精确匹配 0 个占用），不经这里，各自只挡负数。
      */
     private const val MIN_POSITIVE = 1L
 
     private fun atLeastOne(value: Long): Long = value.coerceAtLeast(MIN_POSITIVE)
 
     private fun atLeastOne(value: Int): Int = value.coerceAtLeast(MIN_POSITIVE.toInt())
-
-    /**
-     * 发件箱的行数上限，超出即丢弃最旧的行。
-     *
-     * 默认值来自 [ConfigDefaults]（上游是服务端登记表 `spec.py`），那边刻意给得远超真实
-     * 所需，于是它实际上不触发。**调小它是主动放弃历史**：帧丢了设备不会重发。
-     */
 
     // ── 屏幕提示 ──
     // 配置面在服务端；显隐判定在设备端的 NoticeRule。这里只保存下发值。

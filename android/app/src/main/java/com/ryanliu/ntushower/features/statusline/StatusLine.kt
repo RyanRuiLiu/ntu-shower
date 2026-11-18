@@ -12,10 +12,9 @@ data class StatusPart(val text: String, val tone: StatusTone)
 /** 片段语义：正文、有空闲、零空闲、不可用（离线或无数据）。 */
 enum class StatusTone { PLAIN, AVAILABLE, EMPTY, UNAVAILABLE }
 
-/** 配色方式；与配置登记表 `status_line_color_mode` 的 choices 逐字一致。 */
+/** 配色方式取值；已固定为「按状态」（StatusLineController.COLOR_MODE），统一配色随配置键一并删除。 */
 object StatusLineColorMode {
     const val BY_STATE = "按状态"
-    const val UNIFORM = "统一"
 }
 
 /** 一次显示所需的全部配置与内容；由控制器在主线程从 RuntimeConfig 与最新推送复制。 */

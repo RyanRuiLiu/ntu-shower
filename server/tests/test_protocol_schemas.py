@@ -54,7 +54,7 @@ SAMPLES: dict[str, dict[str, Any]] = {
         "payload": {
             "trusted": True,
             "server_time": "2026-09-30T12:00:00.000Z",
-            "config": {"heartbeat_interval_s": 30},
+            "config": {"notice_text_size_sp": 30},
             "upgrade": None,
         }
     },
@@ -73,7 +73,7 @@ SAMPLES: dict[str, dict[str, Any]] = {
     "door.snapshot_ack": {"payload": {"snapshot_id": "11111111-1111-4111-8111-111111111111"}},
     "device.command": {"payload": {"action": "session.assign", "params": {}, "timeout_ms": 30000}},
     "device.command_result": {"payload": {"status": "ok", "reason_code": "", "data": {}}},
-    "config.update": {"payload": {"revision": 1, "config": {"heartbeat_interval_s": 30}}},
+    "config.update": {"payload": {"revision": 1, "config": {"notice_text_size_sp": 30}}},
     "config.ack": {"payload": {"revision": 1}},
     "status_line.update": {
         "payload": {

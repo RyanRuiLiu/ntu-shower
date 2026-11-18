@@ -374,7 +374,7 @@ def test_config_push_ack_round_trip(fresh_db: str, monkeypatch: pytest.MonkeyPat
     fake = _online(monkeypatch, "dev-push")
 
     async def flow() -> dict[str, Any]:
-        task = asyncio.create_task(service.push_config_update("dev-push", 2, {"heartbeat_interval_s": 45}, timeout_s=5))
+        task = asyncio.create_task(service.push_config_update("dev-push", 2, {"notice_text_size_sp": 30}, timeout_s=5))
         await fake.wait_for_sent()
         update = json.loads(fake.sent[0])
         assert update["type"] == "config.update"

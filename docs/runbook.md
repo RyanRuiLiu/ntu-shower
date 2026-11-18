@@ -293,8 +293,8 @@ ssh <deploy-user>@<deploy-host> 'curl -s -H "Authorization: Bearer <ntushower_�
    （先设备、后学号维度），同档内设备集合更小者优先、再比学号集合；「全部学号」的规则若把这个学号
    放进了排除名单；规则停用或没有规则就不会下发。看 `/api/v1/voice/deliveries`
    有没有对应记录。
-2. **事件是否过期**：超过 `voice_event_max_age_s` 的事件会被跳过（默认值见
-   `app/modules/config/spec.py`），离线积压导致过期会跳过；
+2. **事件是否过期**：超过 60 秒（服务端常量 `VOICE_EVENT_MAX_AGE_S`）的事件会被跳过，
+   离线积压导致过期会跳过；
    规则保存后的预下载失败只让首次播放现场下载；设备日志看 `audio.prepared` /
    `audio.prefetch-failed`，页面「最近推送」的 `downloaded` 表示本次播放是否走了下载。
 3. **命令是否到达设备**：审计页看 `voice.play` / `voice.prepare` 的 status 与
@@ -310,9 +310,8 @@ ssh <deploy-user>@<deploy-host> 'curl -s -H "Authorization: Bearer <ntushower_�
    60 秒下载预算；等后台预下载完成后重试，或减少单条规则引用的素材。
 7. **和浴室 App 的提示音重叠**：设备播放前会自动检测 `STREAM_MUSIC` 上的浴室提示音，
    等它结束再播，不需要逐条配延迟。看设备日志 `audio.bath-wait` 的 `waited_ms`；
-   出现 `audio.bath-wait-timeout` 说明等待超过 `voice_bath_wait_max_ms`（默认值见
-   `app/modules/config/spec.py`），
-   检查浴室 App 是否卡在循环播放。网页「最近推送」的下发/完成时刻、分段与
+   出现 `audio.bath-wait-timeout` 说明等待超过 15 秒（设备端常量
+   `VOICE_BATH_WAIT_MAX_MS`），检查浴室 App 是否卡在循环播放。网页「最近推送」的下发/完成时刻、分段与
    `downloaded` 用于区分链路慢、现场下载还是设备播放慢。
 
 ### 调试通道（ADB 桥）
@@ -332,8 +331,8 @@ curl -s -H "Authorization: Bearer <ntushower_密钥>" http://127.0.0.1:8110/api/
 curl -X POST -H "Authorization: Bearer <ntushower_密钥>" http://127.0.0.1:8110/api/v1/devices/<id>/bridge/close
 ```
 
-两个上限都可配（`bridge_pair_timeout_s`——点开桥后建隧道的最长时间；
-`bridge_max_lifetime_s`——隧道总寿命。默认值与语义见 `app/modules/config/spec.py`）。
+两个上限都是服务端常量（`BRIDGE_PAIR_TIMEOUT_S`——点开桥后建隧道的最长时间，30 秒；
+`BRIDGE_MAX_LIFETIME_S`——隧道总寿命，1 小时）。
 **隧道本身没有空闲超时**，只靠寿命上限兜着——
 调试通道不该无限期开着。
 

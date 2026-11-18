@@ -120,7 +120,7 @@ class AgentService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        // 每次拉起都核对无障碍链路：看门狗周期（watchdog_interval_s，默认 60 秒）就是
+        // 每次拉起都核对无障碍链路：看门狗周期（WATCHDOG_INTERVAL_S）就是
         // 巡检周期。总开关被系统置 0 时本服务会失去无障碍这个自举锚点，看门狗的拉起
         // 是它仅剩的恢复机会——只在首次初始化时核对，这种情况下一次都不会执行。
         worker.execute {
@@ -583,10 +583,11 @@ class AgentService : Service() {
     companion object {
         private const val TAG = "AgentService"
 
-        /** 首次 OTA 检查的延迟：覆盖安装后尽快对齐版本，之后按配置间隔。 */
         private const val WATCHDOG_INTERVAL_S = 60L
         private const val COMMAND_DEDUP_MAX_COUNT = 1_024
         private const val DEVICE_EXEC_MAX_OUTPUT_BYTES = 32_768
+
+        /** 首次 OTA 检查的延迟：覆盖安装后尽快对齐版本，之后按 OTA_CHECK_INTERVAL_S 周期。 */
         private const val OTA_CHECK_INTERVAL_S = 3_600L
         private const val FIRST_OTA_CHECK_DELAY_S = 30L
 

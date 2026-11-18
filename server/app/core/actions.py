@@ -185,7 +185,7 @@ UI_DUMP = "ui.dump"
 
 bounds 为 [left,top][right,bottom]，index 是同级中的序号而非全树序号；需要稳定
 定位时用 resource-id 在调用方一侧重新匹配，不使用遍历序号（随界面变化错位）。
-节点上限取配置项 ui_dump_max_nodes，达到即停止遍历。
+节点上限由设备端固定（CommandScheduler.UI_DUMP_MAX_NODES），达到即停止遍历。
 """
 
 UI_TOUCH = "ui.touch"

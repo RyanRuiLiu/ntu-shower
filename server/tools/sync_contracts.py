@@ -179,7 +179,7 @@ def _kotlin_config_defaults() -> str:
 
 
 def _constant_of_key(key: str) -> str:
-    """配置键 → Kotlin 常量名。`overlay_message` → `OVERLAY_MESSAGE`。"""
+    """配置键 → Kotlin 常量名。`notice_text` → `NOTICE_TEXT`。"""
     return key.upper()
 
 

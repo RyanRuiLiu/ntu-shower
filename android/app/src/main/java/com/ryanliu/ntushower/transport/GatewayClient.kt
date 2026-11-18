@@ -26,8 +26,8 @@ import org.json.JSONObject
  *
  * 链路行为（对应 protocol/schema/）：
  * - 连接成功后首帧发 link.hello；
- * - hello_ack 带回配置（心跳间隔等）与 trusted 标志；[HANDSHAKE_TIMEOUT_MS] 内等不到就断掉重连；
- * - 按配置间隔发 link.ping；服务端 ping → 给 [ServerClock] 立锚点、再回 pong；
+ * - hello_ack 带回配置（提示与状态行的样式等）与 trusted 标志；[HANDSHAKE_TIMEOUT_MS] 内等不到就断掉重连；
+ * - 按固定间隔发 link.ping；服务端 ping → 给 [ServerClock] 立锚点、再回 pong；
  * - 断线自动重连，指数退避加抖动（5s 起、60s 封顶；实际等待落在各级的一半到上限之间，几十台设备共用一次断网时不至于同一波次同时重连）；
  * - 业务消息一律回调 onMessage 交给上层。
  *
@@ -48,7 +48,7 @@ import org.json.JSONObject
  * | 通道 | 时机 | 放什么 |
  * |---|---|---|
  * | `link.hello` | 连接建立时一次 | 身份与**不变的事实**：设备 id、版本、系统、能力位、开机时刻 |
- * | `link.ping` | 周期（`heartbeat_interval_s`） | **只有时间戳** |
+ * | `link.ping` | 周期（HEARTBEAT_INTERVAL_MS） | **只有时间戳** |
  * | `door.snapshot` | 喷头状态变化时 | 喷头现态（事件驱动） |
  * | `ota.progress` | 升级过程中 | 下载进度（一次性流程） |
  *

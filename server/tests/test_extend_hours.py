@@ -31,7 +31,6 @@ DEVICE = "dev-extend"
 #: 名单里有两个人，其中只有一个占着喷头——另一份名单项用来验"没占用的人不被分配"。
 CONFIG: dict[str, object] = {
     "extend_hours_enabled": True,
-    "extend_shift_minutes": 15,
     "server_zone_offset_minutes": 480,
     "extend_hours_students": {"9999999001": "000000", "9999999003": "111111"},
     "power_off_at": "23:58",
@@ -870,7 +869,6 @@ def test_tick_advances_each_extending_device_with_its_own_config(
     base = {
         "extend_hours_enabled": False,  # 不参与拨钟，只走推进
         "server_zone_offset_minutes": 480,
-        "extend_shift_minutes": 15,
         "extend_hours_students": {},
         "time_sync_enabled": False,
         "power_off_at": "23:58",

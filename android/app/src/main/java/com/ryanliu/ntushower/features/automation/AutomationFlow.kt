@@ -149,7 +149,7 @@ object AutomationFlow {
         }
     }
 
-    /** 点击后的静默窗口。`ui_click_delay_ms` 允许为 0，此时用轮询间隔兜住最小等待。 */
+    /** 点击后的静默窗口（[UI_SETTLE_MS]）。 */
     internal fun uiSettleMs(): Long = UI_SETTLE_MS
 
     private const val HOME_BUDGET_MS = 15_000L

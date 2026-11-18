@@ -44,8 +44,8 @@ object RootShell {
      * 挂在控制通道上，界面注入与无障碍守护就得陪着等 20 秒。分开之后，慢命令只影响
      * 它自己那条通道。
      *
-     * 它的 [ShellChannel.maxOutputBytes] 由配置项 `device_exec_max_output_bytes` 驱动，
-     * 在 `AgentService` 应用配置时同步过来。
+     * 它的 [ShellChannel.maxOutputBytes] 固定取 `AgentService` 的
+     * DEVICE_EXEC_MAX_OUTPUT_BYTES，配置同步时写入。
      */
     val command: ShellChannel = ShellChannel("command")
 

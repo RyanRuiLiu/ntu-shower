@@ -345,7 +345,7 @@ async def reboot_device(device_id: str, session: Session = Depends(get_db)) -> C
 async def dump_ui_tree(device_id: str, session: Session = Depends(get_db)) -> CommandOutcome:
     """导出设备当前界面的节点树，结果在 data.xml。
 
-    格式与 uiautomator dump 一致；节点上限取配置项 ui_dump_max_nodes。
+    格式与 uiautomator dump 一致；节点上限由设备端固定（CommandScheduler.UI_DUMP_MAX_NODES）。
     """
     return await device_action(session, device_id, actions.UI_DUMP, {}, _ui_timeout_s())
 

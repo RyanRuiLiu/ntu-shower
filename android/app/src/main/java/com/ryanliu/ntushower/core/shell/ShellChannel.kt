@@ -36,9 +36,9 @@ class ShellChannel(private val name: String) {
     /**
      * 单条命令的最大累积输出（字节），**运行时可调**。
      *
-     * 由配置项 `device_exec_max_output_bytes` 驱动（见 [RootShell.command]）：上限必须
-     * 可调，写死的数字换个场景就不合适了。默认不限制，因为常驻通道的命令都是我们自己
-     * 写的短命令；只有承载"内容不可预期"的通道才需要设它。
+     * 由 [RootShell.command] 的拥有方设值（`AgentService.DEVICE_EXEC_MAX_OUTPUT_BYTES`，
+     * 配置同步时写入）。默认不限制，因为常驻通道的命令都是我们自己写的短命令；只有
+     * 承载"内容不可预期"的通道才需要设它。
      *
      * 它在**读取时**生效，不是读完再截——一条 `dumpsys` 的输出被整块读进内存，足以让
      * agent 进程被系统杀掉、设备从此失联。

@@ -95,7 +95,7 @@ async def device_gateway(ws: WebSocket) -> None:
             return
         device_id, trusted, ip = hello_state
 
-        # 立刻主动探测一轮，不等 ping_interval_s：设备刚连上时手上还没有时间锚点，而
+        # 立刻主动探测一轮，不等周期探测（PING_INTERVAL_S）：设备刚连上时手上还没有时间锚点，而
         # 它采集的每一帧都要带采集时刻——越早把服务端时刻交给它，最初那几帧时刻越准。
         await ws.send_text(protocol.envelope("link.ping", {"sender_time": now_rfc3339()}))
 
