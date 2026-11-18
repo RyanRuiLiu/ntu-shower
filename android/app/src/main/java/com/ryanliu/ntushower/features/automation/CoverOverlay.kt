@@ -14,7 +14,6 @@ import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.ryanliu.ntushower.R
-import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.threading.MainThread
 
 /**
@@ -25,7 +24,7 @@ import com.ryanliu.ntushower.core.threading.MainThread
  * 问题会安静等一会儿，看到「系统正在远程操作」则可能去拔电源或找来管理员。
  * 遮盖要挡的不只是手指，还得让这段等待显得合理。
  *
- * 文案与样式全部经 [RuntimeConfig] 下发，所以改一句话不必重新发版。
+ * 文案与样式钉为本文件常量（沿用旧项目线上取值，运维从未改过）；要改一句话需要发版。
  *
  * 窗口类型必须是 [WindowManager.LayoutParams.TYPE_SYSTEM_ERROR]，不能用 TYPE_PHONE：
  * KitKat 的层级（PhoneWindowManager.windowTypeToLayerLw）里 TYPE_PHONE 是第 3 层，在
@@ -54,7 +53,7 @@ class CoverOverlay(context: Context, private val onVisibilityChanged: (Boolean) 
     @Volatile private var showing = false
 
     /**
-     * 盖住屏幕。文案与样式取自 [RuntimeConfig]，改配置后下一次 show 生效。重复调用是空操作。
+     * 盖住屏幕。重复调用是空操作。
      *
      * 主线程繁忙时 [MainThread.runAndWait] 会超时放弃，那时遮盖其实没盖上。**不因此中断流程**
      * ——遮盖是给现场学生看的，自动化本身不依赖它；但必须留痕，否则「学生点到了界面」会被
@@ -94,11 +93,7 @@ class CoverOverlay(context: Context, private val onVisibilityChanged: (Boolean) 
     private fun addInternal() {
         if (showing) return
         view.removeAllViews()
-        // 文案为空时不放 TextView：设备拿到下发的配置之前 RuntimeConfig 里就是空的，
-        // 那时只显示背景图，不在提示图上叠一行空白文字
-        if (OVERLAY_MESSAGE.isNotEmpty()) {
-            view.addView(buildMessage(OVERLAY_MESSAGE))
-        }
+        view.addView(buildMessage(OVERLAY_MESSAGE))
         try {
             wm.addView(view, coverLayoutParams())
             showing = true
@@ -119,7 +114,7 @@ class CoverOverlay(context: Context, private val onVisibilityChanged: (Boolean) 
         val textView = TextView(view.context).apply {
             text = message
             setTextSize(TypedValue.COMPLEX_UNIT_SP, OVERLAY_TEXT_SIZE_SP.toFloat())
-            setTextColor(parseColorSafely(OVERLAY_TEXT_COLOR))
+            setTextColor(Color.parseColor(OVERLAY_TEXT_COLOR))
             gravity = Gravity.CENTER_VERTICAL
         }
         val params = LinearLayout.LayoutParams(
@@ -129,19 +124,6 @@ class CoverOverlay(context: Context, private val onVisibilityChanged: (Boolean) 
         params.leftMargin = (OVERLAY_MARGIN_LEFT_DP * density).toInt()
         textView.layoutParams = params
         return textView
-    }
-
-    /**
-     * 解析十六进制颜色，格式不对时退回白色。
-     *
-     * 颜色是服务端下发的字符串，写错一个字 `Color.parseColor` 就会抛异常——而它发生在
-     * 主线程创建窗口的过程中，异常会让整次自动化连同遮盖一起失败。一个配色笔误不该
-     * 有这个后果。
-     */
-    private fun parseColorSafely(value: String): Int = try {
-        Color.parseColor(value)
-    } catch (_: IllegalArgumentException) {
-        Color.WHITE
     }
 
     private fun coverLayoutParams(): WindowManager.LayoutParams = WindowManager.LayoutParams(
@@ -173,7 +155,6 @@ class CoverOverlay(context: Context, private val onVisibilityChanged: (Boolean) 
     }
 
     companion object {
-        const val OVERLAY_ENABLED = true
         private const val OVERLAY_MESSAGE = "网络连接中，请稍后重试..."
         private const val OVERLAY_TEXT_SIZE_SP = 80
         private const val OVERLAY_TEXT_COLOR = "#d94f16"

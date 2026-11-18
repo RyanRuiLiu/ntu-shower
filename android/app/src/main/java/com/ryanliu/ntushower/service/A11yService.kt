@@ -130,10 +130,9 @@ class A11yService :
      * 去向交给守护判断：退到桌面才拉回来，退到别的包是现场人员走调试通道，不碰。
      */
     private fun handleBathAppExit(leftToPackage: String) {
-        if (!BATH_GUARD_ENABLED) return
         val now = Uptime.nowMs()
-        // 阈值每次从 RuntimeConfig 现取：远程配置改动即时生效，
-        // 不必等服务因故重绑重建这个守护（构造期固化是曾经的缺陷）
+        // 阈值钉为常量（生产实测从未改动，2026-11-17 收编）；每次现取构造，
+        // 不依赖服务实例生命周期（构造期固化是曾经的缺陷）
         val params = BathAppGuard.Params(
             windowMs = BATH_EXIT_WINDOW_MS,
             maxCount = BATH_EXIT_MAX_COUNT,
@@ -301,7 +300,6 @@ class A11yService :
     }
 
     companion object {
-        private const val BATH_GUARD_ENABLED = true
         private const val BATH_EXIT_WINDOW_MS = 30_000L
         private const val BATH_EXIT_MAX_COUNT = 3
         private const val BATH_EXIT_COOLDOWN_MS = 600_000L

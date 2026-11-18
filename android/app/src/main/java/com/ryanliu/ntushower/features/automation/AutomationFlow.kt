@@ -62,8 +62,8 @@ object AutomationFlow {
             return FlowOutcome(error = FlowError(ReasonCodes.DEVICE_HOME_UNREACHABLE, "无法回到首页"))
         }
         trace?.mark("navigate-home")
-        // 2 遮盖层（可经配置关闭；文案取运行时配置）
-        if (CoverOverlay.OVERLAY_ENABLED) overlay.show()
+        // 2 遮盖层（开关钉为常量，一直开）
+        overlay.show()
         trace?.mark("overlay-show")
         try {
             // 3 命令动作
