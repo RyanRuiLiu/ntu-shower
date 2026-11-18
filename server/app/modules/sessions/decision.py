@@ -57,7 +57,7 @@ class JobSpec:
     start: Literal["assigned_at", "paused_at"]
     """从哪一刻起算：整场会话（浴室 App 那两条上限管着它）还是关阀那一刻。"""
     max_duration_s: int | None
-    """时长上限的配置键；None 表示不限。从这一串第一场起算，到了就停。"""
+    """时长上限（秒）；None 表示不限。从这一串第一场起算，到了就停。"""
     two_step: bool
     """续期是两步（先结算、等门空的那一帧再分配回同一个喷头）；自动结算只做前半步。"""
 
