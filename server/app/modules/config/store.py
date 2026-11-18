@@ -4,8 +4,8 @@
 改默认值即刻对所有设备生效，调用方提交整个表单也不会把未改动的键固化成覆盖。
 存完整配置的做法会固化当时的默认值，新增键永远下不下去。
 
-入参按 spec.CONFIG_SPECS 校验类型与范围；越界值会让设备进入异常状态（如心跳
-间隔为 0 会导致心跳风暴），在此拒绝而非下发。
+入参按 spec.CONFIG_SPECS 校验类型与范围；越界值会让设备进入异常状态（如字号
+低于下限会让文字不可见），在此拒绝而非下发。
 """
 
 import threading
@@ -193,6 +193,11 @@ def get_device_overrides(session: Session, device_id: str) -> tuple[int, ConfigV
 
 
 def put_device_overrides(session: Session, device_id: str, values: ConfigValues) -> tuple[int, ConfigValues]:
+    """覆盖式写入设备覆盖项；返回新修订号与入库内容。
+
+    不加锁：唯一写侧是 HTTP 路由（async，写段无 await），读—改—写在事件循环线程上
+    天然原子。全局那份要锁，是因为名单增删经 `update_global` 从后台任务线程进来。
+    """
     existing = get_device_overrides(session, device_id)
     overrides = _as_overrides(values)
     new_revision = (existing[0] if existing else 0) + 1
