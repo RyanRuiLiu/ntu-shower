@@ -914,8 +914,7 @@ async def handle_events(events: tuple[DoorEvent, ...]) -> None:
     from app.db.session import session_scope
 
     with session_scope() as session:
-        value = VOICE_EVENT_MAX_AGE_S
-        max_age = value if isinstance(value, int) else 0
+        max_age = VOICE_EVENT_MAX_AGE_S
         for event in events:
             try:
                 await _dispatch_event(session, event, max_age)
