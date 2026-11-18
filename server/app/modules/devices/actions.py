@@ -411,7 +411,8 @@ async def _dispatch(
 def audit_data(action: str, data: object) -> dict[str, object] | None:
     """命令结果里进审计的 data：只记不可重现的文本结果。
 
-    device.exec 的输出是不可重现的运维事实，必须留痕，体积有配置上限；
+    device.exec 的输出是不可重现的运维事实，必须留痕，体积由设备端固定的
+    输出上限（AgentService.DEVICE_EXEC_MAX_OUTPUT_BYTES）约束；
     媒体（截图、拍照的 base64）与 ui.dump 的 XML 属于数据重型且可重取，不落。
     分配与结算的参数由 HTTP 审计的请求体留痕，命令审计只记结果。
     """
