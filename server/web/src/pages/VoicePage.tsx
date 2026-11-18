@@ -21,6 +21,12 @@ export function VoicePage() {
     onError: (error) => setError(error instanceof ApiError ? error.message : "操作失败"),
   });
 
+  const remove = useMutation({
+    mutationFn: (id: number) => voiceApi.deleteRule(id),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["voice", "rules"] }),
+    onError: (error) => setError(error instanceof ApiError ? error.message : "操作失败"),
+  });
+
   return (
     <div className="grid gap-3">
       <section className="glass-panel p-4">
@@ -47,8 +53,9 @@ export function VoicePage() {
               <Button
                 size="sm"
                 variant="danger-soft"
+                isPending={remove.isPending && remove.variables === rule.id}
                 onPress={() => {
-                  if (window.confirm(`删除规则 #${rule.id}？`)) voiceApi.deleteRule(rule.id);
+                  if (window.confirm(`删除规则 #${rule.id}？`)) remove.mutate(rule.id);
                 }}
               >
                 删除
