@@ -23,7 +23,6 @@ class StatusLineRuleTest {
         enabled = enabled,
         textSizeSp = 13,
         textColor = "#ffffff",
-        colorMode = StatusLineColorMode.BY_STATE,
         availableColor = "#6bc600",
         unavailableColor = "#999999",
         background = true,

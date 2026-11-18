@@ -23,7 +23,7 @@ import com.ryanliu.ntushower.features.overlay.OverlayWindow
  * 状态行用 `TYPE_PHONE`（第 3 层），只压住浴室 App；提示用 `TYPE_SYSTEM_ALERT`
  * （第 9 层），因此提示始终在状态行上方。两者都是标准应用浮层，都在系统栏之下。
  *
- * 「按状态」配色只改颜色，不改文字：空闲为绿色，0 个空闲与离线/无数据为灰色；
+ * 配色只改颜色，不改文字：空闲为绿色，0 个空闲与离线/无数据为灰色；
  * 颜色全部来自配置，默认值在服务端登记表。配置里的颜色无法解析时文字回落到白色、
  * 背景回落到透明，并在设备日志留痕——代码里不另存一套调色板。
  */
@@ -73,7 +73,6 @@ class StatusLineOverlay(context: Context) : OverlayTarget<StatusLineSettings> {
     ): CharSequence {
         val parts = StatusLine.parts(settings.floors)
         val plain = parts.joinToString("") { part -> part.text }
-        if (settings.colorMode != StatusLineColorMode.BY_STATE) return plain
 
         val spannable = SpannableString(plain)
         var start = 0
