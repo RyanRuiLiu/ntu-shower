@@ -426,8 +426,9 @@ LD_LIBRARY_PATH=/system/lib dalvikvm -cp /data/local/tmp/mcu.jar mcu.Main on <on
 # 写回：按"距现在的 23:58"换算重新布防；23:58 已过则布到次日同一时刻
 ```
 
-现行机制不在本文复述：延长期间 MCU 截止按**滚动窗口**续写（每 30 秒重写为
-"表盘此刻 + 10 分钟"，服务端消失最迟一个窗口后断电），恢复条件与全部判据见
+现行机制不在本文复述：延长期间 MCU 截止按**滚动窗口**续写（每 2 分钟重写为
+"表盘此刻 + 10 分钟"；续写失败下一轮 30 秒的 tick 就重试。服务端消失最迟一个
+窗口后断电），恢复条件与全部判据见
 `server/app/modules/extend_hours/service.py` 的模块注释；动作行为见
 `server/app/core/actions.py` 的 `POWER_SCHEDULE`；钟偏差的自动校正（`time_sync_enabled`）
 也在同一处。
