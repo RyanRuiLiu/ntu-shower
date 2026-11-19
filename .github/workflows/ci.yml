@@ -148,7 +148,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "25"
-      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
       - run: cp gradle.properties.example gradle.properties
       # 单次调用：org.gradle.caching 已开，未变任务命中缓存后这里只剩增量
       # 编译与测试执行（实测冷启动 171s 的最大杆已被缓存削平）。
