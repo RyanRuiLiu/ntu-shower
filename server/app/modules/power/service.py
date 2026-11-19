@@ -46,9 +46,7 @@ from sqlalchemy.orm import Session
 
 from app.contracts import HoldSource, JobOutcome
 from app.core import actions, device_clock, outcomes, problems
-from app.core.clock import (
-    format_rfc3339,
-)
+from app.core.clock import format_rfc3339
 from app.core.connections import manager
 from app.core.logging import log_event
 from app.core.problems import DEVICE_NOT_FOUND, VALIDATION_FAILED, ApiProblemError
@@ -87,6 +85,9 @@ LEASE_TTL_S = 600.0
 #: 校正阈值（秒）：设备钟晶振日漂移秒级，累积数日才到 60 秒——避免为小偏差频繁拨钟。
 TIME_SYNC_THRESHOLD_S = 60
 
+#: 同设备同事件的 WARNING 限频（秒）：对账每轮重试，失败日志不刷屏。
+WARN_THROTTLE_S = 60.0
+
 _tasks: set[asyncio.Task[None]] = set()
 #: 每设备的节流标记（循环单调钟）：step 与租约续期在一次成功后不重复。进程级，
 #: 重启后的首轮多做一次幂等写（目标相同，结果一致）——注释即承诺。
@@ -116,7 +117,7 @@ def _warn_once(device_id: str, key: str, event: str, message: str, **extra: obje
     """同一设备同一件事的 WARNING 限频（60 秒一条）：对账失败下一轮会重试，
     每轮一条会把真正的问题淹掉。"""
     now = time_module.monotonic()
-    if now - _last_warn_at.get(f"{device_id}:{key}", 0.0) < 60.0:
+    if now - _last_warn_at.get(f"{device_id}:{key}", 0.0) < WARN_THROTTLE_S:
         return
     _last_warn_at[f"{device_id}:{key}"] = now
     log_event("WARNING", event, message, device_id=device_id, **extra)
@@ -205,8 +206,7 @@ def _wall_text(moment_local: datetime) -> str:
     """表盘时刻（[to_local] 产出的 aware datetime）→ 设备墙钟文本。
 
     to_local 的本地字段就是表盘读数，直接取字段——不要经 format_rfc3339 绕回
-    UTC 再格式化，那会把墙钟写成 UTC 字面（差一个时区，恰是 wall_clock_text 注释
-    警告的那类错法）。
+    UTC 再格式化，那会把墙钟写成 UTC 字面（差一个时区；演绎阶段真实踩过）。
     """
     return moment_local.strftime("%Y-%m-%d %H:%M:%S")
 

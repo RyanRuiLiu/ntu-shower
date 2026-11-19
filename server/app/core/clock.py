@@ -77,21 +77,6 @@ def shift_rfc3339(text: object, seconds: float) -> str | None:
     return format_rfc3339(moment + timedelta(seconds=seconds))
 
 
-def wall_clock_text(value: object) -> str | None:
-    """把一个时刻写成设备墙钟的 `YYYY-MM-DD HH:MM:SS`；无法解析时返回 None。
-
-    它是 `clock.set` 那条命令的字段格式（设备端按 `yyyy-MM-dd HH:mm:ss`、**用设备
-    默认时区**解析，见 TimeSync.setWallClock）。**它只换字面，不换轴**——调用方先
-    把目标时刻换算成"设备表盘上该显示几点"，再交给它。两件事分开写，是因为合成一步
-    之后，"格式"与"轴"哪一处出问题就分不出来了，而两者的错法完全不同：一个让命令
-    被设备拒收，一个让钟拨到错的一小时。
-    """
-    moment = parse_rfc3339(value)
-    if moment is None:
-        return None
-    return moment.strftime("%Y-%m-%d %H:%M:%S")
-
-
 def to_local(value: object, offset_minutes: int) -> datetime | None:
     """把一个 UTC 时刻换算成指定偏移的当地时间；无法解析时返回 None。
 
