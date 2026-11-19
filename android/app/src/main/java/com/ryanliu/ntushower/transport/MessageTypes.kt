@@ -42,6 +42,7 @@ object MessageTypes {
 
     // ── 设备自报（device.*） ──
     const val DEVICE_LOG_UPLOAD = "device.log_upload"
+    const val DEVICE_STATUS = "device.status"
 
     /** 全部消息类型。 */
     val ALL: Set<String> = setOf(
@@ -62,5 +63,6 @@ object MessageTypes {
         OTA_UPGRADE_AVAILABLE,
         OTA_PROGRESS,
         DEVICE_LOG_UPLOAD,
+        DEVICE_STATUS,
     )
 }

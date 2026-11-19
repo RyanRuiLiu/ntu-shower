@@ -20,6 +20,7 @@ from app.contracts import DeviceLogKind
 from app.core import events
 from app.core.clock import now_rfc3339, rfc3339_ago
 from app.db.session import session_scope
+from app.modules.devices import crud as devices_store
 from app.modules.devices.models import Device, DeviceLinkEvent, DeviceLog
 from app.modules.devices.schemas import LINK_OFFLINE, LINK_ONLINE
 from app.modules.doors import service as doors_service
@@ -732,3 +733,34 @@ def _skew(device_id: str) -> float:
 
     with _svc_session() as session:
         return devices_store.get_clock_skew(session, device_id)
+
+
+def test_device_status_frame_lands_power_facts(client: TestClient, fresh_db: str) -> None:
+    """device.status 帧：上报事实落影子行；形状不对回结构化错误且连接保持。"""
+    device_link.register_trusted_device("dev-status-frame")
+    with client.websocket_connect("/gateway/device") as ws:
+        ws.send_text(frames.hello_frame("dev-status-frame"))
+        frames.recv_until(ws, "link.hello_ack")
+
+        ws.send_text(
+            frames.frame(
+                "device.status",
+                {"auto_close_time": "23:58", "auto_open_time": "10:55", "zone_offset_minutes": 480},
+            )
+        )
+
+        # WS 帧按序处理：后发的 ping 收到 pong 即证明 status 帧已处理完
+        ws.send_text(frames.frame("link.ping", {"sender_time": now_rfc3339()}))
+        assert frames.recv_until(ws, "link.pong")["reply_to"]
+
+        with session_scope() as session:
+            assert devices_store.power_facts(session, "dev-status-frame") == ("23:58", "10:55", 480)
+
+        ws.send_text(
+            frames.frame(
+                "device.status",
+                {"auto_close_time": "99:99", "auto_open_time": "10:55", "zone_offset_minutes": 480},
+            )
+        )
+        err = frames.recv_until(ws, "link.error")
+        assert err["payload"]["code"] == "proto.bad_json"

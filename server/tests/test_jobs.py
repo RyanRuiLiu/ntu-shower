@@ -4,10 +4,12 @@
 不再有登记端点。
 """
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from app.contracts import HoldSource
 from app.modules.config.spec import SPECS_BY_KEY, ConfigKind, ConfigScope
 from app.modules.jobs.spec import _TITLES, JOBS
 from app.modules.sessions import decision
@@ -28,7 +30,7 @@ def test_job_keys_are_derived_from_the_decision_table() -> None:
     entries = {key: (enabled, students) for key, enabled, students in JOBS}
     outside = set(entries) - decision_keys
 
-    assert outside == {"extend_hours"}, "判据表里没有的只该是它——它的判据是设备级的"
+    assert outside == {"power"}, "判据表里没有的只该是它——它的判据是设备级的"
 
     for key, enabled_key, students_key in JOBS:
         source = next(item for item in decision.JOBS if item.key == key) if key in decision_keys else None
@@ -55,11 +57,11 @@ def test_job_config_keys_exist_are_server_scoped_and_of_the_right_kind() -> None
         assert students.scope is ConfigScope.SERVER
 
 
-def test_extend_hours_is_not_in_the_decision_table() -> None:
+def test_power_is_not_in_the_decision_table() -> None:
     """它不在判据表里是有意的：它的判据是设备级的，塞进去要放一个不成立的形状。"""
-    assert "extend_hours" not in {spec.key for spec in decision.JOBS}
+    assert "power" not in {spec.key for spec in decision.JOBS}
     entries = {key: (enabled, students) for key, enabled, students in JOBS}
-    assert entries["extend_hours"] == ("extend_hours_enabled", "extend_hours_students")
+    assert entries["power"] == ("hold_enabled", "hold_students")
 
 
 def test_frontend_groups_scheduled_rows_by_the_job_field() -> None:
@@ -78,12 +80,12 @@ def test_frontend_groups_scheduled_rows_by_the_job_field() -> None:
 # ── 当前态看板（admin）──
 
 
-def test_status_reports_tasks_extending_and_scheduled(
+def test_status_reports_tasks_holds_and_scheduled(
     client: TestClient, admin_headers: dict[str, str], fresh_db: str
 ) -> None:
-    """当前态的形状：四任务（开关与名单数）、延长中的设备、调度器的即时计划。
+    """当前态的形状：四任务（开关与名单数）、hold 中的设备、调度器的即时计划。
 
-    新库上四任务全关、无延长、无排定——看板在"系统闲着"时也必须能如实显示闲着。
+    新库上四任务全关、无 hold、无排定——看板在"系统闲着"时也必须能如实显示闲着。
     """
     resp = client.get("/api/v1/jobs/status", headers=admin_headers)
 
@@ -93,49 +95,53 @@ def test_status_reports_tasks_extending_and_scheduled(
         "renew_wait",
         "renew_session",
         "auto_settle",
-        "extend_hours",
+        "power",
     ]
     assert all(job["enabled"] is False and job["students_count"] == 0 for job in data["jobs"])
-    assert data["extending"] == []
+    assert data["holds"] == []
     assert data["scheduled"] == []
 
 
-def test_status_includes_the_extending_device(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:
-    """延长中的设备是"哪台设备钟是拨快着的"唯一可见面：表里有行，看板就报。"""
-    from datetime import UTC, datetime
-
+def test_status_includes_the_holding_device(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:
+    """hold 中的设备是"哪台设备钟是偏置着的"唯一可见面：表里有状态，看板就报。"""
     from app.db.session import session_scope
     from app.modules.devices import crud as devices_store
-    from app.modules.extend_hours import crud as extend_repository
 
-    shifted_at = datetime(2026, 10, 5, 15, 49, 30, tzinfo=UTC)
+    started_at = datetime(2026, 10, 5, 15, 49, 30, tzinfo=UTC)
     with session_scope() as session:
         devices_store.register(
             session,
-            device_id="dev-status-ext",
-            app_version="0.4.13",
-            version_code=57,
+            device_id="dev-status-hold",
+            app_version="0.8.0",
+            version_code=125,
             os_version="4.4.4",
             capabilities=[],
             ip="127.0.0.1",
-            booted_at=shifted_at,
-            seen_at=shifted_at,
+            booted_at=started_at,
+            seen_at=started_at,
         )
-        extend_repository.record(session, "dev-status-ext", shifted_at, [{"door_no": 3, "cert_no": CERT_NO}])
+        devices_store.start_hold(session, "dev-status-hold", HoldSource.AUTOMATED)
+        devices_store.mark_hold_applied(
+            session,
+            "dev-status-hold",
+            660,
+            [{"door_no": 3, "cert_no": CERT_NO, "done": False, "failed": False}],
+            started_at + timedelta(minutes=10),
+        )
 
     data = client.get("/api/v1/jobs/status", headers=admin_headers).json()
 
-    extending = data["extending"]
-    assert len(extending) == 1
-    row = extending[0]
-    assert row["device_id"] == "dev-status-ext"
-    assert row["shift_minutes"] == 15
-    assert row["shifted_at"] == "2026-10-05T15:49:30.000Z"
+    holds = data["holds"]
+    assert len(holds) == 1
+    row = holds[0]
+    assert row["device_id"] == "dev-status-hold"
+    assert row["hold_source"] == "automated"
+    assert row["hold_started_at"] != ""  # 意图建立时刻由 start_hold 落库（真实钟）
+    assert row["hold_offset_s"] == 660
     assert row["total"] == 1
     assert row["reassigned_count"] == 0
     assert row["pending"] == [{"door_no": 3, "cert_no": CERT_NO}]
-    assert row["mcu_off_at"] == ""  # 没经过滚动：尚无武装的截止
-    assert row["rearm_interval_s"] == 120
+    assert row["lease_deadline"] == "2026-10-05T15:59:30.000Z"
     assert row["idle"] is True
 
 

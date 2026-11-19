@@ -18,26 +18,7 @@ os.environ.setdefault("SESSION_SECRET", "test-session-secret")
 import pytest
 from fastapi.testclient import TestClient
 
-# 表模型分散在各域目录：create_all 前必须全部导入，否则跨域外键解析不到目标表。
-# 与 migrations/env.py 同一份清单，漏模型由 tests/test_schema.py 钉住。
-from app.auth.models import ApiKey, User  # noqa: F401
 from app.core import config as config_module
-from app.modules.config.models import AppSettings  # noqa: F401
-from app.modules.devices.models import (  # noqa: F401
-    Device,
-    DeviceCredential,
-    DeviceLinkEvent,
-    DeviceLog,
-)
-from app.modules.doors.models import (  # noqa: F401
-    DoorSegment,
-    DoorSession,
-    DoorSnapshot,
-    DoorStateEvent,
-)
-from app.modules.ota.models import OtaRelease, OtaReleaseInstall  # noqa: F401
-from app.modules.voice.models import VoiceAsset, VoiceDelivery, VoiceRule, VoiceUnit  # noqa: F401
-from app.persistence.audit import ApiCall, CommandAudit, JobRun  # noqa: F401
 
 ADMIN_USER = "admin"
 OPS_USER = "ops-user"
@@ -68,16 +49,15 @@ def _reset_process_singletons() -> Iterator[None]:
     `open_time` 平移而来还是退回观测时刻，取决于有没有偏差）。不清理的话，前一个用例
     留下的偏差会让后一个用例的会话起点凭空平移一段。
 
-    延长服务时间的两份进程内状态也一样。在途的重新分配任务留着，`on_frame` 那条"已经
-    有一轮在跑"的互斥判据就永远为真，之后的用例一次都排不进去；而"替他试过却失败了"的
-    记忆留着，下一个用例里的人会被直接跳过。
+    电源计划的进程内状态也一样。在途的放回任务留着，帧路径的排入就带着上一个用例的
+    残影；step/租约的节流标记留着，下一个用例的施加会被误判成"刚做过"。
     """
     from app.core import device_clock, events
     from app.core.connections import manager
     from app.modules.bridge.manager import registry
     from app.modules.devices import actions as device_actions
     from app.modules.doors import service as doors_service
-    from app.modules.extend_hours import service as extend_hours_service
+    from app.modules.power import service as power_service
     from app.modules.voice import service as voice_service
 
     def clear() -> None:
@@ -91,8 +71,10 @@ def _reset_process_singletons() -> Iterator[None]:
         device_actions._channel_locks.clear()
         events._subscribers.clear()
         device_clock.clear()
-        extend_hours_service._reassign_tasks.clear()
-        extend_hours_service._reassign_failed.clear()
+        power_service._tasks.clear()
+        power_service._last_step_at.clear()
+        power_service._last_arm_at.clear()
+        power_service._last_warn_at.clear()
         voice_service._tasks.clear()
 
     clear()
@@ -122,18 +104,26 @@ def _isolate_default_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
 def _schema_template(tmp_path_factory: pytest.TempPathFactory) -> str:
     """会话级空库模板：表结构只建一次，之后每个用例复制这份文件。
 
-    每用例执行一遍 init_schema 要 15 毫秒以上，而结果完全相同；复制一个已
-    checkpoint 的空库文件是亚毫秒级操作，隔离性不变（每个用例仍是独立文件）。
+    表结构走 **alembic upgrade head**，与生产建库同一来源——此前用 metadata
+    create_all，约束（如 job_runs 的枚举 CHECK）取的是模型当前值，而生产库取的
+    是迁移冻结值，两者漂移在任何测试里都不可见（2026-11-20 二楼事故的深层原因）。
+    每用例执行一遍迁移要 15 毫秒以上，而结果完全相同；复制一个已完成迁移的空库
+    文件是亚毫秒级操作，隔离性不变（每个用例仍是独立文件）。
     """
     base = tmp_path_factory.mktemp("schema-template")
     path = str(base / "template.db")
-    from app.db.base import Base
-    from app.db.engine import create_db_engine
+    server_dir = Path(__file__).resolve().parents[1]
 
-    engine = create_db_engine(f"sqlite:///{path}")
-    Base.metadata.create_all(engine)
-    # 最后一个连接关闭即 checkpoint，WAL 落盘，模板才是可整文件复制的静止状态
-    engine.dispose()
+    from alembic import command
+    from alembic.config import Config
+
+    os.environ["DATABASE_URL"] = f"sqlite:///{path}"
+    try:
+        alembic_cfg = Config(str(server_dir / "alembic.ini"))
+        alembic_cfg.set_main_option("script_location", str(server_dir / "migrations"))
+        command.upgrade(alembic_cfg, "head")
+    finally:
+        os.environ.pop("DATABASE_URL", None)
     return path
 
 

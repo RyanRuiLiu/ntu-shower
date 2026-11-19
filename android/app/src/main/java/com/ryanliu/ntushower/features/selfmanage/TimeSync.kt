@@ -3,7 +3,6 @@ package com.ryanliu.ntushower.features.selfmanage
 import android.util.Log
 import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.AppConfig
-import com.ryanliu.ntushower.core.config.RuntimeConfig
 import com.ryanliu.ntushower.core.log.DeviceLog
 import com.ryanliu.ntushower.core.shell.RootShell
 import java.io.File
@@ -76,7 +75,15 @@ object TimeSync {
             return false
         }
         if (rearm) {
-            McuPowerSchedule.schedule(RuntimeConfig.powerOffAt, RuntimeConfig.powerOnAt)
+            // 重布目标取设备本地事实（浴室 App 参数里的平台计划），不依赖服务端下发——
+            // 写钟与重布的配对不变式在设备侧自洽，服务端离线也一样成立。
+            val facts = PowerFacts.read()
+            if (facts == null) {
+                Log.w(TAG, "rearm skipped: power facts unavailable")
+                deviceLog.error("clock.set-rearm-skipped", "本地电源计划事实缺失，跳过重布")
+            } else {
+                McuPowerSchedule.schedule(facts.autoCloseTime, facts.autoOpenTime)
+            }
         }
         return true
     }

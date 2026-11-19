@@ -3,7 +3,7 @@
 目标设备一律由路径给出，请求体只带业务参数。cert_no/password 是浴室系统的
 业务凭证，随操作直传设备，真正的凭证验证发生在浴室服务器端。
 
-领域逻辑（预检、下发、过载拒绝）在 service.perform_*：scheduler 与 extend_hours
+领域逻辑（预检、下发、过载拒绝）在 service.perform_*：scheduler 与 power
 复用同一条路径。这里只做 HTTP 的事：把领域异常转给错误处理器。
 
 守卫：`sessions:write` + 对象级 device_scope 检查（auth.dependencies），外部业务

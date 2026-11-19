@@ -81,13 +81,13 @@ PRODUCTION_OVERRIDES = {
     "auto_settle_enabled": True,
     "renew_session_enabled": True,
     "renew_wait_enabled": True,
-    "extend_hours_enabled": True,
+    "hold_enabled": True,
     "automation_trace_enabled": True,
     "time_sync_enabled": True,
     "auto_settle_students": {"9999999001": "000000"},
     "renew_session_students": {"9999999003": "111111"},
-    "renew_wait_students": {"9999000002": "000000"},
-    "extend_hours_students": {"9999000004": "111111"},
+    "renew_wait_students": {"9999999002": "000000"},
+    "hold_students": {"9999000004": "111111"},
 }
 
 
@@ -285,20 +285,14 @@ def test_validate_passes_normalized_values(fresh_db: str) -> None:
     }
 
 
-def test_validate_accepts_and_rejects_times(fresh_db: str) -> None:
-    """时刻键：先看格式再看范围，两者报的是不同的错。
-
-    分开报是有用的：填错格式（`23:60`）与填得太早（`22:59`）是两种失误，混成一句
-    "不在范围内"会让人去范围里找问题，而问题在写法上。
-    """
-    assert store.validate({"power_off_at": "23:58"}) == {"power_off_at": "23:58"}
-
+def test_validate_rejects_malformed_times(fresh_db: str) -> None:
+    """时刻形状的拒绝口径（voice 生效时段与上报校验共用同一形状）：格式不对先于一切。"""
     with pytest.raises(store.InvalidConfigError, match="HH:MM"):
-        store.validate({"power_on_at": "23:60"})
+        store.validate({"notice_time_start": "23:60"})
     with pytest.raises(store.InvalidConfigError, match="HH:MM"):
-        store.validate({"power_on_at": "2349"})
+        store.validate({"notice_time_start": "2349"})
     with pytest.raises(store.InvalidConfigError, match="需要时刻文本"):
-        store.validate({"power_on_at": 2349})
+        store.validate({"notice_time_start": 2349})
 
 
 def test_validate_accepts_and_rejects_weekdays(fresh_db: str) -> None:
@@ -369,7 +363,7 @@ def test_config_spec_rendering_contract(client: TestClient, admin_headers: dict[
     groups = {g["key"]: g for g in spec["groups"]}
     assert groups["notice"]["section"] == "device"
     assert groups["renew_wait"]["section"] == "server"
-    assert groups["extend_hours"]["section"] == "server"
+    assert groups["power"]["section"] == "server"
     size = next(item for item in spec["specs"] if item["key"] == "notice_text_size_sp")
     assert size["kind"] == "int"
     assert size["scope"] == "device"
@@ -431,7 +425,7 @@ def test_global_config_roundtrip(client: TestClient, admin_headers: dict[str, st
 
     global_cfg = client.get("/api/v1/config", headers=admin_headers).json()
     assert global_cfg["config"]["notice_text_size_sp"] == 45
-    assert global_cfg["config"]["power_on_at"] == "10:55"  # 未覆盖的键仍是默认值
+    assert global_cfg["config"]["notice_time_end"] == "23:00"  # 未覆盖的键仍是默认值
 
 
 def test_global_update_rejects_invalid_values(client: TestClient, admin_headers: dict[str, str]) -> None:

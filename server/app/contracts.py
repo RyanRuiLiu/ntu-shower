@@ -54,6 +54,17 @@ class LinkEvent(StrEnum):
     OFFLINE = "offline"
 
 
+class HoldSource(StrEnum):
+    """一次 hold 的来源：运维手动触发，还是名单占用触发的自动化。
+
+    语义与取值同恒温器行业的 Hold 体系（Honeywell 手动 hold / 程序自动过渡）：
+    两种来源共用同一条状态机与同一条恢复路径，来源只进审计与看板。
+    """
+
+    MANUAL = "manual"
+    AUTOMATED = "automated"
+
+
 class DeviceLogKind(StrEnum):
     """设备上送日志的种类。"""
 
@@ -103,16 +114,15 @@ class JobOutcome(StrEnum):
     REJECTED = "rejected"
     NO_PASSWORD = "no-password"
     NOT_APPLICABLE = "not-applicable"
-    #: 延长服务时间（extend_hours）的终局：拨钟、放回与恢复。与该域日志事件名
-    #: 后缀同一套（`extend-hours.<它>`），日志与审计表两边不分叉。
-    CLOCK_MOVED = "clock-moved"
-    SHIFTED = "shifted"
-    SHIFT_FAILED = "shift-failed"
+    #: 电源计划域（power）的终局：hold 的施加与恢复、放回。取值即该域日志事件名
+    #: 后缀（`power.<它>`），日志与审计表两边不分叉。hold/resume 取恒温器行业词
+    #: （Hold Until / Resume Schedule）。
+    HOLD_APPLIED = "hold-applied"
+    HOLD_FAILED = "hold-failed"
     REASSIGNED = "reassigned"
     REASSIGN_FAILED = "reassign-failed"
-    RESTORED = "restored"
-    RESTORE_FAILED = "restore-failed"
-    RESTORE_REARM_FAILED = "restore-rearm-failed"
+    RESUMED = "resumed"
+    RESUME_FAILED = "resume-failed"
 
 
 class ApiCallKind(StrEnum):
@@ -243,10 +253,26 @@ class DeviceRecord(DeviceSummary):
     clock_skew_s: float
     """设备钟与服务端的偏差（秒）。由设备回 pong 时带上的墙上时刻算出（见 core/device_clock）。
 
-    它用来把帧里的 `open_time` / `in_time` 平移到服务端时间轴——那两个字段是"这次
-    会话从什么时候开始"的唯一线索。**绝对值不可信不代表它没用**：一次会话压在 20 分钟
+    它用来把帧里的 `open_time` / `in_time` 平移到服务端时间轴——那两个字段是"这次会话
+    从什么时候开始"的唯一线索。**绝对值不可信不代表它没用**：一次会话压在 20 分钟
     以内，而 20 分钟里的漂移只有 0.03 秒，窗口内偏差是常量。
     """
+
+    auto_close_time: str
+    """设备上报的平台每日关闭时刻（`HH:MM`，V8 autoCloseTime 原词的 snake_case）。
+
+    电源计划对账的唯一来源：hold 触发窗、恢复判定、MCU 常规布防都按它换算。
+    设备从未上报过（device.status 未到）时为空串，电源计划对账按缺失处理。
+    """
+
+    auto_open_time: str
+    """设备上报的平台每日开启时刻（`HH:MM`，V8 autoOpenTime）。hold 恢复后的 MCU 布防取它。"""
+
+    zone_offset_minutes: int | None
+    """设备上报的本机时区偏移（分钟，UTC+8 = 480）。语音生效时段按它换算当地时刻。"""
+
+    facts_at: str
+    """最近一次 device.status 到达时刻（RFC 3339）。从未上报过时为空串。"""
 
     sort_order: int
     """展示顺序：设备下拉、管理台设备表、统计接口全部按它排。管理员在设备页调整，
@@ -373,6 +399,7 @@ __all__: list[str] = [
     "DeviceSummary",
     "DoorState",
     "DoorView",
+    "HoldSource",
     "JobOutcome",
     "JobRun",
     "KeyRecord",

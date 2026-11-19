@@ -105,21 +105,6 @@ def set_device_offline(session: Session, device_id: str) -> None:
     crud.touch_seen(session, device_id, utcnow())
 
 
-def shift_clock_skew(session: Session, device_id: str, seconds: float) -> None:
-    """设备钟被整体平移 seconds 秒（可负）后，把偏差记录当场跟上。
-
-    偏差 = 服务端 − 设备：设备钟被拨快 seconds，偏差就减同量。拨钟由延长服务发起，
-    而记录若等下一次 pong 才自发跟上，那 30 秒里一切按表盘换算的目标（滚动续写、
-    恢复判定）都带着过时的偏差——实测把同一轮 tick 的滚动续写拨回了过去 15 分钟。
-    内存与落库同时改：跨重启也要是对的。
-    """
-    if not device_clock.has(device_id):
-        return  # 没有记录就无从改：拨钟本来就以"有记录"为前提
-    skew = device_clock.get(device_id) - seconds
-    device_clock.load(device_id, skew)
-    crud.set_clock_skew(session, device_id, skew)
-
-
 def record_link_event(session: Session, device_id: str, event: str, reason: str = "") -> None:
     """记一次上下线（event 取 schemas 的 LINK_ONLINE / LINK_OFFLINE）。
 
@@ -133,6 +118,22 @@ def record_link_event(session: Session, device_id: str, event: str, reason: str 
 def record_log_upload(session: Session, device_id: str, kind: str, content: str) -> None:
     """落一份设备日志上送（见 crud.append_device_log 的保留规则）。"""
     crud.append_device_log(session, device_id, DeviceLogKind(kind), content, utcnow())
+
+
+def record_status_report(
+    session: Session,
+    device_id: str,
+    auto_close_time: str,
+    auto_open_time: str,
+    zone_offset_minutes: int,
+) -> bool:
+    """落一份 device.status 上报事实（开关机计划与时区）。设备不在册返回 False。"""
+    return crud.set_power_facts(session, device_id, auto_close_time, auto_open_time, zone_offset_minutes)
+
+
+def power_facts(session: Session, device_id: str) -> tuple[str, str, int] | None:
+    """上报事实的唯一消费入口：hold 对账、voice 当地时刻、设备页展示共用。"""
+    return crud.power_facts(session, device_id)
 
 
 def latest_device_log(session: Session, device_id: str, kind: str) -> dict[str, str] | None:

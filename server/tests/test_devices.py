@@ -113,6 +113,10 @@ def test_runtime_returns_full_record(client: TestClient, admin_headers: dict[str
         "last_seen_at",
         "last_ip",
         "clock_skew_s",
+        "auto_close_time",
+        "auto_open_time",
+        "zone_offset_minutes",
+        "facts_at",
         "sort_order",
         "booted_at",
     }

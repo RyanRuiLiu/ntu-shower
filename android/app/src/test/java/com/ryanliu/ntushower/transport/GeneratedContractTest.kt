@@ -63,8 +63,7 @@ class GeneratedContractTest {
         // 之前**处于「配置缺失」状态——那段时间很短，但正好覆盖进程刚起来的那一瞬。
         assertTrue("提示文字的默认值为空是刻意的（空文案不显示），其余键必须非默认零值", ConfigDefaults.NOTICE_TEXT.isBlank())
         assertTrue("颜色要是十六进制写法", ConfigDefaults.NOTICE_TEXT_COLOR.startsWith("#"))
-        assertTrue(ConfigDefaults.POWER_OFF_AT.isNotBlank())
-        assertTrue(ConfigDefaults.POWER_ON_AT.isNotBlank())
+        assertTrue(ConfigDefaults.BATH_DB_ARCHIVE_ENABLED)
         assertTrue(ConfigDefaults.NOTICE_TEXT_SIZE_SP > 0)
         assertTrue(ConfigDefaults.STATUS_LINE_TEXT_SIZE_SP > 0)
     }

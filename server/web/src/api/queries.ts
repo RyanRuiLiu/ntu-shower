@@ -93,6 +93,10 @@ export const devicesApi = {
   reboot: (deviceId: string) => post<CommandOutcome>(devicePath(deviceId, "/reboot")),
   clockSet: (deviceId: string, datetime: string) =>
     post<CommandOutcome>(devicePath(deviceId, "/clock-set"), { datetime }),
+  hold: (deviceId: string) =>
+    post<{ device_id: string; hold_source: string; hold_started_at: string }>(devicePath(deviceId, "/hold")),
+  resume: (deviceId: string) =>
+    post<{ device_id: string; resumed: boolean }>(devicePath(deviceId, "/resume")),
   uiDump: (deviceId: string) => post<CommandOutcome>(devicePath(deviceId, "/ui-dump")),
   uiTouch: (deviceId: string, value: { x: number; y: number; to_x?: number; to_y?: number; duration_ms?: number }) =>
     post<CommandOutcome>(devicePath(deviceId, "/ui-touch"), value),

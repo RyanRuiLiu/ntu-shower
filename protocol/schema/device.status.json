@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schema/device.status.json",
+  "title": "Device power-plan facts (device to server)",
+  "allOf": [
+    {
+      "$ref": "https://example.com/schema/envelope.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "device.status"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "auto_close_time",
+            "auto_open_time",
+            "zone_offset_minutes"
+          ],
+          "properties": {
+            "auto_close_time": {
+              "type": "string",
+              "pattern": "^\\d{2}:\\d{2}$",
+              "description": "平台每日关闭时刻（`HH:MM`，V8 autoCloseTime）。从浴室 App 参数文件读取后如实上报；hold 触发窗、恢复判定与 MCU 常规布防全部按它换算——服务端不定任何时刻。"
+            },
+            "auto_open_time": {
+              "type": "string",
+              "pattern": "^\\d{2}:\\d{2}$",
+              "description": "平台每日开启时刻（`HH:MM`，V8 autoOpenTime）。恢复常规计划时的 MCU 上电目标。"
+            },
+            "zone_offset_minutes": {
+              "type": "integer",
+              "minimum": -720,
+              "maximum": 840,
+              "description": "设备默认时区偏移（分钟，UTC+8 = 480）。语音生效时段的当地时刻按它换算。"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -31,6 +31,7 @@ import com.ryanliu.ntushower.features.selfmanage.A11yGuard
 import com.ryanliu.ntushower.features.selfmanage.BathDbArchiver
 import com.ryanliu.ntushower.features.selfmanage.LogShipper
 import com.ryanliu.ntushower.features.selfmanage.OtaUpdater
+import com.ryanliu.ntushower.features.selfmanage.PowerFacts
 import com.ryanliu.ntushower.features.statusline.StatusLineController
 import com.ryanliu.ntushower.features.voice.VoiceClipStore
 import com.ryanliu.ntushower.features.voice.VoicePlayer
@@ -126,7 +127,10 @@ class AgentService : Service() {
         worker.execute {
             A11yGuard.ensureAvailable(deviceLog)
             // 修复过程本身会写 a11y.* 事件；通道已就绪就立刻送一份，不等周期
-            if (::client.isInitialized && client.isReady()) LogShipper.shipChanged(client)
+            if (::client.isInitialized && client.isReady()) {
+                LogShipper.shipChanged(client)
+                reportFactsIfChanged()
+            }
         }
 
         // 清掉上一世残留的命令 pid 文件。正常路径由 shell 包裹脚本自己删（见
@@ -197,6 +201,9 @@ class AgentService : Service() {
         return START_STICKY
     }
 
+    /** 上次上报的电源计划事实指纹；变化才重发（连上即报：初始为 null 时必发一次）。 */
+    private var lastFactsHash: Int? = null
+
     private val callback = object : GatewayClient.Callback {
         override fun onConnected(trusted: Boolean, config: JSONObject, upgrade: JSONObject?, serverTime: String) {
             this@AgentService.trusted = trusted
@@ -210,6 +217,7 @@ class AgentService : Service() {
             if (trusted) {
                 // 日志上送（见 LogShipper）：离线期间的故障现场随回连自动到服务端
                 worker.execute { LogShipper.ship(client) }
+                worker.execute { reportFactsIfChanged() }
                 worker.execute {
                     // 服务端的喷头现态可能已经被清空重建（开发期"删了重建"是常规操作），
                     // 而设备侧状态可能一直没变。先忘掉指纹，这次采集才会无条件入队，
@@ -328,6 +336,23 @@ class AgentService : Service() {
         }
         sendOutcome(
             CommandOutcome(commandId, OutcomeStatus.FAILED, ReasonCodes.PROTO_UNKNOWN_ACTION, "设备不认识这个操作：$action"),
+        )
+    }
+
+    /**
+     * 上报电源计划事实（device.status）：平台开关机时刻与本机时区。连上即报、变化才报
+     * （指纹比对，与 LogShipper 同一手法）——服务端的 hold 对账与语音当地时刻全按它
+     * 换算，服务端不定任何时刻。读不到（App 从未启动）不发：服务端按"计划未知"处理。
+     */
+    private fun reportFactsIfChanged() {
+        if (!::client.isInitialized || !client.isReady()) return
+        val facts = PowerFacts.read() ?: return
+        if (facts.fingerprint() == lastFactsHash) return
+        lastFactsHash = facts.fingerprint()
+        client.send(MessageTypes.DEVICE_STATUS, org.json.JSONObject(facts.toPayload()))
+        deviceLog.lifecycle(
+            "power.facts-reported",
+            "close=${facts.autoCloseTime} open=${facts.autoOpenTime} tz=${facts.zoneOffsetMinutes}",
         )
     }
 

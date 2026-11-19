@@ -57,9 +57,9 @@ function DeviceDetail({ deviceId }: { deviceId: string }) {
   });
   const [lastOutcome, setLastOutcome] = useState<string>("");
 
-  const run = (action: (id: string) => Promise<unknown>) => {
+  const run = (action: (id: string) => Promise<string>) => {
     return action(deviceId)
-      .then(() => setLastOutcome(`${new Date().toLocaleTimeString()} 命令已执行`))
+      .then((message) => setLastOutcome(`${new Date().toLocaleTimeString()} ${message}`))
       .catch((error: unknown) =>
         setLastOutcome(
           `${new Date().toLocaleTimeString()} 失败：${error instanceof ApiError ? error.message : String(error)}`,
@@ -94,23 +94,47 @@ function DeviceDetail({ deviceId }: { deviceId: string }) {
           size="sm"
           variant={runtime.data?.retired ? "primary" : "danger-soft"}
           onPress={() =>
-            run((id) => devicesApi.patch(id, { retired: !runtime.data?.retired })).then(() =>
+            run((id) => devicesApi.patch(id, { retired: !runtime.data?.retired }).then(() => '已更新')).then(() =>
               void queryClient.invalidateQueries({ queryKey: ["device", deviceId] }),
             )
           }
         >
           {runtime.data?.retired ? "恢复" : "停用"}
         </Button>
-        <Button size="sm" variant="ghost" onPress={() => run(devicesApi.capture)}>
+        <Button size="sm" variant="ghost" onPress={() => run(() => devicesApi.capture(deviceId).then(() => '命令已执行'))}>
           截图
         </Button>
-        <Button size="sm" variant="ghost" onPress={() => run(devicesApi.restartApp)}>
+        <Button size="sm" variant="ghost" onPress={() => run(() => devicesApi.restartApp(deviceId).then(() => '命令已执行'))}>
           重启应用
         </Button>
-        <Button size="sm" variant="ghost" onPress={() => run(devicesApi.restartBath)}>
+        <Button
+          size="sm"
+          variant="ghost"
+          onPress={() =>
+            run(async (id) => {
+              await devicesApi.hold(id);
+              return "今晚延长已建立：对账器将在下一轮施加";
+            })
+          }
+        >
+          今晚延长
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onPress={() =>
+            run(async (id) => {
+              const result = await devicesApi.resume(id);
+              return result.resumed ? "已恢复常规电源计划" : "设备未在延长中，无需恢复";
+            })
+          }
+        >
+          恢复计划
+        </Button>
+        <Button size="sm" variant="ghost" onPress={() => run(() => devicesApi.restartBath(deviceId).then(() => '命令已执行'))}>
           重启浴室 App
         </Button>
-        <Button size="sm" variant="danger-soft" onPress={() => run(devicesApi.reboot)}>
+        <Button size="sm" variant="danger-soft" onPress={() => run(() => devicesApi.reboot(deviceId).then(() => '命令已执行'))}>
           重启设备
         </Button>
       </div>

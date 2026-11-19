@@ -217,8 +217,8 @@ function JobBoard({ data }: { data: Awaited<ReturnType<typeof jobsApi.status>> |
                 </span>
                 <span className="text-xs text-default-500">名单 {job.students_count} 人</span>
               </div>
-              {job.key === "extend_hours" ? (
-                <ExtendSection extending={data.extending} />
+              {job.key === "power" ? (
+                <HoldSection holds={data.holds} />
               ) : rows.length === 0 ? (
                 <p className="text-xs text-default-500">当前没有排定的动作</p>
               ) : (
@@ -229,7 +229,7 @@ function JobBoard({ data }: { data: Awaited<ReturnType<typeof jobsApi.status>> |
                   </div>
                 ))
               )}
-              {nextAt && job.key !== "extend_hours" && (
+              {nextAt && job.key !== "power" && (
                 <div className="mt-1 text-xs text-indigo-300">下次执行 {fmtFullDateTime(nextAt)}</div>
               )}
             </div>
@@ -240,14 +240,15 @@ function JobBoard({ data }: { data: Awaited<ReturnType<typeof jobsApi.status>> |
   );
 }
 
-function ExtendSection({ extending }: { extending: NonNullable<Awaited<ReturnType<typeof jobsApi.status>>>["extending"] }) {
-  if (extending.length === 0) {
+function HoldSection({ holds }: { holds: NonNullable<Awaited<ReturnType<typeof jobsApi.status>>>["holds"] }) {
+  if (holds.length === 0) {
     return <p className="text-xs text-default-500">当前没有设备在延长中</p>;
   }
-  return extending.map((shift) => (
-    <div key={shift.device_id} className="text-xs text-default-500">
-      <span className="font-mono">{shift.device_id}</span> 钟已拨快 {shift.shift_minutes} 分钟 · 已放回{" "}
-      {shift.reassigned_count}/{shift.total} · MCU 截止 {shift.mcu_off_at || "—"}
+  return holds.map((hold) => (
+    <div key={hold.device_id} className="text-xs text-default-500">
+      <span className="font-mono">{hold.device_id}</span> {hold.hold_source === "manual" ? "手动" : "自动"} hold · 已放回{" "}
+      {hold.reassigned_count}/{hold.total} · MCU 截止 {hold.lease_deadline || "—"}
+      · 恢复条件 {hold.past_close && hold.idle ? "已齐，下一轮生效" : `${hold.past_close ? "close 已过" : "close 未过"} / ${hold.idle ? "喷头空闲" : "仍有会话"}`}
     </div>
   ));
 }

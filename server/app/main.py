@@ -62,11 +62,12 @@ from .modules.devices.routes import device_read_router as devices_device_read_ro
 from .modules.devices.routes import device_router as devices_device_router
 from .modules.devices.routes import router as devices_router
 from .modules.doors.routes import router as doors_router
-from .modules.extend_hours import service as extend_hours_service
 from .modules.freelist.routes import router as freelist_router
 from .modules.jobs.routes import admin_router as jobs_admin_router
 from .modules.ota.routes import device_router as ota_device_router
 from .modules.ota.routes import router as ota_router
+from .modules.power import service as power_service
+from .modules.power.routes import router as power_router
 from .modules.sessions import scheduler as sessions_scheduler
 from .modules.sessions.routes import router as sessions_router
 from .modules.status_line import service as status_line_service
@@ -139,18 +140,20 @@ def create_app() -> FastAPI:
         with _app.state.database.new_session() as session:
             session.execute(text("SELECT 1"))
         # 间隔任务统一装配：各模块只提供「一轮做什么」，生命周期集中在这一个对象上。
-        background.interval("extend-hours", extend_hours_service.TICK_INTERVAL_S, extend_hours_service.tick_once)
+        background.interval("power", power_service.TICK_INTERVAL_S, power_service.tick_once)
         background.interval("status-line", status_line_service.PUSH_INTERVAL_S, status_line_service.tick)
         background.interval("audit-prune", retention.PRUNE_INTERVAL_S, retention.prune_once)
         # 库维护：设备夜间关机后的静默窗口里归还滚动删除留下的空闲页（VACUUM）
         background.interval("maintenance", retention.VACUUM_INTERVAL_S, retention.maybe_vacuum)
         _abort_pending_commands()
+        power_service.start()
         background.start()
         # 事件驱动型任务保持自己的模型：按设备惰性起 worker，不占统一循环。
         sessions_scheduler.start()
         yield
         await sessions_scheduler.stop()
         await background.stop()
+        await power_service.stop()
         _app.state.database.dispose()
 
     # 调试 UI（/docs、/redoc）不对外：对外契约是 /openapi.json（外部调用方拿它
@@ -207,6 +210,7 @@ def create_app() -> FastAPI:
     app.include_router(devices_device_router)
     app.include_router(devices_device_read_router)
     app.include_router(freelist_router)
+    app.include_router(power_router)
     app.include_router(config_admin_router)
     app.include_router(ota_router)
     app.include_router(ota_device_router)

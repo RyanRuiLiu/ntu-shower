@@ -135,20 +135,16 @@ SECTIONS: tuple[tuple[str, str], ...] = (
     ("device", "设备下发"),
 )
 
-#: 界面分组清单：顺序即配置页卡片顺序（设备侧那几块按改动的频繁程度排——遮罩实测常改，
-#: 链路、守护、自更新是一次性调好的）。
-#: **从原来按主题分的组里拆出来的服务端那几块换了组名**（`server_link` / `server_ui` /
-#: `server_bridge` / `server_clock`），不与设备侧的同名组混在一起——同一个名字只能指一件事。
+#: 界面分组清单：顺序即配置页卡片顺序。
 #: 分组元数据只在这里一份，前端据此分卡片渲染，不在各处硬编码键表。
 GROUPS: tuple[GroupSpec, ...] = (
     # ── 后台任务：在服务器上运行，不下发设备 ──
     GroupSpec("renew_wait", "预约续期", "server"),
     GroupSpec("renew_session", "会话续期", "server"),
     GroupSpec("auto_settle", "自动结算", "server"),
-    GroupSpec("extend_hours", "延长服务时间", "server"),
+    GroupSpec("power", "延长服务时间", "server"),
     GroupSpec("server_clock", "自动校时", "server"),
     # ── 设备下发：会推到设备，支持单台覆盖 ──
-    GroupSpec("power", "电源计划", "device"),
     GroupSpec("notice", "屏幕提示", "device"),
     GroupSpec("notice_condition", "提示条件", "device"),
     GroupSpec("status_line", "楼层状态行", "device"),
@@ -169,11 +165,8 @@ WEEKDAYS = ConfigKind.WEEKDAYS
 
 #: 跨模块引用的配置键名。以字符串字面量散落在消费方迟早漂移（登记表改名一处、
 #: 消费方三处），跨模块引用一律取这里的常量。
-EXTEND_HOURS_STUDENTS_KEY = "extend_hours_students"
-SERVER_ZONE_OFFSET_MINUTES_KEY = "server_zone_offset_minutes"
-POWER_ON_AT_KEY = "power_on_at"
-POWER_OFF_AT_KEY = "power_off_at"
-EXTEND_HOURS_ENABLED_KEY = "extend_hours_enabled"
+HOLD_ENABLED_KEY = "hold_enabled"
+HOLD_STUDENTS_KEY = "hold_students"
 TIME_SYNC_ENABLED_KEY = "time_sync_enabled"
 
 
@@ -591,74 +584,41 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         group="auto_settle",
     ),
     ConfigSpec(
-        "extend_hours_enabled",
+        "hold_enabled",
         BOOL,
         SERVER,
         False,
         "启用延长服务时间",
-        "浴室 App 每日按时关机，并在关机前释放全部喷头。开启后，服务端在触发时刻先重布"
-        "MCU 定时开关机（跳过当晚断电），再将设备时钟前移一段可配置的时间并清空喷头，"
-        "把名单内学号重新分配回原喷头；喷头全部空闲且过了午夜后，设备时钟恢复原值",
-        group="extend_hours",
+        "浴室 App 每日按平台下发的时刻关机，并在关机前释放全部喷头。开启后，名单内学生"
+        "仍在占用的夜晚，服务端按设备上报的计划自动施加 hold（钟面偏置 + MCU 租约）,"
+        "让服务跨过平台的关机时刻；也可在设备页对单台手动建立今晚 hold。全部时刻按设备"
+        "上报的平台计划自适应，本页不定任何时刻",
+        group="power",
     ),
     ConfigSpec(
-        "extend_hours_students",
+        "hold_students",
         TEXT_MAP,
         SERVER,
         {},
         "延长服务时间名单",
-        "只在这些学号还有会话时才拨钟，一行一个（格式：学号=密码）。留空表示谁都不做。"
-        "**凭证跟着这份名单走**：拨钟之后要替他们重新分配喷头，那一步要用密码——"
-        "四份名单各自完整，配一份就读得懂一份",
-        group="extend_hours",
+        "只在这些学号还有会话时才自动 hold，一行一个（格式：学号=密码）。留空表示谁都不做。"
+        "**凭证跟着这份名单走**：hold 之后要替他们重新分配喷头，那一步要用密码——"
+        "四份名单各自完整，配一份就读得懂一份。设备页的「今晚延长」不受此名单限制",
+        group="power",
     ),
     # ── 自动校时 ──
-    ConfigSpec(
-        "server_zone_offset_minutes",
-        INT,
-        SERVER,
-        480,
-        "设备时区偏移",
-        "设备墙钟与 UTC 的差，用来把设备钟换算成「设备表盘上现在几点」。默认 480 即 UTC+8。"
-        "**它是设备的事实而不是我们的策略**：浴室 App 判时间用的是设备默认时区，配错会让"
-        "一切按表盘换算的动作（拨钟时机、校时判定）整体错位一小时，而且不报任何错。"
-        "延长服务与自动校时共用这一个换算轴——设备的表盘只有一个",
-        minimum=-720,
-        maximum=840,
-        unit="分钟",
-        group="server_clock",
-    ),
     ConfigSpec(
         "time_sync_enabled",
         BOOL,
         SERVER,
         False,
         "启用自动校时",
-        "服务端每 30 秒检查一次设备钟偏差，超过阈值即把设备钟写准，并按电源计划重布 MCU。"
-        "设备没有 NTP，时钟靠 RTC 维持、会跑偏（实测快过整 1 小时）；依赖开关机计划准确时"
-        "应开启。三种情形自动让位：延长服务期间（偏差是故意的）、设备上有人占用（校钟的"
-        "跳变会清掉会话）、还没有偏差记录（无从判）。设备页的「校正时间」是手动动作，"
-        "不受此开关影响。默认关闭",
+        "服务端每 30 秒检查一次设备钟偏差，超过阈值即把设备钟一次性写准（设备端随后按"
+        "自己上报的计划重布 MCU）。设备没有 NTP，时钟靠 RTC 维持、会跑偏（实测快过整 "
+        "1 小时）；依赖开关机计划准确时应开启。三种情形自动让位：hold 期间（偏差是故意"
+        "的）、设备上有人占用（校钟的跳变会清掉会话）、还没有偏差记录（无从判）。设备页"
+        "的「校正时间」是手动动作，不受此开关影响。默认关闭",
         group="server_clock",
-    ),
-    ConfigSpec(
-        "power_off_at",
-        TIME,
-        DEVICE,
-        "23:58",
-        "每日断电时刻",
-        "设备 MCU 每日定时断电的时刻（浴室 App 从 V8 平台拿到的是同一个值）。"
-        "延长服务与自动校时都用它换算重布 MCU 的目标时刻；改它要与浴室平台那侧保持一致",
-        group="power",
-    ),
-    ConfigSpec(
-        "power_on_at",
-        TIME,
-        DEVICE,
-        "10:55",
-        "每日上电时刻",
-        "设备 MCU 每日定时上电的时刻。重布 MCU 时与「每日断电时刻」成对使用：开机延时从断电时刻起算，到这个时刻上电",
-        group="power",
     ),
 )
 

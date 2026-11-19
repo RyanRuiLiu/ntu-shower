@@ -384,8 +384,8 @@ function refreshTaskCountdowns() {
  * 四个后台任务各一段：开关与名单、下次执行（倒计时）、每条在等动作的完整明细。
  *
  * 只报告状态、不做判断：判据在服务端只有一处出处，这里把它显示出来。排定的动作按
- * 功能归到各自的任务段；extend_hours 不走调度器，它自己的现状是"拨快状态 + MCU
- * 武装的截止 + 恢复条件逐项"。设备名用全站同一种单元格（悬停看 id），任务板只额外
+ * 功能归到各自的任务段；power 不走调度器，它自己的现状是"hold 状态 + MCU
+ * 租约到点 + 恢复条件逐项"。设备名用全站同一种单元格（悬停看 id），任务板只额外
  * 加粗。倒计时是这块的锚点——每秒走字，其余一切安静。
  */
 function renderTaskBoard(data) {
@@ -403,35 +403,34 @@ function renderTaskBoard(data) {
         ${nextAt ? `<span class="task-next">下次执行 <span data-at="${esc(nextAt)}">${esc(countdownText(nextAt))}</span></span>` : ''}
       </div>`
 
-    if (task.key === 'extend_hours') {
+    if (task.key === 'power') {
       const body =
-        data.extending.length === 0
+        data.holds.length === 0
           ? '<div class="task-hint">当前没有设备在延长中</div>'
-          : data.extending
-              .map((shift) => {
+          : data.holds
+              .map((hold) => {
                 const flags = [
-                  { ok: shift.past_midnight, yes: '午夜已过', no: '未过午夜' },
-                  { ok: shift.idle, yes: '喷头空闲', no: '仍有会话' },
+                  { ok: hold.past_close, yes: 'close 已过', no: 'close 未过' },
+                  { ok: hold.idle, yes: '喷头空闲', no: '仍有会话' },
                 ]
                   .map(({ ok, yes, no }) => `<span class="task-flag ${ok ? 'ok' : 'no'}">${ok ? yes : no}</span>`)
                   .join('')
-                  + (shift.past_midnight && shift.idle ? '<span class="task-flag ok">即将拨回</span>' : '')
+                  + (hold.past_close && hold.idle ? '<span class="task-flag ok">即将恢复</span>' : '')
                 const pending =
-                  shift.pending.length === 0
+                  hold.pending.length === 0
                     ? ''
-                    : `<div class="task-sub">待分配 ${shift.pending.length} 人：${shift.pending
+                    : `<div class="task-sub">待放回 ${hold.pending.length} 人：${hold.pending
                         .map((item) => `#${esc(item.door_no)} ${esc(item.cert_no)}`)
                         .join('  ')}</div>`
                 return `
                 <div class="task-entry">
                   <div class="task-line">
-                    ${deviceCell(shift.device_id, 'task-dev')}
-                    <span class="muted">钟已拨快 ${shift.shift_minutes} 分钟（${esc(fmtDateTime(shift.shifted_at))}）</span>
-                    <span class="task-next">滚动续写每 ${Math.round(shift.rearm_interval_s / 60)} 分钟</span>
+                    ${deviceCell(hold.device_id, 'task-dev')}
+                    <span class="muted">hold 中（${esc(hold.hold_source === 'manual' ? '手动' : '自动')}，${esc(fmtDateTime(hold.hold_started_at))}）</span>
                   </div>
                   <div class="task-sub">
-                    <span>MCU 截止 <span class="mono">${esc(shift.mcu_off_at || '—')}</span></span>
-                    <span>已放回 ${shift.reassigned_count}/${shift.total}</span>
+                    <span>MCU 租约到点 <span class="mono">${esc(hold.lease_deadline || '—')}</span></span>
+                    <span>已放回 ${hold.reassigned_count}/${hold.total}</span>
                     ${flags}
                   </div>
                   ${pending}

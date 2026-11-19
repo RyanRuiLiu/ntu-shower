@@ -1,6 +1,6 @@
 [project]
 name = "ntu-shower-server"
-version = "0.7.5"
+version = "0.8.0"
 description = "NTU 浴室系统服务端：设备网关 / 用户 API / 管理面 / OTA（FastAPI 模块化单体）"
 requires-python = ">=3.13"
 # 抽象依赖（兼容范围）。精确锁定版本见 requirements.txt——PyPA 标准分工：
@@ -121,8 +121,8 @@ exclude_lines = [
 # - 共享模块：config（配置中心）、devices（设备命令平面）——任何域可引用；
 # - 业务模块彼此零引用（independence），声明边逐条列在 forbidden 里：
 #     sessions → doors（分配预检读门现态）
-#     extend_hours → sessions、doors（续期判据与门现态）
-#     jobs → extend_hours、sessions（看板读两域的即时状态）
+#     power → sessions、doors（放回分配与门现态）
+#     jobs → power、sessions（看板读两域的即时状态）
 #     status_line → doors（楼层汇总读门现态）
 #     voice → doors（规则目标校验读门现态）
 [tool.importlinter]
@@ -162,7 +162,7 @@ name = "业务模块彼此零引用（二）"
 type = "independence"
 modules = ["app.modules.audit", "app.modules.doors", "app.modules.freelist", "app.modules.ota", "app.modules.water"]
 
-# 以下五条 = 声明边之外的组合一律禁止（含 jobs / sessions / extend_hours 的白名单）
+# 以下五条 = 声明边之外的组合一律禁止（含 jobs / sessions / power 的白名单）
 [[tool.importlinter.contracts]]
 name = "sessions 只许引用 doors"
 type = "forbidden"
@@ -171,20 +171,20 @@ source_modules = ["app.modules.sessions"]
 forbidden_modules = [
     "app.modules.audit",
     "app.modules.bridge",
-    "app.modules.extend_hours",
     "app.modules.freelist",
     "app.modules.jobs",
     "app.modules.ota",
+    "app.modules.power",
     "app.modules.status_line",
     "app.modules.voice",
     "app.modules.water",
 ]
 
 [[tool.importlinter.contracts]]
-name = "extend_hours 只许引用 sessions 与 doors"
+name = "power 只许引用 sessions 与 doors"
 type = "forbidden"
 allow_indirect_imports = true
-source_modules = ["app.modules.extend_hours"]
+source_modules = ["app.modules.power"]
 forbidden_modules = [
     "app.modules.audit",
     "app.modules.bridge",
@@ -197,7 +197,7 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "jobs 只许引用 extend_hours 与 sessions"
+name = "jobs 只许引用 power 与 sessions"
 type = "forbidden"
 allow_indirect_imports = true
 source_modules = ["app.modules.jobs"]
@@ -220,7 +220,7 @@ source_modules = ["app.modules.status_line"]
 forbidden_modules = [
     "app.modules.audit",
     "app.modules.bridge",
-    "app.modules.extend_hours",
+    "app.modules.power",
     "app.modules.freelist",
     "app.modules.jobs",
     "app.modules.ota",
@@ -237,7 +237,7 @@ source_modules = ["app.modules.voice"]
 forbidden_modules = [
     "app.modules.audit",
     "app.modules.bridge",
-    "app.modules.extend_hours",
+    "app.modules.power",
     "app.modules.freelist",
     "app.modules.jobs",
     "app.modules.ota",
@@ -253,7 +253,7 @@ source_modules = ["app.modules.doors"]
 forbidden_modules = [
     "app.modules.audit",
     "app.modules.bridge",
-    "app.modules.extend_hours",
+    "app.modules.power",
     "app.modules.freelist",
     "app.modules.jobs",
     "app.modules.ota",

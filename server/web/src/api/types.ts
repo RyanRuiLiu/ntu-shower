@@ -73,6 +73,10 @@ export interface DeviceRecord extends DeviceSummary {
   last_ip: string;
   booted_at: string;
   clock_skew_s: number;
+  auto_close_time: string;
+  auto_open_time: string;
+  zone_offset_minutes: number | null;
+  facts_at: string;
   sort_order: number;
 }
 
@@ -125,17 +129,17 @@ export interface DoorAssignment {
   cert_no: string;
 }
 
-export interface ExtendingDevice {
+export interface HoldStatus {
   device_id: string;
-  shift_minutes: number;
-  shifted_at: string;
+  hold_source: string;
+  hold_started_at: string;
+  hold_offset_s: number | null;
+  lease_deadline: string;
   total: number;
   reassigned_count: number;
   pending: DoorAssignment[];
-  mcu_off_at: string;
-  rearm_interval_s: number;
+  past_close: boolean;
   idle: boolean;
-  past_midnight: boolean;
 }
 
 export interface ScheduledAction {
@@ -154,7 +158,7 @@ export interface ScheduledAction {
 
 export interface JobsStatus {
   jobs: JobStatus[];
-  extending: ExtendingDevice[];
+  holds: HoldStatus[];
   scheduled: ScheduledAction[];
 }
 

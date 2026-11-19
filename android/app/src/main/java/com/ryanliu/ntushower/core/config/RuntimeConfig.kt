@@ -157,12 +157,7 @@ object RuntimeConfig {
     @Volatile var bathDbArchiveEnabled = ConfigDefaults.BATH_DB_ARCHIVE_ENABLED
         private set
 
-    // ── 电源计划 ──
-    @Volatile var powerOffAt = ConfigDefaults.POWER_OFF_AT
-        private set
-
-    @Volatile var powerOnAt = ConfigDefaults.POWER_ON_AT
-        private set
+    // ── 电源计划：开关机时刻改由设备本地事实（PowerFacts）自持，不再是服务端下发键 ──
 
     /**
      * 把每个键复位为 [ConfigDefaults] 的值。
@@ -251,10 +246,6 @@ object RuntimeConfig {
             { c, key -> homeBudgetMs = atLeastOne(c.optLong(key, homeBudgetMs)) },
         "bath_db_archive_enabled" to
             { c, key -> bathDbArchiveEnabled = c.optBoolean(key, bathDbArchiveEnabled) },
-        "power_off_at" to
-            { c, key -> powerOffAt = c.optString(key, powerOffAt) },
-        "power_on_at" to
-            { c, key -> powerOnAt = c.optString(key, powerOnAt) },
     )
 
     /** 应用下发的配置；未知键忽略（服务端可能比设备端新，新增键由后续版本消化）。 */

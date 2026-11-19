@@ -414,7 +414,7 @@ mcugetcmdvalue（本驱动未实现，全部 -1）、`0xA8` mcusetcmd；`enable`
 **眼前**（剩 5 分钟）→ 09:41 断电。拨钟本身不改倒计时的"存在"，改的是它相对钟面
 的剩余量。
 
-**power.schedule 的前身（2026-10-04 的手动验证记录）**：当时 extend_hours 靠 APP 重启
+**power.schedule 的前身（2026-10-04 的手动验证记录）**：当时延长服务靠 APP 重启
 重读计划重写 MCU，这里的手动布防证明了"直接重布即可，**不拨钟、不重启 APP、不碰
 会话时间轴**"。这条 dalvikvm 路径现已封装为 `power.schedule` 动作（agent 内经
 libposix.so 直调 ioctl）：
@@ -429,7 +429,7 @@ LD_LIBRARY_PATH=/system/lib dalvikvm -cp /data/local/tmp/mcu.jar mcu.Main on <on
 现行机制不在本文复述：延长期间 MCU 截止按**滚动窗口**续写（每 2 分钟重写为
 "表盘此刻 + 10 分钟"；续写失败下一轮 30 秒的 tick 就重试。服务端消失最迟一个
 窗口后断电），恢复条件与全部判据见
-`server/app/modules/extend_hours/service.py` 的模块注释；动作行为见
+`server/app/modules/power/service.py` 的模块注释；动作行为见
 `server/app/core/actions.py` 的 `POWER_SCHEDULE`；钟偏差的自动校正（`time_sync_enabled`）
 也在同一处。
 

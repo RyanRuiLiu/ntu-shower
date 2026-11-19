@@ -119,12 +119,6 @@ object ConfigDefaults {
     /** 启用数据库归档 */
     const val BATH_DB_ARCHIVE_ENABLED = true
 
-    /** 每日断电时刻 */
-    const val POWER_OFF_AT = "23:58"
-
-    /** 每日上电时刻 */
-    const val POWER_ON_AT = "10:55"
-
     /** 全部默认值拼成一个对象，供 `RuntimeConfig.resetToDefaults` 复位用。 */
     fun asJson(): JSONObject = JSONObject()
         .put("notice_enabled", NOTICE_ENABLED)
@@ -162,6 +156,4 @@ object ConfigDefaults {
         .put("cert_verify_wait_ms", CERT_VERIFY_WAIT_MS)
         .put("home_timeout_ms", HOME_TIMEOUT_MS)
         .put("bath_db_archive_enabled", BATH_DB_ARCHIVE_ENABLED)
-        .put("power_off_at", POWER_OFF_AT)
-        .put("power_on_at", POWER_ON_AT)
 }

@@ -1,8 +1,8 @@
-"""设备域的表：影子行（档案+配置覆盖+拨钟态+停用位）、凭据、日志与链路事件。
+"""设备域的表：影子行（档案+配置覆盖+电源计划+停用位）、凭据、日志与链路事件。
 
 「设备」是单一归属的领域，表按实体前缀 `device_` 统一。`devices` 是设备影子
-（AWS IoT Shadow 同型）：一行承载档案、配置覆盖、拨钟态与停用位——低频的
-一行一设备状态不另立表。
+（AWS IoT Shadow 同型）：一行承载档案、配置覆盖、上报事实（开关机计划与时区）、
+hold 状态与停用位——低频的一行一设备状态不另立表。
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Any
 from sqlalchemy import JSON, Boolean, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.contracts import DeviceLogKind, LinkEvent
+from app.contracts import DeviceLogKind, HoldSource, LinkEvent
 from app.db.base import Base, CreatedAtMixin, TimestampMixin, UtcDateTime, enum_column
 
 
@@ -37,10 +37,23 @@ class Device(TimestampMixin, Base):
     booted_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
     #: 设备钟与服务端钟的偏差（秒），用于判断设备时间是否被改过
     clock_skew_s: Mapped[float] = mapped_column(default=0.0)
-    #: 拨钟态：非空即「设备钟还偏着」。assignments 是拨钟那一刻的占用归属
-    #: （门号 → 学号），延长服务据此把人分配回去。
-    clock_shifted_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
-    clock_shift_assignments: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, default=None)
+    # ── 上报事实（device.status 帧）：设备从浴室 App 参数文件读到的平台开关机计划 ──
+    # 列名镜像 V8 平台的 autoCloseTime / autoOpenTime（与 doors 域镜像 openTime 同一先例）。
+    auto_close_time: Mapped[str | None] = mapped_column(String(5), default=None)
+    auto_open_time: Mapped[str | None] = mapped_column(String(5), default=None)
+    #: 设备默认时区偏移（分钟；UTC+8 = 480）。浴室 App 判时刻用的是本机时区。
+    zone_offset_minutes: Mapped[int | None] = mapped_column(Integer, default=None)
+    facts_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
+    # ── hold 状态：非空即「今晚在 hold 中」（恒温器 Hold Until 语义，一次性）──
+    hold_started_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
+    hold_source: Mapped[HoldSource | None] = mapped_column(enum_column(HoldSource, "hold_source"), default=None)
+    #: 已施加的钟面偏移（秒；NULL = 意图已建、尚未施加）。施加后墙钟 = 真实 + 偏移。
+    hold_offset_s: Mapped[int | None] = mapped_column(Integer, default=None)
+    #: 施加瞬间的名单占用快照与放回标记 [{door_no, cert_no, done}]。放回是一次性的。
+    hold_assignments: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, default=None)
+    #: MCU 租约到点（真实轴）：hold 期间每 LEASE_RENEW_INTERVAL_S 续租一次，服务端
+    #: 消失后最迟一个租期断电（失效安全，DHCP/etcd lease 同型）。
+    lease_deadline: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
     #: 单台配置覆盖。存的是与默认值的差异，空对象/修订号 0 即全部沿用默认。
     #: 生效值每次现算：默认 ← 全局 ← 设备。
     config_revision: Mapped[int] = mapped_column(Integer, default=0)

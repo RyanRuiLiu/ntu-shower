@@ -231,9 +231,9 @@ def record_job_run(
 ) -> None:
     """后台任务终局的唯一写路径：日志与 job_runs 表同一条路。
 
-    sessions（自动结算/续期）与 extend_hours（延长服务）两个域共用——散在各域
+    sessions（自动结算/续期）与 power（电源计划）两个域共用——散在各域
     各写一份迟早出现「记了日志、没落表」。`event` 是完整日志事件名（各域自带
-    前缀，如 `job.settled` / `extend-hours.shifted`）；`extra` 只进日志（状态码、
+    前缀，如 `job.settled` / `power.hold-applied`）；`extra` 只进日志（状态码、
     设备原话这类给人看的细节），door_no/cert_no 未显式传入 extra 时用参数值。
     """
     log_fields: dict[str, object] = {"device_id": device_id, "job": job, **(extra or {})}

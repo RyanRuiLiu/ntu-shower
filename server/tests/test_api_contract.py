@@ -22,8 +22,9 @@ from app.main import app
 _SCHEMA = app.openapi()
 _COMPONENTS = _SCHEMA.get("components", {}).get("schemas", {})
 
-#: 桥端点不等待设备命令结果（本地建桥/回收），返回各自的报告而非 CommandOutcome。
-_BRIDGE_REPORTS = {"BridgeOpened", "BridgeClosed"}
+#: 管理动作端点不等待设备命令结果：桥（本地建桥/回收）与电源计划（hold/resume
+#: 是影子行状态动作，不是设备命令）返回各自的报告而非 CommandOutcome。
+_MANAGEMENT_REPORTS = {"BridgeOpened", "BridgeClosed", "HoldStatus", "PowerActionResult"}
 
 
 def _resolve_ref(schema: dict) -> str:
@@ -78,7 +79,7 @@ def test_device_action_posts_share_command_outcome() -> None:
             continue
         schema = post["responses"]["200"]["content"]["application/json"]["schema"]
         ref = _resolve_ref(schema)
-        allowed = {"CommandOutcome"} | _BRIDGE_REPORTS
+        allowed = {"CommandOutcome"} | _MANAGEMENT_REPORTS
         assert ref in allowed, f"POST {path} 的响应不是命令动作族的统一形状：{ref}"
 
 

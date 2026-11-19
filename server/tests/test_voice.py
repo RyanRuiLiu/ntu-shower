@@ -155,6 +155,16 @@ def _event(
     )
 
 
+def _seed_device_facts(*device_ids: str) -> None:
+    """上报事实种子：voice 的当地时刻按设备上报的时区换算（缺报即跳过匹配）。"""
+    from app.db.session import session_scope
+
+    ids = device_ids or (DEVICE_ID,)
+    with session_scope() as session:
+        for device_id in ids:
+            devices_service.record_status_report(session, device_id, "23:58", "10:55", 480)
+
+
 def _ok_outcome(downloaded: bool | None = None) -> CommandOutcome:
     data = {"downloaded": downloaded} if downloaded is not None else None
     return CommandOutcome(status="ok", reason_code="", terminal_message="", data=data)
@@ -1087,6 +1097,7 @@ def test_handle_events_delivers_once(
     assets: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _seed_device_facts()
     _create(
         client,
         admin_headers,
@@ -1158,6 +1169,7 @@ def test_handle_events_specific_rule_and_exemption_yields(
     assets: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _seed_device_facts(DEVICE_ID, OTHER_DEVICE_ID)
     _create(
         client,
         admin_headers,
@@ -1562,10 +1574,18 @@ def _door_payload(**overrides: object) -> dict[str, object]:
     return door
 
 
-def test_dispatch_uses_server_local_time(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """时段按服务端当地时间判断：设备钟被拨快也不参与。"""
+def test_dispatch_uses_device_reported_local_time(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """时段按设备上报的时区换算当地时间：设备钟被拨快也不参与。"""
     captured: dict[str, object] = {}
     monkeypatch.setattr(service, "now_rfc3339", lambda: "2026-01-05T14:00:00.000Z")
+    from tests import device_link
+
+    device_link.register_trusted_device("dev-voice")
+    from app.db.session import session_scope
+    from app.modules.devices import service as devices_service
+
+    with session_scope() as session:
+        devices_service.record_status_report(session, "dev-voice", "23:58", "10:55", 480)
 
     def capture(_session: Session, _device_id: str, _cert_no: str, _event: str, local: object) -> list[object]:
         captured["local"] = local

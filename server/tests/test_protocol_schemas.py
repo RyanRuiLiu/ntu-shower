@@ -38,9 +38,17 @@ KNOWN_TYPES = [
     "bridge.open",
     "bridge.close",
     "device.log_upload",
+    "device.status",
 ]
 
 SAMPLES: dict[str, dict[str, Any]] = {
+    "device.status": {
+        "payload": {
+            "auto_close_time": "23:58",
+            "auto_open_time": "10:55",
+            "zone_offset_minutes": 480,
+        }
+    },
     "link.hello": {
         "payload": {
             "device_id": "a1b2c3d4e5f60708",

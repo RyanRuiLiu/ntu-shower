@@ -3,11 +3,14 @@
 响应用 TypedDict：响应不需要运行时校验，零开销，与项目"请求用 Pydantic、
 响应用 TypedDict"的分工一致（见 sessions/schemas.py 的模块注释）。
 
-行的形状由来源模块（extend_hours.current_shifts、scheduler.snapshot）与
-本文件共同钉住，tests/test_jobs.py 断言字段。
+行的形状由来源模块（power.holds、scheduler.snapshot）与本文件共同钉住，
+tests/test_jobs.py 断言字段。hold 的形状（HoldStatus / DoorAssignment）住在
+power/schemas.py——它是电源计划域自己的契约，看板只是转发。
 """
 
 from typing_extensions import TypedDict
+
+from app.modules.power.schemas import DoorAssignment, HoldStatus
 
 
 class JobStatus(TypedDict):
@@ -17,33 +20,6 @@ class JobStatus(TypedDict):
     title: str
     enabled: bool
     students_count: int
-
-
-class DoorAssignment(TypedDict):
-    """延长服务记下的"谁在哪个喷头"。"""
-
-    door_no: int
-    cert_no: str
-
-
-class ExtendingDevice(TypedDict):
-    """正在延长服务中的设备：拨快幅度、拨快时刻、MCU 武装的截止与恢复条件。
-
-    恢复条件两项（`past_midnight` 真实时间过午夜、`idle` 喷头全部空闲）逐项给出：
-    两项齐了之后的一轮 tick（`tick_interval_s` 内）就会拨回。`pending` 是尚未放回
-    的人——浴室端收回谁，谁就是走了，放回是一次性的。
-    """
-
-    device_id: str
-    shift_minutes: int
-    shifted_at: str
-    total: int
-    reassigned_count: int
-    pending: list[DoorAssignment]
-    mcu_off_at: str
-    rearm_interval_s: int
-    idle: bool
-    past_midnight: bool
 
 
 class ScheduledAction(TypedDict):
@@ -70,18 +46,18 @@ class ScheduledAction(TypedDict):
 class JobsStatus(TypedDict):
     """后台任务的当前态（概览页看板）。
 
-    纯只读的组合，三个部分各自来自自己的域：开关与名单是全局配置，延长中是
-    `extend_hours` 的落库状态，已排定是调度器内存里的定时器。
+    纯只读的组合，三个部分各自来自自己的域：开关与名单是全局配置，hold 是
+    电源计划域的落库状态，已排定是调度器内存里的定时器。
     """
 
     jobs: list[JobStatus]
-    extending: list[ExtendingDevice]
+    holds: list[HoldStatus]
     scheduled: list[ScheduledAction]
 
 
 __all__: list[str] = [
     "DoorAssignment",
-    "ExtendingDevice",
+    "HoldStatus",
     "JobStatus",
     "JobsStatus",
     "ScheduledAction",

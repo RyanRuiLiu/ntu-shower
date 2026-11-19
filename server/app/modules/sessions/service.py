@@ -1,6 +1,6 @@
 """会话域服务：分配、结算的领域入口（HTTP 与后台任务共用）。
 
-从 routes 下沉的原因：scheduler（自动结算/续期）与 extend_hours（延长服务）
+从 routes 下沉的原因：scheduler（自动结算/续期）与 power（放回分配）
 复用同一套「预检 + 下发 + 过载拒绝」，领域入口不该住在 HTTP 层里——否则
 scheduler 与他模块的 service 反向 import routes，导入顺序脆弱且有循环。
 

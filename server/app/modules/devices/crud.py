@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
-from app.contracts import DeviceLogKind, DeviceRecord, LinkEvent
+from app.contracts import DeviceLogKind, DeviceRecord, HoldSource, LinkEvent
 from app.core.clock import format_rfc3339
 from app.core.tokens import generate_token, hash_token
 from app.db.base import utcnow
@@ -122,6 +123,115 @@ def set_retired(session: Session, device_id: str, retired: bool) -> bool:
     row.retired_at = utcnow() if retired else None
     session.commit()
     return True
+
+
+def set_power_facts(
+    session: Session,
+    device_id: str,
+    auto_close_time: str,
+    auto_open_time: str,
+    zone_offset_minutes: int,
+) -> bool:
+    """落一份 device.status 上报事实（影子行的 reported 部分）。设备不在册返回 False。"""
+    row = _find(session, device_id)
+    if row is None:
+        return False
+    row.auto_close_time = auto_close_time
+    row.auto_open_time = auto_open_time
+    row.zone_offset_minutes = zone_offset_minutes
+    row.facts_at = utcnow()
+    session.commit()
+    return True
+
+
+def power_facts(session: Session, device_id: str) -> tuple[str, str, int] | None:
+    """上报事实（计划关闭、计划开启、时区偏移）；从未上报过时 None。
+
+    唯一消费入口：hold 对账（触发与恢复都按它换算）、voice 生效时段的当地时刻、
+    设备页展示。缺哪一项都按整体缺失处理——半个计划没法对账。
+    """
+    row = _find(session, device_id)
+    if row is None or not row.auto_close_time or not row.auto_open_time:
+        return None
+    if row.zone_offset_minutes is None:
+        return None
+    return (str(row.auto_close_time), str(row.auto_open_time), int(row.zone_offset_minutes))
+
+
+def get_hold(session: Session, device_id: str) -> dict[str, Any] | None:
+    """hold 状态：意图建立即非 None（`hold_offset_s` NULL 表示尚未施加）。无行给 None。"""
+    row = _find(session, device_id)
+    if row is None or row.hold_started_at is None:
+        return None
+    return {
+        "started_at": row.hold_started_at,
+        "source": HoldSource(row.hold_source) if row.hold_source is not None else None,
+        "offset_s": row.hold_offset_s,
+        "assignments": list(row.hold_assignments or []),
+        "lease_deadline": row.lease_deadline,
+    }
+
+
+def start_hold(session: Session, device_id: str, source: HoldSource) -> None:
+    """建立 hold 意图（状态先行）：对账器随后施加偏置。已在 hold 中时是空操作。"""
+    row = _find(session, device_id)
+    if row is None or row.hold_started_at is not None:
+        return
+    row.hold_started_at = utcnow()
+    row.hold_source = source
+    row.hold_offset_s = None
+    row.hold_assignments = None
+    session.commit()
+
+
+def mark_hold_applied(
+    session: Session,
+    device_id: str,
+    offset_s: int,
+    assignments: list[dict[str, Any]],
+    lease_deadline: datetime,
+) -> None:
+    """记录偏置已施加：墙钟 = 真实 + 偏移，租约到点入库（崩溃后对账可见）。"""
+    row = _find(session, device_id)
+    if row is None:
+        return
+    row.hold_offset_s = offset_s
+    row.hold_assignments = assignments
+    row.lease_deadline = lease_deadline
+    session.commit()
+
+
+def set_lease(session: Session, device_id: str, deadline: datetime) -> None:
+    row = _find(session, device_id)
+    if row is None:
+        return
+    row.lease_deadline = deadline
+    session.commit()
+
+
+def clear_hold(session: Session, device_id: str) -> None:
+    """回到 following_schedule：hold 全列清空（幂等）。"""
+    row = _find(session, device_id)
+    if row is None or row.hold_started_at is None:
+        return
+    row.hold_started_at = None
+    row.hold_source = None
+    row.hold_offset_s = None
+    row.hold_assignments = None
+    row.lease_deadline = None
+    session.commit()
+
+
+def mark_assignment(session: Session, device_id: str, index: int, *, done: bool) -> None:
+    """放回的一次性标记：写进 hold_assignments 的对应项，进程重启不丢。"""
+    row = _find(session, device_id)
+    if row is None or row.hold_assignments is None:
+        return
+    assignments = list(row.hold_assignments)
+    if 0 <= index < len(assignments):
+        assignments[index] = {**assignments[index], "done": done, "failed": not done}
+        row.hold_assignments = assignments
+        session.commit()
 
 
 def set_order(session: Session, device_ids: list[str]) -> None:
@@ -236,6 +346,10 @@ def as_record(row: Device) -> DeviceRecord:
         "last_ip": row.last_ip or "",
         "booted_at": format_rfc3339(row.booted_at) if row.booted_at else "",
         "clock_skew_s": float(row.clock_skew_s),
+        "auto_close_time": str(row.auto_close_time or ""),
+        "auto_open_time": str(row.auto_open_time or ""),
+        "zone_offset_minutes": int(row.zone_offset_minutes) if row.zone_offset_minutes is not None else None,
+        "facts_at": format_rfc3339(row.facts_at) if row.facts_at else "",
         "sort_order": int(row.sort_order),
     }
     return record
@@ -335,21 +449,29 @@ __all__: list[str] = [
     "append_device_log",
     "as_record",
     "authenticate_device",
+    "clear_hold",
     "get",
     "get_clock_skew",
+    "get_hold",
     "insert_link_event",
     "issue",
     "latest_device_log",
     "link_events",
     "list_all",
     "list_for_device",
+    "mark_assignment",
+    "mark_hold_applied",
+    "power_facts",
     "register",
     "revoke",
     "revoke_all",
     "set_clock_skew",
+    "set_lease",
     "set_name",
     "set_order",
+    "set_power_facts",
     "set_retired",
     "set_trusted",
+    "start_hold",
     "touch_seen",
 ]

@@ -26,13 +26,14 @@ from app.core.protocol import JsonObject, as_int, list_of, payload_of, text_of
 from app.core.tokens import extract_bearer
 from app.db.session import Database
 from app.modules.config import store as config_store
+from app.modules.config.spec import parse_time
 from app.modules.devices import actions as device_actions
 from app.modules.devices import crud as devices_crud
 from app.modules.devices import service as devices_service
 from app.modules.devices.schemas import LINK_OFFLINE, LINK_ONLINE
 from app.modules.doors import service as doors_service
-from app.modules.extend_hours import service as extend_hours_service
 from app.modules.ota import crud as ota_crud
+from app.modules.power import service as power_service
 from app.modules.sessions import scheduler as sessions_scheduler
 from app.modules.voice import service as voice_service
 
@@ -355,9 +356,9 @@ async def _handle_frame(
         # 帧是后台任务的心跳：门刚被占用、刚被释放，都只能从帧看出来。调度器据此重算这台
         # 设备每个喷头的"下一个到点"，并把待补的那次分配接上——**不轮询**。
         sessions_scheduler.on_frame(device_id)
-        # 延长服务时间：拨钟会把喷头清空，这里按拨之前记下的"谁在哪个喷头"把他们分配回去。
-        # 它同步返回，真正的分配在后台任务里跑——帧的处理路径上不能等命令
-        extend_hours_service.on_frame(device_id)
+        # 电源计划：hold 施加的钟跳会清空喷头，这里按施加瞬间记下的"谁在哪个喷头"把名单
+        # 内的人放回去。它同步返回，真正的分配在后台任务里跑——帧的处理路径上不能等命令
+        power_service.on_frame(device_id)
         # 语音播报：同步建任务后立即返回；回执失败时设备会重发同一帧，event_key 去重。
         voice_service.schedule_events(result.events)
         await ws.send_text(
@@ -391,6 +392,38 @@ async def _handle_frame(
         # 握手会重新上送，日志是幂等的现态读数，不是队列
         await _call(ws, devices_service.record_log_upload, device_id, kind, content)
         log_event("INFO", "gateway.log-uploaded", "设备日志已上送", device_id=device_id, kind=kind)
+    elif mtype == "device.status":
+        if not trusted:
+            return
+        # 设备上报自己的电源计划事实：从浴室 App 参数文件读到的平台开关机时刻，
+        # 与本机时区偏移。它们是 hold 触发/恢复换算与语音当地时刻的唯一来源——
+        # 服务端不定任何时刻，全部自适应。落库即回执（无需回帧）；形状不对回错误帧
+        # （与 device.log_upload 同一处置）。
+        close = payload.get("auto_close_time")
+        open_at = payload.get("auto_open_time")
+        zone = payload.get("zone_offset_minutes")
+        valid = (
+            isinstance(close, str)
+            and parse_time(close) is not None
+            and isinstance(open_at, str)
+            and parse_time(open_at) is not None
+            and isinstance(zone, int)
+            and not isinstance(zone, bool)
+            and -720 <= zone <= 840
+        )
+        if not valid:
+            await ws.send_text(protocol.error(reason_codes.BAD_JSON.code, "上报事实形状不对", reply_to=frame_id))
+            return
+        await _call(ws, devices_service.record_status_report, device_id, close, open_at, zone)
+        log_event(
+            "INFO",
+            "gateway.status-reported",
+            "设备电源计划事实已上报",
+            device_id=device_id,
+            close=close,
+            open_at=open_at,
+            zone=zone,
+        )
     elif mtype == "ota.progress":
         if not trusted:
             return

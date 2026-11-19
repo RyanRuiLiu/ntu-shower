@@ -83,15 +83,12 @@ class RuntimeConfigTest {
         assertEquals(9, RuntimeConfig.statusLineOccupancyMax)
         assertEquals(true, RuntimeConfig.automationTraceEnabled)
         assertEquals(false, RuntimeConfig.bathDbArchiveEnabled)
-        assertEquals("23:50", RuntimeConfig.powerOffAt)
-        assertEquals("10:00", RuntimeConfig.powerOnAt)
     }
 
     @Test
     fun apply_missingKeysKeepCurrentValues() {
         RuntimeConfig.apply(JSONObject("{\"notice_text_size_sp\": 30}"))
         assertEquals(30, RuntimeConfig.noticeTextSizeSp)
-        assertEquals("10:55", RuntimeConfig.powerOnAt) // 未下发的键保持原值
     }
 
     @Test
@@ -101,7 +98,7 @@ class RuntimeConfigTest {
         RuntimeConfig.apply(
             JSONObject(
                 "{\"notice_enabled\": true, \"notice_text_size_sp\": 45, " +
-                    "\"notice_text\": \"维护中\", \"power_on_at\": \"10:00\"}",
+                    "\"notice_text\": \"维护中\"}",
             ),
         )
         RuntimeConfig.resetToDefaults()
@@ -109,14 +106,13 @@ class RuntimeConfigTest {
         assertEquals(ConfigDefaults.NOTICE_ENABLED, RuntimeConfig.noticeEnabled)
         assertEquals(ConfigDefaults.NOTICE_TEXT_SIZE_SP.toInt(), RuntimeConfig.noticeTextSizeSp)
         assertEquals(ConfigDefaults.NOTICE_TEXT, RuntimeConfig.noticeText)
-        assertEquals(ConfigDefaults.POWER_ON_AT, RuntimeConfig.powerOnAt)
     }
 
     @Test
     fun supportedKeys_hasExpectedCount() {
         // 真正的键集合对账在服务端（server/tests/test_config_spec.py，按名字比对）。
         // 这里只守住数量：设备端键凭空变少或变多都该是有意的改动。
-        assertEquals(37, RuntimeConfig.supportedKeys.size)
+        assertEquals(35, RuntimeConfig.supportedKeys.size)
     }
 
     @Test
@@ -264,14 +260,13 @@ class RuntimeConfigTest {
                 RuntimeConfig.apply(JSONObject().put(key, value))
             }
         }
-        assertEquals(37, RuntimeConfig.supportedKeys.size)
+        assertEquals(35, RuntimeConfig.supportedKeys.size)
     }
 
     @Test
     fun apply_doesNotDisturbUnrelatedKeys() {
         RuntimeConfig.apply(JSONObject().put("notice_text_size_sp", 45))
 
-        assertEquals("10:55", RuntimeConfig.powerOnAt)
         assertEquals(true, RuntimeConfig.bathDbArchiveEnabled)
     }
 }

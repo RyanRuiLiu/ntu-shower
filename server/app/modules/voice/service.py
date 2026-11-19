@@ -32,8 +32,6 @@ from app.core.problems import (
     ApiProblemError,
 )
 from app.db.base import utcnow
-from app.modules.config import store as config_store
-from app.modules.config.spec import SERVER_ZONE_OFFSET_MINUTES_KEY
 from app.modules.devices import actions as device_actions
 from app.modules.devices import service as devices_service
 from app.modules.doors.events import DoorEvent, DoorEventKind
@@ -943,15 +941,16 @@ async def _dispatch_event(session: Session, event: DoorEvent, max_age: int) -> N
         return
     if not event.cert_no:
         return
-    zone_offset = config_store.global_effective(session)[SERVER_ZONE_OFFSET_MINUTES_KEY]
-    if not isinstance(zone_offset, int):
+    facts = devices_service.power_facts(session, event.device_id)
+    if facts is None:
         log_event(
             "ERROR",
-            "voice.zone-offset-invalid",
-            "时区偏移配置不是整数，跳过语音匹配",
-            value=str(zone_offset),
+            "voice.zone-missing",
+            "设备尚未上报时区，跳过语音匹配",
+            device_id=event.device_id,
         )
         return
+    zone_offset = facts[2]
     local = to_local(now_rfc3339(), zone_offset)
     if local is None:
         log_event("ERROR", "voice.local-time-invalid", "无法换算服务端当地时间，跳过语音匹配")

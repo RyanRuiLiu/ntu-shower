@@ -27,7 +27,7 @@ from app.core.problems import ApiProblemError, Problem
 from app.core.protocol import JsonObject
 from app.db.session import session_scope
 from app.modules.devices import actions as device_actions
-from app.modules.extend_hours import service as extend_hours_service
+from app.modules.power import service as power_service
 from app.modules.sessions import scheduler
 from app.modules.sessions.decision import (
     JOB_AUTO_SETTLE,
@@ -46,7 +46,7 @@ def _read_snapshots(device_id: str) -> list:
 
 
 SCHEDULER_PATH = Path(scheduler.__file__)
-EXTEND_HOURS_PATH = Path(extend_hours_service.__file__)
+POWER_PATH = Path(power_service.__file__)
 AUDIT_PATH = Path(audit_repository.__file__)
 
 #: 这一层测的是**编排**，所以把时长上限放得极大：下面那些夹具动辄是"一小时前分配"，
@@ -334,14 +334,14 @@ def test_terminal_outcomes_are_recorded_on_one_path() -> None:
     所以它们直接写日志——这份白名单就是它们，多一个都要在这里说清楚。
     """
     source = SCHEDULER_PATH.read_text(encoding="utf-8")
-    extend_source = EXTEND_HOURS_PATH.read_text(encoding="utf-8")
+    power_source = POWER_PATH.read_text(encoding="utf-8")
     audit_source = AUDIT_PATH.read_text(encoding="utf-8")
 
     literals = sorted(re.findall(r'"job\.([a-z-]+)"', source))
     assert literals == ["started", "stopped"], f"还有别处直接写终局日志：{literals}"
     # 落表收口后的形态：两个域都委托 audit.record_job_run，全项目落表恰好一处。
     assert source.count("insert_job_run(") == 0, "本文件不得直接落表（收口 audit.record_job_run）"
-    assert extend_source.count("insert_job_run(") == 0, "延长服务不得直接落表（收口 audit.record_job_run）"
+    assert power_source.count("insert_job_run(") == 0, "电源计划不得直接落表（收口 audit.record_job_run）"
     assert audit_source.count("def insert_job_run(") == 1, "全项目落表定义必须恰好一处（audit.record_job_run）"
 
 

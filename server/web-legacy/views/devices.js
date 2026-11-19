@@ -88,6 +88,8 @@ function updateCurrentDevice() {
     'btnFreelist',
     'btnRestart',
     'btnBathRestart',
+    'btnHold',
+    'btnResume',
     'btnReboot',
     'btnExec',
     'btnBridgeOpen',
@@ -277,6 +279,28 @@ async function doAppRestart() {
 }
 
 /** 重启整机：设备离线一段时间，重连后由全貌帧重建现态。这是四个里最重的一个，排在最后。 */
+async function doHold() {
+  if (!window.confirm('今晚延长？设备钟将被偏置并清空在场会话：名单内的学生自动放回，'
+    + '其他人需要重新进入；恢复在过 close 且无人占用后自动进行。')) return
+  report('maintResult', '正在建立今晚延长…', 'info')
+  try {
+    await api.hold(store.deviceId)
+    report('maintResult', '已完成 · hold 意图已建立，对账器将在下一轮施加', 'ok')
+  } catch (error) {
+    report('maintResult', problemText(error), 'err')
+  }
+}
+
+async function doResume() {
+  report('maintResult', '正在恢复常规电源计划…', 'info')
+  try {
+    const result = await api.resume(store.deviceId)
+    report('maintResult', result.resumed ? '已完成 · 已恢复常规计划' : '设备未在延长中，无需恢复', result.resumed ? 'ok' : 'info')
+  } catch (error) {
+    report('maintResult', problemText(error), 'err')
+  }
+}
+
 async function doReboot() {
   if (!window.confirm(REBOOT_CONFIRM)) return
   report('maintResult', '正在重启设备…', 'info')
@@ -468,6 +492,8 @@ export const devicesView = {
               <button type="button" class="btn btn-ghost btn-sm" id="btnFreelist">免费名单</button>
               <button type="button" class="btn btn-ghost btn-sm" id="btnRestart">重启 NTU Shower</button>
               <button type="button" class="btn btn-ghost btn-sm" id="btnBathRestart">重启浴室 App</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnHold">今晚延长</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnResume">恢复计划</button>
               <button type="button" class="btn btn-danger btn-sm" id="btnReboot">重启设备</button>
             </div>
             <div class="result" id="maintResult"></div>
@@ -563,6 +589,8 @@ export const devicesView = {
     dispose.add(listen($('btnFreelistClose'), 'click', closeFreelist))
     dispose.add(listen($('btnRestart'), 'click', doAppRestart))
     dispose.add(listen($('btnBathRestart'), 'click', () => restartBathApp(store.deviceId, sayMaint)))
+    dispose.add(listen($('btnHold'), 'click', doHold))
+    dispose.add(listen($('btnResume'), 'click', doResume))
     dispose.add(listen($('btnReboot'), 'click', doReboot))
     dispose.add(listen($('btnBridgeStatus'), 'click', bridgeStatus))
     dispose.add(listen($('btnBridgeOpen'), 'click', bridgeOpen))
