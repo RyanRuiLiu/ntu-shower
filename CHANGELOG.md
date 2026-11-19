@@ -8,6 +8,8 @@
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-20
+
 ### Added
 
 - **电源计划域（power）重写**：设备经 `device.status` 帧自报平台开关机计划与本机时区（读浴室 App 参数文件，V8 autoCloseTime/autoOpenTime），服务端不再持有任何时刻配置——`power_off_at` / `power_on_at` / `server_zone_offset_minutes` 三个配置键删除，平台改计划无需服务端改动。延长服务改写为 hold（恒温器行业语义）：影子行状态 + 30 秒对账 + MCU 租约（2 分钟续期/10 分钟租期，失效安全）；写钟一律绝对钟面 step（chrony makestep），禁止增量拨。设备页新增「今晚延长」「恢复计划」按钮（hold/resume 端点）。删除 `modules/extend_hours` 过程式拨钟状态机、`shift_clock_skew` 与 job_runs 词表外的全部旧词汇（shift/restore/clock-moved 等终局值）。迁移重建 `job_runs` 词表 CHECK 并清理二楼残留拨钟态；测试建库改走 alembic（与生产同源），迁移词表漂移由用例逐值 INSERT 钉死。行业参照与事故背景见 ADR-0024。
