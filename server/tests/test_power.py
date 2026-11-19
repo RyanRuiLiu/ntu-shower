@@ -184,16 +184,16 @@ def test_hold_due_window_and_its_cross_midnight_form() -> None:
 
     close = parse_time("23:58")
     assert close is not None
-    assert power._hold_due(local(23, 49), close)
+    assert power._hold_due(local(23, 48), close)
     assert power._hold_due(local(23, 57), close)
-    assert not power._hold_due(local(23, 48), close)
+    assert not power._hold_due(local(23, 47), close)
     assert not power._hold_due(local(23, 58), close)  # 到点即出窗：close 后不触发
 
     late_close = parse_time("00:05")
     assert late_close is not None
-    assert power._hold_due(local(23, 56), late_close)
+    assert power._hold_due(local(23, 55), late_close)
     assert power._hold_due(local(0, 0), late_close)
-    assert not power._hold_due(local(23, 55), late_close)
+    assert not power._hold_due(local(23, 54), late_close)
     assert not power._hold_due(local(0, 5), late_close)
 
 
@@ -942,3 +942,19 @@ def test_hold_and_resume_on_unknown_device_return_404(
 
     resp = client.post("/api/v1/devices/ghost/resume", headers=admin_headers)
     assert resp.status_code == 404
+
+
+def test_offline_devices_never_get_commands(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """离线设备零通信：校正、施加、续租三处都在本地把门，不发命令不落审计行。"""
+    sent: list[tuple[str, object]] = []
+    _prepare(monkeypatch, "2026-11-20 23:50:00", sent, skew_s=-120.0, online=False)
+    _with_session("2026-11-20T15:40:00.000Z")
+    _seed_hold(fresh_db, "2026-11-20T15:49:00.000Z", offset_s=660, monkeypatch=monkeypatch)
+
+    _tick()
+
+    assert sent == []
+    from app.persistence.audit import JobRun
+
+    with session_scope() as session:
+        assert session.query(JobRun).count() == 0

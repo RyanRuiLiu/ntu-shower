@@ -65,12 +65,13 @@ from app.persistence import audit as audit_store
 
 from .schemas import DoorAssignment, HoldStatus
 
-#: 对账间隔（秒）。触发窗（close − 9 分钟起、到 close 止）按 30 秒一轮有十余次机会。
+#: 对账间隔（秒）。触发窗（close − 10 分钟起、到 close 止）按 30 秒一轮有约二十次机会。
 TICK_INTERVAL_S = 30.0
 
-#: hold 触发提前量（分钟）：浴室 App 自己的放人线是 close − 5 分钟，再留 4 分钟
-#: 操作余量。是相对余量（策略），不是自定时刻。
-HOLD_TRIGGER_MARGIN_MIN = 9
+#: hold 触发提前量（分钟）：浴室 App 自己的放人线是 close − 5 分钟，触发线再
+#: 提前整整 5 分钟——预补偿布防与写钟两条命令在这段窗内从容完成。是相对余量
+#: （策略），不是自定时刻。
+HOLD_TRIGGER_MARGIN_MIN = 10
 
 #: 偏置落点 = 午夜后这个余量（分钟）：跳过 App 的一天边界，它的 autoCloseTime 变成
 #: 约 24 小时后，整夜不再触发「关机前 5 分钟放人」。偏移量按施加时刻的表盘现算——
@@ -336,6 +337,8 @@ async def _apply_hold(
         _record("skipped", "close 已过，hold 意图作废", device_id, level="WARNING")
         return
 
+    if not manager.is_online(device_id):
+        return  # 离线发不出命令：不发、不落审计行，上线后下一轮自动施加
     if not device_clock.has(device_id):
         _warn_once(device_id, "no-skew", "power.no-skew", "还没有钟偏差记录，暂缓施加")
         return
@@ -368,6 +371,8 @@ async def _renew_lease(session: Session, device_id: str, facts: tuple[str, str, 
     last = _last_arm_at.get(device_id)
     if last is not None and time_module.monotonic() - last < LEASE_RENEW_INTERVAL_S:
         return
+    if not manager.is_online(device_id):
+        return  # 离线续租必失败：不发、不落审计行（租约到点断电即失效安全）
     if not device_clock.has(device_id):
         _warn_once(device_id, "no-skew", "power.no-skew", "还没有钟偏差记录，本轮无法续租")
         return
@@ -421,6 +426,8 @@ async def _correct_clock(session: Session, device_id: str, config: JsonObject, z
         return  # 还没有偏差记录（首次 pong 之前），无从判
     if doors_service.open_sessions(session, device_id):
         return  # 有人占用：校钟的跳变会清掉会话，等人走再校
+    if not manager.is_online(device_id):
+        return  # 夜间断电是常态：离线不发命令、不落审计行
     skew = device_clock.get(device_id)
     if abs(skew) < TIME_SYNC_THRESHOLD_S:
         return
