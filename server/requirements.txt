@@ -3,7 +3,7 @@ uvicorn==0.54.0
 pydantic==2.14.3
 pydantic-settings==2.16.2
 python-dotenv==1.2.4
-python-multipart==0.0.33
+python-multipart==0.0.34
 # 运行时已升 3.13：websockets 回到 17.x 主线（pyproject 兼容范围本就是 >=17.0）
 websockets==17.4
 typing-extensions==4.16.0
