@@ -8,6 +8,16 @@
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-20
+
+### Changed
+
+- 计划事实的读取时机收敛到**连接建立时**（含重连与服务重启后的首次连接），60 秒看门狗 tick 不再读文件：平台计划一天至多变一次，1440 次/天的轮询没有收益；连接存续期间的变更由下一次重连或次日开机刷新。
+
+### Fixed
+
+- 设备计划事实改为读浴室 App 自己的 `data.xml`（`autoopentime` / `autoclosetime`，与 App 启动时装载并交给 smdt 布防的是同一份值），不再读 `/sdcard/datalook/log/Params_*.txt` 下载日志：日志只是副本、会被 `logExpiredDate` 清理，且 0.8.1 的 `rootRead` 把路径当命令下发，shell 去执行那个 `.txt`，退出码非 0 后按缺失处理——`device.status` 始终缺报。读取统一走 `cat '<path>'`（与 `WaterTargetReader` 读 waterList 同一写法），用例钉住命令形状与键名。0.8.1 发布时设备已断电，缺陷未在真机暴露。
+
 ## [0.8.1] - 2026-11-20
 
 ### Fixed
