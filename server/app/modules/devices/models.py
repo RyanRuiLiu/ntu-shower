@@ -51,8 +51,8 @@ class Device(TimestampMixin, Base):
     hold_offset_s: Mapped[int | None] = mapped_column(Integer, default=None)
     #: 施加瞬间的名单占用快照与放回标记 [{door_no, cert_no, done}]。放回是一次性的。
     hold_assignments: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, default=None)
-    #: MCU 租约到点（真实轴）：hold 期间每 LEASE_RENEW_INTERVAL_S 续租一次，服务端
-    #: 消失后最迟一个租期断电（失效安全，DHCP/etcd lease 同型）。
+    #: MCU 布防截止到点（真实轴）：施加时一次写定（落点 + 余量），此后不再重布；
+    #: 服务端消失它照常到点——到点断电正是期望终态。
     lease_deadline: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
     #: 单台配置覆盖。存的是与默认值的差异，空对象/修订号 0 即全部沿用默认。
     #: 生效值每次现算：默认 ← 全局 ← 设备。

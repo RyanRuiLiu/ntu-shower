@@ -78,6 +78,17 @@ def get(device_id: str) -> float:
     return _skew.get(device_id, 0.0)
 
 
+def forget(device_id: str) -> None:
+    """作废一台设备的偏差记录（写钟方在写准成功后调用）。
+
+    偏差描述的是"服务端 − 设备钟面"，写钟改变的就是设备钟面本身——旧偏差从写入
+    那一刻起描述的是一个不存在的钟面。不清掉它，写钟后 30 秒内的续租/校正会按
+    旧轴换算出错误的表盘时刻（2026-11-20 事故：拨钟后 33 秒的续租把截止布到
+    次日）。下一帧到达时 [update] 会重新量得新偏差。
+    """
+    _skew.pop(device_id, None)
+
+
 def has(device_id: str) -> bool:
     """这台设备有没有偏差记录。
 

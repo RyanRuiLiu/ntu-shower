@@ -50,7 +50,7 @@ def _reset_process_singletons() -> Iterator[None]:
     留下的偏差会让后一个用例的会话起点凭空平移一段。
 
     电源计划的进程内状态也一样。在途的放回任务留着，帧路径的排入就带着上一个用例的
-    残影；step/租约的节流标记留着，下一个用例的施加会被误判成"刚做过"。
+    残影；警告限频标记留着，下一个用例的失败留痕会被误判成"刚说过"。
     """
     from app.core import device_clock, events
     from app.core.connections import manager
@@ -72,8 +72,6 @@ def _reset_process_singletons() -> Iterator[None]:
         events._subscribers.clear()
         device_clock.clear()
         power_service._tasks.clear()
-        power_service._last_step_at.clear()
-        power_service._last_arm_at.clear()
         power_service._last_warn_at.clear()
         voice_service._tasks.clear()
 

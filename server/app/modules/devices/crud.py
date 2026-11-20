@@ -191,10 +191,15 @@ def mark_hold_applied(
     assignments: list[dict[str, Any]],
     lease_deadline: datetime,
 ) -> None:
-    """记录偏置已施加：墙钟 = 真实 + 偏移，租约到点入库（崩溃后对账可见）。"""
+    """记录偏置已施加：墙钟 = 真实 + 偏移，MCU 截止到点入库（崩溃后对账可见）。
+
+    started_at 就位为**施加时刻**（意图建立时刻被覆盖）：落点 = 施加时刻 + 偏移，
+    恢复判定与看板都按这条轴算，两者必须同轴。
+    """
     row = _find(session, device_id)
     if row is None:
         return
+    row.hold_started_at = utcnow()
     row.hold_offset_s = offset_s
     row.hold_assignments = assignments
     row.lease_deadline = lease_deadline

@@ -9,11 +9,35 @@
   hold 状态同 row，不另立表；
 - **执行模型**：对账（Kubernetes controller）——每 tick 使实际收敛于期望，每一步
   幂等、崩溃重入安全；
-- **失效安全**：hold 期间的 MCU 截止是租约（DHCP/etcd lease 同型）——每
-  [LEASE_RENEW_INTERVAL_S] 续租一次，租期 [LEASE_TTL_S]；服务端消失，最迟一个
-  租期后断电；
 - **钟写**：chrony makestep——所有写入都是绝对钟面的一次性 step（校正写准、hold
-  施加写"真实+偏移"、恢复写回真实），永不增量拨。
+  施加写"真实+偏移"），永不增量拨。
+
+## MCU 是钟面闹钟，hold 是一次布防
+
+MCU 的 0xA1 布防把"距现在几小时几分钟"换算成**布防那刻钟面的一个 HH:MM 截止**，
+此后钟面走到那个时刻即断电（docs/device-poweroff.md：拨过截止立即断电、
+回拨等量推迟）。由此两条铁律：
+
+1. **拨钟会吃掉钟面距离**。布防写在拨钟前（此刻墙钟=真实轴），拨钟把墙钟推前
+   offset_s，截止必须再让出同样的量——少让一次，实际断电就提前一个 offset_s
+   （2026-11-20 事故：六台在 apply+租期而非落点+租期集体断电）。
+2. **滚动续写与钟面检查冲突**。每次续写的截止可能不晚于已在位的那个，写下去要么
+   被忽略、要么把断电拉前。所以 hold 的布防**只有一次**：截止 = 落点 + 余量，
+   此后不再下发任何布防。服务端消失，截止照常到点——那正是期望终态，无需
+   另设失效安全窗口。
+
+## 状态机
+
+- **intent**：hold_started_at 落库、offset_s 为空。触发窗外 park（手动提前点击
+  在此等待），close 已过作废，窗内施加。
+- **applied**：一次布防（截止 = 落点 + 余量）+ 一次拨钟（到落点），started_at
+  就位为施加时刻。余下只有两件事：提前掉线的可见性（布防可能被 MCU 静默丢弃）
+  与落点恢复。
+- **resumed**：落点已过且喷头空闲 → 清 hold 列。**不发命令、不动钟面**——钟面
+  写回由 following_schedule 的自动校时承担（恢复后偏差 = 偏移量，超阈值即触发，
+  其重布按营业时段判定，过 close 不重布，否则延长会被变成 24 小时）。落点前的
+  手动 resume 是尽力取消：重布一个更早的截止（MCU 接受更早截止时生效，否则被
+  忽略，断电仍落在落点 + 余量），随后清状态。
 
 ## 为什么偏置期间状态时间仍然正确
 
@@ -31,8 +55,9 @@ hold 意图先落库（devices 行），动作随后；审计（job_runs）独�
 ## 与校正的关系
 
 校正（[_correct_clock]）只在 following_schedule 下进行：hold 期间的偏差是故意的。
-互斥是显式的（读 hold 列），不是隐式的域间约定。校正依赖上报的时区（目标钟面按它
-换算）；facts 未到的设备既不校正也不 hold——缺省动作是不动手。
+互斥是显式的（读 hold 列），不是隐式的域间约定。校正依赖上报的时区与 open/close
+（目标钟面与重布判定都按它们换算）；facts 未到的设备既不校正也不 hold——缺省动作
+是不动手。
 """
 
 from __future__ import annotations
@@ -78,10 +103,10 @@ HOLD_TRIGGER_MARGIN_MIN = 10
 #: 平台把 close 改到 00:30 之类的场景同样成立。
 LANDING_MARGIN_MIN = 10
 
-#: 租约续期间隔与租期（秒）：hold 期间每 2 分钟把 MCU 截止重布到"表盘此刻 + 租期"。
-#: 服务端消失，最迟一个租期后断电（失效安全且有界）。
-LEASE_RENEW_INTERVAL_S = 120.0
-LEASE_TTL_S = 600.0
+#: 布防余量（分钟）：MCU 截止 = 落点 + 这个余量。它同时是拨钟量的安全垫——截止
+#: 必须严格晚于拨钟后的墙钟（否则拨钟瞬间断电），也要晚到"服务端消失也无关紧要"
+#: （到点断电正是期望终态）。取消重布的截止（表盘此刻 + 1.5 分钟）落在它之内。
+HOLD_MARGIN_MIN = 10
 
 #: 校正阈值（秒）：设备钟晶振日漂移秒级，累积数日才到 60 秒——避免为小偏差频繁拨钟。
 TIME_SYNC_THRESHOLD_S = 60
@@ -90,10 +115,8 @@ TIME_SYNC_THRESHOLD_S = 60
 WARN_THROTTLE_S = 60.0
 
 _tasks: set[asyncio.Task[None]] = set()
-#: 每设备的节流标记（循环单调钟）：step 与租约续期在一次成功后不重复。进程级，
-#: 重启后的首轮多做一次幂等写（目标相同，结果一致）——注释即承诺。
-_last_step_at: dict[str, float] = {}
-_last_arm_at: dict[str, float] = {}
+#: 同设备同事件的 WARNING 限频标记（循环单调钟）。进程级：重启后的首轮多做一次
+#: 幂等留痕（内容相同），注释即承诺。
 _last_warn_at: dict[str, float] = {}
 
 _running = False
@@ -114,14 +137,15 @@ def _record(outcome: str, message: str, device_id: str, *, level: str = "INFO", 
     )
 
 
-def _warn_once(device_id: str, key: str, event: str, message: str, **extra: object) -> None:
-    """同一设备同一件事的 WARNING 限频（60 秒一条）：对账失败下一轮会重试，
-    每轮一条会把真正的问题淹掉。"""
+def _warn_once(device_id: str, key: str, event: str, message: str, **extra: object) -> bool:
+    """同一设备同一件事的 WARNING 限频（60 秒一条）。返回是否真的发了——
+    需要与日志同节奏落审计行的调用方据此判定。"""
     now = time_module.monotonic()
     if now - _last_warn_at.get(f"{device_id}:{key}", 0.0) < WARN_THROTTLE_S:
-        return
+        return False
     _last_warn_at[f"{device_id}:{key}"] = now
     log_event("WARNING", event, message, device_id=device_id, **extra)
+    return True
 
 
 # ── 原语：全库仅有的两个钟面/布防入口 ──────────────────────────────────────
@@ -132,8 +156,8 @@ async def _step_wall_clock(session: Session, device_id: str, target_wall: str, *
 
     [target_wall] 是设备表盘上该显示的时刻（`YYYY-MM-DD HH:MM:SS`）。目标永远由
     服务端轴计算，与设备当前读数无关——重复写结果一致，误差不可能累积。
-    [rearm] 为 true 时设备端写钟后按本地事实重布 MCU 常规计划，供恢复使用；
-    hold 施加传 false（流程自己管理租约）。
+    [rearm] 由调用方按营业时段判定（见 [_correct_clock]）：设备端写钟后是否按本地
+    事实重布 MCU 常规计划。hold 施加传 false（它自己的布防已经就位）。
     """
     result = await device_actions.send_command_and_wait(
         session, device_id, actions.CLOCK_SET, {"datetime": target_wall, "rearm": rearm}
@@ -148,7 +172,7 @@ async def _step_wall_clock(session: Session, device_id: str, target_wall: str, *
             reason_code=str(result.get("reason_code") or "-"),
         )
         return False
-    _last_step_at[device_id] = time_module.monotonic()
+    device_clock.forget(device_id)  # 旧偏差描述的是旧钟面：作废，等下一帧重新收敛
     log_event("INFO", "power.step-applied", "设备墙钟已按绝对目标写准", device_id=device_id, target=target_wall)
     return True
 
@@ -157,7 +181,7 @@ async def _arm_mcu(session: Session, device_id: str, off_at: str, on_at: str) ->
     """把一对断电/上电目标（设备表盘 HH:MM）写给 MCU；返回是否成功。
 
     设备端用自己的钟换算相对延时：断电延时从命令落地起算，上电延时从断电时刻起算，
-    目标已过就落到次日（"下一个"）。一次布防覆盖上一次。
+    目标已过就落到次日（"下一个"）。写入行为与重布语义见 docs/device-poweroff.md。
     """
     result = await device_actions.send_command_and_wait(
         session, device_id, actions.POWER_SCHEDULE, {"off_at": off_at, "on_at": on_at}
@@ -182,17 +206,17 @@ async def _arm_mcu(session: Session, device_id: str, off_at: str, on_at: str) ->
 
 def _now_utc() -> datetime:
     """当前时刻（UTC，aware）。模块级函数而非散落的 datetime.now：测试注入时间
-    的唯一入口（hold 施加/租约/恢复的判定都在它上面）。"""
+    的唯一入口（hold 施加/恢复的判定都在它上面）。"""
     return datetime.now(UTC)
 
 
-def _close_minute(close: str) -> int:
-    """上报事实的 close（`HH:MM`）→ 当天分钟数。
+def _fact_minute(text: str) -> int:
+    """上报事实的时刻（`HH:MM`，close/open 都用）→ 当天分钟数。
 
     事实在网关入口已按 HH:MM 校验（device.status 分支），此处的非 None 是入口
     校验的推论；assert 只是把这条不变式写在明面上，不是兜底。"""
-    minute = parse_time(close)
-    assert minute is not None, f"close 形状损坏（网关入口应已拦截）：{close!r}"
+    minute = parse_time(text)
+    assert minute is not None, f"事实时刻形状损坏（网关入口应已拦截）：{text!r}"
     return minute
 
 
@@ -235,8 +259,8 @@ def _hold_due(now_local: datetime, close_minute: int) -> bool:
 def _skipped_close_moment(hold_started_at: datetime, close_minute: int, zone_offset_minutes: int) -> datetime:
     """被跳过的断电时刻（真实当地轴）：hold 建立之后第一次到来的 autoCloseTime。
 
-    恢复判定与意图过期都以它为界。day_offset=1 的候选必然晚于建立时刻，
-    因此恒有返回值（不必 None 判空）。
+    意图过期以它为界。day_offset=1 的候选必然晚于建立时刻，因此恒有返回值
+    （不必 None 判空）。
     """
     started_local = hold_started_at.astimezone(timezone(timedelta(minutes=zone_offset_minutes)))
     # 当日候选若早于建立时刻（hold 建立当晚 close 已过），次日的同一时刻必然晚于它
@@ -274,7 +298,7 @@ async def _reconcile_device(session: Session, device_id: str) -> None:
     hold = devices_crud.get_hold(session, device_id)
 
     if hold is None:
-        await _correct_clock(session, device_id, config, zone)
+        await _correct_clock(session, device_id, config, facts)
         if config[HOLD_ENABLED_KEY]:
             await _maybe_request_automated_hold(session, device_id, config, close, zone)
         hold = devices_crud.get_hold(session, device_id)
@@ -284,8 +308,8 @@ async def _reconcile_device(session: Session, device_id: str) -> None:
     if hold["offset_s"] is None:
         await _apply_hold(session, device_id, config, hold, facts)
         return
-    await _renew_lease(session, device_id, facts)
-    await _resume_if_due(session, device_id, hold, facts)
+    _watch_armed(device_id, hold)
+    await _resume_if_due(session, device_id, hold)
 
 
 async def _maybe_request_automated_hold(
@@ -302,7 +326,7 @@ async def _maybe_request_automated_hold(
     if not device_clock.has(device_id):
         return  # 首次 pong 之前表盘算不出：触发窗无法判定
     local_now = _local_now(device_id, zone)
-    if not _hold_due(local_now, _close_minute(close)):
+    if not _hold_due(local_now, _fact_minute(close)):
         return
     students = students_of(config, HOLD_STUDENTS_KEY)
     occupying = [item for item in doors_service.open_sessions(session, device_id) if item.cert_no in students]
@@ -325,17 +349,22 @@ async def _apply_hold(
     hold: dict[str, Any],
     facts: tuple[str, str, int],
 ) -> None:
-    """施加偏置。顺序硬约束：**布防先于拨钟**——墙钟被拨过旧布防的截止即当场断电
-    （见 docs/device-poweroff.md），必须先把截止推到落点之后。"""
+    """施加偏置：一次布防（截止 = 落点 + 余量）+ 一次拨钟（到落点）。
+
+    顺序硬约束：**布防先于拨钟**——墙钟被拨过旧布防的截止即当场断电
+    （docs/device-poweroff.md 的实测记录），必须先把截止推到拨后钟面之外。
+    """
     close, open_at, zone = facts
     students = students_of(config, HOLD_STUDENTS_KEY)
-    skipped_close = _skipped_close_moment(hold["started_at"], _close_minute(close), zone)
+    skipped_close = _skipped_close_moment(hold["started_at"], _fact_minute(close), zone)
     now_real_local = _now_utc().astimezone(timezone(timedelta(minutes=zone)))
     if now_real_local > skipped_close:
         # close 已过（离线错过整窗、或意图拖到次日）：作废本轮 hold，不无意义拨钟
         devices_crud.clear_hold(session, device_id)
         _record("skipped", "close 已过，hold 意图作废", device_id, level="WARNING")
         return
+    if not _hold_due(now_real_local, _fact_minute(close)):
+        return  # 触发窗未到：意图保持到窗内再施加（手动提前点击在此等待）
 
     if not manager.is_online(device_id):
         return  # 离线发不出命令：不发、不落审计行，上线后下一轮自动施加
@@ -350,8 +379,10 @@ async def _apply_hold(
         if item.cert_no in students
     ]
 
-    # ① 预补偿布防：截止推到"落点 + 租期"之后，拨钟才不会越过旧截止当场断电
-    deadline_wall = local_now + timedelta(seconds=offset_s + LEASE_TTL_S)
+    # ① 预补偿布防：截止 = 表盘此刻 + 2×偏移 + 余量。布防写在拨钟前（此刻墙钟=
+    # 真实轴），拨钟把墙钟推前 offset_s——截止必须再让出同样的量，实际断电才落在
+    # 落点 + 余量（真实轴）。少让一次就是 2026-11-20 的六台集体提前断电。
+    deadline_wall = local_now + timedelta(seconds=2 * offset_s + HOLD_MARGIN_MIN * 60)
     if not await _arm_mcu(session, device_id, deadline_wall.strftime("%H:%M"), open_at):
         _record("hold-failed", "预补偿布防没成功，下一轮重试", device_id, level="WARNING")
         return
@@ -359,66 +390,64 @@ async def _apply_hold(
     if not await _step_wall_clock(session, device_id, _wall_text(local_now + timedelta(seconds=offset_s)), rearm=False):
         _record("hold-failed", "墙钟写入没成功，下一轮重试", device_id, level="WARNING")
         return
-    # ③ 施加结果落库 + 审计（意图已在状态先行步落库）
-    lease_deadline = _now_utc() + timedelta(seconds=LEASE_TTL_S)
-    devices_crud.mark_hold_applied(session, device_id, offset_s, assignments, lease_deadline)
+    # ③ 施加结果落库 + 审计（意图已在状态先行步落库）。started_at 就位为施加时刻：
+    # 落点 = 施加时刻 + 偏移，恢复判定与看板都按这条轴算。
+    devices_crud.mark_hold_applied(
+        session,
+        device_id,
+        offset_s,
+        assignments,
+        _now_utc() + timedelta(seconds=offset_s + HOLD_MARGIN_MIN * 60),
+    )
     _record("hold-applied", "今晚 hold 已施加", device_id, offset_s=offset_s, students=len(assignments))
 
 
-async def _renew_lease(session: Session, device_id: str, facts: tuple[str, str, int]) -> None:
-    """租约续期：hold 期间每 [LEASE_RENEW_INTERVAL_S] 把 MCU 截止重布到"表盘此刻 +
-    租期"。服务端消失后最迟一个租期断电。"""
-    last = _last_arm_at.get(device_id)
-    if last is not None and time_module.monotonic() - last < LEASE_RENEW_INTERVAL_S:
+def _watch_armed(device_id: str, hold: dict[str, Any]) -> None:
+    """已施加的 hold：提前掉线的可见性。
+
+    布防只有一次，MCU 又可能静默丢弃（docs/device-poweroff.md 的实测记录）——设备在落点
+    前掉线意味着"延长可能没生效"，这一条必须有人看得见。掉线本身不触发任何补救
+    （人不在就是断电，方向安全）；落点后掉线是断电的正常表现，不告警。
+    """
+    deadline = hold["lease_deadline"]
+    if deadline is None or _now_utc() >= deadline:
         return
-    if not manager.is_online(device_id):
-        return  # 离线续租必失败：不发、不落审计行（租约到点断电即失效安全）
-    if not device_clock.has(device_id):
-        _warn_once(device_id, "no-skew", "power.no-skew", "还没有钟偏差记录，本轮无法续租")
+    if manager.is_online(device_id):
         return
-    _close, open_at, zone = facts
-    local_now = _local_now(device_id, zone)
-    deadline_wall = local_now + timedelta(seconds=LEASE_TTL_S)
-    if await _arm_mcu(session, device_id, deadline_wall.strftime("%H:%M"), open_at):
-        devices_crud.set_lease(session, device_id, _now_utc() + timedelta(seconds=LEASE_TTL_S))
-        _last_arm_at[device_id] = time_module.monotonic()
-        log_event(
-            "INFO",
-            "power.lease-renewed",
-            "MCU 租约已续期",
-            device_id=device_id,
-            deadline=deadline_wall.strftime("%H:%M"),
-        )
+    if _warn_once(device_id, "hold-offline", "power.hold-offline", "延长期间设备掉线，布防可能未生效"):
+        _record("hold-failed", "延长期间设备掉线，请人工确认今晚是否延长", device_id, level="WARNING")
 
 
-async def _resume_if_due(
-    session: Session,
-    device_id: str,
-    hold: dict[str, Any],
-    facts: tuple[str, str, int],
-) -> None:
-    """恢复判定：被跳过的 close 已过且设备空闲 → 写回真实钟面（rearm=true 一条命令
-    同时完成写准与常规重布），清 hold 列，回到 following_schedule。"""
-    close, _open_at, zone = facts
-    skipped_close = _skipped_close_moment(hold["started_at"], _close_minute(close), zone)
-    now_real_local = _now_utc().astimezone(timezone(timedelta(minutes=zone)))
-    if now_real_local <= skipped_close:
+async def _resume_if_due(session: Session, device_id: str, hold: dict[str, Any]) -> None:
+    """恢复判定：落点已过（施加时刻 + 偏移）且设备空闲 → 清 hold 列。
+
+    恢复等**落点**，不等被跳过的 close——延长的全部意义就是越过 close，close 一过
+    就恢复等于没延长（2026-11-20 事故：六台在 23:58 被恢复，午夜前后集体断电）。
+    恢复本身不动钟面、不发命令：钟面写回由 following_schedule 的自动校时承担
+    （恢复后偏差 = 偏移量，超阈值即触发）；今晚的断电由布防截止承担。
+    """
+    started_at = hold["started_at"]
+    offset_s = hold["offset_s"]
+    if started_at is None or offset_s is None:
+        return
+    if _now_utc() < started_at + timedelta(seconds=offset_s):
         return
     if doors_service.open_sessions(session, device_id):
         return  # 有人在用：钟跳会清掉会话，等人走再恢复
     if not manager.is_online(device_id):
-        return  # 设备已失联（租约到点即断电）：恢复等它回连、空闲后自动进行
+        return  # 设备已失联（截止到点即断电）：恢复等它回连、空闲后自动进行
     await resume(session, device_id)
 
 
 # ── 校正（following_schedule 下才进行；hold 期间的偏差是故意的）────────────
 
 
-async def _correct_clock(session: Session, device_id: str, config: JsonObject, zone: int) -> None:
+async def _correct_clock(session: Session, device_id: str, config: JsonObject, facts: tuple[str, str, int]) -> None:
     """自动校时：偏差超过阈值且无人占用时，把墙钟一次性写准（绝对钟面）。
 
-    目标 = 真实当地钟面（服务端轴 + 上报时区）。rearm=true：设备端写准后按本地
-    事实重布常规计划，节奏自愈。
+    目标 = 真实当地钟面（服务端轴 + 上报时区）。营业时段内（open→close）写准后
+    重布常规计划（rearm=true）；已过今晚 close 的校正不重布——此刻的重布把断电
+    推到次日，延长的服务会被变成 24 小时，断电由既有布防截止承担。
     """
     if not config.get("time_sync_enabled"):
         return
@@ -431,9 +460,15 @@ async def _correct_clock(session: Session, device_id: str, config: JsonObject, z
     skew = device_clock.get(device_id)
     if abs(skew) < TIME_SYNC_THRESHOLD_S:
         return
+    close, open_at, zone = facts
+    close_minute = _fact_minute(close)
+    open_minute = _fact_minute(open_at)
     local_real = _now_utc().astimezone(timezone(timedelta(minutes=zone)))
+    in_open_hours = ((local_real.hour * 60 + local_real.minute - open_minute) % 1440) < (
+        (close_minute - open_minute) % 1440
+    )
     log_event("INFO", "time-sync.step-pending", "设备钟偏差超阈值，写准", device_id=device_id, skew_s=round(skew, 1))
-    if await _step_wall_clock(session, device_id, _wall_text(local_real), rearm=True):
+    if await _step_wall_clock(session, device_id, _wall_text(local_real), rearm=in_open_hours):
         log_event("INFO", "time-sync.corrected", "设备钟偏差已校正", device_id=device_id, skew_s=round(skew, 1))
     else:
         _warn_once(device_id, "correct", "time-sync.correction-failed", "设备钟偏差校正失败，下一轮重试")
@@ -532,10 +567,10 @@ async def _reassign(
 
 
 def request_hold(session: Session, device_id: str) -> HoldStatus:
-    """今晚延长（manual hold）：建立意图，对账器在下一轮（≤30 秒）施加。
+    """今晚延长（manual hold）：建立意图，对账器在触发窗内施加。
 
     已在 hold 中时幂等返回现状；主开关关闭时拒绝。不要求设备在线——意图持久，
-    离线错过触发窗由对账器的作废守卫处理。
+    离线错过触发窗由对账器的作废守卫处理；触发窗前的点击在对账器里 park 到窗内。
     """
     record = devices_service.get_device(session, device_id)
     if record is None:
@@ -555,34 +590,48 @@ def request_hold(session: Session, device_id: str) -> HoldStatus:
 
 
 async def resume(session: Session, device_id: str) -> dict[str, object]:
-    """恢复（Resume Schedule）：写回真实钟面并按本地事实重布常规计划。
+    """恢复（Resume Schedule）：清 hold 列，回到 following_schedule。
 
-    未在 hold 中时幂等返回 resumed=false；设备离线拒绝（写钟命令发不出去）。
+    不动钟面。落点已过（或尚未施加）时这是纯状态操作；落点前且已施加时它同时是
+    **尽力取消**——重布一个更早的截止（表盘此刻 + 1.5 分钟），MCU 接受更早截止时
+    生效，否则被忽略、断电仍落在落点 + 余量。无论哪种，都对"已布防截止"的任何
+    重布保持警惕：把它推到次日的重布会把延长变成 24 小时（2026-11-20 事故里
+    恢复后的按事实重布算出 0 分钟延时，六台在午夜集体断电）。
+    未在 hold 中时幂等返回 resumed=false。
     """
     if devices_service.get_device(session, device_id) is None:
         raise ApiProblemError(problems.DEVICE_NOT_FOUND, f"设备 {device_id} 不在档案里")
     hold = devices_crud.get_hold(session, device_id)
     if hold is None:
         return {"device_id": device_id, "resumed": False}
-    if not devices_service.is_online(device_id):
-        raise ApiProblemError(problems.DEVICE_OFFLINE, f"设备 {device_id} 没有活跃连接")
+    await _cancel_arming_if_pending(session, device_id, hold)
+    devices_crud.clear_hold(session, device_id)
+    _record("resumed", "已恢复常规电源计划", device_id)
+    return {"device_id": device_id, "resumed": True}
+
+
+async def _cancel_arming_if_pending(session: Session, device_id: str, hold: dict[str, Any]) -> None:
+    """落点前的尽力取消：重布一个更早的截止。
+
+    只在布防已在位、落点未到、设备在线且偏差可换算时尝试；任何前提不满足就跳过
+    （清状态照常，断电由既有截止承担）。截止取"表盘此刻 + 1.5 分钟"——比此刻晚、
+    比落点早，且不与同分钟的 0 延时撞车。
+    """
+    if hold["offset_s"] is None or hold["started_at"] is None:
+        return
+    if _now_utc() >= hold["started_at"] + timedelta(seconds=hold["offset_s"]):
+        return  # 落点已过：断电本来就到点了
+    if not manager.is_online(device_id) or not device_clock.has(device_id):
+        return
     facts = devices_service.power_facts(session, device_id)
     if facts is None:
-        _warn_once(device_id, "resume-target", "power.resume-failed", "设备尚未上报开关机计划，恢复失败")
-        return {"device_id": device_id, "resumed": False}
-    zone = facts[2]
-    local_real = _now_utc().astimezone(timezone(timedelta(minutes=zone)))
-    ok = await _step_wall_clock(session, device_id, _wall_text(local_real), rearm=True)
-    if ok:
-        devices_crud.clear_hold(session, device_id)
-        _record("resumed", "已恢复常规电源计划", device_id)
-    else:
-        _record("resume-failed", "恢复的墙钟写入没成功，下一轮对账重试", device_id, level="WARNING")
-    return {"device_id": device_id, "resumed": bool(ok)}
+        return
+    local_now = _local_now(device_id, facts[2])
+    await _arm_mcu(session, device_id, (local_now + timedelta(seconds=90)).strftime("%H:%M"), facts[1])
 
 
 def holds(session: Session) -> list[HoldStatus]:
-    """看板：全部 hold 中的设备与恢复条件两项（close 已过 / 喷头空闲）。"""
+    """看板：全部 hold 中的设备与恢复条件两项（落点已过 / 喷头空闲）。"""
     result: list[HoldStatus] = []
     for record in devices_service.list_devices(session):
         if record["retired"]:
@@ -596,14 +645,11 @@ def holds(session: Session) -> list[HoldStatus]:
 
 
 def _hold_view(session: Session, device_id: str, hold: dict[str, Any]) -> HoldStatus:
-    facts = devices_service.power_facts(session, device_id)
     past_close = False
     idle = not doors_service.open_sessions(session, device_id)
-    if facts is not None and hold["offset_s"] is not None:
-        close, _open_at, zone = facts
-        skipped_close = _skipped_close_moment(hold["started_at"], _close_minute(close), zone)
-        now_real_local = _now_utc().astimezone(timezone(timedelta(minutes=zone)))
-        past_close = now_real_local > skipped_close
+    if hold["offset_s"] is not None and hold["started_at"] is not None:
+        # 落点已过 = 恢复条件之一（另一项是喷头空闲）；字段名沿用契约的 past_close
+        past_close = _now_utc() >= hold["started_at"] + timedelta(seconds=hold["offset_s"])
     assignments = hold["assignments"] or []
     pending: list[DoorAssignment] = [
         {"door_no": int(item["door_no"]), "cert_no": str(item["cert_no"])}
@@ -639,15 +685,13 @@ async def stop() -> None:
     if _tasks:
         await asyncio.gather(*list(_tasks), return_exceptions=True)
     _tasks.clear()
-    _last_step_at.clear()
-    _last_arm_at.clear()
     _last_warn_at.clear()
-    log_event("INFO", "power.stopped", "电源计划对账已停止")
 
 
 __all__ = [
-    "LEASE_RENEW_INTERVAL_S",
-    "LEASE_TTL_S",
+    "HOLD_MARGIN_MIN",
+    "HOLD_TRIGGER_MARGIN_MIN",
+    "LANDING_MARGIN_MIN",
     "TICK_INTERVAL_S",
     "holds",
     "on_frame",

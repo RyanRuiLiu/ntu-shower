@@ -15,10 +15,10 @@ class DoorAssignment(TypedDict):
 
 
 class HoldStatus(TypedDict):
-    """hold 中的设备：来源、建立时刻、租约到点、放回进度与恢复条件两项。
+    """hold 中的设备：来源、施加时刻、布防截止、放回进度与恢复条件两项。
 
-    恢复条件两项（`past_close` 真实时间已过被跳过的 close、`idle` 喷头全部空闲）
-    逐项给出：两项齐了之后的一轮对账（`TICK_INTERVAL_S` 内）就会恢复。
+    恢复条件两项（`past_close` 真实时间已过落点、`idle` 喷头全部空闲）逐项给出：
+    两项齐了之后的一轮对账（`TICK_INTERVAL_S` 内）就会恢复。
     """
 
     device_id: str

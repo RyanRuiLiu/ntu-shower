@@ -1,4 +1,4 @@
-"""电源计划域：触发窗、偏置施加、租约、恢复与放回的对账判定。
+"""电源计划域：触发窗、偏置施加、布防截止、恢复与放回的对账判定。
 
 夹具要四样：一台**有偏差记录与上报事实**的设备（触发、落点与恢复全部按上报的计划
 换算）、一份名单、可替换的桩（命令下发、在线判定与放回分配），以及 hold 的状态
@@ -203,7 +203,12 @@ def test_hold_due_window_and_its_cross_midnight_form() -> None:
 
 
 def test_trigger_applies_hold_with_pre_arm_then_step(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """触发窗内名单学生在占用：先落意图，再预补偿布防、最后写钟到午夜后落点。"""
+    """触发窗内名单学生在占用：先落意图，再预补偿布防、最后写钟到午夜后落点。
+
+    截止 = 表盘此刻 + 2×偏移 + 余量：布防写在拨钟前（此刻墙钟=真实轴），拨钟把墙钟
+    推前一个偏移，截止必须再让出同样的量——实际断电才落在落点 + 余量（真实轴
+    00:20 = 墙钟轴 00:40 减去拨快的那 20 分钟）。
+    """
     sent: list[tuple[str, object]] = []
     _prepare(monkeypatch, "2026-11-20 23:50:00", sent)
     _with_session("2026-11-20T15:40:00.000Z")
@@ -217,8 +222,15 @@ def test_trigger_applies_hold_with_pre_arm_then_step(fresh_db: str, monkeypatch:
     # 顺序硬约束：布防先于拨钟
     kinds = [action for action, _ in sent]
     assert kinds == ["power.schedule", "clock.set"]
-    assert sent[0][1] == {"off_at": "00:20", "on_at": "10:55"}
+    assert sent[0][1] == {"off_at": "00:40", "on_at": "10:55"}
     assert sent[1][1] == {"datetime": "2026-11-21 00:10:00", "rearm": False}
+
+    # 施加时刻落库为恢复的落点轴：落点 = 施加时刻 + 偏移
+    with session_scope() as session:
+        row = devices_store.get_hold(session, DEVICE)
+        assert row is not None
+        assert row["started_at"] is not None
+        assert row["lease_deadline"] is not None
 
 
 def test_trigger_outside_window_does_not_hold(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -290,14 +302,88 @@ def test_expired_intent_is_abandoned_after_close(fresh_db: str, monkeypatch: pyt
     assert sent == []
 
 
+def test_incident_timeline_replay(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """用 2026-11-20 事故的真实参数逐 tick 重演：断电截止落在落点 + 余量，恢复
+    零命令，恢复后的校正不重布。
+
+    当晚参数：close 23:58、23:51:44 手动点击、对账 30 秒一轮、偏移 18 分钟。
+    旧实现的实际结果是 00:00–00:02 集体断电（预补偿少算一个偏移、close 一过就
+    恢复、恢复重布算出 0 分钟延时）。
+    """
+    sent: list[tuple[str, object]] = []
+
+    def at(local: str) -> datetime:
+        moment = datetime.strptime(local, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone(timedelta(minutes=ZONE_MINUTES)))
+        return moment.astimezone(UTC)
+
+    _prepare(monkeypatch, "2026-11-20 23:51:44", sent)
+    monkeypatch.setattr(power.manager, "is_online", lambda _d: True)
+
+    def tick_at(local_real: str) -> None:
+        monkeypatch.setattr(power, "_now_utc", lambda: at(local_real))
+        asyncio.run(power.tick_once())
+
+    # 23:51:44 手动点击（真实轴）
+    monkeypatch.setattr(power, "_now_utc", lambda: at("2026-11-20 23:51:44"))
+    with session_scope() as session:
+        power.request_hold(session, DEVICE)
+
+    # 23:52:00 对账：一次布防（截止 00:38 = 拨后墙钟轴的落点+余量）+ 一次拨钟（到 00:10）
+    # 施加时刻（started_at）由 mark_hold_applied 的 utcnow 落库，冻结到对账这一刻
+    monkeypatch.setattr(devices_store, "utcnow", lambda: at("2026-11-20 23:52:00"))
+    tick_at("2026-11-20 23:52:00")
+    assert [action for action, _ in sent] == ["power.schedule", "clock.set"]
+    assert sent[0][1] == {"off_at": "00:38", "on_at": "10:55"}
+    assert sent[1][1] == {"datetime": "2026-11-21 00:10:00", "rearm": False}
+
+    # 拨钟后第一帧收敛偏差：表盘 = 真实 + 18 分钟（gateway 的 update 在生产做同样的事）
+    device_clock.load(DEVICE, -1080.0)
+
+    # 23:58:20（旧实现在此恢复并算出 0 分钟延时）：对账不动——布防在位、落点未到，
+    # 没有续租、没有恢复、没有任何命令
+    sent.clear()
+    tick_at("2026-11-20 23:58:20")
+    assert sent == []
+    assert _get_hold(fresh_db) is not None
+
+    # 00:10:00 落点：恢复清状态，零命令
+    tick_at("2026-11-21 00:10:00")
+    assert _get_hold(fresh_db) is None
+    assert sent == []
+
+    # 00:10:30 下一轮：自动校时写回真实钟面，且不重布（已过 close——重布会把断电
+    # 推到次日，延长被变成 24 小时）
+    tick_at("2026-11-21 00:10:30")
+    assert sent == [("clock.set", {"datetime": "2026-11-21 00:10:30", "rearm": False})]
+
+    # 布防截止的语义核对：墙钟轴 00:38 = 真实轴 00:20 = 落点（00:10）+ 余量（10 分钟）
+    with session_scope() as session:
+        row = devices_store.get_hold(session, DEVICE)
+        assert row is None
+
+
+def test_intent_outside_the_window_parks_without_commands(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """触发窗前的意图 park 到窗内再施加：close 还没到，拨钟只会白白跳过 App 的放人线。"""
+    sent: list[tuple[str, object]] = []
+    _prepare(monkeypatch, "2026-11-20 23:30:00", sent)
+    _seed_hold(fresh_db, "2026-11-20T15:30:00.000Z", offset_s=None, monkeypatch=monkeypatch)  # 23:30 手动点击
+
+    _tick()
+
+    hold = _get_hold(fresh_db)
+    assert hold is not None
+    assert hold["offset_s"] is None  # 意图保留，等触发窗
+    assert sent == []
+
+
 # ── 租约 ──────────────────────────────────────────────────────────────────
 
 
-def test_lease_renews_and_throttles(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """hold 中每 2 分钟续租（表盘 now + 租期），节流内不重复下发。
+def test_armed_hold_sends_no_further_commands(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """已施加的 hold 不再下发任何布防/写钟：布防只有一次，滚动续写与 MCU 的钟面
+    检查语义冲突（每次续写的截止可能更早，会抢先或拉前——2026-11-20 事故）。
 
-    hold 起点取白天（表盘 00:30 之后的意图，被跳过的 close 是当晚的）：恢复判定
-    不在本用例触发，只看租约。
+    hold 起点取白天（表盘 00:30 之后的意图，落点在当晚）：恢复判定不在本用例触发。
     """
     sent: list[tuple[str, object]] = []
     # hold 中墙钟 = 真实 + 偏移：真实 00:00 local，偏移 660s → 墙 00:11 local
@@ -307,20 +393,15 @@ def test_lease_renews_and_throttles(fresh_db: str, monkeypatch: pytest.MonkeyPat
     _tick()
     _tick()
 
-    arms = [params for action, params in sent if action == "power.schedule"]
-    assert len(arms) == 1  # 节流：第二轮不再下发
-    assert arms[0] == {"off_at": "00:21", "on_at": "10:55"}
-    with session_scope() as session:
-        hold = devices_store.get_hold(session, DEVICE)
-        assert hold is not None
-        assert hold["lease_deadline"] is not None
+    assert sent == []
 
 
 # ── 恢复 ──────────────────────────────────────────────────────────────────
 
 
-def test_resume_steps_back_and_clears_hold(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """close 已过且无人占用：写回真实钟面（rearm=true）并清 hold 列。"""
+def test_resume_at_landing_clears_hold_without_commands(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """落点已过且无人占用：清 hold 列，不发任何命令——钟面写回由 following_schedule
+    的自动校时承担（恢复后偏差 = 偏移量，超阈值即触发）。"""
     sent: list[tuple[str, object]] = []
     _prepare(monkeypatch, "2026-11-21 00:30:00", sent, skew_s=0.0)
     _seed_hold(fresh_db, "2026-11-20T15:49:00.000Z", offset_s=660, monkeypatch=monkeypatch)
@@ -329,7 +410,7 @@ def test_resume_steps_back_and_clears_hold(fresh_db: str, monkeypatch: pytest.Mo
 
     hold = _get_hold(fresh_db)
     assert hold is None
-    assert ("clock.set", {"datetime": "2026-11-21 00:30:00", "rearm": True}) in sent
+    assert sent == []
 
 
 def test_resume_waits_while_a_roster_student_is_occupying(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -345,7 +426,8 @@ def test_resume_waits_while_a_roster_student_is_occupying(fresh_db: str, monkeyp
     assert all(action != "clock.set" for action, _ in sent)
 
 
-def test_resume_waits_until_the_skipped_close_has_passed(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resume_waits_until_the_landing_has_passed(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """恢复等落点，不等被跳过的 close——close 一过就恢复等于没延长。"""
     sent: list[tuple[str, object]] = []
     _prepare(monkeypatch, "2026-11-20 23:30:00", sent, skew_s=0.0)
     _seed_hold(fresh_db, "2026-11-20T15:49:00.000Z", offset_s=660, monkeypatch=monkeypatch)
@@ -373,6 +455,17 @@ def test_correction_steps_when_skewed_and_idle(fresh_db: str, monkeypatch: pytes
     assert ("clock.set", {"datetime": "2026-11-20 19:58:00", "rearm": True}) in sent
 
 
+def test_correction_after_close_does_not_rearm(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """过了今晚 close 的校正不重布常规计划：此刻重布把断电推到次日，延长会被
+    变成 24 小时——断电由既有布防截止承担。"""
+    sent: list[tuple[str, object]] = []
+    _prepare(monkeypatch, "2026-11-21 00:10:00", sent, skew_s=-120.0)
+
+    _tick()
+
+    assert ("clock.set", {"datetime": "2026-11-21 00:08:00", "rearm": False}) in sent
+
+
 def test_correction_is_silent_during_hold(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """hold 期间的偏差是故意的：校正让位。"""
     sent: list[tuple[str, object]] = []
@@ -382,6 +475,45 @@ def test_correction_is_silent_during_hold(fresh_db: str, monkeypatch: pytest.Mon
     _tick()
 
     assert all(action != "clock.set" for action, _ in sent)
+
+
+# ── 已施加期间的掉线可见性 ────────────────────────────────────────────────
+
+
+def test_armed_hold_offline_before_landing_is_flagged_once(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """布防在位、落点未到、设备掉线：留痕一次（限频门控日志与审计同一路径）；掉线
+    不触发任何补救（人不在就是断电，方向安全）。"""
+    sent: list[tuple[str, object]] = []
+    _prepare(monkeypatch, "2026-11-20 23:51:00", sent, skew_s=-660.0, online=False)
+    _seed_hold(fresh_db, "2026-11-20T15:49:00.000Z", offset_s=660, monkeypatch=monkeypatch)
+    # 布防截止取未来：seed 的 moment 是过去时刻，把截止推到"现在 + 一个余量"之后
+    with session_scope() as session:
+        devices_store.set_lease(session, DEVICE, datetime(2026, 11, 20, 16, 59, 0, tzinfo=UTC))
+
+    _tick()
+    _tick()
+
+    assert sent == []
+    from app.persistence.audit import JobRun
+
+    with session_scope() as session:
+        rows = session.query(JobRun).filter(JobRun.outcome == "hold-failed").all()
+        assert len(rows) == 1  # 限频：第二轮不再重复
+
+
+def test_armed_hold_offline_after_landing_is_not_flagged(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """布防截止已过（到点断电）后的掉线是正常表现：不留痕。"""
+    sent: list[tuple[str, object]] = []
+    _prepare(monkeypatch, "2026-11-21 00:30:00", sent, skew_s=0.0, online=False)
+    _seed_hold(fresh_db, "2026-11-20T15:49:00.000Z", offset_s=660, monkeypatch=monkeypatch)
+
+    _tick()
+
+    assert sent == []
+    from app.persistence.audit import JobRun
+
+    with session_scope() as session:
+        assert session.query(JobRun).filter(JobRun.outcome == "hold-failed").count() == 0
 
 
 # ── 放回（帧驱动）────────────────────────────────────────────────────────
@@ -534,7 +666,35 @@ def test_resume_endpoint_resumes_when_holding(
     assert resp.status_code == 200
     assert resp.json()["resumed"] is True
     assert _get_hold(fresh_db) is None
-    assert any(action == "clock.set" for action, _ in sent)
+    assert sent == []
+
+
+def test_resume_endpoint_before_the_landing_attempts_a_cancel_arming(
+    client: TestClient, admin_headers: dict[str, str], fresh_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """落点前的 resume 是尽力取消：重布"表盘此刻 + 1.5 分钟"的更早截止（MCU 接受
+    更早截止时生效，否则被忽略、断电仍落在落点 + 余量），随后清 hold 列。"""
+    _register_device_for_http()
+    _seed_facts(fresh_db)
+    _seed_hold(fresh_db, "2026-11-20T15:49:00.000Z", offset_s=660, monkeypatch=monkeypatch)
+    monkeypatch.setattr(power.manager, "is_online", lambda _d: True)
+    sent: list[tuple[str, object]] = []
+
+    async def fake_send(_session: object, _device_id: str, action: str, params: object, **_kw: object) -> object:
+        sent.append((action, params))
+        return {"status": "ok", "reason_code": "", "terminal_message": "", "data": None}
+
+    monkeypatch.setattr(power.device_actions, "send_command_and_wait", fake_send)
+    _prepare(monkeypatch, "2026-11-20 23:51:00", sent, skew_s=0.0)
+
+    resp = client.post("/api/v1/devices/dev-hold/resume", headers=admin_headers)
+
+    assert resp.status_code == 200
+    assert resp.json()["resumed"] is True
+    assert _get_hold(fresh_db) is None
+    # 取消重布：截止取表盘 23:52（此刻 + 1.5 分钟），上电目标取上报的 open
+    assert ("power.schedule", {"off_at": "23:52", "on_at": "10:55"}) in sent
+    assert all(action != "clock.set" for action, _ in sent)
 
 
 def test_resume_endpoint_is_idempotent_when_not_holding(
@@ -670,34 +830,6 @@ def test_step_failure_after_arm_records_hold_failed(fresh_db: str, monkeypatch: 
     assert calls["n"] == 2
 
 
-def test_lease_skips_without_skew_record(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """租约续期需要表盘读数：偏差记录缺失时本轮不续（下轮再试）。"""
-    sent: list[tuple[str, object]] = []
-    _prepare(monkeypatch, "2026-11-21 00:11:00", sent, skew_s=-660.0)
-    _seed_hold(fresh_db, "2026-11-20T16:30:00.000Z", offset_s=660)
-    device_clock.clear()
-
-    _tick()
-
-    assert all(action != "power.schedule" for action, _ in sent)
-
-
-def test_lease_arm_failure_keeps_the_old_deadline(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    sent: list[tuple[str, object]] = []
-    _prepare(monkeypatch, "2026-11-21 00:11:00", sent, skew_s=-660.0)
-    _seed_hold(fresh_db, "2026-11-20T16:30:00.000Z", offset_s=660)
-    old_deadline = datetime(2026, 11, 20, 16, 30, 0, tzinfo=UTC)
-
-    async def failing_send(_session: object, _device_id: str, action: str, _params: object, **_kw: object) -> object:
-        return {"status": "timeout", "reason_code": "device.offline", "terminal_message": "", "data": None}
-
-    monkeypatch.setattr(power.device_actions, "send_command_and_wait", failing_send)
-    _tick()
-
-    with session_scope() as session:
-        assert devices_store.get_hold(session, DEVICE)["lease_deadline"] == old_deadline
-
-
 def test_reassign_skips_a_student_removed_from_the_roster(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """名单刚被改：不在名单里的人不再分配（凭证也跟着名单走）。"""
     _prepare(monkeypatch, "2026-11-20 23:51:00", skew_s=-660.0)
@@ -730,16 +862,20 @@ def test_reassign_waits_on_precondition_rejection(fresh_db: str, monkeypatch: py
     assert hold["assignments"][0]["failed"] is False
 
 
-def test_resume_endpoint_offline_returns_409(
+def test_resume_endpoint_works_offline(
     client: TestClient, admin_headers: dict[str, str], fresh_db: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """resume 只清状态、不发命令：离线同样可恢复（取消重布的前提不满足就跳过）。"""
     _register_device_for_http()
+    _seed_facts(fresh_db)
     _seed_hold(fresh_db, "2026-11-20T15:49:00.000Z", offset_s=660, monkeypatch=monkeypatch)
     monkeypatch.setattr(power.manager, "is_online", lambda _d: False)
 
     resp = client.post("/api/v1/devices/dev-hold/resume", headers=admin_headers)
 
-    assert resp.status_code == 409
+    assert resp.status_code == 200
+    assert resp.json()["resumed"] is True
+    assert _get_hold(fresh_db) is None
 
 
 def test_holds_view_without_reported_facts_reports_recovery_undecided(
@@ -921,9 +1057,10 @@ def test_warn_once_throttles_repeated_failures(fresh_db: str, monkeypatch: pytes
     assert hold["offset_s"] is None
 
 
-def test_resume_endpoint_without_facts_returns_resumed_false(
+def test_resume_endpoint_does_not_need_facts(
     client: TestClient, admin_headers: dict[str, str], fresh_db: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """resume 只清状态：facts 缺失（上报被清）也不影响恢复。"""
     _register_device_for_http()
     _seed_hold(fresh_db, "2026-11-20T15:49:00.000Z", offset_s=660, monkeypatch=monkeypatch)
     monkeypatch.setattr(power.manager, "is_online", lambda _d: True)
@@ -931,7 +1068,8 @@ def test_resume_endpoint_without_facts_returns_resumed_false(
     resp = client.post("/api/v1/devices/dev-hold/resume", headers=admin_headers)
 
     assert resp.status_code == 200
-    assert resp.json()["resumed"] is False
+    assert resp.json()["resumed"] is True
+    assert _get_hold(fresh_db) is None
 
 
 def test_hold_and_resume_on_unknown_device_return_404(
@@ -946,11 +1084,14 @@ def test_hold_and_resume_on_unknown_device_return_404(
 
 
 def test_offline_devices_never_get_commands(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """离线设备零通信：校正、施加、续租三处都在本地把门，不发命令不落审计行。"""
+    """离线设备零通信：校正、施加、布防可见性三处都在本地把门，不发命令不落审计行。"""
     sent: list[tuple[str, object]] = []
     _prepare(monkeypatch, "2026-11-20 23:50:00", sent, skew_s=-120.0, online=False)
     _with_session("2026-11-20T15:40:00.000Z")
     _seed_hold(fresh_db, "2026-11-20T15:49:00.000Z", offset_s=660, monkeypatch=monkeypatch)
+    # 布防截止取过去：掉线发生在截止之后是断电的正常表现，不触发可见性告警
+    with session_scope() as session:
+        devices_store.set_lease(session, DEVICE, datetime(2026, 11, 20, 15, 30, 0, tzinfo=UTC))
 
     _tick()
 
