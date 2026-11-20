@@ -65,24 +65,31 @@ def _enum(values: tuple[str, ...]) -> sa.Enum:
 
 
 def upgrade() -> None:
-    with op.batch_alter_table("devices") as batch:
-        batch.drop_column("clock_shifted_at")
-        batch.drop_column("clock_shift_assignments")
-        batch.add_column(sa.Column("auto_close_time", sa.String(length=5), nullable=True))
-        batch.add_column(sa.Column("auto_open_time", sa.String(length=5), nullable=True))
-        batch.add_column(sa.Column("zone_offset_minutes", sa.Integer(), nullable=True))
-        batch.add_column(sa.Column("facts_at", UtcDateTime(), nullable=True))
-        batch.add_column(sa.Column("hold_started_at", UtcDateTime(), nullable=True))
-        batch.add_column(
-            sa.Column(
-                "hold_source",
-                sa.Enum("manual", "automated", name="hold_source", native_enum=False, create_constraint=True, length=32),
-                nullable=True,
-            )
-        )
-        batch.add_column(sa.Column("hold_offset_s", sa.Integer(), nullable=True))
-        batch.add_column(sa.Column("hold_assignments", sa.JSON(), nullable=True))
-        batch.add_column(sa.Column("lease_deadline", UtcDateTime(), nullable=True))
+    # 上一次失败的部署在库里留了 batch 重建的半成品表：devices 本体未动，先清残留。
+    # （表无被引用者，外键开启下也可安全 DROP。）
+    op.execute(sa.text("DROP TABLE IF EXISTS _alembic_tmp_devices"))
+
+    # devices 影子行换列全部走原生 ALTER（SQLite ≥3.35 支持 ADD/DROP COLUMN）——
+    # 不用 batch 重建：devices 被 door_states 等多张表外键引用，重建需要整库关外键。
+    # 两列均无索引/无外键参与，原生 DROP COLUMN 成立。
+    op.add_column("devices", sa.Column("auto_close_time", sa.String(length=5), nullable=True))
+    op.add_column("devices", sa.Column("auto_open_time", sa.String(length=5), nullable=True))
+    op.add_column("devices", sa.Column("zone_offset_minutes", sa.Integer(), nullable=True))
+    op.add_column("devices", sa.Column("facts_at", UtcDateTime(), nullable=True))
+    op.add_column("devices", sa.Column("hold_started_at", UtcDateTime(), nullable=True))
+    op.add_column(
+        "devices",
+        sa.Column(
+            "hold_source",
+            sa.Enum("manual", "automated", name="hold_source", native_enum=False, create_constraint=True, length=32),
+            nullable=True,
+        ),
+    )
+    op.add_column("devices", sa.Column("hold_offset_s", sa.Integer(), nullable=True))
+    op.add_column("devices", sa.Column("hold_assignments", sa.JSON(), nullable=True))
+    op.add_column("devices", sa.Column("lease_deadline", UtcDateTime(), nullable=True))
+    op.drop_column("devices", "clock_shifted_at")
+    op.drop_column("devices", "clock_shift_assignments")
 
     with op.batch_alter_table("job_runs") as batch:
         batch.alter_column(

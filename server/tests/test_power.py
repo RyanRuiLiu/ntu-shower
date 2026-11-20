@@ -12,6 +12,7 @@
 
 import asyncio
 from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -20,13 +21,15 @@ from tests.test_scheduler import _frame
 
 from app.contracts import HoldSource, JobOutcome
 from app.core import device_clock
-from app.core.clock import parse_rfc3339
+from app.core.clock import format_rfc3339, parse_rfc3339
 from app.core.problems import DOOR_NOT_FREE, ApiProblemError
 from app.db.base import utcnow
+from app.db.engine import create_db_engine
 from app.db.session import session_scope
 from app.modules.config import store as config_store
 from app.modules.config.spec import parse_time
 from app.modules.devices import crud as devices_store
+from app.modules.devices import service as devices_service
 from app.modules.power import service as power
 
 DEVICE = "dev-hold"
@@ -147,7 +150,6 @@ def _seed_hold(
 
 
 def _get_hold(fresh_db: str) -> dict[str, object] | None:
-    from app.core.clock import format_rfc3339
 
     with session_scope() as session:
         hold = devices_store.get_hold(session, DEVICE)
@@ -548,7 +550,6 @@ def test_resume_endpoint_is_idempotent_when_not_holding(
 
 def test_record_status_report_lands_the_shadow_row(fresh_db: str) -> None:
     """上报事实落影子行：三个值整组进出（缺哪项都按整体缺失处理）。"""
-    from app.modules.devices import service as devices_service
 
     device_link.register_trusted_device(DEVICE)
     with session_scope() as session:
@@ -958,3 +959,51 @@ def test_offline_devices_never_get_commands(fresh_db: str, monkeypatch: pytest.M
 
     with session_scope() as session:
         assert session.query(JobRun).count() == 0
+
+
+# ── 迁移恢复：复现 2026-11-20 生产部署失败的现场 ──────────────────────────
+
+
+def test_migration_recovers_from_failed_deploy_leftover(tmp_path: Path) -> None:
+    """上次部署失败留下的 batch 半成品表不再阻塞迁移，重跑一次到位。
+
+    生产现场：迁移在 DROP TABLE devices 上因外键失败退出——残留
+    _alembic_tmp_devices 半成品表、devices 本体未动、alembic_version 未推进。
+    修复后的迁移先清残表，devices 换列走原生 ADD/DROP COLUMN（不重建被引用的表），
+    同一库上重跑成功。整条迁移在测试里真实重放，与生产建库同源。
+    """
+    import os
+
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import text
+
+    server_dir = Path(__file__).resolve().parents[1]
+    db = tmp_path / "recover.db"
+
+    os.environ["DATABASE_URL"] = f"sqlite:///{db.as_posix()}"
+    try:
+        cfg = Config(str(server_dir / "alembic.ini"))
+        cfg.set_main_option("script_location", str(server_dir / "migrations"))
+        command.upgrade(cfg, "5e0f1d5dd2c0")
+
+        # 复现失败现场：半成品残表（迁移中断的 batch 产物）
+        engine = create_db_engine(f"sqlite:///{db.as_posix()}")
+        with engine.connect() as conn:
+            conn.execute(text("CREATE TABLE _alembic_tmp_devices (id VARCHAR(64) PRIMARY KEY)"))
+            conn.commit()
+        engine.dispose()
+
+        # 重放到 head：迁移应清理残表、完成全部换列
+        command.upgrade(cfg, "head")
+
+        engine = create_db_engine(f"sqlite:///{db.as_posix()}")
+        with engine.connect() as conn:
+            cols = {row[1] for row in conn.execute(text("pragma table_info(devices)"))}
+            assert "hold_started_at" in cols
+            assert "clock_shifted_at" not in cols
+            leftover = conn.execute(text("select name from sqlite_master where name='_alembic_tmp_devices'")).scalar()
+            assert leftover is None
+        engine.dispose()
+    finally:
+        os.environ.pop("DATABASE_URL", None)
