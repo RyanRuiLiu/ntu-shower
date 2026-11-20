@@ -8,6 +8,12 @@
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-20
+
+### Fixed
+
+- 设备端计划事实上报不出（125 引入）：浴室 App 参数文件 `Params_*` 属 `root:battery`，agent 进程直读拿不到内容，`device.status` 因此始终缺报——改经 root shell 列目录与读文件（与 DoorSnapshotReader 读 bath.db 同一前提）。facts 落库后校时、hold 与语音时区按既有对账链路自愈，无需服务端变更。
+
 ## [0.8.0] - 2026-11-20
 
 ### Added
