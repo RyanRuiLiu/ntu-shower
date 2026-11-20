@@ -129,7 +129,6 @@ class AgentService : Service() {
             // 修复过程本身会写 a11y.* 事件；通道已就绪就立刻送一份，不等周期
             if (::client.isInitialized && client.isReady()) {
                 LogShipper.shipChanged(client)
-                reportFactsIfChanged()
             }
         }
 
@@ -343,6 +342,10 @@ class AgentService : Service() {
      * 上报电源计划事实（device.status）：平台开关机时刻与本机时区。连上即报、变化才报
      * （指纹比对，与 LogShipper 同一手法）——服务端的 hold 对账与语音当地时刻全按它
      * 换算，服务端不定任何时刻。读不到（App 从未启动）不发：服务端按"计划未知"处理。
+     *
+     * **只在连接建立时读**（含重连与服务重启后的首次连接）：平台计划一天至多变一次，
+     * 不跟着 60 秒看门狗 tick 轮询——那个 tick 只做幂等拉起，读一份几乎不变的文件
+     * 每天 1440 次没有收益。计划若在连接存续期间变更，下一次重连或次日开机即刷新。
      */
     private fun reportFactsIfChanged() {
         if (!::client.isInitialized || !client.isReady()) return
