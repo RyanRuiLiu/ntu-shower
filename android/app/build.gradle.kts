@@ -134,6 +134,9 @@ val frameworkBoundClasses = listOf(
     // 数据库归档的 shell/文件系统编排（mv/rm 经 root 通道、/sdcard 实盘）；判定逻辑
     // 已抽为 BathDbArchivePolicy 并纳入覆盖
     "**/features/selfmanage/BathDbArchiver*",
+    // 电源计划事实的目录列举/文件读取经 root shell（Params_* 属 root:battery）；
+    // 解析逻辑已抽为 read(paramsDir, ls, readFile) 纯参数注入并纳入覆盖
+    "**/features/selfmanage/PowerFacts*",
     // 日志上送的文件系统/网络编排（读 /sdcard 实盘、经 GatewayClient 发送）
     "**/features/selfmanage/LogShipper*",
     // 无障碍节点操作：依赖 android.view.accessibility 节点树与窗口管理器
