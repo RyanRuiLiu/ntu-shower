@@ -1,39 +1,33 @@
 package com.ryanliu.ntushower.features.selfmanage
 
+import com.ryanliu.ntushower.core.config.AppConfig
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * PowerFacts 的解析与缺失语义：真实参数行格式（device-poweroff.md §7 实测）钉在这里。
- * ls/read 读取函数注入为纯函数（生产默认绑定 RootShell），用完整路径的内存"文件"
- * 模拟目录列举与读取，不依赖真机文件系统。
+ * PowerFacts 的解析与缺失语义：真实 `data.xml` 片段按反编译源码的键名钉在这里
+ * （`WelcomeActivity:564` 读 `autoopentime` / `autoclosetime`）。读取函数注入为纯
+ * 函数（生产默认绑定 RootShell），不依赖真机文件系统。
  */
 class PowerFactsTest {
 
-    private val dir = "/sdcard/datalook/log"
-    private val files = mutableMapOf<String, String>()
+    private val xml = """
+        <?xml version='1.0' encoding='utf-8' standalone='yes' ?>
+        <map>
+            <string name="roomname">管庄男浴室</string>
+            <string name="autoopentime">10:55</string>
+            <string name="autoclosetime">23:58</string>
+            <int name="posserverport" value="5500" />
+        </map>
+    """.trimIndent()
 
-    private fun writeParams(name: String, content: String) {
-        files["$dir/$name"] = content
-    }
-
-    private fun read(): PowerFacts? = PowerFacts.read(
-        dir,
-        ls = { files.keys.map { it.substringAfterLast("/") }.sorted() },
-        readFile = { path -> files[path] },
-    )
+    private fun read(text: String?): PowerFacts? = PowerFacts.read(readFile = { text })
 
     @Test
-    fun read_parses_the_real_param_line_format() {
-        writeParams(
-            "Params_2026-11-20.txt",
-            "读取参数[autoOpenTime:10:55][autoCloseTime:23:58][closepassword:xxx]\n" +
-                "V8下载参数[maxbathtime:1200,...]\n",
-        )
-
-        val facts = read()
+    fun read_parses_the_app_shared_preferences() {
+        val facts = read(xml)
 
         assertTrue(facts != null)
         assertEquals("23:58", facts!!.autoCloseTime)
@@ -42,25 +36,22 @@ class PowerFactsTest {
     }
 
     @Test
-    fun read_takes_the_latest_params_file() {
-        writeParams("Params_20261119.txt", "[autoCloseTime:22:00][autoOpenTime:09:00]")
-        writeParams("Params_20261120.txt", "[autoCloseTime:23:58][autoOpenTime:10:55]")
-
-        val facts = read()
-
-        assertEquals("23:58", facts!!.autoCloseTime)
+    fun read_returns_null_when_the_file_is_missing() {
+        assertNull(read(null))
     }
 
     @Test
-    fun read_returns_null_when_the_directory_is_empty() {
-        assertNull(read())
+    fun read_returns_null_when_either_key_is_absent() {
+        assertNull(read("""<map><string name="autoopentime">10:55</string></map>"""))
+        assertNull(read("""<map><string name="autoclosetime">23:58</string></map>"""))
     }
 
     @Test
-    fun read_returns_null_when_the_line_has_no_times() {
-        writeParams("Params_20261120.txt", "读取参数[other:1]")
-
-        assertNull(read())
+    fun read_command_cats_the_prefs_path_instead_of_executing_it() {
+        assertEquals(
+            "cat '${AppConfig.BATH_PREFS_PATH}'",
+            PowerFacts.readCommand(AppConfig.BATH_PREFS_PATH),
+        )
     }
 
     @Test

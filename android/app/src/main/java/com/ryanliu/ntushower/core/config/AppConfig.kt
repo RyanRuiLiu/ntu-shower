@@ -38,13 +38,6 @@ object AppConfig {
     const val BATH_DB_PATH = "$BATH_DB_DIR/$BATH_DB_FILE"
 
     /**
-     * 浴室 App 下载参数时落盘的参数日志目录：`Params_*.txt` 里有
-     * `读取参数[autoOpenTime:…][autoCloseTime:…]`（V8 平台的每日开关机计划）。
-     * 电源计划事实从这里读取——设备自报，服务端不定时刻。
-     */
-    const val BATH_PARAMS_DIR = "/sdcard/datalook/log"
-
-    /**
      * 浴室 App 的 SharedPreferences（`MODE_PRIVATE`，需 root 读）。
      *
      * 水控板直控只用其中的 `waterList`（板 IP/端口/起始门号/门数/编码/名称）与
