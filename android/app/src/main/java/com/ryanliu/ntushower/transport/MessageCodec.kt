@@ -1,6 +1,7 @@
 package com.ryanliu.ntushower.transport
 
 import com.ryanliu.ntushower.core.clock.Clock
+import com.ryanliu.ntushower.core.clock.ServerClock
 import org.json.JSONObject
 import java.util.UUID
 
@@ -22,7 +23,10 @@ object MessageCodec {
             .put("v", 1)
             .put("type", type)
             .put("id", UUID.randomUUID().toString())
-            .put("ts", Clock.wallClockRfc3339())
+            // 帧时刻在服务端时间轴上：它要与服务端审计、日志按时间对账，而墙钟在
+            // hold 期间是故意拨快的。无锚点（刚启动还没握手）回退墙钟，宁可不准
+            // 也不缺字段。
+            .put("ts", ServerClock.nowRfc3339() ?: Clock.wallClockRfc3339())
             .put("payload", payload)
         if (replyTo != null) {
             env.put("reply_to", replyTo)

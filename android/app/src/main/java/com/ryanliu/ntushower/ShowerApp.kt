@@ -6,7 +6,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.util.Log
-import com.ryanliu.ntushower.core.clock.Clock
+import com.ryanliu.ntushower.core.clock.ServerClock
 import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.logfile.CappedLogFile
@@ -34,7 +34,7 @@ class ShowerApp : Application() {
             val dir = File(AppConfig.WORK_DIR).apply { mkdirs() }
             CappedLogFile.append(
                 File(dir, AppConfig.CRASH_LOG_NAME),
-                "\n==== ${Clock.wallClockRfc3339()} ====\n" + Log.getStackTraceString(throwable) + "\n",
+                "\n==== ${ServerClock.nowRfc3339() ?: "unknown"} ====\n" + Log.getStackTraceString(throwable) + "\n",
                 CappedLogFile.DEFAULT_MAX_BYTES,
             )
             try {

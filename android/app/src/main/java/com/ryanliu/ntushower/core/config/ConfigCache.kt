@@ -3,7 +3,7 @@ package com.ryanliu.ntushower.core.config
 import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
-import com.ryanliu.ntushower.core.clock.Clock
+import com.ryanliu.ntushower.core.clock.ServerClock
 import com.ryanliu.ntushower.core.storage.AgentDatabase
 import org.json.JSONObject
 
@@ -50,7 +50,7 @@ object ConfigCache {
             val values = ContentValues().apply {
                 put("id", 1)
                 put("payload", config.toString())
-                put("updated_at", Clock.wallClockRfc3339())
+                put("updated_at", ServerClock.nowRfc3339() ?: "")
             }
             AgentDatabase.get(context).insertWithOnConflict(
                 AppConfig.CONFIG_TABLE,

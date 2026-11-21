@@ -94,7 +94,7 @@ class DoorSnapshotSender(context: Context, private val onDoorsRead: (DoorReading
             ContentValues().apply {
                 put("snapshot_id", snapshotId)
                 put("payload", payload.toString())
-                put("created_at", Clock.wallClockRfc3339())
+                put("created_at", capturedAt ?: Clock.wallClockRfc3339())
             },
             SQLiteDatabase.CONFLICT_REPLACE,
         )

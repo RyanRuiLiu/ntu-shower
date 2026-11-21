@@ -1,6 +1,7 @@
 package com.ryanliu.ntushower.core.log
 
 import com.ryanliu.ntushower.core.clock.Clock
+import com.ryanliu.ntushower.core.clock.ServerClock
 import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.logfile.CappedLogFile
 import org.json.JSONObject
@@ -106,7 +107,10 @@ class DeviceLog(private val dir: File, private val maxBytes: Long = CappedLogFil
         // 自己的落点自己建，但不在构造期做：DeviceLog 由常驻服务在主线程构造，
         // 而目录创建是文件系统调用。放在第一次写之前，仍是"谁写谁建"。
         dir.mkdirs()
-        entry.put("ts", Clock.wallClockRfc3339())
+        // ts 在服务端时间轴上：日志要与审计、命令记录按时间对账，而墙钟在 hold
+        // 期间是故意拨快的。无锚点回退墙钟；uptime_ms 是不受任何拨钟影响的单调
+        // 时长，两列分工见 core/clock。
+        entry.put("ts", ServerClock.nowRfc3339() ?: Clock.wallClockRfc3339())
         entry.put("uptime_ms", Uptime.nowMs())
         entry.put("severity", severity)
         CappedLogFile.append(file, entry.toString() + "\n", maxBytes)
