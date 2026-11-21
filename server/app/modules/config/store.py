@@ -29,7 +29,7 @@ from .spec import (
 
 #: 全局覆盖的写锁。`put_global_overrides` 是**覆盖式**写入——收整份配置、剔掉等于默认值
 #: 的项、整体写回——所以"读现状 → 改一项 → 写回"这三步之间必须串行：否则两个改动各自
-#: 读到旧值，后写的把先写的抹掉（A 刚登记、B 同时登记，名单里只剩 B）。
+#: 读到旧值，后写入的会覆盖先写入的改动（A 刚登记、B 同时登记，名单里只剩 B）。
 #:
 #: 可重入：`update_global` 在锁内还要调 `put_global_overrides`。锁内**不许 await**，
 #: 否则把事件循环卡住。
@@ -165,12 +165,12 @@ def update_global(session: Session, augment: Callable[[ConfigValues], ConfigValu
     同样完整的配置。**只回传要改的那一项是不行的**：`_as_overrides` 会把"没出现在输入
     里"的键当成等于默认值而剔掉，于是管理员设过的开关被一次不相干的改动悄悄清掉。
 
-    读的为什么不是 `effective(device_id)`：那会把设备覆盖一起合并进来，而设备覆盖属于
+    读侧为什么不用 `effective(device_id)`：那会把设备覆盖一起合并进来，而设备覆盖属于
     另一张表，混进来就会在写全局的时候把某台设备的覆盖当成全局值固化。
 
     这是 `*_students` 名单增删的**原子入口**（判据不是死代码）：名单是覆盖式整份写回，
-    "先读后写"若不在同一把锁里，两个人同时登记会各写各读到的旧名单，后写的把先写的
-    抹掉。名单写侧接手时必须走这里，不得绕过锁自拼读改写。
+    "先读后写"若不在同一把锁里，两个人同时登记会各写各读到的旧名单，后写入的覆盖
+    先写入的改动。名单写侧接手时必须走这里，不得绕过锁自拼读改写。
     """
     with _global_lock:
         return put_global_overrides(session, augment(global_effective(session)))

@@ -58,7 +58,7 @@ def _validated_device_overrides(values: ConfigValues) -> ConfigValues:
     服务端的键在服务器上运行（后台任务、链路维持、调试通道那些），它们**不按设备区分**：
     收进来之后 `device_effective` 会把它滤掉、永远不下发，而 `effective` 会把它当真——
     于是"同一份阈值、每台设备各不相同"这种既推不出去又说得出口的状态就悄悄存在了。
-    与其留这么一个口子，不如在这里拒掉。
+    这个口子不应存在，在此拒绝。
     """
     checked = _validated(values)
     server_only = sorted(key for key in checked if SPECS_BY_KEY[key].scope is SERVER)
@@ -93,7 +93,7 @@ async def put_global_config(req: ConfigUpdateRequest, session: Session = Depends
     _before_revision, before = store.get_global_overrides(session)
     revision, overrides = store.put_global_overrides(session, _validated(req.config))
     # 服务端的键不下发，所以只有**设备域那部分真的变了**才需要惊动设备：在服务器上运行的
-    # 那些改动保存即生效，再推一条与上次一模一样的 config.update 只是白跑一趟。
+    # 那些改动保存即生效，再推送一条与上次相同的 config.update 对设备只是一次无效传输。
     # 定时器重算与设备推送都由订阅者做（写侧不 import sessions，见 notifier.py 的
     # 模块注释）；推送目标是在线设备全体，订阅者逐台并发等待，单台慢设备不拖慢整批。
     push_targets = (
