@@ -8,12 +8,17 @@ I/O，归属设备域；此前放在 sessions 使 devices 的守卫反向依赖 
 排队语义：设备端把命令分到几条互不阻塞的执行通道（core/actions 的执行通道），
 服务端按同一划分排队——同一通道内每台设备串行，跨通道并行；限流只针对过载，
 不针对串行——串行由通道锁承担。
+
+时间预算只有一份：等锁与等结果共用同一个截止时刻。排队等待是命令延迟的真实
+组成部分，把它排除在超时之外会让"等了 29 秒锁 + 只剩 1 秒执行"的命令必然超时
+却按满额预算投递。
+
+拒绝语义只有两档：预检拒绝（能力集不含、通道排满）在命令未下发时就确定结局，
+登记即收尾；执行期结局（超时、失败、成功）由 [COMMAND_DISPATCH] 统一收尾。
 """
 
 import asyncio
-import contextlib
 import uuid
-from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import TypedDict
 
@@ -100,8 +105,7 @@ def _set(future: asyncio.Future[JsonObject], value: JsonObject) -> None:
 _pending: dict[str, PendingResult] = {}
 
 # 通道排队状态。设备端把命令分到几条互不阻塞的路径（见 core/actions 的执行通道），
-# 服务端按同一划分排队：同一通道内每台设备串行，跨通道并行。限流只针对过载，
-# 不针对串行——串行由通道锁承担。
+# 服务端按同一划分排队：同一通道内每台设备串行，跨通道并行。
 #: (device_id, channel) → 正在等这条通道的命令数（含正在执行的那条）。
 _channel_waiting: dict[tuple[str, str], int] = {}
 
@@ -135,40 +139,6 @@ def _lock_for(device_id: str, channel: str) -> asyncio.Lock:
     return lock
 
 
-@contextlib.asynccontextmanager
-async def _acquire_with_deadline(lock: asyncio.Lock, deadline: float) -> AsyncIterator[None]:
-    """在截止时刻前取得通道锁；超时抛 TimeoutError。
-
-    不用 `wait_for(lock.acquire())`：Python 3.10 的 `wait_for` 在取消与锁已取得的
-    边界上会吞掉取消并继续执行，调用方明明取消了命令，命令却仍被下发、锁仍被占住。
-    这里显式持有获取任务，取消与超时都先收尾再抛出。
-    """
-    remaining = deadline - asyncio.get_running_loop().time()
-    if remaining <= 0:
-        raise TimeoutError
-    acquire = asyncio.ensure_future(lock.acquire())
-    try:
-        done, _ = await asyncio.wait({acquire}, timeout=remaining)
-    except asyncio.CancelledError:
-        acquire.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await acquire
-        if acquire.done() and not acquire.cancelled() and acquire.result():
-            lock.release()
-        raise
-    if not done:
-        acquire.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await acquire
-        if acquire.done() and not acquire.cancelled() and acquire.result():
-            lock.release()
-        raise TimeoutError
-    try:
-        yield
-    finally:
-        lock.release()
-
-
 def _supported_actions(session: Session, device_id: str) -> list[str]:
     """设备在 link.hello 中声明的能力集合；未声明或设备不存在时为空。"""
     device = devices_service.get_device(session, device_id)
@@ -176,6 +146,63 @@ def _supported_actions(session: Session, device_id: str) -> list[str]:
         return []
     capabilities = device.get("capabilities")
     return capabilities if isinstance(capabilities, list) else []
+
+
+def _audited_rejection(
+    session: Session,
+    command_id: str,
+    device_id: str,
+    action: str,
+    params: JsonObject,
+    outcome: CommandOutcome,
+) -> CommandOutcome:
+    """预检拒绝（能力集不含 / 通道排满）：命令未下发、没有可等的结果，登记即收尾。
+
+    登记表补齐规则对预检拒绝同样适用——审计行的 terminal_message 与函数出口
+    一致，不为空。
+    """
+    command_audit.insert_command(session, command_id, device_id, action, utcnow(), trace_id_var.get(), params)
+    command_audit.finish(
+        session,
+        command_id,
+        CommandStatus(outcome["status"]),
+        outcome["reason_code"],
+        outcome["terminal_message"],
+        utcnow(),
+        None,
+    )
+    return outcome
+
+
+def _audited_timeout(
+    session: Session,
+    command_id: str,
+    device_id: str,
+    action: str,
+    params: JsonObject,
+) -> CommandOutcome:
+    """等锁与锁内预算耗尽同归这一路：命令未产生结果，审计记超时。
+
+    等锁超时与"取得锁后预算已尽"是同一种处境（时间预算只有一份，见模块注释），
+    审计行也归同一路登记，不各写一遍。terminal_message 按登记表补齐。
+    """
+    outcome = CommandOutcome(
+        status=outcomes.TIMEOUT.value,
+        reason_code=reason_codes.DEADLINE_EXCEEDED.code,
+        terminal_message="",
+        data=None,
+    )
+    command_audit.insert_command(session, command_id, device_id, action, utcnow(), trace_id_var.get(), params)
+    command_audit.finish(
+        session,
+        command_id,
+        CommandStatus(outcome["status"]),
+        outcome["reason_code"],
+        reason_codes.describe(outcome["reason_code"]),
+        utcnow(),
+        None,
+    )
+    return outcome
 
 
 async def send_command_and_wait(
@@ -204,26 +231,23 @@ async def _send_and_wait(
     supported = _supported_actions(session, device_id)
     # 空能力集表示设备未声明：不据此拦截，否则升级服务端会锁死在网设备
     if supported and action not in supported:
-        command_audit.insert_command(session, command_id, device_id, action, utcnow(), trace_id_var.get(), params)
-        command_audit.finish(
+        return _audited_rejection(
             session,
             command_id,
-            CommandStatus(outcomes.FAILED.value),
-            reason_codes.DEVICE_UNSUPPORTED_ACTION.code,
-            "",
-            utcnow(),
+            device_id,
+            action,
+            params,
+            CommandOutcome(
+                status=outcomes.FAILED.value,
+                reason_code=reason_codes.DEVICE_UNSUPPORTED_ACTION.code,
+                terminal_message=f"设备不支持该操作：{action}",
+                data=None,
+            ),
         )
-        return {
-            "status": outcomes.FAILED.value,
-            "reason_code": reason_codes.DEVICE_UNSUPPORTED_ACTION.code,
-            "terminal_message": f"设备不支持该操作：{action}",
-            "data": None,
-        }
 
     channel = actions.ACTION_CHANNELS[action]
     key = (device_id, channel)
     if _channel_waiting.get(key, 0) >= CHANNEL_QUEUE_MAX:
-        command_audit.insert_command(session, command_id, device_id, action, utcnow(), trace_id_var.get(), params)
         log_event(
             "INFO",
             "command.rejected",
@@ -233,64 +257,38 @@ async def _send_and_wait(
             action=action,
             channel=channel,
         )
-        command_audit.finish(
+        return _audited_rejection(
             session,
             command_id,
-            CommandStatus(outcomes.REJECTED.value),
-            reason_codes.SERVER_OVERLOADED.code,
-            "",
-            utcnow(),
+            device_id,
+            action,
+            params,
+            CommandOutcome(
+                status=outcomes.REJECTED.value,
+                reason_code=reason_codes.SERVER_OVERLOADED.code,
+                # 用登记表里的措辞，不自己拼：拼出来的会把内部通道名摊给用户
+                terminal_message=reason_codes.SERVER_OVERLOADED.message,
+                data=None,
+            ),
         )
-        return {
-            "status": outcomes.REJECTED.value,
-            "reason_code": reason_codes.SERVER_OVERLOADED.code,
-            # 用登记表里的措辞，不自己拼：拼出来的会把内部通道名摊给用户
-            "terminal_message": reason_codes.SERVER_OVERLOADED.message,
-            "data": None,
-        }
 
     _channel_waiting[key] = _channel_waiting.get(key, 0) + 1
     loop = asyncio.get_running_loop()
-    # 排队与执行共用一个时间预算：等锁的时间也算在内
     deadline = loop.time() + timeout_s
     try:
-        async with _acquire_with_deadline(_lock_for(device_id, channel), deadline):
+        # 等锁计入同一份预算。wait_for 自 3.12 起以 asyncio.timeout 重实现
+        # （Python 官方文档 Changed in version 3.12），取消与超时的边界不再吞取消，
+        # 无需手写获取任务管理；取消时锁不会被持有（Lock.acquire 被取消即不入锁）。
+        await asyncio.wait_for(_lock_for(device_id, channel).acquire(), timeout=deadline - loop.time())
+        try:
             remaining = deadline - loop.time()
             if remaining <= 0:
-                command_audit.insert_command(
-                    session, command_id, device_id, action, utcnow(), trace_id_var.get(), params
-                )
-                command_audit.finish(
-                    session,
-                    command_id,
-                    CommandStatus(outcomes.TIMEOUT.value),
-                    reason_codes.DEADLINE_EXCEEDED.code,
-                    "",
-                    utcnow(),
-                )
-                return CommandOutcome(
-                    status=outcomes.TIMEOUT.value,
-                    reason_code=reason_codes.DEADLINE_EXCEEDED.code,
-                    terminal_message="",
-                    data=None,
-                )
+                raise TimeoutError
             return await _dispatch(session, command_id, device_id, action, params, remaining)
+        finally:
+            _lock_for(device_id, channel).release()
     except TimeoutError:
-        command_audit.insert_command(session, command_id, device_id, action, utcnow(), trace_id_var.get(), params)
-        command_audit.finish(
-            session,
-            command_id,
-            CommandStatus(outcomes.TIMEOUT.value),
-            reason_codes.DEADLINE_EXCEEDED.code,
-            "",
-            utcnow(),
-        )
-        return CommandOutcome(
-            status=outcomes.TIMEOUT.value,
-            reason_code=reason_codes.DEADLINE_EXCEEDED.code,
-            terminal_message="",
-            data=None,
-        )
+        return _audited_timeout(session, command_id, device_id, action, params)
     finally:
         left = _channel_waiting.get(key, 1) - 1
         if left > 0:
