@@ -317,7 +317,7 @@ function showIssuedSecret(token, message) {
 }
 
 function copyIssued() {
-  copyText($('issuedValue').value, { fallbackInputId: 'issuedValue' })
+  copyText($('issuedValue').value)
 }
 
 /** 密钥表单双模式：签发（POST）与编辑（PUT，令牌不变）共用同一组控件。 */

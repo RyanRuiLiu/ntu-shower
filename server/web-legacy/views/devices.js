@@ -431,11 +431,9 @@ async function bridgeClose() {
   }
 }
 
-/**
- * 复制一个只读输入框里的内容：退路（选中让手动复制）由核心的 clipboard 统一。
- */
+/** 复制一个只读输入框里的内容：成功与失败文案由核心的 clipboard 统一。 */
 function copyFrom(id) {
-  copyText($(id).value, { fallbackInputId: id })
+  copyText($(id).value)
 }
 
 let dispose = disposer()

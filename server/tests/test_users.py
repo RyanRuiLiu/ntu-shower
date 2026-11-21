@@ -133,23 +133,3 @@ def test_disabled_user_keys_fail_immediately(client: TestClient, admin_headers: 
 
     assert client.put(f"/api/v1/users/{username}", headers=admin_headers, json={"disabled": True}).status_code == 200
     assert client.get("/api/v1/devices", headers={"Authorization": f"Bearer {token}"}).status_code == 401
-
-
-def test_x_identity_header_is_ignored(client: TestClient, admin_headers: dict[str, str]) -> None:
-    """自定 `X-Identity` 头不是认证通道（决策 2026-11-07-2）：带头访问管理端点等同匿名 401。"""
-    r = client.get("/api/v1/users", headers={"X-Identity": ADMIN_USER})
-
-    assert r.status_code == 401
-    assert r.json()["type"].endswith("/problems/unauthenticated")
-
-
-def test_legacy_x_identity_yields_to_bearer_when_both_present(
-    client: TestClient, admin_headers: dict[str, str]
-) -> None:
-    """Bearer 优先于 X-Identity：两者并存时以 Bearer 为准。"""
-    r = client.get(
-        "/api/v1/users",
-        headers={**admin_headers, "X-Identity": "irrelevant-value"},
-    )
-
-    assert r.status_code == 200

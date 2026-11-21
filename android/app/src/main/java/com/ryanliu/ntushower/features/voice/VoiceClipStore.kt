@@ -2,7 +2,6 @@ package com.ryanliu.ntushower.features.voice
 
 import android.util.Log
 import com.ryanliu.ntushower.BuildConfig
-import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.transport.ReasonCodes
 import okhttp3.Call
 import okhttp3.OkHttpClient
@@ -19,8 +18,7 @@ import java.security.MessageDigest
  * 哈希，URL 由 `clip_id` 推出（`/voice/assets/{id}.mp3`），设备不能借参数下载任意
  * 地址。按声明长度精确收字节、校验 SHA-256，命中缓存时也校验，损坏就重下。
  *
- * 旧版本把缓存放在 `/sdcard/ntu-shower/voice`。新实例初始化时删除旧目录，并清掉
- * 私有目录里上次中断留下的 `.part` 文件；文件超上限时按最后修改时刻淘汰。
+ * 初始化时清掉私有目录里上次中断留下的 `.part` 文件；文件超上限时按最后修改时刻淘汰。
  */
 class VoiceClipStore(private val clientProvider: () -> OkHttpClient, private val dir: File) {
 
@@ -47,11 +45,6 @@ class VoiceClipStore(private val clientProvider: () -> OkHttpClient, private val
     /** 缓存目录首次使用前的清理；由 [ensure] 在后台线程触发，避免构造期做文件 IO。 */
     private var initialized = false
 
-    init {
-        // 旧公共缓存可能有大量文件；删目录放后台，不阻塞服务启动。
-        Thread({ removeLegacyCache() }, "voice-legacy-cleanup").apply { isDaemon = true }.start()
-    }
-
     @Synchronized
     private fun initializeIfNeeded() {
         if (initialized) return
@@ -59,13 +52,6 @@ class VoiceClipStore(private val clientProvider: () -> OkHttpClient, private val
         dir.listFiles { file -> file.isFile && file.name.endsWith(".part") }?.forEach { it.delete() }
         prune(dir, emptySet())
         initialized = true
-    }
-
-    private fun removeLegacyCache() {
-        val legacy = File(AppConfig.VOICE_DIR)
-        if (legacy.exists() && !legacy.deleteRecursively()) {
-            Log.w(TAG, "legacy voice cache not fully removed: ${legacy.absolutePath}")
-        }
     }
 
     /**
