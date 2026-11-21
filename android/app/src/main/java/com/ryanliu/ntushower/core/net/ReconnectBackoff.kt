@@ -9,7 +9,8 @@ import kotlin.random.Random
  * 几十台设备的规模下才显出必要的一层——共用一次断网（服务器重启、楼内网络闪断）
  * 的设备们退避计数几乎同步，没有它就会永远以同一波次同时重连，每一波都是 N 条
  * 并发 TLS 握手加 hello 处理同时砸向服务端；抖动把同一波的设备摊开到半个退避
- * 窗口里，任何一台设备的平均等待仍是同阶的量。
+ * 窗口里，任何一台设备的平均等待仍是同阶的量（AWS SDK 与 exponential backoff
+ * + jitter 文献的通行形态，此处是它的最小实现）。
  */
 object ReconnectBackoff {
 

@@ -10,12 +10,14 @@ import okhttp3.TlsVersion
 import java.util.concurrent.TimeUnit
 
 /**
- * 统一的 OkHttp 工厂：内置 DNS 自解析 + 最小现代化 TLS 规格。
- * 网关 WebSocket 与 OTA 下载共用同一配置，规则单一来源。
+ * 全应用唯一的 OkHttp 工厂：TLS、DNS、超时策略在这里定一次，网关 WebSocket、
+ * OTA 下载、自注册、AdbBridge 全部经它——不允任何调用点自带第二套客户端配置
+ * （第二套配置就是第二套信任面与超时语义）。
  *
- * 套件清单说明：系统 TLS 栈（API 19）实测只有 CBC、无任何 AEAD，无法满足服务端
- * 纯 AEAD 要求。SecureTls 内置 Conscrypt（BoringSSL）后，这里只声明 AEAD 套件；
- * 不声明 CBC 套件——服务端也不再接受 CBC。
+ * TLS 规格与超时的依据见 [SecureTls] 与 [DnsResolver] 的类注释；三个超时参数的
+ * 分工：connect 管建链、read 管两次数据之间的等待、call 管一次调用的整体上限
+ * （OkHttp 官方语义）。callTimeout 默认 0 = 不封顶：网关 WS 是长连接、OTA 是大
+ * 文件，慢速滴漏的响应体 readTimeout 管不住；语音下载这类有界请求由调用方传值。
  */
 object HttpClientFactory {
 
@@ -35,8 +37,6 @@ object HttpClientFactory {
             .sslSocketFactory(tls.socketFactory, tls.trustManager)
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(readTimeoutSeconds, TimeUnit.SECONDS)
-            // 0 = 不设整体超时：网关 WS 与 OTA 大文件沿用 readTimeout 语义。慢速滴漏的
-            // 响应体 readTimeout 管不住，语音下载这类有界请求用 callTimeout 封顶
             .apply { if (callTimeoutSeconds > 0) callTimeout(callTimeoutSeconds, TimeUnit.SECONDS) }
             .build()
     }

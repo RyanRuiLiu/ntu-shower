@@ -8,12 +8,19 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
-import java.util.Random
 
 /**
- * 内置 DNS 解析器：设备系统 DNS 不可用（实测校园网封锁默认解析器，见 docs/architecture.md），
- * 直接向公共 DNS 发标准查询（UDP 优先，端口超时换 TCP，同为标准查询方式）。
- * 只解析服务域名：域名是设备唯一的网络锚点。无缓存，也不设第二台解析服务器。
+ * 内置 DNS 解析器：设备系统 DNS 不可用（校园网封锁默认解析器，见
+ * docs/architecture.md 的传输层事实节），直接向公共解析器发标准查询。
+ *
+ * UDP 优先、UDP 失败换 TCP——两者都是 RFC 1035 的标准查询方式（TCP 以前导长度
+ * 两字节分帧）。只解析服务域名：域名是设备唯一的网络锚点，无缓存、无第二台解析
+ * 服务器——解析失败由调用方的重连退避承担节奏（[com.ryanliu.ntushower.core.net.ReconnectBackoff]）。
+ *
+ * 事务 ID 由 [kotlin.random.Random.Default] 生成：RFC 1035 规定它用于匹配应答，
+ * 而 `java.util.Random` 是线性同余发生器（其 Javadoc 自述不适合安全用途），
+ * 可预测的 ID 让伪造应答变便宜；Kotlin 的 `Random.Default` 是平台安全随机源的
+ * 接口。此属性与重连抖动共用同一随机源。
  */
 class DnsResolver(
     private val server: String = "114.114.114.114",
@@ -95,7 +102,7 @@ class DnsResolver(
             put(s shr 8)
             put(s and 0xFF)
         }
-        Random().nextInt().let { putShort(it and 0xFFFF) } // id
+        putShort(kotlin.random.Random.Default.nextInt() and 0xFFFF) // id（安全随机，见类注释）
         putShort(0x0100) // flags: RD
         putShort(1) // qdcount
         putShort(0)
