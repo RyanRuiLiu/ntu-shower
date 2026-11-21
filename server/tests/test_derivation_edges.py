@@ -526,7 +526,7 @@ def test_takeover_while_paused_recovers_the_open_time(fresh_db: str) -> None:
 def test_opened_at_comes_from_the_shifted_in_time(fresh_db: str) -> None:
     """正在出水时，开阀时刻取 `in_time` 的平移值，不是我们看见它的那一帧。
 
-    两者差着"设备检测加上报"的那一段。它同时就是这一段的起点——同一份证据喂给两个
+    两者差着"设备检测加上报"的那一段。它同时就是这一段的起点——同一份证据提供给两个
     字段，不再各算各的。
     """
     device_id = "dev-open-shift"

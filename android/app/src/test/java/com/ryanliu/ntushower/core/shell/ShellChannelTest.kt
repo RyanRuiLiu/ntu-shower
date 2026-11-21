@@ -37,7 +37,7 @@ class ShellChannelTest {
         // 命令被包进子 shell 后台跑，是为了拿到 pid 以便超时后按 pid 杀掉它——设备上的
         // 真实进程链是 su → su → su → sh，只 destroy 最上面那层杀不掉真正在跑的那个。
         // `< /dev/null` 也不是可选项：后台任务继承常驻 shell 的 stdin 时，一条读 stdin
-        // 的命令会把后续命令从管道里吃掉。
+        // 的命令会把后续命令从管道中读走。
         val wrapped = ShellChannel("test").wrap("sleep 99", marker, pidFile)
 
         assertTrue("命令该放进子 shell 后台执行，才拿得到 pid", wrapped.startsWith("( sleep 99 ) < /dev/null &"))

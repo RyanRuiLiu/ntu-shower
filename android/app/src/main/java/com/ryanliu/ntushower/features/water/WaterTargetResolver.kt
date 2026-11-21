@@ -115,7 +115,7 @@ object WaterTargetResolver {
         )
     }
 
-    /** 纯换算版本，供单元测试直接喂 waterList 解析结果。 */
+    /** 纯换算版本，供单元测试直接注入 waterList 解析结果。 */
     fun targetIn(boards: List<Board>, doorNo: Int): Target? {
         val board = boards.firstOrNull { it.contains(doorNo) } ?: return null
         return Target(board, doorNo, doorNo - board.start + 1)

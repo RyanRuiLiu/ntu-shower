@@ -173,7 +173,7 @@ def set_trusted(session: Session, device_id: str, trusted: bool) -> bool:
     **信任只在那条连接的 hello 握手时判定一次**：库里这个位变了，已经建立的连接不会
     跟着变——新标记的设备若恰好在线，它的业务帧与命令结果会被当作未信任设备静默丢弃，
     表现是「设备在线、功能全坏」（2026-10-06 首台新设备入网实测）。所以调用方（信任
-    路由）改完必须**掐断现有连接**让设备重新握手，见 `routes.patch_device`。
+    路由）改完必须**断开现有连接**让设备重新握手，见 `routes.patch_device`。
     """
     return crud.set_trusted(session, device_id, trusted)
 
@@ -181,7 +181,7 @@ def set_trusted(session: Session, device_id: str, trusted: bool) -> bool:
 def set_retired(session: Session, device_id: str, retired: bool) -> bool:
     """停用/恢复（只落库）。
 
-    执行语义在网关与自注册：握手与 enroll 即刻拒绝。调用方改完必须掐断现有
+    执行语义在网关与自注册：握手与 enroll 即刻拒绝。调用方改完必须断开现有
     连接——在线设备的业务帧不会因这个位自动停下（与信任位同一处置）。
     """
     return crud.set_retired(session, device_id, retired)

@@ -583,7 +583,7 @@ export const overviewView = {
 
     dispose = disposer()
     // 帧到即重绘喷头并刷新看板：调度器的计划随帧变，跟随帧的节奏就是实时；
-    // 30 秒轮询兜住"状态不变就没有帧"的空窗
+    // 30 秒轮询覆盖"状态不变就没有帧"的空窗
     dispose.add(subscribe('doors', () => { paint(); refreshTaskBoard() }))
     dispose.add(subscribe('view', (id) => { if (id !== 'overview') dispose.dispose() }))
 

@@ -324,7 +324,7 @@ function renderSegments() {
         )
         if (segment.source === 'cert_no') {
           controls.push(
-            // 分段编辑只在 spec 装载后可用（load 先取 spec 再渲染），直接读不设第二份兜底
+            // 分段编辑只在 spec 装载后可用（load 先取 spec 再渲染），直接读取，不设第二份来源
             `<input type="number" min="1" max="${esc(String(spec.max_digits_length))}" data-seg-field="length" data-index="${index}"
               value="${segment.length || ''}" placeholder="全部位数"
               aria-label="第 ${index + 1} 段取学号的位数（留空为全部位数）">`,

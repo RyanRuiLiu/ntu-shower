@@ -77,7 +77,7 @@ DEVICE_LOG_TAIL = "device.log_tail"
 DEVICE_REBOOT = "device.reboot"
 """重启整机。设备重启后 agent 随之重来，会话与喷头现态由重连后的全貌帧重建。
 
-先回报再动作：与 [APP_RESTART] 同理，命令本身会掐断回报通路。
+先回报再动作：与 [APP_RESTART] 同理，命令本身会中断回报通路。
 """
 
 # ── 本程序 ──

@@ -51,7 +51,7 @@ class ApiKey(CreatedAtMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     #: 凭据随身份走：删除用户时密钥一并删除（波次2 删除语义三态：凭据 CASCADE）。
-    #: DB 层与 ORM cascade 双层声明——ORM 管会话内删除，DB 层兜住一切直连路径，
+    #: DB 层与 ORM cascade 双层声明——ORM 管会话内删除，DB 层覆盖一切直连路径，
     #: 两个真相不许分叉。
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     user: Mapped[User] = relationship(back_populates="keys")

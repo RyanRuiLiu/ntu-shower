@@ -208,8 +208,8 @@ class WaterBoardClientTest {
 
     @Test
     fun `an io error after connect maps to board unreachable`() {
-        // 请求写出后读回包阶段连接被掐断（对端半途死亡）：这不是超时——连不上与
-        // "连上了但死了"是两种处境，前者才是 unreachable 之外的超时语义
+        // 请求写出后读回包阶段连接被对端中断（对端中途终止）：这不是超时——连不上与
+        // "连上了但对端终止"是两种处境，前者才是 unreachable 之外的超时语义
         val server = FakeBoardServer { conn, _ ->
             conn.setSoLinger(true, 0)
             conn.close()

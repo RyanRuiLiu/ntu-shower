@@ -191,7 +191,7 @@ class ShellChannel(private val name: String) {
      * 文件里，超时后由 [terminateRunningCommand] 据它终止。
      *
      * `< /dev/null` 不是可选项：后台任务默认继承常驻 shell 的 stdin，一条读 stdin 的命令
-     * 会把**后续命令**从管道里吃掉，之后每条都得等满超时。
+     * 会把**后续命令**从管道中读走，之后每条都得等满超时。
      *
      * 退出码与标记由同一次 echo 输出，两者必然同行。`$?` 必须紧贴着它要反映的那条命令
      * （这里中间多了一步 `rm`，所以先存进 `__ntu_rc`），而贴在标记上之后，"读到标记"与

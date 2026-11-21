@@ -8,10 +8,10 @@
 |---|---|---|
 | 根目录 `compose.yaml` | `/opt/ntu-shower/compose.yaml` | `NTU_SHOWER_TAG=<tag> docker compose -f /opt/ntu-shower/compose.yaml up -d` |
 | `litestream.yml` | `/etc/ntu-shower/litestream.yml` | `docker compose restart litestream` |
-| `nginx/ntu-shower.conf` | `/etc/nginx/sites-enabled/<public-domain>.conf`（**独立文件，非软链**：sites-available 与 enabled 是两份拷贝，只写 enabled 才生效） | 见下方「nginx 同步程序」（reload 在本机曾静默失效，以 restart 兜底） |
+| `nginx/ntu-shower.conf` | `/etc/nginx/sites-enabled/<public-domain>.conf`（**独立文件，非软链**：sites-available 与 enabled 是两份拷贝，只写 enabled 才生效） | 见下方「nginx 同步程序」（reload 在本机曾静默失效，以 restart 恢复） |
 | `publish_apk.ps1` | **不上服务器**：本地工具 | `.\deploy\publish_apk.ps1 -Token <admin 的 API Bearer 凭据>` |
 
-## 部署（自动为主，手动兜底）
+## 部署（自动为主，手动恢复）
 
 **自动路径（默认）**：main 合并 → `docker` workflow 构建推送镜像 → `deploy` job 以专用部署密钥
 （GitHub secrets `DEPLOY_SSH_KEY`/`DEPLOY_HOST`/`DEPLOY_USER`，公钥在服务器 authorized_keys，注释

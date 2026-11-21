@@ -75,7 +75,7 @@ class ConnectionManager:
         return True
 
     async def disconnect(self, device_id: str) -> bool:
-        """主动掐断设备的活动连接（设备会按重连退避自己回来）。
+        """主动断开设备的活动连接（设备会按重连退避自己回来）。
 
         用于信任位等**只在握手时生效**的状态变更之后：让设备重新 hello，新状态才能
         被它带上。连接不存在返回 False，不抛异常。

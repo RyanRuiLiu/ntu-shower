@@ -54,7 +54,7 @@ def candidate(**overrides: object) -> Candidate:
 def test_roster_reads_the_map_and_trims_the_id_only() -> None:
     """学号两端去空格（粘贴常带），**密码不动**——它是凭证，静默改它比留着空格更糟。
 
-    配置页那侧两个都 trim 过了，所以这里只兜住"直接调接口"的情形。
+    配置页那侧两个都 trim 过了，所以这里只覆盖"直接调接口"的情形。
     """
     assert students_of({"k": {"1001": "pw"}}, "k") == {"1001": "pw"}
     assert students_of({"k": {" 1001 ": "pw"}}, "k") == {"1001": "pw"}

@@ -786,7 +786,7 @@ async def push_to_device(session: Session, rule_id: int, device_id: str) -> sche
         occurred_at=now,
         event_key=f"{MANUAL_EVENT_PREFIX}{rule_id}:{uuid.uuid4().hex[:12]}",
     )
-    # 手动推送的 event_key 内嵌随机段，认领永不撞车，认领结果无需判读
+    # 手动推送的 event_key 内嵌随机段，认领永不冲突，认领结果无需判读
     _claim_delivery(session, event, rule_id, plan, duration_ms)
     outcome = await _send_play(session, device_id, plan, int(row["volume"]))
     detail = _detail(outcome)

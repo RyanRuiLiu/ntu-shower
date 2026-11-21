@@ -242,7 +242,7 @@ class RuntimeConfigTest {
 
     @Test
     fun apply_keepsLegitimateValuesUntouched() {
-        // 钳制只兜下限，不得把正常值改掉
+        // 钳制只作用于下限，不得把正常值改掉
         RuntimeConfig.apply(
             JSONObject("{\"notice_text_size_sp\": 45, \"notice_y_dp\": 0, \"notice_occupancy_max\": 5}"),
         )

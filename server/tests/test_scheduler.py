@@ -822,7 +822,7 @@ async def _let_the_loop_run(ticks: int = 20) -> None:
 
 
 def _lift_renew_wait_cap(monkeypatch: pytest.MonkeyPatch, seconds: int = 86_400) -> None:
-    """renew_wait 的时长上限收编为常量（1200 秒）后，喂"1 小时前"会话的用例需要
+    """renew_wait 的时长上限收编为常量（1200 秒）后，注入"1 小时前"会话的用例需要
     把上限抬高——旧形态靠 CONFIG 里的 renew_wait_max_duration_s，键删除后改 patch
     判据表。"""
     from dataclasses import replace

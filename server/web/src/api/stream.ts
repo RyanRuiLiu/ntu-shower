@@ -1,6 +1,6 @@
 /**
  * 实时推送（WS /api/v1/stream）：door.update 与 device.update 直接打进 TanStack
- * Query 缓存，REST 轮询只是兜底。连接断开自动重连（指数退避），消息类型与
+ * Query 缓存，REST 轮询只是补充。连接断开自动重连（指数退避），消息类型与
  * 服务端 events 契约一致。
  */
 

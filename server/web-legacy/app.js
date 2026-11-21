@@ -222,7 +222,7 @@ function renderDeviceInfo() {
     .join('')
 
   // 功能行：与设备页同一套动作、同一份实现（core/device-actions.js）。这里只放两个「轻」的
-  // ——改时间与重启浴室 APP 不会掐断本页与服务端的连接；重启本程序/整机会，那类确认留在设备页。
+  // ——改时间与重启浴室 APP 不会断开本页与服务端的连接；重启本程序/整机会，那类确认留在设备页。
   const actions = summary
     ? `<div class="btn-row info-actions">
          <button type="button" class="btn btn-ghost btn-sm" data-act="clock-set">修改设备端时间</button>

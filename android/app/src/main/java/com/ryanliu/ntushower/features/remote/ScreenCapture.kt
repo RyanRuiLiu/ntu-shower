@@ -116,7 +116,7 @@ object ScreenCapture {
     }
 
     /**
-     * 喂入一个样本到解码器；流结束时发 EOS 并返回 true。
+     * 向解码器输入一个样本；流结束时发 EOS 并返回 true。
      *
      * 用 inputBuffers 而非 getInputBuffer(index)：后者 API 21 才引入，
      * 而本设备 ROM 冻结在 Android 4.4（API 19），没有替代路径。

@@ -58,7 +58,7 @@ def unsubscribe(sid: int) -> None:
 
 
 def publish(event_type: str, payload: JsonObject) -> None:
-    """非阻塞广播；队列满则丢弃并继续（推送是尽力而为，现态可经 REST 兜取）。"""
+    """非阻塞广播；队列满则丢弃并继续（推送是尽力而为，现态可经 REST 获取）。"""
     message = json.dumps({"type": event_type, "payload": payload}, separators=(",", ":"), ensure_ascii=False)
     with _lock:
         subscribers = list(_subscribers.items())

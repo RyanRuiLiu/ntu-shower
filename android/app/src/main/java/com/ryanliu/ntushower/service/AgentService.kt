@@ -376,7 +376,7 @@ class AgentService : Service() {
         statusLine.onConfigChanged()
         // hasReading 表示收到过完整读数：读失败不算，每次看门狗 tick 都会再补一次，
         // 直到读成为止。浴室数据库在没人洗浴时长期安静，事件驱动的采集补不上这次失败。
-        // 两个浮层都需要占用时共用同一次读；一次回调会同时喂给它们。
+        // 两个浮层都需要占用时共用同一次读；一次回调会同时分发给它们。
         val noticeNeedsOccupancy = notice.needsOccupancy() && !notice.hasReading()
         val statusLineNeedsOccupancy = statusLine.needsOccupancy() && !statusLine.hasReading()
         if (noticeNeedsOccupancy || statusLineNeedsOccupancy) {
@@ -618,7 +618,7 @@ class AgentService : Service() {
 
         /** 首次 OTA 检查的延迟：覆盖安装后尽快对齐版本，之后按 OTA_CHECK_INTERVAL_S 周期。 */
         // 6 小时：升级触达的主通道是发布推送（在线设备）与 hello_ack 的 upgrade 字段
-        // （重连设备），轮询只兜「推送静默失败且设备持续在线不重连」的罕见场景——
+        // （重连设备），轮询只覆盖「推送静默失败且设备持续在线不重连」的罕见场景——
         // 业主裁定降频到 6 小时。
         private const val OTA_CHECK_INTERVAL_S = 21_600L
         private const val FIRST_OTA_CHECK_DELAY_S = 30L

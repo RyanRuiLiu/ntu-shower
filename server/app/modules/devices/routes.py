@@ -265,7 +265,7 @@ async def patch_device(device_id: str, req: DevicePatchRequest, session: Session
         await manager.disconnect(device_id)
     if req.retired is not None:
         service.set_retired(session, device_id, req.retired)
-        # 在线设备的业务帧不会因这个位自动停下，掐断让它按重连退避回来——
+        # 在线设备的业务帧不会因这个位自动停下，断开让它按重连退避回来——
         # 那时握手即被拒（已停用），数据流就此停止。
         await manager.disconnect(device_id)
     record = _require_device(session, device_id)

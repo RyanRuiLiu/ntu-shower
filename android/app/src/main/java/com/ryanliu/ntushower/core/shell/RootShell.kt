@@ -55,7 +55,7 @@ object RootShell {
      * 只用在**必须活过本进程**的场景（`pm install` 会为了替换 APK 杀掉本进程；
      * 重启整机与本程序同理）。需要输出的命令走 [command]。
      *
-     * 用 `su 0 sh -c` 把整条脚本交给一个 shell 解析：设备上的 `su` 本身不吃 `-c`
+     * 用 `su 0 sh -c` 把整条脚本交给一个 shell 解析：设备上的 `su` 不支持 `-c` 参数
      * （`su -c "echo x"` 会把命令当用户名，报 `Unknown id`），所以必须显式给出要跑的
      * shell。这条路径在 OTA 安装上反复验证过。
      */

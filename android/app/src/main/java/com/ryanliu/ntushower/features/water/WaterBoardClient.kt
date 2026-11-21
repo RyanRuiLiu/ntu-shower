@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicInteger
 class WaterBoardException(val reasonCode: String, message: String) : Exception(message)
 
 /**
- * 板子的四条命令。抽成接口只为一件事：让 [WaterHandler] 的单测能喂固定回包，
+ * 板子的四条命令。抽成接口只为一件事：让 [WaterHandler] 的单测能注入固定回包，
  * 不必在测试里起真实 TCP；生产实现只有 [WaterBoardClient] 一个。
  */
 internal interface WaterBoard {

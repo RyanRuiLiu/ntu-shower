@@ -333,7 +333,7 @@ curl -X POST -H "Authorization: Bearer <ntushower_密钥>" http://127.0.0.1:8110
 
 两个上限都是服务端常量（`BRIDGE_PAIR_TIMEOUT_S`——点开桥后建隧道的最长时间，30 秒；
 `BRIDGE_MAX_LIFETIME_S`——隧道总寿命，1 小时）。
-**隧道本身没有空闲超时**，只靠寿命上限兜着——
+**隧道本身没有空闲超时**，只由寿命上限保证关闭——
 调试通道不该无限期开着。
 
 ## 复盘

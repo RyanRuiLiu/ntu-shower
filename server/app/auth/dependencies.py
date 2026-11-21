@@ -58,7 +58,7 @@ from . import crud
 from .permissions import SCOPE_LABELS, Scope, scopes_satisfied
 
 #: 使用中的会话每过这么久重签一次 Cookie（滑动续期）。1 天：活跃用户无感续期，
-#: 空闲超过 idle 的会话由 Cookie 寿命兜底。
+#: 空闲超过 idle 的会话由 Cookie 寿命保证过期。
 RENEW_AFTER_S = 24 * 60 * 60
 
 #: OpenAPI 的安全方案声明。OAuth2 Password flow 是 RFC 6749 定义、OpenAPI 原生

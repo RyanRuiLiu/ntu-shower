@@ -1,7 +1,7 @@
-"""测试直读门域的短会话包装：喂一帧、读一行。
+"""测试直读门域的短会话包装：注入一帧、读一行。
 
 门域服务已改为显式 session 注入（与设备域同批定稿的会话三入口）；测试侧的
-喂帧与直读统一经这里，避免每个测试文件各写一遍 `session_scope` 包裹。
+注帧与直读统一经这里，避免每个测试文件各写一遍 `session_scope` 包裹。
 """
 
 from __future__ import annotations
@@ -15,9 +15,9 @@ from app.modules.doors import crud as repository
 
 
 def feed(device_id: str, payload: dict[str, Any]) -> object:
-    """喂一帧给 process_snapshot：短会话包住，返回其 SnapshotResult。
+    """注入一帧给 process_snapshot：短会话包住，返回其 SnapshotResult。
 
-    设备不在册时先登记：线上帧只来自已握手在册的设备，直喂的测试补齐同一前提。
+    设备不在册时先登记：线上帧只来自已握手在册的设备，直注入的测试补齐同一前提。
     已在册的不动——信任位等档案字段归测试自己管（有「未信任设备」的场景）。
     """
     from app.modules.devices.models import Device
