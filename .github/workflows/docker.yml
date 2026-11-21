@@ -38,9 +38,11 @@ jobs:
   # main 推送：镜像构建成功即滚动部署生产（pull → up → 健康探测，失败即红）。
   # 部署序列与 deploy/README.md 的人工步骤一致，只是由 CI 代为执行；镜像标签
   # 由 metadata 的 type=sha 产出（sha-<短哈希>），与本仓全部部署记录同形。
+  # 临时手动门（2026-11-22）：迁移基准重置的生产切换需要人工序先于部署执行，
+  # 切换完成后此行删除、恢复自动部署。
   deploy:
     needs: docker
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: false
     runs-on: ubuntu-latest
     # 部署序列实测 40~70 秒（pull + up + healthz 探测 60s 上限）；挂起按额定分钟烧。
     timeout-minutes: 10
