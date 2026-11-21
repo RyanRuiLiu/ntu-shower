@@ -376,7 +376,7 @@ def test_intent_outside_the_window_parks_without_commands(fresh_db: str, monkeyp
     assert sent == []
 
 
-# ── 租约 ──────────────────────────────────────────────────────────────────
+# ── 布防在位 ──────────────────────────────────────────────────────────────
 
 
 def test_armed_hold_sends_no_further_commands(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -422,8 +422,8 @@ def test_resume_waits_while_a_roster_student_is_occupying(fresh_db: str, monkeyp
     _tick()
 
     assert _get_hold(fresh_db) is not None
-    # 租约续期照常（幂等布防）；恢复未发生：无写钟
-    assert all(action != "clock.set" for action, _ in sent)
+    # 恢复未发生：无写钟（布防在位，也不再有任何重布）
+    assert sent == []
 
 
 def test_resume_waits_until_the_landing_has_passed(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -943,7 +943,7 @@ def test_trigger_offline_does_not_create_intent(fresh_db: str, monkeypatch: pyte
 
 
 def test_apply_and_resume_tolerate_a_missing_skew_record(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """意图未施加 + 偏差记录缺失：表盘算不出，施加与续租都暂缓（下轮重试）。"""
+    """意图未施加 + 偏差记录缺失：表盘算不出，施加暂缓（下轮重试）。"""
     sent: list[tuple[str, object]] = []
     _prepare(monkeypatch, "2026-11-20 23:50:00", sent)
     _with_session("2026-11-20T15:40:00.000Z")

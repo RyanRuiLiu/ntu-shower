@@ -97,7 +97,7 @@ CLOCK_SET = "clock.set"
 """设置设备系统时钟。params.datetime 为设备本地墙钟时间（YYYY-MM-DD HH:MM:SS）；
 params.rearm（默认 true）控制写钟后是否按电源计划重布 MCU——写钟与重布必须成对，
 钟一动 MCU 里的截止就在真实时间里跟着漂（见 docs/device-poweroff.md），只有
-电源计划的 hold 施加传 false（它自己管理租约）。
+电源计划的 hold 施加传 false（它自己管理布防：一次布防承担整晚，见 power 域）。
 
 触发者有三个：网页端手动（设备页「校正时间」）、服务端自动校时（`time_sync_enabled`）、
 电源计划的 hold 施加与恢复。设备端执行见 TimeSync.setWallClock。
