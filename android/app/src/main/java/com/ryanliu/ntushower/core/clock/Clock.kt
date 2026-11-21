@@ -6,47 +6,51 @@ import java.util.Locale
 import java.util.TimeZone
 
 /**
- * 设备侧的 RFC 3339 时间格式化与解析。
+ * 设备侧的 RFC 3339 格式化与解析：协议信封的 `ts` 与帧载荷里的时间字段都经由此处，
+ * 全项目只有这一份格式实现。
  *
- * 对应协议信封的 `ts`——两端的时间字符串都经由此处，格式不会各自漂移。
+ * [formatRfc3339]/[parseRfc3339] 是服务端 `app/core/clock.py` 的对侧，两端输出同型
+ * （UTC、毫秒、`Z` 后缀）。解析的消费者是 [ServerClock]——拿 `link.hello_ack` 的
+ * `server_time` 与每一轮 `link.ping` 的 `sender_time` 立锚点；格式化的另一个消费者是
+ * 浴室 App 本地时刻转协议时间（features.doors 的 DoorRaw）。
  *
- * 解析的消费者是 [ServerClock]：拿 `link.hello_ack` 的 `server_time` 与每一轮
- * `link.ping` 的 `sender_time` 立锚点。**墙钟本身仍不得用于"判断某个时刻
- * 过了没有"**——那类判定依赖两台机器的时钟一致，而这台设备没有 NTP；命令的有效期因此
- * 仍是相对时长（见 `protocol/schema/device.command.json` 的 `timeout_ms`）。
+ * **墙钟本身不得用于"判断某个时刻过了没有"**——那类判定依赖两台机器的时钟一致，而这
+ * 台设备没有 NTP；命令的有效期因此仍是相对时长（见 `protocol/schema/device.command.json`
+ * 的 `timeout_ms`）。读墙上钟只回答"设备此刻的读数是什么"这一种事实（偏差测量、与
+ * 浴室 App 同源的字段），"过了多久"走 [Uptime]，外发时刻走 [ServerClock]。
  *
- * **命名带 `wallClock` 是刻意的**：这里和 [ServerClock] 都能给"现在"，但一个是设备那口
- * 会被拨的钟、一个是锚在服务端轴上的权威时刻，差一个 3590 秒的偏差。名字里不写出轴，
- * 调用方只看函数名分不出拿的是哪条——而分错是静默的。
+ * `SimpleDateFormat` 非线程安全（Java 官方文档明示），心跳、自动化、主线程会并发调用，
+ * 故访问以 `@Synchronized` 串行——调用频率是每帧毫秒级，监视器开销可忽略。Android 4.4
+ * 没有 `java.time`，它是本 API 级别下的标准选择。命名见 [wallClockRfc3339]：三个对象
+ * 都能给"现在"，名字不写出轴，调用方就分不出拿的是哪一条——而分错是静默的。
  */
 object Clock {
 
-    // SimpleDateFormat 非线程安全：心跳/自动化/主线程并发调用，故 ThreadLocal 隔离
-    private val formatter = object : ThreadLocal<SimpleDateFormat>() {
-        override fun initialValue(): SimpleDateFormat =
-            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-                timeZone = TimeZone.getTimeZone("UTC")
-            }
+    /** 本系统的 RFC 3339 形态：UTC、毫秒精度、`Z` 后缀（RFC 3339 §5.6）。 */
+    private const val PATTERN = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+
+    private val formatter = SimpleDateFormat(PATTERN, Locale.US).apply {
+        timeZone = TimeZone.getTimeZone("UTC")
     }
 
-    private fun currentFormatter(): SimpleDateFormat = requireNotNull(formatter.get()) { "RFC 3339 formatter missing" }
-
-    /** 设备墙钟此刻（**不是服务端轴**；要权威时刻用 [ServerClock.nowRfc3339]）。 */
+    /** 设备墙上时钟此刻的读数（**不是服务端轴**；权威时刻用 [ServerClock.nowRfc3339]）。 */
+    @Synchronized
     fun wallClockRfc3339(): String = formatRfc3339(Date())
 
     /**
-     * 把给定的时刻格式化为协议时间。格式串因此只在本文件出现一份：浴室 App 的本地
-     * 时间转协议时间（features.doors 的 DoorRaw）用的就是这里。
+     * 把给定时刻格式化为协议时间。浴室 App 的本地时间（`t_doorlist` 的
+     * `yyyyMMddHHmmss`）转协议时间走的也是这里。
      */
-    fun formatRfc3339(date: Date): String = currentFormatter().format(date)
+    @Synchronized
+    fun formatRfc3339(date: Date): String = formatter.format(date)
 
     /**
-     * 解析服务端输出的 RFC 3339 毫秒字符串（Z 后缀，与服务端 core/clock.py 的输出
-     * 同型）。格式不符返回 null，由调用方决定是否留痕——解析失败的处置是调用方的
-     * 业务语义，这里不记日志（core 层不依赖任何日志设施）。
+     * 解析服务端输出的 RFC 3339 毫秒字符串。格式不符返回 null，处置是调用方的业务
+     * 语义（core 层不依赖日志设施，不在此留痕）。
      */
+    @Synchronized
     fun parseRfc3339(value: String): Date? = try {
-        currentFormatter().parse(value)
+        formatter.parse(value)
     } catch (e: Exception) {
         null
     }
