@@ -410,7 +410,7 @@ function renderTaskBoard(data) {
           : data.holds
               .map((hold) => {
                 const flags = [
-                  { ok: hold.past_close, yes: 'close 已过', no: 'close 未过' },
+                  { ok: hold.past_close, yes: '落点已过', no: '落点未到' },
                   { ok: hold.idle, yes: '喷头空闲', no: '仍有会话' },
                 ]
                   .map(({ ok, yes, no }) => `<span class="task-flag ${ok ? 'ok' : 'no'}">${ok ? yes : no}</span>`)
