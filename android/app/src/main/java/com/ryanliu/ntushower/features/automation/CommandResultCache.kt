@@ -12,8 +12,8 @@ import java.util.Collections
  * 命中缓存时调用方重发上次结果，而不是重新执行——服务端可能正是因为没收到结果
  * 才重发，静默忽略会让它一直等到超时。
  *
- * 有界：只保留最近若干条，不随运行时长增长。上限是**配置项**（`command_dedup_max_count`），
- * 见 [setCapacity]。
+ * 有界：只保留最近若干条，不随运行时长增长。上限是**配置项**（`command_dedup_max_count`，
+ * 服务端登记表下发），见 [setCapacity]。
  */
 class CommandResultCache(private var capacity: Int) {
 

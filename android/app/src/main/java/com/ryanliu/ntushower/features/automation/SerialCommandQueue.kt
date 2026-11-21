@@ -80,10 +80,11 @@ class SerialCommandQueue<T>(private val maxPending: Int = DEFAULT_MAX_PENDING) {
         /**
          * 等待上限。
          *
-         * 与服务端 `CHANNEL_QUEUE_MAX` 取同一个数：两边看法一致，排障时不必换算。
+         * 与服务端 `CHANNEL_QUEUE_MAX`（modules/devices/actions.py）同值：两边看法
+         * 一致，排障时不必换算。
          */
-        // 与服务端 CHANNEL_QUEUE_MAX 同值同源（同通道排队上限，见 sessions/service.py）：
-        // 语音风暴时一扇门一条播报，喷头最多的设备同时迁移也不应触发"排满"拒绝
+        // 同通道排队上限两端同值。语音风暴时一扇门一条播报，喷头最多的设备同时
+        // 迁移就是 8 场，低于它后排播报会被当成过载拒掉
         const val DEFAULT_MAX_PENDING = 8
     }
 }

@@ -39,6 +39,10 @@ data class CommandOutcome(
  * 命令调度器：自动化类命令（分配/结算）经 [SerialCommandQueue] 串行放行——
  * 浴室 App 的 UI 操作必须串行，并发会让节点定位互相错位；
  * 拍照/截图资源独立，走单独执行器并行处理。
+ *
+ * 每条通道的保证一致：**结果只回报一次**（回报后失败的收尾不补发第二条），
+ * 执行前判过期（服务端已不等结果的命令不执行），队满如实报过载。
+ * 维护类命令不经本调度器——它们的执行与过期判定在 [com.ryanliu.ntushower.service.DeviceMaintenance]。
  */
 @Suppress("TooManyFunctions")
 class CommandScheduler(
