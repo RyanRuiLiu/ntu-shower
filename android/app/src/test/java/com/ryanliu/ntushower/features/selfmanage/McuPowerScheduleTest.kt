@@ -1,6 +1,7 @@
 package com.ryanliu.ntushower.features.selfmanage
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class McuPowerScheduleTest {
@@ -32,6 +33,42 @@ class McuPowerScheduleTest {
     fun `on delay counts from the off moment`() {
         // 断电落在 01:58（118 分），上电目标 10:55（655 分）→ 相隔 8 小时 57 分
         assertEquals(8 * 60 + 57, McuPowerSchedule.delayMinutes(1 * 60 + 58, 10 * 60 + 55))
+    }
+
+    @Test
+    fun `computeDelays passes the regular night through`() {
+        // 常规夜：23:50 布防 23:58 断电、次日 10:55 上电
+        val delays = McuPowerSchedule.computeDelays(
+            nowMinuteOfDay = 23 * 60 + 50,
+            offMinuteOfDay = 23 * 60 + 58,
+            onMinuteOfDay = 10 * 60 + 55,
+        )
+
+        assertEquals(8 to (10 * 60 + 57), delays)
+    }
+
+    @Test
+    fun `computeDelays rejects a zero off delay`() {
+        // 断电目标与当前同分钟：MCU 对 0 延时没有立即语义，唯一写入入口如实拒绝
+        assertNull(
+            McuPowerSchedule.computeDelays(
+                nowMinuteOfDay = 23 * 60 + 58,
+                offMinuteOfDay = 23 * 60 + 58,
+                onMinuteOfDay = 10 * 60 + 55,
+            ),
+        )
+    }
+
+    @Test
+    fun `computeDelays rejects a zero on delay`() {
+        // 上电目标与断电时刻同分钟：同样按 0 延时拒绝
+        assertNull(
+            McuPowerSchedule.computeDelays(
+                nowMinuteOfDay = 23 * 60,
+                offMinuteOfDay = 23 * 60 + 58,
+                onMinuteOfDay = 23 * 60 + 58,
+            ),
+        )
     }
 
     @Test

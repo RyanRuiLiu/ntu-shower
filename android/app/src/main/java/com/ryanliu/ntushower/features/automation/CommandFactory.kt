@@ -10,7 +10,7 @@ import org.json.JSONObject
  * 负责收帧、去重、回报；"某个 action 对应哪条命令、参数怎么取"是纯粹的数据
  * 转换，放在一起会让传输层承担它不需要知道的协议细节。
  *
- * 只处理入队执行的命令。设备维护类（重启/卸载/执行）即时执行，见
+ * 只处理入队执行的命令。设备维护类（重启/执行）即时执行，见
  * [com.ryanliu.ntushower.service.DeviceMaintenance]。
  */
 object CommandFactory {

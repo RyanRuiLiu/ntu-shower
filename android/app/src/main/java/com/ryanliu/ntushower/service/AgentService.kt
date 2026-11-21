@@ -77,7 +77,7 @@ class AgentService : Service() {
     private val maintenanceExecutor = Executors.newSingleThreadExecutor()
 
     /**
-     * 终结类维护动作（重启、卸载）的执行器。
+     * 终结类维护动作（重启本程序、重启整机）的执行器。
      *
      * 与 [maintenanceExecutor] 分开，理由见 [DeviceMaintenance.isTerminating]：这两个动作的作用
      * 就是终止本进程，排在别的维护命令后面没有意义。真机上出过——一串 `device.exec` 各自等满
