@@ -78,8 +78,8 @@ def manifest(device_id: str, version_code: int, session: Session = Depends(get_d
         return {"up_to_date": True}
     path = service.release_path(rel["version"])
     if not path.is_file():
-        # 库里有记录、文件却不在（手工清理过目录之类）：当作没有更新，而不是给
-        # 设备一个下不动的地址
+        # 库里有记录、文件却不在（手工清理过目录之类）：当作没有更新，而不是向设备提供
+        # 一个无法完成下载的地址
         log_event("WARNING", "ota.release-file-missing", "发布文件缺失", version=str(rel["version"]))
         return {"up_to_date": True}
     return {

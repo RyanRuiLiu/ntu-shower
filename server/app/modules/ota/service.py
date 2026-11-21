@@ -65,7 +65,7 @@ def prune_releases(session: Session, keep: int) -> list[str]:
 
     旧的 APK 留在盘上只有体积没有意义，但上一两个版本要留作回滚点，所以 keep
     是配置而不是写死的 1。注册行与盘上文件可能因删除或库重建而脱节，孤儿文件
-    （盘上有、注册表里没有）一并清，"不积累垃圾"才算完整。
+    （盘上有、注册表里没有）一并清理，不积累无效文件才算完整。
     """
     removed: list[str] = []
     for rel in crud.list_releases(session)[max(keep, 0) :]:

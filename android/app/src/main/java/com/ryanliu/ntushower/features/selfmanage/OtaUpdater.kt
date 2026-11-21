@@ -250,7 +250,7 @@ class OtaUpdater(context: Context, private val onProgress: (version: String, sta
                 copyExactly(body.byteStream(), target, expectedSize)
             }
         } catch (e: Exception) {
-            // 半个文件没用而空间是实打实占着的：下次重试本来就要重下，留着只是垃圾
+            // 不完整的文件没有任何用途，却已实际占用存储空间：下次重试本就需要重新下载，保留它只是积累无效文件
             target.delete()
             throw e
         }
