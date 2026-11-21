@@ -35,6 +35,7 @@ from app.contracts import DoorState
 from app.core import protocol
 from app.core.connections import manager
 from app.core.logging import log_event
+from app.core.message_types import STATUS_LINE_UPDATE
 from app.db.session import session_scope
 from app.modules.devices import service as devices_service
 from app.modules.doors import service as doors_service
@@ -140,7 +141,7 @@ class _Pusher:
             if not changed and fresh_connection and now - self.last_sent.get(device_id, 0.0) < KEEPALIVE_S:
                 continue
             try:
-                sent = await manager.send_to(device_id, protocol.envelope("status_line.update", snapshot.payload))
+                sent = await manager.send_to(device_id, protocol.envelope(STATUS_LINE_UPDATE, snapshot.payload))
             except Exception as exc:  # noqa: BLE001 —— 一条坏连接不影响其余设备
                 log_event(
                     "WARNING",

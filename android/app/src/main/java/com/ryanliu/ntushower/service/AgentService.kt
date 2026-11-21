@@ -282,7 +282,7 @@ class AgentService : Service() {
                     }
                 }
 
-                MessageTypes.OTA_UPGRADE_AVAILABLE -> {
+                MessageTypes.OTA_UPDATE_AVAILABLE -> {
                     // 实时推送：立即触发一次检查（自动化期间 OtaUpdater 自行推迟）
                     worker.execute { otaUpdater?.checkAndInstall() }
                 }
@@ -388,7 +388,7 @@ class AgentService : Service() {
         // 修订号单调守卫（AWS Shadow version 同型）：乱序的旧配置直接回执不应用——
         // 跨连接无序（新连接 hello_ack 与在途 push 竞争）时，后到的旧值会把新值抹掉
         if (revision <= configRevision && revision > 0) {
-            client.send(MessageTypes.CONFIG_ACK, JSONObject().put("revision", revision), replyTo = envelope.id)
+            client.send(MessageTypes.CONFIG_UPDATE_ACK, JSONObject().put("revision", revision), replyTo = envelope.id)
             deviceLog.lifecycle("config.stale", "revision=$revision 已应用 $configRevision，回执不应用")
             return
         }
@@ -402,7 +402,7 @@ class AgentService : Service() {
         // 看门狗间隔变更：重建监视器与看门狗
         startWatchdog()
         restartDoorMonitor()
-        client.send(MessageTypes.CONFIG_ACK, JSONObject().put("revision", revision), replyTo = envelope.id)
+        client.send(MessageTypes.CONFIG_UPDATE_ACK, JSONObject().put("revision", revision), replyTo = envelope.id)
         deviceLog.lifecycle("config.applied", "revision=$revision")
         Log.i(TAG, "config applied revision=$revision")
     }

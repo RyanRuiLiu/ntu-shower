@@ -154,7 +154,7 @@ async def upload_release(
 ) -> ReleasePublished:
     """上传新版本 APK 并注册发布（target='all' 表示全部设备，或逗号分隔的 device_id 列表）。
 
-    发布成功后向在线的目标设备即时推送 ota.upgrade_available。
+    发布成功后向在线的目标设备即时推送 ota.update_available。
 
     **版本必须在 HTTP 边界与 APK 内容比对**（根因闸门，源自 2026-10-24 事故）：
     曾有表单声明 0.4.40、APK 实际为 0.4.39 的发布被直接受理，六台设备安装成功

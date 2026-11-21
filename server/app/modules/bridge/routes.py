@@ -29,6 +29,7 @@ from app.core.config import settings
 from app.core.connections import manager
 from app.core.errors import problem_responses
 from app.core.logging import log_event
+from app.core.message_types import BRIDGE_CLOSE, BRIDGE_OPEN
 from app.core.problems import DEVICE_OFFLINE, ApiProblemError
 from app.db.base import utcnow
 from app.db.deps import get_db
@@ -253,7 +254,7 @@ async def adb_open(device_id: str, session: Session = Depends(get_db)) -> Bridge
         command_audit.insert_command(session, audit_id, device_id, actions.BRIDGE_OPEN, utcnow())
         sent = await manager.send_to(
             device_id,
-            protocol.envelope(actions.BRIDGE_OPEN, {"device_id": device_id, "nonce": nonce}),
+            protocol.envelope(BRIDGE_OPEN, {"device_id": device_id, "nonce": nonce}),
         )
         if not sent:
             registry.pending.pop(device_id, None)
@@ -311,7 +312,7 @@ async def adb_close(device_id: str, session: Session = Depends(get_db)) -> Bridg
         # 通知设备停 adbd 的返回值不看：本地已收干净，设备没收到也只是它的 adbd
         # 多开一会儿，下次开桥会重新下发；为一个不影响本地状态的通知改关桥成败
         # 只会让"关没关掉"变成两个问题。
-        await manager.send_to(device_id, protocol.envelope(actions.BRIDGE_CLOSE, {}))
+        await manager.send_to(device_id, protocol.envelope(BRIDGE_CLOSE, {}))
         return {"device_id": device_id, "closed": True}
 
 

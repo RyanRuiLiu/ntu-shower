@@ -1,6 +1,6 @@
 """OTA 领域服务：APK 存储与发布通知。
 
-发布通知：release 注册后向在线的目标设备即时推送 ota.upgrade_available；
+发布通知：release 注册后向在线的目标设备即时推送 ota.update_available；
 离线设备不补推——其下次轮询 `GET /ota/manifest` 时自然获取。
 """
 
@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.core import protocol
 from app.core.config import settings
 from app.core.connections import manager
+from app.core.message_types import OTA_UPDATE_AVAILABLE
 
 from . import crud
 
@@ -87,7 +88,7 @@ async def notify_target_devices(version: str, version_code: int, target: list[st
     `target` 与注册表同形：`["*"]` 表示全部在线设备，其余按 device_id 匹配。
     """
     envelope = protocol.envelope(
-        "ota.upgrade_available",
+        OTA_UPDATE_AVAILABLE,
         {
             "version": version,
             "version_code": version_code,

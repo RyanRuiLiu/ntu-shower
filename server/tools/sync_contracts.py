@@ -8,6 +8,7 @@
 | 喷头状态取值 | `app/modules/doors/schemas.py` 的 `DoorState` |
 | 配置键规格 | `app/modules/config/spec.py` |
 | 版本号形状 | `app/modules/ota/service.py` 的 `VERSION_PATTERN` |
+| 消息类型 | `protocol/schema/` 的文件名（每个 schema 一个消息类型） |
 
 Kotlin 与 JavaScript 都不能 import Python，所以另两端拿到的是**生成产物**。
 在此之前两端各手写一份、靠测试事后对账——漂移是必然的，只是早晚。
@@ -51,7 +52,11 @@ from app.modules.ota.service import VERSION_PATTERN as OTA_VERSION_PATTERN
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+SCHEMA_DIR = REPO_ROOT / "protocol" / "schema"
+
 KOTLIN_ACTIONS = REPO_ROOT / "android/app/src/main/java/com/ryanliu/ntushower/transport/SupportedActions.kt"
+KOTLIN_MESSAGE_TYPES = REPO_ROOT / "android/app/src/main/java/com/ryanliu/ntushower/transport/MessageTypes.kt"
+SERVER_MESSAGE_TYPES = REPO_ROOT / "server/app/core/message_types.py"
 KOTLIN_OUTCOMES = REPO_ROOT / "android/app/src/main/java/com/ryanliu/ntushower/transport/OutcomeStatus.kt"
 KOTLIN_REASONS = REPO_ROOT / "android/app/src/main/java/com/ryanliu/ntushower/transport/ReasonCodes.kt"
 KOTLIN_OTA = REPO_ROOT / "android/app/src/main/java/com/ryanliu/ntushower/transport/OtaContract.kt"
@@ -308,6 +313,77 @@ def _kotlin_ota() -> str:
     return "\n".join(lines)
 
 
+def _schema_message_types() -> list[str]:
+    """消息类型的唯一出处：`protocol/schema/` 的文件名（envelope 是共享信封，不是消息）。"""
+    return sorted(path.stem for path in SCHEMA_DIR.glob("*.json") if path.stem != "envelope")
+
+
+def _kotlin_message_types(stems: list[str]) -> str:
+    """设备端的消息类型常量与全集。
+
+    每个常量按信封 `type` 的取值命名（`door.snapshot_ack` → `DOOR_SNAPSHOT_ACK`），
+    分组按命名空间，组内按字典序——生成物要能读。
+    """
+    groups: dict[str, list[str]] = {}
+    for stem in stems:
+        groups.setdefault(stem.split(".", 1)[0], []).append(stem)
+
+    lines = [
+        "package com.ryanliu.ntushower.transport",
+        "",
+        "/**",
+        " * 协议消息类型（信封 `type` 字段的取值），按命名空间分组。",
+        " *",
+        " * **本文件由 tools/sync_contracts.py 生成，不要手改**——消息类型的唯一出处是",
+        " * `protocol/schema/` 下的 schema 文件名：新增/改名 = 改 schema 文件后重新生成，",
+        " * 两端登记表自动跟上。",
+        " */",
+        "object MessageTypes {",
+    ]
+    for ns, stems_in_ns in groups.items():
+        lines.append("")
+        lines.append(f"    // ── {ns} ──")
+        for stem in stems_in_ns:
+            lines.append(f'    const val {constant_of(stem)} = "{stem}"')
+    lines.append("")
+    lines.append("    /** 全部消息类型。 */")
+    lines.append("    val ALL: Set<String> = setOf(")
+    for stem in stems:
+        lines.append(f"        {constant_of(stem)},")
+    lines.append("    )")
+    lines.append("}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _server_message_types(stems: list[str]) -> str:
+    """服务端的消息类型登记表：网关收发与各域下发一律引用这里的常量，
+    禁止裸字符串（裸字符串与登记表漂移时，服务端不认识自己刚发的消息）。"""
+    lines = [
+        '"""协议消息类型登记表。',
+        "",
+        "**本文件由 tools/sync_contracts.py 生成，不要手改**——消息类型的唯一出处是",
+        "`protocol/schema/` 下的 schema 文件名。网关收发与各域下发的信封 `type` 一律",
+        "引用这里的常量，禁止裸字符串。",
+        '"""',
+        "",
+        "from __future__ import annotations",
+        "",
+    ]
+    for stem in stems:
+        lines.append(f'{constant_of(stem)} = "{stem}"')
+    lines.append("")
+    # ALL 的展开样式与 ruff format 的输出逐字节一致：生成物必须直接过格式门，
+    # 否则"生成→格式化"两步会互相打架（生成物是逐字节守卫的）。
+    lines.append("ALL: frozenset[str] = frozenset(")
+    lines.append("    [")
+    for stem in stems:
+        lines.append(f'        "{stem}",')
+    lines.extend(["    ]", ")"])
+    lines.append("")
+    return "\n".join(lines)
+
+
 def _javascript() -> str:
     """网页端要用的契约常量。
 
@@ -371,8 +447,11 @@ def artifacts() -> dict[Path, str]:
     统一在这里收尾：去掉尾部空行再补一个换行。生成函数逐条 append 时会在最后一条
     后面也留一个空行，而 Kotlin 的 `}` 前不容空行（detekt 的 NoBlankLineBeforeRbrace）。
     """
+    message_types = _schema_message_types()
     raw = {
         KOTLIN_ACTIONS: _kotlin(),
+        KOTLIN_MESSAGE_TYPES: _kotlin_message_types(message_types),
+        SERVER_MESSAGE_TYPES: _server_message_types(message_types),
         KOTLIN_OUTCOMES: _kotlin_outcomes(),
         KOTLIN_REASONS: _kotlin_reason_codes(),
         KOTLIN_OTA: _kotlin_ota(),

@@ -13,6 +13,7 @@ import uuid
 from typing import Any
 
 from app.core.clock import now_rfc3339
+from app.core.message_types import LINK_ERROR
 
 PROTOCOL_VERSION = 1
 
@@ -41,7 +42,7 @@ def envelope(msg_type: str, payload: dict[str, Any], reply_to: str | None = None
 
 def error(code: str, message: str, reply_to: str | None = None) -> str:
     """组装 link.error 帧（code 为结构化错误码，见 protocol/schema/errors）。"""
-    return envelope("link.error", {"code": code, "message": message}, reply_to)
+    return envelope(LINK_ERROR, {"code": code, "message": message}, reply_to)
 
 
 def parse(raw: str) -> JsonObject | None:

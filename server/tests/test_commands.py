@@ -370,7 +370,7 @@ def test_terminal_message_from_device_is_preserved(fresh_db: str, monkeypatch: p
 
 
 def test_config_push_ack_round_trip(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """配置推送：设备回 config.ack 后 applied 为真。"""
+    """配置推送：设备回 config.update_ack 后 applied 为真。"""
     fake = _online(monkeypatch, "dev-push")
 
     async def flow() -> dict[str, Any]:

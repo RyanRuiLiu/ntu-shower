@@ -8,6 +8,8 @@ import jsonschema
 import pytest
 from referencing import Registry, Resource
 
+from app.core.message_types import ALL as _ALL
+
 SCHEMA_DIR = Path(__file__).resolve().parents[2] / "protocol" / "schema"
 
 
@@ -20,26 +22,9 @@ def _registry() -> Registry:
     return registry
 
 
-KNOWN_TYPES = [
-    "link.hello",
-    "link.hello_ack",
-    "link.ping",
-    "link.pong",
-    "link.error",
-    "door.snapshot",
-    "door.snapshot_ack",
-    "device.command",
-    "device.command_result",
-    "config.update",
-    "config.ack",
-    "status_line.update",
-    "ota.upgrade_available",
-    "ota.progress",
-    "bridge.open",
-    "bridge.close",
-    "device.log_upload",
-    "device.status",
-]
+# 消息类型清单取自生成登记表（唯一出处 = protocol/schema 文件名），不再手抄；
+# frozenset 直接参数化会让 xdist 各 worker 收集顺序不同——排序后固定
+KNOWN_TYPES = sorted(_ALL)
 
 SAMPLES: dict[str, dict[str, Any]] = {
     "device.status": {
@@ -82,7 +67,7 @@ SAMPLES: dict[str, dict[str, Any]] = {
     "device.command": {"payload": {"action": "session.assign", "params": {}, "timeout_ms": 30000}},
     "device.command_result": {"payload": {"status": "ok", "reason_code": "", "data": {}}},
     "config.update": {"payload": {"revision": 1, "config": {"notice_text_size_sp": 30}}},
-    "config.ack": {"payload": {"revision": 1}},
+    "config.update_ack": {"payload": {"revision": 1}},
     "status_line.update": {
         "payload": {
             "floors": [
@@ -92,7 +77,7 @@ SAMPLES: dict[str, dict[str, Any]] = {
             ]
         }
     },
-    "ota.upgrade_available": {
+    "ota.update_available": {
         "payload": {
             "version": "0.2.4",
             "version_code": 6,

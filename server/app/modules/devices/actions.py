@@ -24,6 +24,7 @@ from app.core import actions, outcomes, protocol, reason_codes
 from app.core.config import settings
 from app.core.connections import manager
 from app.core.logging import log_event, trace_id_var
+from app.core.message_types import CONFIG_UPDATE, DEVICE_COMMAND
 from app.core.problems import SERVER_OVERLOADED, ApiProblemError
 from app.core.protocol import JsonObject
 from app.db.base import utcnow
@@ -321,7 +322,7 @@ async def _dispatch(
 
     try:
         envelope = protocol.envelope(
-            "device.command",
+            DEVICE_COMMAND,
             {
                 "action": action,
                 "params": params,
@@ -444,7 +445,7 @@ async def push_config_update(
 
     try:
         envelope = protocol.envelope(
-            "config.update",
+            CONFIG_UPDATE,
             {"revision": revision, "config": config},
         )
         if not await manager.send_to(device_id, envelope):
@@ -461,7 +462,7 @@ async def push_config_update(
 
 
 def resolve_config_ack(device_id: str, revision: int) -> bool:
-    """网关收到 config.ack 时回填挂起中的配置推送。
+    """网关收到 config.update_ack 时回填挂起中的配置推送。
 
     回执的修订号必须与推送一致：不一致说明设备端守卫拒了旧值或乱序，不回填——
     让调用方走 ack timeout 的失败路径（真实结果以设备侧日志为准）。

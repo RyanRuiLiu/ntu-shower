@@ -22,6 +22,19 @@ from app.core.clock import now_rfc3339, rfc3339_ago
 from app.core.config import settings
 from app.core.connections import manager
 from app.core.logging import log_event
+from app.core.message_types import (
+    CONFIG_UPDATE_ACK,
+    DEVICE_COMMAND_RESULT,
+    DEVICE_LOG_UPLOAD,
+    DEVICE_STATUS,
+    DOOR_SNAPSHOT,
+    DOOR_SNAPSHOT_ACK,
+    LINK_HELLO,
+    LINK_HELLO_ACK,
+    LINK_PING,
+    LINK_PONG,
+    OTA_PROGRESS,
+)
 from app.core.protocol import JsonObject, as_int, list_of, payload_of, text_of
 from app.core.tokens import extract_bearer
 from app.db.session import Database
@@ -98,7 +111,7 @@ async def device_gateway(ws: WebSocket) -> None:
 
         # 立刻主动探测一轮，不等周期探测（PING_INTERVAL_S）：设备刚连上时手上还没有时间锚点，而
         # 它采集的每一帧都要带采集时刻——越早把服务端时刻交给它，最初那几帧时刻越准。
-        await ws.send_text(protocol.envelope("link.ping", {"sender_time": now_rfc3339()}))
+        await ws.send_text(protocol.envelope(LINK_PING, {"sender_time": now_rfc3339()}))
 
         with _db_session(ws) as session:
             devices_service.publish_device_update(session, device_id)
@@ -184,7 +197,7 @@ async def _verify_device_token(ws: WebSocket) -> tuple[bool, str | None]:
 async def _accept_hello(ws: WebSocket, token_device_id: str | None) -> tuple[str, bool, str] | None:
     """首帧必须是 link.hello：注册档案、回 hello_ack；失败已完成回错并返回 None。"""
     hello = protocol.parse(await ws.receive_text())
-    if hello is None or hello.get("type") != "link.hello":
+    if hello is None or hello.get("type") != LINK_HELLO:
         log_event("WARNING", "gateway.hello-required", "首帧必须是 link.hello，连接被拒")
         await ws.send_text(protocol.error(reason_codes.HELLO_REQUIRED.code, "首帧必须是 link.hello"))
         await ws.close()
@@ -264,7 +277,7 @@ async def _accept_hello(ws: WebSocket, token_device_id: str | None) -> tuple[str
     )
     await ws.send_text(
         protocol.envelope(
-            "link.hello_ack",
+            LINK_HELLO_ACK,
             {
                 "trusted": trusted,
                 "server_time": now_rfc3339(),
@@ -291,13 +304,13 @@ async def _handle_frame(
     frame_id = text_of(msg, "id")
     payload = payload_of(msg)
 
-    if mtype == "link.ping":
+    if mtype == LINK_PING:
         # 先记录再回 pong：反过来时 pong 已发出而记录未落，外部会看到时序颠倒。
         # 服务端回的这一份 pong 载荷为空——反方向那份才带 device_time，那是给服务端
         # 算钟偏差用的（见下一条分支）。
         await _call(ws, devices_service.touch_seen, device_id)
-        await ws.send_text(protocol.envelope("link.pong", {}, reply_to=frame_id))
-    elif mtype == "link.pong":
+        await ws.send_text(protocol.envelope(LINK_PONG, {}, reply_to=frame_id))
+    elif mtype == LINK_PONG:
         # 两件事：判活，以及用设备带回来的墙上时刻更新钟偏差。那个偏差把帧里的
         # open_time / in_time 平移到服务端时间轴——那两个字段是"这次会话从什么时候
         # 开始"的唯一线索（见 core/device_clock）。
@@ -313,9 +326,9 @@ async def _handle_frame(
             now_rfc3339(),
         )
         pong_seen.set()
-    elif mtype == "config.ack":
+    elif mtype == CONFIG_UPDATE_ACK:
         device_actions.resolve_config_ack(device_id, as_int(payload.get("revision")))
-    elif mtype == "door.snapshot":
+    elif mtype == DOOR_SNAPSHOT:
         if not trusted:
             return
         # 帧自己带着"采集那一刻的设备钟读数"，与 captured_at 同刻——比 pong 那条通路准得多
@@ -363,12 +376,12 @@ async def _handle_frame(
         voice_service.schedule_events(result.events)
         await ws.send_text(
             protocol.envelope(
-                "door.snapshot_ack",
+                DOOR_SNAPSHOT_ACK,
                 {"snapshot_id": text_of(payload, "snapshot_id")},
                 reply_to=frame_id,
             )
         )
-    elif mtype == "device.command_result":
+    elif mtype == DEVICE_COMMAND_RESULT:
         if not trusted:
             return
         if not device_actions.resolve(text_of(msg, "reply_to"), payload):
@@ -377,7 +390,7 @@ async def _handle_frame(
             await ws.send_text(
                 protocol.error(reason_codes.UNKNOWN_COMMAND_ID.code, "没有与该结果对应的待办命令", reply_to=frame_id)
             )
-    elif mtype == "device.log_upload":
+    elif mtype == DEVICE_LOG_UPLOAD:
         if not trusted:
             return
         kind = text_of(payload, "kind")
@@ -392,7 +405,7 @@ async def _handle_frame(
         # 握手会重新上送，日志是幂等的现态读数，不是队列
         await _call(ws, devices_service.record_log_upload, device_id, kind, content)
         log_event("INFO", "gateway.log-uploaded", "设备日志已上送", device_id=device_id, kind=kind)
-    elif mtype == "device.status":
+    elif mtype == DEVICE_STATUS:
         if not trusted:
             return
         # 设备上报自己的电源计划事实：从浴室 App 参数文件读到的平台开关机时刻，
@@ -424,7 +437,7 @@ async def _handle_frame(
             open_at=open_at,
             zone=zone,
         )
-    elif mtype == "ota.progress":
+    elif mtype == OTA_PROGRESS:
         if not trusted:
             return
         # 设备自更新的进度上报（一次性流程，设备端 AgentService 的 onProgress 发出）：
@@ -468,7 +481,7 @@ async def _server_ping_loop(ws: WebSocket, device_id: str, pong_seen: asyncio.Ev
         await asyncio.sleep(interval)
         pong_seen.clear()
         try:
-            await ws.send_text(protocol.envelope("link.ping", {"sender_time": now_rfc3339()}))
+            await ws.send_text(protocol.envelope(LINK_PING, {"sender_time": now_rfc3339()}))
         except (WebSocketDisconnect, RuntimeError) as exc:
             log_event(
                 "DEBUG",

@@ -482,7 +482,9 @@ def test_device_config_ack_round_trip(
             frame = json.loads(ws.receive_text())
             if frame["type"] == "config.update":
                 break
-        ws.send_text(json.dumps({"v": 1, "type": "config.ack", "id": "ack-1", "ts": "t", "payload": {"revision": 1}}))
+        ws.send_text(
+            json.dumps({"v": 1, "type": "config.update_ack", "id": "ack-1", "ts": "t", "payload": {"revision": 1}})
+        )
         thread.join(timeout=10)
 
     body = outcome["r"].json()

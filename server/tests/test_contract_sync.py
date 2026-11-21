@@ -47,3 +47,58 @@ def test_every_action_reaches_the_kotlin_artifact() -> None:
     content = sync_contracts.artifacts()[sync_contracts.KOTLIN_ACTIONS]
     for action in ALL_ACTIONS:
         assert f'"{action}"' in content, f"生成物里没有动作：{action}"
+
+
+def test_message_types_come_from_the_schema_directory() -> None:
+    """消息类型登记（服务端 + 设备）必须与 schema 文件集一致：schema 是唯一出处。"""
+    from app.core.message_types import ALL as SERVER_ALL
+
+    schemas = {path.stem for path in sync_contracts.SCHEMA_DIR.glob("*.json")} - {"envelope"}
+    assert set(SERVER_ALL) == schemas
+    kotlin = sync_contracts.artifacts()[sync_contracts.KOTLIN_MESSAGE_TYPES]
+    for stem in schemas:
+        assert f'"{stem}"' in kotlin, f"设备登记表里没有消息类型：{stem}"
+
+
+def test_wire_types_are_never_written_as_raw_strings() -> None:
+    """网关与各域的信封 type 一律引用登记表常量：裸字符串与登记表漂移时，
+    服务端会不认识自己刚发的消息——源头禁掉。"""
+    import re
+
+    wire_types = sorted(sync_contracts._schema_message_types())
+    pattern = re.compile("|".join(f'"{re.escape(t)}"' for t in wire_types))
+    # actions.py 持有桥动作的**动作名**（bridge.open/close 以裸消息下发，动作名即
+    # 消息名——双登记，同值由 test_bridge_action_names_match_their_message_types 钉住）
+    offenders: list[str] = []
+    for path in (REPO_ROOT / "server" / "app").rglob("*.py"):
+        if path.name in ("message_types.py", "actions.py"):
+            continue
+        matched = pattern.findall(path.read_text(encoding="utf-8"))
+        if matched:
+            offenders.append(f"{_rel(path)}: {matched}")
+    assert not offenders, f"信封 type 出现裸字符串（改用 app.core.message_types 常量）：{offenders}"
+
+
+def test_bridge_action_names_match_their_message_types() -> None:
+    """桥动作用裸消息下发（无命令信封）：动作登记表与消息登记表各自持有同名值，
+    双登记不可漂移——同值由这里钉住。"""
+    from app.core import actions, message_types
+
+    assert actions.BRIDGE_OPEN == message_types.BRIDGE_OPEN
+    assert actions.BRIDGE_CLOSE == message_types.BRIDGE_CLOSE
+
+
+def test_every_message_type_has_a_server_side_consumer() -> None:
+    """每个消息类型在服务端都有消费者（发送方或接收方）：schema 只登记没人用的
+    消息，是"看起来有协议、实际没实现"的静默缺口。"""
+    from app.core.message_types import ALL as SERVER_ALL
+
+    for wire_type in SERVER_ALL:
+        constant = wire_type.replace(".", "_").upper()
+        consumers = 0
+        for path in (REPO_ROOT / "server" / "app").rglob("*.py"):
+            if path.name == "message_types.py":
+                continue
+            if constant in path.read_text(encoding="utf-8"):
+                consumers += 1
+        assert consumers >= 1, f"消息类型没有服务端消费者：{wire_type}"

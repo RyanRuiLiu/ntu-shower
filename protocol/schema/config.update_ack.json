@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.com/schema/config.ack.json",
-  "title": "Device acknowledgement of applied config revision",
+  "$id": "https://example.com/schema/config.update_ack.json",
+  "title": "Device acknowledgement of an applied config revision",
   "allOf": [
     {
       "$ref": "https://example.com/schema/envelope.json"
@@ -10,7 +10,7 @@
       "type": "object",
       "properties": {
         "type": {
-          "const": "config.ack"
+          "const": "config.update_ack"
         },
         "payload": {
           "type": "object",

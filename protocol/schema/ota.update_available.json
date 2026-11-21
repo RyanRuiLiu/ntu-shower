@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.com/schema/ota.upgrade_available.json",
-  "title": "New release pushed to an online device",
+  "$id": "https://example.com/schema/ota.update_available.json",
+  "title": "OTA update available for an online device",
   "allOf": [
     {
       "$ref": "https://example.com/schema/envelope.json"
@@ -10,7 +10,7 @@
       "type": "object",
       "properties": {
         "type": {
-          "const": "ota.upgrade_available"
+          "const": "ota.update_available"
         },
         "payload": {
           "type": "object",

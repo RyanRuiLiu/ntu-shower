@@ -20,7 +20,7 @@ class MessageCodecTest {
 
     @Test
     fun encode_replyToIsPreserved() {
-        val raw = MessageCodec.encode("config.ack", JSONObject(), replyTo = "cmd-1")
+        val raw = MessageCodec.encode("config.update_ack", JSONObject(), replyTo = "cmd-1")
         assertTrue(JSONObject(raw).getString("reply_to") == "cmd-1")
     }
 
@@ -61,7 +61,7 @@ class MessageCodecTest {
 
     @Test
     fun decode_keepsReplyToWhenPresent() {
-        val env = MessageCodec.decode("""{"v":1,"type":"config.ack","id":"x","reply_to":"cmd-9"}""")
+        val env = MessageCodec.decode("""{"v":1,"type":"config.update_ack","id":"x","reply_to":"cmd-9"}""")
 
         assertEquals("cmd-9", env?.replyTo)
     }
