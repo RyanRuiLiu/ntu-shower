@@ -6,6 +6,32 @@
 # 每条规则都对应一次真实发生过的漂移，不是假想的整洁偏好。
 
 rules:
+  - id: no-emoji
+    languages: [generic]
+    severity: ERROR
+    message: |
+      全项目所有文件禁止 emoji（业主规则）：✅⏳❌⭐ 及其余表情符号一律不得出现，
+      状态用文字表达（完成/待做/失败/进行中）。图形字符在等宽终端、提交面与
+      diff 里宽度不一且不可检索，注释与文档里的状态标记没有检索价值。
+    paths:
+      exclude:
+        - ".semgrep.yml"
+      include:
+        - "*.py"
+        - "*.kt"
+        - "*.kts"
+        - "*.js"
+        - "*.md"
+        - "*.ps1"
+        - "*.sh"
+        - "*.toml"
+        - "*.yml"
+        - "*.yaml"
+        - "*.json"
+        - ".githooks/*"
+    pattern-regex: >-
+      [\x{1F000}-\x{1FAFF}]|[\x{2600}-\x{26FF}]|[\x{2700}-\x{27BF}]|[\x{2B00}-\x{2BFF}]|[\x{231A}-\x{231B}]|[\x{23E9}-\x{23FA}]|[\x{FE0F}\x{200D}]
+
   - id: doc-section-ref
     languages: [generic]
     severity: ERROR
