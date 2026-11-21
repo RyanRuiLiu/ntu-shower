@@ -410,7 +410,7 @@ function renderTaskBoard(data) {
           : data.holds
               .map((hold) => {
                 const flags = [
-                  { ok: hold.past_close, yes: '落点已过', no: '落点未到' },
+                  { ok: hold.past_close, yes: '恢复时刻已过', no: '恢复时刻未到' },
                   { ok: hold.idle, yes: '喷头空闲', no: '仍有会话' },
                 ]
                   .map(({ ok, yes, no }) => `<span class="task-flag ${ok ? 'ok' : 'no'}">${ok ? yes : no}</span>`)
@@ -419,7 +419,7 @@ function renderTaskBoard(data) {
                 const pending =
                   hold.pending.length === 0
                     ? ''
-                    : `<div class="task-sub">待放回 ${hold.pending.length} 人：${hold.pending
+                    : `<div class="task-sub">待重分配 ${hold.pending.length} 人：${hold.pending
                         .map((item) => `#${esc(item.door_no)} ${esc(item.cert_no)}`)
                         .join('  ')}</div>`
                 return `
@@ -429,8 +429,8 @@ function renderTaskBoard(data) {
                     <span class="muted">hold 中（${esc(hold.hold_source === 'manual' ? '手动' : '自动')}，${esc(fmtDateTime(hold.hold_started_at))}）</span>
                   </div>
                   <div class="task-sub">
-                    <span>MCU 租约到点 <span class="mono">${esc(hold.lease_deadline || '—')}</span></span>
-                    <span>已放回 ${hold.reassigned_count}/${hold.total}</span>
+                    <span>MCU 布防截止 <span class="mono">${esc(hold.arming_deadline || '—')}</span></span>
+                    <span>已重分配 ${hold.reassigned_count}/${hold.total}</span>
                     ${flags}
                   </div>
                   ${pending}

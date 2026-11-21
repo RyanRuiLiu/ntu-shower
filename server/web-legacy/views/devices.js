@@ -280,8 +280,8 @@ async function doAppRestart() {
 
 /** 重启整机：设备离线一段时间，重连后由全貌帧重建现态。这是四个里最重的一个，排在最后。 */
 async function doHold() {
-  if (!window.confirm('今晚延长？设备钟将被偏置并清空在场会话：名单内的学生自动放回，'
-    + '其他人需要重新进入；恢复在过 close 且无人占用后自动进行。')) return
+  if (!window.confirm('今晚延长？设备钟将被偏置并清空在场会话：名单内的学生自动重分配回原喷头，'
+    + '其他人需要重新进入；恢复在恢复时刻（午夜后 10 分钟）且无人占用后自动进行。')) return
   report('maintResult', '正在建立今晚延长…', 'info')
   try {
     await api.hold(store.deviceId)

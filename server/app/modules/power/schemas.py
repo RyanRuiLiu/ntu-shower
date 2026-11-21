@@ -15,9 +15,9 @@ class DoorAssignment(TypedDict):
 
 
 class HoldStatus(TypedDict):
-    """hold 中的设备：来源、施加时刻、布防截止、放回进度与恢复条件两项。
+    """hold 中的设备：来源、施加时刻、布防截止、重分配进度与恢复条件两项。
 
-    恢复条件两项（`past_close` 真实时间已过落点、`idle` 喷头全部空闲）逐项给出：
+    恢复条件两项（`past_close` 真实时间已过恢复时刻、`idle` 喷头全部空闲）逐项给出：
     两项齐了之后的一轮对账（`TICK_INTERVAL_S` 内）就会恢复。
     """
 
@@ -25,7 +25,7 @@ class HoldStatus(TypedDict):
     hold_source: str
     hold_started_at: str
     hold_offset_s: int | None
-    lease_deadline: str
+    arming_deadline: str
     total: int
     reassigned_count: int
     pending: list[DoorAssignment]

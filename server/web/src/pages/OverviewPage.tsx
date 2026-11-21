@@ -246,9 +246,9 @@ function HoldSection({ holds }: { holds: NonNullable<Awaited<ReturnType<typeof j
   }
   return holds.map((hold) => (
     <div key={hold.device_id} className="text-xs text-default-500">
-      <span className="font-mono">{hold.device_id}</span> {hold.hold_source === "manual" ? "手动" : "自动"} hold · 已放回{" "}
-      {hold.reassigned_count}/{hold.total} · MCU 截止 {hold.lease_deadline || "—"}
-      · 恢复条件 {hold.past_close && hold.idle ? "已齐，下一轮生效" : `${hold.past_close ? "落点已过" : "落点未到"} / ${hold.idle ? "喷头空闲" : "仍有会话"}`}
+      <span className="font-mono">{hold.device_id}</span> {hold.hold_source === "manual" ? "手动" : "自动"} hold · 已重分配{" "}
+      {hold.reassigned_count}/{hold.total} · MCU 布防截止 {hold.arming_deadline || "—"}
+      · 恢复条件 {hold.past_close && hold.idle ? "已齐，下一轮生效" : `${hold.past_close ? "恢复时刻已过" : "恢复时刻未到"} / ${hold.idle ? "喷头空闲" : "仍有会话"}`}
     </div>
   ));
 }

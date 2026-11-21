@@ -4,8 +4,8 @@
 守卫与管理面一致：`devices:write` + 对象级 device_scope（router 级依赖）。
 
 hold 不要求设备在线：意图持久在影子行上，离线错过触发窗由对账器按
-「close 已过」守卫作废；resume 只清状态（落点前的尽力取消重布由对账器
-判定），离线同样可恢复。
+「close 已过」守卫作废；resume 把墙钟写回真实时刻（hold 自己的第二步）后清状态，
+写不进（离线、事实缺失）则 hold 保持，等下一轮重试。
 """
 
 from fastapi import APIRouter, Depends, Security
@@ -46,7 +46,7 @@ def hold_device(device_id: str, session: Session = Depends(get_db)) -> HoldStatu
     summary="恢复常规电源计划",
 )
 async def resume_device(device_id: str, session: Session = Depends(get_db)) -> PowerActionResult:
-    """清 hold 列，回到 following_schedule；不动钟面。未在 hold 中时幂等（resumed=false）。"""
+    """把墙钟写回真实时刻、清 hold 列，回到 following_schedule。未在 hold 中时幂等（resumed=false）。"""
     result = await service.resume(session, device_id)
     return PowerActionResult(
         device_id=str(result["device_id"]),

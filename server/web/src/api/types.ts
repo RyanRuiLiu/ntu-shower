@@ -134,7 +134,7 @@ export interface HoldStatus {
   hold_source: string;
   hold_started_at: string;
   hold_offset_s: number | null;
-  lease_deadline: string;
+  arming_deadline: string;
   total: number;
   reassigned_count: number;
   pending: DoorAssignment[];

@@ -372,7 +372,7 @@ async def _handle_frame(
         # 设备每个喷头的"下一个到点"，并把待补的那次分配接上——**不轮询**。
         sessions_scheduler.on_frame(device_id)
         # 电源计划：hold 施加的钟跳会清空喷头，这里按施加瞬间记下的"谁在哪个喷头"把名单
-        # 内的人放回去。它同步返回，真正的分配在后台任务里跑——帧的处理路径上不能等命令
+        # 内的人重分配回原喷头。它同步返回，真正的分配在后台任务里跑——帧的处理路径上不能等命令
         power_service.on_frame(device_id)
         # 语音播报：同步建任务后立即返回；回执失败时设备会重发同一帧，event_key 去重。
         voice_service.schedule_events(result.events)

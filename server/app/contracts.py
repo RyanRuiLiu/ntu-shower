@@ -114,7 +114,7 @@ class JobOutcome(StrEnum):
     REJECTED = "rejected"
     NO_PASSWORD = "no-password"
     NOT_APPLICABLE = "not-applicable"
-    #: 电源计划域（power）的终局：hold 的施加与恢复、放回。取值即该域日志事件名
+    #: 电源计划域（power）的终局：hold 的施加与恢复、重分配。取值即该域日志事件名
     #: 后缀（`power.<它>`），日志与审计表两边不分叉。hold/resume 取恒温器行业词
     #: （Hold Until / Resume Schedule）。
     HOLD_APPLIED = "hold-applied"

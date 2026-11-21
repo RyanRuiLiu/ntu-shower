@@ -247,7 +247,7 @@ def test_timer_is_dropped_when_the_session_ends(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_attempted_session_is_not_scheduled_again(monkeypatch: pytest.MonkeyPatch) -> None:
-    """单次执行的落点：动过手的会话不再排——失败也不重试。"""
+    """单次执行：动过手的会话不再排——失败也不重试。"""
 
     async def body() -> None:
         scheduler.start()

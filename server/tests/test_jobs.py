@@ -141,7 +141,7 @@ def test_status_includes_the_holding_device(client: TestClient, admin_headers: d
     assert row["total"] == 1
     assert row["reassigned_count"] == 0
     assert row["pending"] == [{"door_no": 3, "cert_no": CERT_NO}]
-    assert row["lease_deadline"] == "2026-10-05T15:59:30.000Z"
+    assert row["arming_deadline"] == "2026-10-05T15:59:30.000Z"
     assert row["idle"] is True
 
 

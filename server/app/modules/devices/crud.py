@@ -168,7 +168,7 @@ def get_hold(session: Session, device_id: str) -> dict[str, Any] | None:
         "source": HoldSource(row.hold_source) if row.hold_source is not None else None,
         "offset_s": row.hold_offset_s,
         "assignments": list(row.hold_assignments or []),
-        "lease_deadline": row.lease_deadline,
+        "arming_deadline": row.arming_deadline,
     }
 
 
@@ -189,11 +189,11 @@ def mark_hold_applied(
     device_id: str,
     offset_s: int,
     assignments: list[dict[str, Any]],
-    lease_deadline: datetime,
+    arming_deadline: datetime,
 ) -> None:
     """记录偏置已施加：墙钟 = 真实 + 偏移，MCU 截止到点入库（崩溃后对账可见）。
 
-    started_at 就位为**施加时刻**（意图建立时刻被覆盖）：落点 = 施加时刻 + 偏移，
+    started_at 就位为**施加时刻**（意图建立时刻被覆盖）：恢复时刻 = 施加时刻 + 偏移，
     恢复判定与看板都按这条轴算，两者必须同轴。
     """
     row = _find(session, device_id)
@@ -202,15 +202,7 @@ def mark_hold_applied(
     row.hold_started_at = utcnow()
     row.hold_offset_s = offset_s
     row.hold_assignments = assignments
-    row.lease_deadline = lease_deadline
-    session.commit()
-
-
-def set_lease(session: Session, device_id: str, deadline: datetime) -> None:
-    row = _find(session, device_id)
-    if row is None:
-        return
-    row.lease_deadline = deadline
+    row.arming_deadline = arming_deadline
     session.commit()
 
 
@@ -223,12 +215,12 @@ def clear_hold(session: Session, device_id: str) -> None:
     row.hold_source = None
     row.hold_offset_s = None
     row.hold_assignments = None
-    row.lease_deadline = None
+    row.arming_deadline = None
     session.commit()
 
 
 def mark_assignment(session: Session, device_id: str, index: int, *, done: bool) -> None:
-    """放回的一次性标记：写进 hold_assignments 的对应项，进程重启不丢。"""
+    """重分配的一次性标记：写进 hold_assignments 的对应项，进程重启不丢。"""
     row = _find(session, device_id)
     if row is None or row.hold_assignments is None:
         return
@@ -471,7 +463,6 @@ __all__: list[str] = [
     "revoke",
     "revoke_all",
     "set_clock_skew",
-    "set_lease",
     "set_name",
     "set_order",
     "set_power_facts",

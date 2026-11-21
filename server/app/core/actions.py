@@ -108,8 +108,10 @@ POWER_SCHEDULE = "power.schedule"
 """重布设备定时开关机（/dev/McuCom，ioctl 0xA1，见 docs/device-poweroff.md）。
 
 params.off_at 与 params.on_at 是设备**表盘上**的目标时刻（HH:MM）：off_at 是断电
-时刻，on_at 是断电之后到上电的时刻；设备端用自己的钟换算成相对延时（分钟粒度）
-写入 MCU。行为要点全部来自受控实验（docs/device-poweroff.md 的 2026-11-21 实验节）与实测：
+时刻，on_at 是断电之后到上电的时刻；params.off_day_offset 把断电目标顺延相应天数
+（0 = 下一个该时刻，1 = 明天同一时刻——hold 整夜覆盖布防传 1）；设备端用自己的钟
+换算成相对延时（分钟粒度）写入 MCU。行为要点全部来自受控实验
+（docs/device-poweroff.md 的 2026-11-21 实验节）与实测：
 
 - 延时是相对时长，**截止判定却用实时钟**——钟被拨到越过已布防的截止即当场断电，
   回拨则等量推迟。写钟之前必须先布防（power 域 hold 施加的顺序由此而来）。

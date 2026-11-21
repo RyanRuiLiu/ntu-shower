@@ -49,11 +49,11 @@ class Device(TimestampMixin, Base):
     hold_source: Mapped[HoldSource | None] = mapped_column(enum_column(HoldSource, "hold_source"), default=None)
     #: 已施加的钟面偏移（秒；NULL = 意图已建、尚未施加）。施加后墙钟 = 真实 + 偏移。
     hold_offset_s: Mapped[int | None] = mapped_column(Integer, default=None)
-    #: 施加瞬间的名单占用快照与放回标记 [{door_no, cert_no, done}]。放回是一次性的。
+    #: 施加瞬间的名单占用快照与重分配标记 [{door_no, cert_no, done}]。重分配是一次性的。
     hold_assignments: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, default=None)
-    #: MCU 布防截止到点（真实轴）：施加时一次写定（落点 + 余量），此后不再重布；
-    #: 服务端消失它照常到点——到点断电正是期望终态。
-    lease_deadline: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
+    #: MCU 布防截止到点（真实轴）：施加时一次写定（截止 = 次日 auto_close_time，整夜
+    #: 覆盖），此后不再重布；服务端消失它照常到点——到点断电正是期望终态。
+    arming_deadline: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
     #: 单台配置覆盖。存的是与默认值的差异，空对象/修订号 0 即全部沿用默认。
     #: 生效值每次现算：默认 ← 全局 ← 设备。
     config_revision: Mapped[int] = mapped_column(Integer, default=0)

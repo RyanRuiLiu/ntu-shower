@@ -501,7 +501,7 @@ def test_gap_beyond_session_limit_is_not_counted(fresh_db: str) -> None:
 
 
 def test_session_survives_process_restart(fresh_db: str) -> None:
-    """进程重启不丢状态：会话的延续全靠库里的两处落点。
+    """进程重启不丢状态：会话的延续全靠库里的两处持久状态。
 
     处理一帧用到的一切都在表里——`door_live` 给出上一帧的状态与时刻，`usage_session`
     给出进行中的会话与已累计的出水。处理过程本身没有内存状态（只剩一把按设备分的锁，
