@@ -141,6 +141,16 @@ def latest_device_log(session: Session, device_id: str, kind: str) -> dict[str, 
     return crud.latest_device_log(session, device_id, DeviceLogKind(kind))
 
 
+def list_device_logs(session: Session, device_id: str, kind: str, limit: int = 20) -> list[dict[str, str]]:
+    """某类日志的上送历史，按时间倒序（审计与排障回看）。"""
+    return crud.list_device_logs(session, device_id, DeviceLogKind(kind), limit)
+
+
+def list_link_events(session: Session, device_id: str, limit: int = 100) -> list[dict[str, str]]:
+    """最近的上线下线事件，按时间倒序（链路历史）。"""
+    return crud.list_link_events(session, device_id, limit)
+
+
 def load_clock_skew(session: Session, device_id: str) -> None:
     """把持久化的钟偏差载入内存。设备上线时调一次。
 

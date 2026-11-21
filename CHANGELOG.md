@@ -10,6 +10,13 @@
 
 ### Changed
 
+- **审计按官方标准逐条对账修订**（OWASP Logging Cheat Sheet / NIST SP 800-92 / OpenTelemetry Logs Data Model / W3C Trace Context，官方现文核实，ADR-0014 修订）：自创项清零——api_calls 删 kind 列（网关生命周期行的唯一出处是 device_link_events）与 device_id 列（从路径或查询串推断设备属自创关联，调用审计只记录请求本身）；actor_kind 词表删 identity（X-Identity 已于 ADR-0019 删除）；job_runs 的 door_no/cert_no 改可空，0/空串哨兵占位废除，旧行哨兵值改写 NULL；stdout 日志字段名换 OTel 官方键（timestamp/severity_text/body/event_name/attributes/exception.stacktrace/resource.service.name）；X-Problem-Type 自创响应头删除，problem 的 type 与 detail 改从 RFC 9457 响应体官方字段读取。
+- **历史可见性补齐**（管理面板此前只覆盖三类）：设备上下线历史（`GET /devices/{id}/link-events`）、日志上送历史（`GET /devices/{id}/logs/history`）、OTA 安装记录（`GET /ota/installs`，新 ota:read 作用域）三个只读出口新增，web 两套审计面板补齐安装与链路两类。
+
+## [0.8.6] - 2026-11-22
+
+### Changed
+
 - **凌晨晚关门（close 早于 open 且已越过午夜+10）的恢复时刻改为 close + 10 分钟**：此前统一按「午夜后 10 分钟」现算，该场景会形成近一整天的跳变；恢复时刻必须落在被跳过的 close 之后，午夜+10 在此刻已是过去。常规夜（含 close ≤ 00:10 的跨午夜触发）语义不变。
 - **OTA 自安装的重启掉线不再误报「布防可能未生效」**：设备上报 `ota.progress`/`installing` 后的进程重启掉线是预期表现，gateway 将该时刻通知电源计划并形成 300 秒宽限窗，宽限内的掉线豁免 `hold-failed` 留痕；宽限外恢复正常告警。
 - 旧版与兼容残留清理：设备端删除旧播报缓存目录（`/sdcard/ntu-shower/voice`）的升级清理逻辑（0.8.4 起各设备启动时已执行）；web-legacy 剪贴板删除「选中让手动复制」的降级分支（生产 https 安全上下文下 clipboard API 恒可用，统一失败出口）；删除 X-Identity 相关测试（机制已删，未知头的忽略行为属框架而非产品，决策见 ADR-0019）。

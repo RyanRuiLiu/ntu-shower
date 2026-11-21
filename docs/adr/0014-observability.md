@@ -10,6 +10,14 @@
 > 后记 2026-11-14：文中 `/ops` 路由与设备端 `audit.log` 是 v1 时代机制；v2 起可观测性为
 > stdout JSON 事件流 + `api_calls`/`command_audits`/`job_runs` 三张审计表（见
 > `app/audit_middleware.py` 与 `docs/adr/` 本篇其余部分），决策本体不变。
+>
+> 后记 2026-11-22：本篇按官方现文逐条对账后修订（OWASP Logging Cheat Sheet、
+> NIST SP 800-92、OpenTelemetry Logs Data Model、W3C Trace Context 均为当日现抓）。
+> 自创项清理：api_calls 删 kind/device_id（网关生命周期归 device_link_events 唯一出处，
+> 从路径猜设备属自创关联）；actor_kind 删 identity；job_runs 哨兵 0/空串改 NULL；
+> stdout 字段名换 OTel 官方键；X-Problem-Type 头删除，problem 的 type/detail 从
+> RFC 9457 响应体官方字段读取。设备网关连接含来源 IP 的事实随 kind 列一并删除，
+> 上下线历史以 device_link_events 为唯一出处。
 
 本条目汇总该领域的有效决策；原始讨论、实测与取舍见相关代码注释、`docs/adr/` 的 evidence 附录 与 Git 历史。
 
@@ -19,11 +27,11 @@
 > （审计记录的生成/保护/保留）、W3C Trace Context（关联标识）、OpenTelemetry
 > Log Data Model（字段命名）。2026-10-01 采纳。
 
-- **三层痕迹，一条链**：`api_call`（HTTP/网关审计）→ `command_audit`（命令级审计）
+- **三层痕迹，一条链**：`api_call`（HTTP 审计）→ `command_audit`（命令级审计）
   → 设备端 `audit.log`（命令痕迹 JSONL），以 `command_id` 与 `trace_id` 贯通——
   "这个命令服务端发给谁、设备收到没有、结果是什么"在三个层面各有一行可查。
-- **审计记什么**：全部 /api、/ops、/ota 请求（认证失败、授权失败、参数不合法、
-  服务端错误天然落表，OWASP 的必记事件类）；设备网关的连接与断开（含设备来源 IP）。
+- **审计记什么**：全部 /api、/ota 请求（认证失败、授权失败、参数不合法、
+  服务端错误天然落表，OWASP 的必记事件类）。
   不记静态资源与 /healthz；发布上传的 APK 二进制体不落库（本体已存 ota_releases，
   审计行记版本与大小即完整事实）。
 - **如实记录、不脱敏、不截断**（2026-10-01 用户决定，覆盖同日早先的脱敏决定）：
@@ -31,6 +39,8 @@
   User-Agent、请求体原文**全文落库**；`device.exec` 的输出（不可重现的运维事实）
   随命令审计落 `data` 列。媒体（截图/拍照的 base64）与可重取的 `ui.dump` XML
   仍不落库——那是体积与时效取舍，不是脱敏。stdout 日志不写身份、学号、口令与令牌；两者的分工见 `docs/security.md`。
+  2026-11-22 复议维持：对 OWASP 禁记清单的**显式偏离**（口令与令牌明文在审计表
+  可查）——业主裁定审计的价值在于如实，脱敏会使审计失去意义。
 - **两个审计分类的分工**：`api_call`（接口调用）记"每一次后台请求——谁、从哪个
   IP、调了什么、结果如何"；`command_audit`（命令流水）记"每条发到设备的命令——
   参数、结果、设备回报"。**必要分开**：命令是"先登记、结果异步回填"的两段式

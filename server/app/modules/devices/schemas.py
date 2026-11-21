@@ -44,6 +44,21 @@ class DeviceLogView(BaseModel):
     uploaded_at: str
 
 
+class DeviceLogHistoryRow(BaseModel):
+    """日志上送历史的一行：该（设备，种类）某次上送的原文与时刻。"""
+
+    content: str
+    uploaded_at: str
+
+
+class LinkEventRow(BaseModel):
+    """链路历史的一行：一次上线或下线（occurred_at RFC 3339）。"""
+
+    occurred_at: str
+    event: str
+    reason: str
+
+
 class DeviceLogLiveView(BaseModel):
     """从设备现读的日志尾部；`present=false` 表示文件尚未产生（例如从未崩溃）。"""
 

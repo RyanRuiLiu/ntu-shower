@@ -4,11 +4,14 @@
 INFO 级日志被静默丢弃。按 Twelve-Factor 写 stdout 不写文件，收集与归档由
 运行环境（systemd/journald）负责。
 
-每行一个 JSON 对象：ts（RFC 3339，唯一来源 core/clock）、level、logger、message、
-event（给机器检索的稳定代号）、trace_id 与 request_id（有值才输出，与 api_call
-审计行互通）、其余属性逐键并入顶层。
+每行一个 JSON 对象，键名取 OpenTelemetry Logs Data Model 的官方字段名
+（opentelemetry.io/docs/specs/otel/logs/data-model）：timestamp（RFC 3339，
+OWASP 要求的国际化时刻格式）、severity_text、body、event_name、trace_id、
+attributes（全部标量属性，含 request_id 关联标识）、resource（service.name，
+OTel 语义约定的官方键）、exception（exception.stacktrace 官方键）。
 
-stdout 日志不写口令、令牌、完整学号与身份标识；审计表的原文保留与访问控制见 docs/security.md 与 core/audit.py。
+stdout 日志不写口令、令牌、完整学号与身份标识；审计表的凭据脱敏与访问控制见
+docs/security.md 与 ADR-0014。
 """
 
 import contextvars
@@ -23,6 +26,10 @@ from .clock import now_rfc3339
 #: 应用 logger 的根名称。各模块用 `ntu-shower.<域>[.<模块>]` 作为子 logger。
 ROOT_LOGGER_NAME = "ntu-shower"
 
+#: Resource 的 service.name（OTel 语义约定官方键）：stdout 每行携带，多服务
+#: 共享一套日志收集时不歧义。
+SERVICE_NAME = "ntu-shower"
+
 #: 当前请求的关联标识：审计中间件置位，JSON 日志与审计行读它做事件关联。
 request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="")
 trace_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("trace_id", default="")
@@ -32,29 +39,34 @@ _SCALARS = (str, int, float, bool)
 
 
 class JsonFormatter(logging.Formatter):
-    """一条日志一行 JSON；字段名照 OpenTelemetry Log Data Model。"""
+    """一条日志一行 JSON；键名取 OTel Logs Data Model 官方字段名。"""
 
     def format(self, record: logging.LogRecord) -> str:
+        attributes: dict[str, Any] = {}
+        request_id = request_id_var.get()
+        if request_id:
+            attributes["request_id"] = request_id
+        attrs = getattr(record, "attrs", None)
+        if isinstance(attrs, dict):
+            attributes.update(attrs)
+        if record.exc_info:
+            # 异常进 attributes 的官方键（OTel 语义约定 exception.stacktrace），
+            # 多行堆栈压成一行可检索。
+            attributes["exception.stacktrace"] = self.formatException(record.exc_info).replace("\n", " | ")
         entry: dict[str, Any] = {
-            "ts": now_rfc3339(),
-            "level": record.levelname,
-            "logger": record.name,
-            "message": record.getMessage(),
+            "timestamp": now_rfc3339(),
+            "severity_text": record.levelname,
+            "body": record.getMessage(),
+            "resource": {"service.name": SERVICE_NAME},
         }
         event = getattr(record, "event", "")
         if event:
-            entry["event"] = event
+            entry["event_name"] = event
         trace_id = trace_id_var.get()
         if trace_id:
             entry["trace_id"] = trace_id
-        request_id = request_id_var.get()
-        if request_id:
-            entry["request_id"] = request_id
-        attrs = getattr(record, "attrs", None)
-        if isinstance(attrs, dict):
-            entry.update(attrs)
-        if record.exc_info:
-            entry["exception"] = self.formatException(record.exc_info)
+        if attributes:
+            entry["attributes"] = attributes
         return json.dumps(entry, ensure_ascii=False)
 
 
@@ -74,9 +86,10 @@ def configure_logging(level: str = "INFO") -> None:
 def log_event(level: str, event: str, message: str, /, **attrs: Any) -> None:  # noqa: ANN401
     """按稳定事件名写一条结构化日志。
 
-    `event` 是给机器检索的稳定代号（kebab-case），`message` 是给人读的中文，两者
-    分开，改文案不破坏检索。属性必须全是标量：嵌套结构无法检索，展开成平铺的
-    键值才查得动。签名收 Any 是设计本身，约束在运行时执行。
+    `event` 是给机器检索的稳定代号（kebab-case，OTel EventName 概念），`message`
+    是给人读的中文（OTel Body 概念），两者分开，改文案不破坏检索。属性必须全是
+    标量：嵌套结构无法检索，展开成平铺的键值才查得动。签名收 Any 是设计本身，
+    约束在运行时执行。
     """
     for key, value in attrs.items():
         if not isinstance(value, _SCALARS):
@@ -87,10 +100,11 @@ def log_event(level: str, event: str, message: str, /, **attrs: Any) -> None:  #
 
 
 def exc_info_text() -> str:
-    """当前异常的单行摘要：给结构化日志的 `error` 属性，多行堆栈压成一行可检索。
+    """当前异常的单行摘要：给结构化日志的 `exception.stacktrace` 属性，多行堆栈
+    压成一行可检索。
 
-    它是日志设施的一部分而不是某个调用方的：`error=` 这个属性就是按"一行可检索"设计的，
-    凡是把异常写进日志的地方都需要它。此前它住在 `core/audit`，那是它第一个用处的所在，
-    而不是它该在的地方——第二个调用方出现时就会变成两处实现。
+    它是日志设施的一部分而不是某个调用方的：凡是把异常写进日志的地方都需要它。
+    此前它住在 `core/audit`，那是它第一个用处的所在，而不是它该在的地方——第二个
+    调用方出现时就会变成两处实现。
     """
     return traceback.format_exc(limit=8).replace("\n", " | ")

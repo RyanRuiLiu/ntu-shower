@@ -64,6 +64,7 @@ from .modules.devices.routes import router as devices_router
 from .modules.doors.routes import router as doors_router
 from .modules.freelist.routes import router as freelist_router
 from .modules.jobs.routes import admin_router as jobs_admin_router
+from .modules.ota.routes import admin_router as ota_admin_router
 from .modules.ota.routes import device_router as ota_device_router
 from .modules.ota.routes import router as ota_router
 from .modules.power import service as power_service
@@ -213,6 +214,7 @@ def create_app() -> FastAPI:
     app.include_router(power_router)
     app.include_router(config_admin_router)
     app.include_router(ota_router)
+    app.include_router(ota_admin_router)
     app.include_router(ota_device_router)
     app.include_router(bridge_router)
     app.include_router(bridge_admin_router)

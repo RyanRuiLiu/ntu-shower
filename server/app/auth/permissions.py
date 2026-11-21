@@ -40,6 +40,9 @@ class Scope(StrEnum):
     FREELIST_WRITE = "freelist:write"
     """免费名单的整份写回。"""
 
+    OTA_READ = "ota:read"
+    """发布清单与逐设备安装记录的只读面。"""
+
     OTA_WRITE = "ota:write"
     """发布、下架与重推升级。"""
 
@@ -83,6 +86,7 @@ SCOPE_LABELS: dict[str, str] = {
     Scope.CONFIG_WRITE: "配置（写）",
     Scope.FREELIST_READ: "免费名单（读）",
     Scope.FREELIST_WRITE: "免费名单（写）",
+    Scope.OTA_READ: "发布与安装记录（读）",
     Scope.OTA_WRITE: "升级发布",
     Scope.BRIDGE_WRITE: "ADB 调试通道",
     Scope.WATER_READ: "水控板（读）",

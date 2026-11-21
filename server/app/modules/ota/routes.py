@@ -10,7 +10,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, Path, Security, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Path, Query, Security, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -29,6 +29,7 @@ from app.core.problems import (
 from app.db.deps import get_db
 from app.modules.ota import apk_manifest, service
 from app.modules.ota.schemas import (
+    OtaInstallRow,
     OtaManifest,
     ReleasePublished,
     ReleaseRearmed,
@@ -41,6 +42,14 @@ from app.modules.ota.service import VERSION_PATTERN
 from . import crud
 
 router = APIRouter(prefix="/api/v1/ota", tags=["ota"])
+
+# 发布清单与安装记录的管理面（ota:read）；发布、下架、重推另行 ota:write
+admin_router = APIRouter(
+    prefix="/api/v1/ota",
+    dependencies=[Security(caller, scopes=["ota:read"])],
+    tags=["ota-admin"],
+    responses=problem_responses(401, 403, 422),
+)
 
 # 设备硬编码契约：manifest 的路径不随版本前缀走（冻结，见 docs/architecture.md）
 device_router = APIRouter(tags=["ota"])
@@ -216,3 +225,13 @@ async def upload_release(
         "size": len(data),
         "notified_devices": notified,
     }
+
+
+@admin_router.get("/installs", summary="安装记录")
+def list_installs(
+    device_id: Annotated[str | None, Query(description="按设备过滤")] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    session: Session = Depends(get_db),
+) -> list[OtaInstallRow]:
+    """逐设备的安装记录，按时间倒序：哪台设备在何时装上了哪个版本。"""
+    return crud.list_installs(session, device_id=device_id, limit=limit)

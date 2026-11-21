@@ -294,7 +294,6 @@ export interface ReleasePublished {
 // ── 审计 ──
 
 export interface ApiCallRecord {
-  kind: string;
   requested_at: string;
   request_id: string;
   trace_id: string;
@@ -308,7 +307,6 @@ export interface ApiCallRecord {
   request_body: string | null;
   status_code: number;
   duration_ms: number;
-  device_id: string | null;
   problem_type: string | null;
   detail: string | null;
   response_body: string | null;
@@ -332,14 +330,31 @@ export interface JobRunRecord {
   id: number;
   occurred_at: string;
   device_id: string | null;
-  door_no: number;
+  door_no: number | null;
   session_id: number | null;
-  cert_no: string;
+  cert_no: string | null;
   job: string;
   action: string | null;
   outcome: string;
   reason: string | null;
   threshold_s: number | null;
+}
+
+export interface OtaInstallRecord {
+  device_id: string;
+  version: string;
+  applied_at: string;
+}
+
+export interface DeviceLinkEventRecord {
+  occurred_at: string;
+  event: string;
+  reason: string;
+}
+
+export interface DeviceLogHistoryRecord {
+  content: string;
+  uploaded_at: string;
 }
 
 // ── 设备命令的统一结果（assign/settle/exec/capture/…） ──

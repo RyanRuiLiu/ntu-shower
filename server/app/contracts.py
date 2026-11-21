@@ -36,13 +36,12 @@ ASSIGNABLE_STATES = frozenset({DoorState.FREE, DoorState.SELECTED})
 class ActorKind(StrEnum):
     """调用方类型，与 api_calls.actor_kind 对应。
 
-    token 与 session 是第一批认证标准化引入的两类（Bearer 凭据与会话 Cookie）；
-    identity 留给名单制调用方（已删除的自定身份头时代的历史取值，转换工具会搬进来）。
+    token 与 session 是认证标准化引入的两类（Bearer 凭据与会话 Cookie）；
+    device 是设备网关，anonymous 是未带标识的调用。
     """
 
     DEVICE = "device"
     ANONYMOUS = "anonymous"
-    IDENTITY = "identity"
     TOKEN = "token"
     SESSION = "session"
 
@@ -125,13 +124,6 @@ class JobOutcome(StrEnum):
     RESUME_FAILED = "resume-failed"
 
 
-class ApiCallKind(StrEnum):
-    """api_call 的两类来源：HTTP 请求与设备网关生命周期。"""
-
-    HTTP = "http"
-    GATEWAY = "gateway"
-
-
 class CommandStatus(StrEnum):
     """命令结果状态，与 core.outcomes.VALUES 必须完全一致。
 
@@ -205,9 +197,9 @@ class JobRun(TypedDict):
     id: int
     occurred_at: str
     device_id: str | None
-    door_no: int
+    door_no: int | None
     session_id: int | None
-    cert_no: str
+    cert_no: str | None
     job: str
     action: str | None
     outcome: str
@@ -388,7 +380,6 @@ __all__: list[str] = [
     "ASSIGNABLE_STATES",
     "OCCUPIED_STATES",
     "ActorKind",
-    "ApiCallKind",
     "AssignedSource",
     "Caller",
     "CommandAuditRecord",

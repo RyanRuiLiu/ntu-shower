@@ -4,7 +4,8 @@
 audit 域的只读出口。三张表都是只追加的时间序列，因此每条都有时刻列与索引；
 保留期统一单一数值（全部表跟随 audit_retention_days，登记与执行见
 app/retention.py 的 RETENTIONS 与
-api_calls.prune）。
+api_calls.prune）。设备网关的连接与断开事实的唯一出处是 devices 的
+device_link_events，本表不重复记录（同一事实一处）。
 
 JobRun 的 session_id 外键指向 door_sessions（字符串表名，不需要 import 会话模型）：
 审计行引用业务行，业务行不反向依赖审计层。
@@ -19,7 +20,7 @@ from typing import Any
 from sqlalchemy import JSON, ForeignKey, Index, Integer, String, Text, func, select
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from app.contracts import ActorKind, ApiCallKind, CommandAuditRecord, CommandStatus, JobOutcome
+from app.contracts import ActorKind, CommandAuditRecord, CommandStatus, JobOutcome
 from app.contracts import JobRun as JobRunView
 from app.core import outcomes, reason_codes
 from app.core.clock import format_rfc3339
@@ -32,10 +33,8 @@ class ApiCall(CreatedAtMixin, Base):
     """一次 HTTP 调用的审计行，保留期随 audit_retention_days（统一单一旋钮）。"""
 
     __tablename__ = "api_calls"
-    __table_args__ = (Index("ix_api_calls_device_id_requested_at", "device_id", "requested_at"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    kind: Mapped[ApiCallKind] = mapped_column(enum_column(ApiCallKind, "api_call_kind"))
     requested_at: Mapped[datetime] = mapped_column(UtcDateTime, index=True)
     request_id: Mapped[str] = mapped_column(String(64), default="")
     trace_id: Mapped[str] = mapped_column(String(64), default="", index=True)
@@ -50,7 +49,6 @@ class ApiCall(CreatedAtMixin, Base):
     request_body: Mapped[str | None] = mapped_column(Text, default=None)
     status_code: Mapped[int] = mapped_column(Integer)
     duration_ms: Mapped[int] = mapped_column(Integer)
-    device_id: Mapped[str | None] = mapped_column(String(64), default=None)
     problem_type: Mapped[str | None] = mapped_column(String(64), default=None)
     detail: Mapped[str | None] = mapped_column(Text, default=None)
     response_body: Mapped[str | None] = mapped_column(Text, default=None)
@@ -88,9 +86,9 @@ class JobRun(CreatedAtMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     occurred_at: Mapped[datetime] = mapped_column(UtcDateTime, index=True)
     device_id: Mapped[str | None] = mapped_column(String(64), default=None)
-    door_no: Mapped[int] = mapped_column(Integer)
+    door_no: Mapped[int | None] = mapped_column(Integer, default=None)
     session_id: Mapped[int | None] = mapped_column(ForeignKey("door_sessions.id", ondelete="SET NULL"), default=None)
-    cert_no: Mapped[str] = mapped_column(String(32), default="")
+    cert_no: Mapped[str | None] = mapped_column(String(32), default=None)
     job: Mapped[str] = mapped_column(String(32))
     action: Mapped[str | None] = mapped_column(String(32), default=None)
     outcome: Mapped[JobOutcome] = mapped_column(enum_column(JobOutcome, "job_outcome"))
@@ -185,8 +183,8 @@ def list_commands(session: Session, device_id: str | None = None, limit: int = 5
 def insert_job_run(
     session: Session,
     device_id: str,
-    door_no: int,
-    cert_no: str,
+    door_no: int | None,
+    cert_no: str | None,
     job: str,
     outcome: JobOutcome,
     occurred_at: datetime,
@@ -204,8 +202,8 @@ def insert_job_run(
             session_id=session_id,
             cert_no=cert_no,
             job=job,
-            action=action,
             outcome=outcome,
+            action=action,
             reason=reason or None,
             threshold_s=threshold_s,
         )
@@ -221,8 +219,8 @@ def record_job_run(
     job: str,
     outcome: str,
     level: str = "INFO",
-    door_no: int = 0,
-    cert_no: str = "",
+    door_no: int | None = None,
+    cert_no: str | None = None,
     action: str | None = None,
     session_id: int | None = None,
     reason: str = "",
@@ -234,10 +232,12 @@ def record_job_run(
     sessions（自动结算/续期）与 power（电源计划）两个域共用——散在各域
     各写一份迟早出现「记了日志、没落表」。`event` 是完整日志事件名（各域自带
     前缀，如 `job.settled` / `power.hold-applied`）；`extra` 只进日志（状态码、
-    设备原话这类给人看的细节），door_no/cert_no 未显式传入 extra 时用参数值。
+    设备原话这类给人看的细节）。door_no/cert_no 是设备级行的可空事实：不针对
+    某个喷头（如 hold 的施加）就是 None，不设占位值。
     """
     log_fields: dict[str, object] = {"device_id": device_id, "job": job, **(extra or {})}
-    log_fields.setdefault("door_no", door_no)
+    if door_no is not None:
+        log_fields.setdefault("door_no", door_no)
     if cert_no:
         log_fields.setdefault("cert_no", cert_no)
     log_event(level, event, message, **log_fields)
@@ -268,7 +268,7 @@ def list_job_runs(session: Session, device_id: str | None = None, limit: int = 5
                 "id": int(row.id),
                 "occurred_at": format_rfc3339(row.occurred_at),
                 "device_id": row.device_id,
-                "door_no": int(row.door_no),
+                "door_no": row.door_no,
                 "session_id": row.session_id,
                 "cert_no": row.cert_no,
                 "job": row.job,
@@ -289,12 +289,10 @@ def count_pending(session: Session) -> int:
 def insert_api_call(
     session: Session,
     *,
-    kind: ApiCallKind,
     method: str,
     path: str,
     status_code: int,
     duration_ms: int,
-    device_id: str = "",
     actor_kind: str = "",
     actor: str = "",
     client_ip: str | None = None,
@@ -307,20 +305,14 @@ def insert_api_call(
     request_id: str = "",
     trace_id: str = "",
 ) -> None:
-    """写一行 api_calls 审计（HTTP 请求与网关生命周期共用）。
-
-    device_id 是文本业务键，不设外键：设备不在册时行仍要落（审计先于档案），此刻
-    还没有档案可指。
-    """
+    """写一行 api_calls 审计。HTTP 请求经中间件写入。"""
     requested_at = utcnow()
     session.add(
         ApiCall(
-            kind=kind,
             method=method,
             path=path,
             status_code=status_code,
             duration_ms=duration_ms,
-            device_id=device_id or None,
             actor_kind=ActorKind(actor_kind) if actor_kind else ActorKind.ANONYMOUS,
             actor=actor,
             client_ip=client_ip,
@@ -341,28 +333,18 @@ def insert_api_call(
 def list_api_calls(
     session: Session,
     *,
-    device_id: str | None = None,
     actor_kind: str | None = None,
-    kind: str | None = None,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
-    """按时间倒序取审计行（/api/v1/audit/calls）。
-
-    返回的 device_id 是文本业务键，requested_at 是 RFC 3339。
-    """
+    """按时间倒序取审计行（/api/v1/audit/calls），requested_at 是 RFC 3339。"""
     stmt = select(ApiCall).order_by(ApiCall.id.desc()).limit(limit)
-    if device_id:
-        stmt = stmt.where(ApiCall.device_id == device_id)
     if actor_kind:
         stmt = stmt.where(ApiCall.actor_kind == actor_kind)
-    if kind:
-        stmt = stmt.where(ApiCall.kind == kind)
     rows = session.scalars(stmt).all()
     out: list[dict[str, Any]] = []
     for row in rows:
         out.append(
             {
-                "kind": row.kind,
                 "requested_at": format_rfc3339(row.requested_at),
                 "request_id": row.request_id,
                 "trace_id": row.trace_id,
@@ -376,7 +358,6 @@ def list_api_calls(
                 "request_body": row.request_body,
                 "status_code": row.status_code,
                 "duration_ms": row.duration_ms,
-                "device_id": row.device_id,
                 "problem_type": row.problem_type,
                 "detail": row.detail,
                 "response_body": row.response_body,

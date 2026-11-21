@@ -281,6 +281,41 @@ def link_events(session: Session, device_id: str, before: datetime) -> list[dict
     return [{"occurred_at": format_rfc3339(item.occurred_at), "event": str(item.event)} for item in events]
 
 
+def list_link_events(session: Session, device_id: str, limit: int = 100) -> list[dict[str, str]]:
+    """最近的上线下线事件，按时间倒序（链路历史的只读出口）。"""
+    row = _find(session, device_id)
+    if row is None:
+        return []
+    events = session.scalars(
+        select(DeviceLinkEvent)
+        .where(DeviceLinkEvent.device_id == row.id)
+        .order_by(DeviceLinkEvent.id.desc())
+        .limit(limit)
+    ).all()
+    return [
+        {
+            "occurred_at": format_rfc3339(item.occurred_at),
+            "event": str(item.event),
+            "reason": item.reason or "",
+        }
+        for item in events
+    ]
+
+
+def list_device_logs(session: Session, device_id: str, kind: DeviceLogKind, limit: int = 20) -> list[dict[str, str]]:
+    """该设备某类日志的上送历史，按时间倒序（每次上送一行，保留 LOG_KEEP 份）。"""
+    row = _find(session, device_id)
+    if row is None:
+        return []
+    logs = session.scalars(
+        select(DeviceLog)
+        .where(DeviceLog.device_id == row.id, DeviceLog.kind == kind)
+        .order_by(DeviceLog.id.desc())
+        .limit(limit)
+    ).all()
+    return [{"uploaded_at": format_rfc3339(log.uploaded_at), "content": log.content} for log in logs]
+
+
 def append_device_log(
     session: Session,
     device_id: str,
@@ -455,7 +490,9 @@ __all__: list[str] = [
     "latest_device_log",
     "link_events",
     "list_all",
+    "list_device_logs",
     "list_for_device",
+    "list_link_events",
     "mark_assignment",
     "mark_hold_applied",
     "power_facts",

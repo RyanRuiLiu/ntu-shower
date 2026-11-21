@@ -163,32 +163,30 @@ def test_traceparent_form_violations_fall_back_to_generated(
         assert len(str(row["trace_id"])) == 32
 
 
-def test_gateway_lifecycle_is_recorded(client: TestClient, admin_headers: dict[str, str]) -> None:
-    """设备网关接入记一行 connect（kind=gateway，status 0=连接 1=断开），可按类别过滤。"""
+def test_gateway_lifecycle_lands_in_link_events(client: TestClient, admin_headers: dict[str, str]) -> None:
+    """网关上下线的唯一出处是 device_link_events：api_calls 不再有网关行。"""
     device_id = "dev-gw-audit"
     with client.websocket_connect("/gateway/device") as ws:
         ws.send_text(frames.hello_frame(device_id))
         frames.recv_until(ws, "link.hello_ack")
 
-    rows = _calls(client, admin_headers, kind="gateway")
-    connect_rows = [row for row in rows if row["device_id"] == device_id and row["status_code"] == 0]
-    assert connect_rows
-    assert all(row["actor_kind"] == "device" for row in rows)
+    rows = _calls(client, admin_headers, limit=500)
+    assert all(row["path"] != "/gateway/device" for row in rows)
 
-    # 断开行由网关在连接收尾时写入；测试客户端的断开会取消网关协程，直接验证写入路径
-    audit_middleware.record_gateway(device_id, "disconnect")
-    rows = _calls(client, admin_headers, kind="gateway")
-    disconnect_rows = [row for row in rows if row["device_id"] == device_id and row["status_code"] == 1]
-    assert disconnect_rows
+    from sqlalchemy import select
+
+    from app.modules.devices.models import DeviceLinkEvent
+
+    with _svc() as session:
+        device_id_fk = session.scalars(
+            select(DeviceLinkEvent.device_id).where(DeviceLinkEvent.device_id == device_id)
+        ).first()
+    assert device_id_fk == device_id
 
 
-def test_calls_filters_by_actor_kind_and_device(client: TestClient, admin_headers: dict[str, str]) -> None:
-    """查询参数按列过滤：device_id 与 actor_kind。"""
+def test_calls_filter_by_actor_kind(client: TestClient, admin_headers: dict[str, str]) -> None:
+    """查询参数按列过滤：actor_kind（api_calls 不记设备关联，device_id 不在此表）。"""
     client.get("/ota/manifest", headers=admin_headers, params={"device_id": "dev-filter-1", "version_code": 6})
-
-    by_device = _calls(client, admin_headers, device_id="dev-filter-1")
-    assert by_device
-    assert all(row["device_id"] == "dev-filter-1" for row in by_device)
 
     by_actor = _calls(client, admin_headers, actor_kind="token", limit=1)
     assert by_actor
@@ -206,14 +204,9 @@ def test_commands_lists_command_audit_rows(client: TestClient, admin_headers: di
     assert rows[0]["device_id"] == "dev-audit-cmd"
 
 
-def test_device_of_resolves_path_segment_then_query() -> None:
-    """审计行的 device_id 只来自路径段或 query：路径优先，都没有为空。"""
-    assert audit_middleware._device_of("/api/v1/devices/dev-1/exec", "") == "dev-1"
-    assert audit_middleware._device_of("/api/v1/devices/dev-1/exec", "x=1") == "dev-1"
-    assert audit_middleware._device_of("/api/v1/devices/dev-1/exec", "device_id=dev-from-query") == "dev-1"  # 路径优先
-    assert audit_middleware._device_of("/ota/manifest", "device_id=dev-from-query") == "dev-from-query"
-    assert audit_middleware._device_of("/api/v1/config", "") == ""
-    assert audit_middleware._device_of("/api/v1/devices", "") == ""
+def test_device_of_removed_no_path_sniffing() -> None:
+    """api_calls 不再从路径/查询串猜设备（自创关联已删）：中间件没有该函数。"""
+    assert not hasattr(audit_middleware, "_device_of")
 
 
 def test_data_heavy_paths_are_excluded_from_response_storage() -> None:
@@ -242,7 +235,6 @@ def test_prune_removes_only_expired_rows(client: TestClient, admin_headers: dict
 
     with _svc() as session:
         stale = ApiCall(
-            kind="http",
             method="GET",
             path="/api/v1/ota/releases",
             status_code=200,
@@ -251,7 +243,6 @@ def test_prune_removes_only_expired_rows(client: TestClient, admin_headers: dict
             requested_at=utcnow() - timedelta(days=91),
         )
         fresh = ApiCall(
-            kind="http",
             method="GET",
             path="/api/v1/ota/releases",
             status_code=200,

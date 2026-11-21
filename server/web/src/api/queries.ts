@@ -13,7 +13,9 @@ import {
   type ConfigSpecCatalog,
   type ConfigValues,
   type DeviceConfigView,
+  type DeviceLinkEventRecord,
   type DeviceListItem,
+  type DeviceLogHistoryRecord,
   type DeviceLogLiveView,
   type DeviceLogView,
   type DeviceRecord,
@@ -25,6 +27,7 @@ import {
   type KeyIssued,
   type KeyView,
   type Me,
+  type OtaInstallRecord,
   type ReleaseRecord,
   type UserCatalog,
   type UserView,
@@ -78,6 +81,10 @@ export const usersApi = {
 export const devicesApi = {
   list: () => get<DeviceListItem[]>(`${API_V1}/devices`),
   runtime: (deviceId: string) => get<DeviceRecord>(devicePath(deviceId)),
+  linkEvents: (deviceId: string, params?: { limit?: number }) =>
+    get<DeviceLinkEventRecord[]>(devicePath(deviceId, "link-events") + toSearch(params)),
+  logHistory: (deviceId: string, kind: string, params?: { limit?: number }) =>
+    get<DeviceLogHistoryRecord[]>(devicePath(deviceId, "logs/history") + toSearch({ ...params, kind })),
   patch: (deviceId: string, value: { name?: string; trusted?: boolean; retired?: boolean }) =>
     patch<DeviceRecord>(devicePath(deviceId), value),
   order: (order: string[]) => patch<{ order: string[] }>(`${API_V1}/devices`, { order }),
@@ -175,6 +182,8 @@ export const voiceApi = {
 
 export const otaApi = {
   releases: () => get<ReleaseRecord[]>(`${API_V1}/ota/releases`),
+  installs: (params?: { device_id?: string; limit?: number }) =>
+    get<OtaInstallRecord[]>(`${API_V1}/ota/installs${toSearch(params)}`),
   upload: (form: FormData) => postForm<{ version: string; notified_devices: string[] }>(
     `${API_V1}/ota/releases`,
     form,
@@ -188,7 +197,7 @@ export const otaApi = {
 // ── 审计 ──
 
 export const auditApi = {
-  calls: (params?: { device_id?: string; limit?: number }) =>
+  calls: (params?: { actor_kind?: string; limit?: number }) =>
     get<ApiCallRecord[]>(`${API_V1}/audit/calls${toSearch(params)}`),
   commands: (params?: { device_id?: string; limit?: number }) =>
     get<CommandAuditRecord[]>(`${API_V1}/audit/commands${toSearch(params)}`),

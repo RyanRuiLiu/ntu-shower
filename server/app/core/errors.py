@@ -65,7 +65,6 @@ def _problem(problem: Problem, detail: str) -> JSONResponse:
             "detail": detail,
         },
         media_type=PROBLEM_MEDIA_TYPE,
-        headers={"X-Problem-Type": problem.code},
     )
 
 

@@ -16,7 +16,6 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
-from app import audit_middleware
 from app.core import protocol, reason_codes
 from app.core.clock import now_rfc3339, rfc3339_ago
 from app.core.config import settings
@@ -99,14 +98,13 @@ async def device_gateway(ws: WebSocket) -> None:
     allowed, token_device_id = await _verify_device_token(ws)
     if not allowed:
         return
-    ip = ""
     ping_task: asyncio.Task[None] | None = None
     device_id: str | None = None
     try:
         hello_state = await _accept_hello(ws, token_device_id)
         if hello_state is None:
             return
-        device_id, trusted, ip = hello_state
+        device_id, trusted, _ip = hello_state
 
         # 立刻主动锚定一轮，不等周期锚定（PING_INTERVAL_S）：设备刚连上时手上还没有时间锚点，而
         # 它采集的每一帧都要带采集时刻——越早把服务端时刻交给它，最初那几帧时刻越准。
@@ -167,7 +165,6 @@ async def device_gateway(ws: WebSocket) -> None:
             if manager.unregister(device_id, ws):
                 await _call(ws, devices_service.record_link_event, device_id, LINK_OFFLINE, "")
             await _call(ws, devices_service.set_device_offline, device_id)
-            await run_in_threadpool(audit_middleware.record_gateway, device_id, "disconnect", ip)
             log_event("INFO", "gateway.device-disconnected", "设备断开", device_id=device_id)
             with _db_session(ws) as session:
                 devices_service.publish_device_update(session, device_id)
@@ -270,7 +267,6 @@ async def _accept_hello(ws: WebSocket, token_device_id: str | None) -> tuple[str
     # 读到的是 0（等于不平移）——而刚接手、那边还被占着恰恰最常落在窗口里。
     await _call(ws, devices_service.load_clock_skew, device_id)
     await _call(ws, devices_service.record_link_event, device_id, LINK_ONLINE, last_offline_reason)
-    await run_in_threadpool(audit_middleware.record_gateway, device_id, "connect", ip)
     log_event(
         "INFO",
         "gateway.device-connected",

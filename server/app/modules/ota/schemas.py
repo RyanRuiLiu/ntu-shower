@@ -62,3 +62,11 @@ class ReleaseRemoved(TypedDict):
 
     version: str
     deleted: bool
+
+
+class OtaInstallRow(TypedDict):
+    """一行安装记录：哪台设备在何时装上了哪个版本（applied_at RFC 3339）。"""
+
+    device_id: str
+    version: str
+    applied_at: str

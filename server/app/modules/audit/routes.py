@@ -1,9 +1,9 @@
 """审计域 API：三类审计的只读出口（`audit:read`）。
 
-api_call（HTTP 与网关生命周期）的写入在 core/audit；command_audit（命令级）与
-job_run（后台任务的自动动作）的写入在各自的动作方经
-modules/audit.repository。这里只暴露查询，查询本身也照常被审计。
-前两表以 trace_id 关联，命令与维护记录以 command_id 关联，查两边即得全链路。
+api_call（HTTP 请求）的写入在 core 层的审计中间件；command_audit（命令级）与
+job_run（后台任务的自动动作）的写入在各自的动作方。这里只暴露查询，查询本身
+也照常被审计。前两表以 trace_id 关联，命令与维护记录以 command_id 关联，
+查两边即得全链路。设备网关的连接与断开在 devices 的 link events，不在本表。
 """
 
 from typing import Annotated
@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, Query, Security
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import caller
-from app.contracts import ActorKind, ApiCallKind
+from app.contracts import ActorKind
 from app.core.errors import problem_responses
 from app.db.deps import get_db
 from app.modules.audit.schemas import CommandAuditRecord, JobRun
@@ -29,13 +29,11 @@ admin_router = APIRouter(
 
 @admin_router.get("/audit/calls", summary="接口调用审计")
 def list_calls_endpoint(
-    device_id: Annotated[str | None, Query(description="按设备过滤")] = None,
     actor_kind: Annotated[ActorKind | None, Query(description="按调用方类型过滤")] = None,
-    kind: Annotated[ApiCallKind | None, Query(description="按记录类别过滤")] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> list[ApiCallRecord]:
-    """接口调用与网关生命周期审计。"""
-    return list_calls(device_id=device_id, actor_kind=actor_kind, kind=kind, limit=limit)
+    """接口调用审计。"""
+    return list_calls(actor_kind=actor_kind, limit=limit)
 
 
 @admin_router.get("/audit/commands", summary="命令审计")

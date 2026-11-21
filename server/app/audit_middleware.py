@@ -2,12 +2,15 @@
 
 按 OWASP Logging Cheat Sheet 的事件清单与 NIST SP 800-92 的保留框架设计，
 标准依据见 docs/adr/0014-observability.md。覆盖 /api/v1 与 /ota/manifest 的全部
-请求（认证、授权、参数与服务端错误天然落表）与设备网关生命周期；静态资源与
-/healthz 不审计。
+请求（认证、授权、参数与服务端错误天然落表）；静态资源与 /healthz 不审计。
+设备网关的连接与断开事实的唯一出处是 devices 的 device_link_events，本表不重复
+记录（同一事实一处）。
 
-JSON 请求体与响应体原文入库，全有或全无、不截断、不脱敏（受限审计表；stdout 日志
-不写这些字段）；数据重型且可重取的截图、拍照、UI 节点树与 multipart 上传体除外。
-过期行的清理与各表保留期登记在 app/retention.py（横切运维，不属 HTTP 采集）。
+体原文全有或全无、不截断、不脱敏（2026-11-22 业主裁定维持 2026-10-01 的「如实
+记录」：审计的价值在于如实，这是对 OWASP 禁记清单的显式偏离，ADR-0014 记录在案；
+stdout 日志不写这些字段）。数据重型且可重取的截图、拍照、UI 节点树与 multipart
+上传体除外。过期行的清理与各表保留期登记在 app/retention.py（横切运维，不属
+HTTP 采集）。
 
 存储在 persistence/api_calls.py：采集归 HTTP 侧，落库归持久化层——core 保持
 零向上依赖。
@@ -17,8 +20,7 @@ JSON 请求体与响应体原文入库，全有或全无、不截断、不脱敏
 Starlette 官方文档对 BaseHTTPMiddleware 明示了限制（contextvar 不向上传播、
 WebSocket 不支持、流式与内存问题），推荐直接实现 ASGI 中间件——本装配采用该
 形态：请求体经 receive 缓冲后回放给下游，响应体经包装 send 旁路累积、消息原样
-透传（不重建响应对象）。WebSocket（scope type 非 http）原样放行，网关生命周期
-由 gateway 调 record_gateway 记录。
+透传（不重建响应对象）。WebSocket（scope type 非 http）原样放行。
 """
 
 import contextlib
@@ -26,15 +28,12 @@ import json
 import re
 import time
 import uuid
-from urllib.parse import parse_qs
 
 from fastapi import FastAPI
 from starlette.concurrency import run_in_threadpool
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.contracts import ApiCallKind
 from app.core.logging import request_id_var, trace_id_var
-from app.db.session import session_scope
 from app.persistence import api_calls
 
 #: 需要审计的路径前缀 = 版本化对外面的全部域（/api/v1，见 main.py 的模块注释）。
@@ -49,6 +48,14 @@ _AUDITED_PREFIXES = ("/api/v1", "/ota/manifest")
 #: 进制（全零禁止）、flags 2 位小写十六进制。不合法的 traceparent 一律忽略，按
 #: 规范由本端生成 trace-id。
 _TRACEPARENT = re.compile(r"^(?!ff-)(?!00-0{32}-)[0-9a-f]{2}-([0-9a-f]{32})-(?!0{16}-)[0-9a-f]{16}-[0-9a-f]{2}$")
+
+#: 请求体与响应体入库的体积上限。全有或全无，绝不截断：截断了后续就查不回真实
+#: 内容，超限的记录占位说明（媒体类响应可重取，与不落媒体的取舍一致）。普通
+#: JSON 请求与响应都在 KB 量级，全文入库。
+BODY_MAX_BYTES = 256 * 1024
+
+#: 响应体不落库的路径：数据重型且可重取的截图、拍照、UI 节点树三个端点。
+_DATA_HEAVY_PATH = re.compile(r"/(capture|ui-dump|photo)$")
 
 
 def resolve_trace_id(traceparent: str | None) -> str:
@@ -90,39 +97,11 @@ def _actor_of(scope: Scope) -> tuple[str, str]:
     return "anonymous", ""
 
 
-#: 请求体与响应体入库的体积上限。全有或全无，绝不截断：截断了后续就查不回真实
-#: 内容，超限的记录占位说明（媒体类响应可重取，与不落媒体的取舍一致）。普通
-#: JSON 请求与响应都在 KB 量级，全文入库。
-BODY_MAX_BYTES = 256 * 1024
-
-#: 响应体不落库的路径：数据重型且可重取的截图、拍照、UI 节点树三个端点。
-_DATA_HEAVY_PATH = re.compile(r"/(capture|ui-dump|photo)$")
-
-
 def store_body(body: str) -> str:
     """体积在限内原文返回，超限返回占位说明，绝不截断。"""
     if len(body.encode()) <= BODY_MAX_BYTES:
         return body
     return f"[JSON 体 {len(body.encode())} 字节，超出 {BODY_MAX_BYTES} 字节上限未存储]"
-
-
-def _device_of(path: str, query: str) -> str:
-    """本次调用作用于哪台设备就记哪台。解析优先级：
-
-    ① 路径段 `/devices/{id}/...`（设备动作与档案）；
-    ② query 的 `device_id`（如 /doors?device_id=）。
-    都没有就为空——调用不针对任何设备（如配置、名单本身）。
-    """
-    parts = path.split("/")
-    if "devices" in parts:
-        index = parts.index("devices")
-        if index + 1 < len(parts):
-            return parts[index + 1]
-    if query:
-        value = parse_qs(query).get("device_id", [""])[0]
-        if value:
-            return value
-    return ""
 
 
 class AuditMiddleware:
@@ -216,7 +195,6 @@ class AuditMiddleware:
             user_agent=_scope_header(scope, "user-agent"),
             request_body=request_body,
             response_body=captured.stored_body(),
-            device_id=_device_of(path, query),
             problem_type=captured.problem_type,
             detail=captured.detail,
         )
@@ -228,31 +206,31 @@ class _ResponseCapture:
     content-type 判定在 response.start 到达后生效——媒体类响应（截图、拍照的
     base64）不累积，数据重型路径（_DATA_HEAVY_PATH）不累积；其余 JSON 响应的
     体量在 KB 量级，累积副本在审计写库时消费。消息原样透传，不重建响应。
+    problem 的 type 与 detail 取自 RFC 9457 响应体官方字段（type/detail）。
     """
 
     def __init__(self, path: str) -> None:
         self._path = path
         self._chunks: list[bytes] = []
         self._capture = False
+        self._problem = False
         self.status_code = 0
-        self.problem_type = ""
         self._problem_body = b""
 
     def observe(self, message: Message, request_id: str) -> Message:
         """观察一条响应消息并原样返回（response.start 会追加 X-Request-ID）。"""
         if message["type"] == "http.response.start":
             self.status_code = int(message.get("status") or 0)
-            self.problem_type = _message_header(message, "x-problem-type")
-            self._capture = "json" in _message_header(message, "content-type") and not _DATA_HEAVY_PATH.search(
-                self._path
-            )
+            content_type = _message_header(message, "content-type")
+            self._capture = "json" in content_type and not _DATA_HEAVY_PATH.search(self._path)
+            self._problem = "problem+json" in content_type
             headers = list(message.get("headers") or ())
             headers.append((b"x-request-id", request_id.encode("latin-1")))
             message = {**message, "headers": headers}
         elif message["type"] == "http.response.body":
             if self._capture:
                 self._chunks.append(message.get("body") or b"")
-            if self.problem_type:
+            if self._problem:
                 self._problem_body += message.get("body") or b""
         return message
 
@@ -263,12 +241,25 @@ class _ResponseCapture:
         return store_body(b"".join(self._chunks).decode(errors="replace"))
 
     @property
+    def problem_type(self) -> str:
+        """problem 响应的 type：RFC 9457 官方字段，非 problem 响应给空串。"""
+        value = self._problem_field("type")
+        return value.rsplit("/", 1)[-1] if value else ""
+
+    @property
     def detail(self) -> str:
         """problem 响应的 detail：失败说明的中文原文，供审计行直接展示。"""
-        if not self.problem_type or not self._problem_body:
+        return self._problem_field("detail")
+
+    def _problem_field(self, field: str) -> str:
+        if not self._problem_body:
             return ""
-        with contextlib.suppress(Exception):
-            return str(json.loads(self._problem_body).get("detail") or "")
+        with contextlib.suppress(ValueError):
+            parsed = json.loads(self._problem_body)
+            if isinstance(parsed, dict):
+                value = parsed.get(field)
+                if isinstance(value, str):
+                    return value
         return ""
 
 
@@ -281,29 +272,6 @@ def _message_header(message: Message, name: str) -> str:
     return ""
 
 
-def record_gateway(device_id: str, event: str, client_ip: str = "") -> None:
-    """网关生命周期一行（connect/disconnect）。kind='gateway'，status 约定 0=连接 1=断开。"""
-    from app.persistence import audit as audit_store
-
-    status_code = 0 if event == "connect" else 1
-    with session_scope() as session:
-        audit_store.insert_api_call(
-            session,
-            kind=ApiCallKind.GATEWAY,
-            method="WS",
-            path="/gateway/device",
-            status_code=status_code,
-            duration_ms=0,
-            device_id=device_id,
-            actor_kind="device",
-            actor=device_id,
-            client_ip=client_ip or None,
-        )
-
-
 def install_audit(app: FastAPI) -> None:
-    """装配审计中间件。
-
-    WebSocket 不经过 HTTP 中间件，网关生命周期由 gateway 调 record_gateway 记录。
-    """
+    """装配审计中间件。"""
     app.add_middleware(AuditMiddleware)

@@ -16,6 +16,7 @@ from app.core.protocol import JsonObject
 from app.db.base import utcnow
 from app.modules.devices.models import Device
 from app.modules.ota.models import OtaRelease, OtaReleaseInstall
+from app.modules.ota.schemas import OtaInstallRow
 
 
 def _device(session: Session, device_id: str) -> Device | None:
@@ -142,6 +143,25 @@ def list_releases(session: Session) -> list[ReleaseRecord]:
     return [as_record(row) for row in rows]
 
 
+def list_installs(session: Session, device_id: str | None = None, limit: int = 100) -> list[OtaInstallRow]:
+    """逐设备的安装记录，按时间倒序：哪台设备在何时装上了哪个版本。
+
+    设备以文本键返回（与安装事实同行的原始记录），发布按外键取版本号。
+    """
+    statement = (
+        select(OtaReleaseInstall, OtaRelease.version)
+        .join(OtaRelease, OtaReleaseInstall.release_id == OtaRelease.id)
+        .order_by(OtaReleaseInstall.applied_at.desc())
+        .limit(limit)
+    )
+    if device_id:
+        statement = statement.where(OtaReleaseInstall.device_id == device_id)
+    return [
+        {"device_id": install.device_id, "version": version, "applied_at": format_rfc3339(install.applied_at)}
+        for install, version in session.execute(statement).all()
+    ]
+
+
 def as_record(row: OtaRelease) -> ReleaseRecord:
     record: ReleaseRecord = {
         "version": row.version,
@@ -160,6 +180,7 @@ __all__: list[str] = [
     "insert_release",
     "is_installed",
     "latest_for",
+    "list_installs",
     "list_releases",
     "mark_installed_upto",
     "rearm",

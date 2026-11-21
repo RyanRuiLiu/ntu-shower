@@ -189,6 +189,32 @@ def get_device_logs(
     return schemas.DeviceLogView.model_validate(latest)
 
 
+@device_read_router.get("/{device_id}/logs/history", summary="设备日志的上送历史")
+def list_device_log_history(
+    device_id: str,
+    kind: DeviceLogKind = DeviceLogKind.DEVICE,
+    limit: int = Query(default=20, ge=1, le=100),
+    session: Session = Depends(get_db),
+) -> list[schemas.DeviceLogHistoryRow]:
+    """该设备某类日志的历次上送，按时间倒序（每次上送一行，保留份数有限）。"""
+    _require_device(session, device_id)
+    return [
+        schemas.DeviceLogHistoryRow.model_validate(row)
+        for row in service.list_device_logs(session, device_id, kind, limit)
+    ]
+
+
+@device_read_router.get("/{device_id}/link-events", summary="设备上下线历史")
+def list_device_link_events(
+    device_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    session: Session = Depends(get_db),
+) -> list[schemas.LinkEventRow]:
+    """该设备最近的上线下线事件，按时间倒序（链路历史的唯一出处）。"""
+    _require_device(session, device_id)
+    return [schemas.LinkEventRow.model_validate(row) for row in service.list_link_events(session, device_id, limit)]
+
+
 @device_read_router.get("/{device_id}/logs/live", summary="设备日志尾部现读", responses=problem_responses(409, 502))
 async def get_live_device_log(
     device_id: str,

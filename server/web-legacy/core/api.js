@@ -192,9 +192,12 @@ export const api = {
   rearmRelease: (version, deviceId) =>
     send(`${API_V1}/ota/releases/${encodeURIComponent(version)}/rearm`, post({ device_id: deviceId })),
 
-  // ── 审计 ──（admin）
-  /** 审计三类共用这一条：`kind` 取 `calls` / `commands` / `job-runs`。 */
+  // ── 审计与历史 ──（admin）
+  /** 审计与历史共用这一条：`kind` 取 `calls` / `commands` / `job-runs` / `installs` / `link-events`。 */
   audit: (kind, params) => send(`${API_V1}/audit/${kind}${query(params)}`),
+  /** 设备域的链路历史（链路事件挂在设备资源树下）。 */
+  deviceLinkEvents: (deviceId, params) =>
+    send(`${API_V1}/devices/${encodeURIComponent(deviceId)}/link-events${query(params)}`),
 
   // ── 后台任务 ──（admin）
   /** 当前态：四任务的开关与名单、延长中的设备、调度器的即时计划。只读组合。 */

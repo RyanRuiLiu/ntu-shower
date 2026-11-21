@@ -14,7 +14,6 @@ from sqlalchemy import delete
 from sqlalchemy.orm import Session
 from typing_extensions import TypedDict
 
-from app.contracts import ApiCallKind
 from app.core.logging import request_id_var, trace_id_var
 from app.db.base import utcnow
 from app.db.session import session_scope
@@ -25,12 +24,11 @@ from . import audit as audit_store
 class ApiCallRecord(TypedDict):
     """一行调用审计（`GET /audit/calls` 的行）。
 
-    列即 api_call 表的列；可空字段对应"本行没有该事实"（如网关生命周期行没有
-    method/path 语义、匿名调用没有 actor）。`request_body`/`response_body` 是
-    JSON 体原文，数据重型响应为占位说明（见 audit_middleware.store_body）。
+    列即 api_call 表的列；可空字段对应"本行没有该事实"（如匿名调用没有 actor）。
+    `request_body`/`response_body` 是 JSON 体原文（业主裁定如实落库），数据重型
+    响应为占位说明（见 audit_middleware.store_body）。
     """
 
-    kind: ApiCallKind
     requested_at: str
     request_id: str
     trace_id: str
@@ -44,7 +42,6 @@ class ApiCallRecord(TypedDict):
     request_body: str | None
     status_code: int
     duration_ms: int
-    device_id: str | None
     problem_type: str | None
     detail: str | None
     response_body: str | None
@@ -63,11 +60,10 @@ def record(
     user_agent: str = "",
     request_body: str = "",
     response_body: str = "",
-    device_id: str = "",
     problem_type: str = "",
     detail: str = "",
 ) -> None:
-    """写一行 HTTP 审计（kind=ApiCallKind.HTTP）。关联字段取自中间件置位的 contextvar。
+    """写一行 HTTP 审计。关联字段取自中间件置位的 contextvar。
 
     与命令审计以 trace_id 关联：本行与 command_audit 各带一份，查两边即得全链路。
     `query` 是请求的查询串；`request_body` 与 `response_body` 是 JSON 体原文；
@@ -76,12 +72,10 @@ def record(
     with session_scope() as session:
         audit_store.insert_api_call(
             session,
-            kind=ApiCallKind.HTTP,
             method=method,
             path=path,
             status_code=status_code,
             duration_ms=duration_ms,
-            device_id=device_id,
             actor_kind=actor_kind,
             actor=actor,
             client_ip=client_ip or None,
@@ -98,16 +92,14 @@ def record(
 
 def list_calls(
     *,
-    device_id: str | None = None,
     actor_kind: str | None = None,
-    kind: str | None = None,
     limit: int = 100,
 ) -> list[ApiCallRecord]:
     """按时间倒序取审计记录（/api/v1/audit/calls）。"""
     with session_scope() as session:
         return cast(
             "list[ApiCallRecord]",
-            audit_store.list_api_calls(session, device_id=device_id, actor_kind=actor_kind, kind=kind, limit=limit),
+            audit_store.list_api_calls(session, actor_kind=actor_kind, limit=limit),
         )
 
 

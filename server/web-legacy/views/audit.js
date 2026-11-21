@@ -1,8 +1,9 @@
 /**
- * 审计：接口调用（api_calls）、命令流水（command_audits）、后台任务（job_runs）。
+ * 审计：接口调用（api_calls）、命令流水（command_audits）、后台任务（job_runs）、
+ * 安装记录（ota_release_installs）、链路历史（device_link_events）。
  *
- * 三种审计结构不同，页面骨架却是同一个：一张关键列表 + 右侧全部字段。所以**差异只写在
- * [TABS] 里**（标题、取数、列头、每格怎么显示、时间取哪一列），渲染只有一份——加第四种
+ * 五种审计结构不同，页面骨架却是同一个：一张关键列表 + 右侧全部字段。所以**差异只写在
+ * [TABS] 里**（标题、取数、列头、每格怎么显示、时间取哪一列），渲染只有一份——加第六种
  * 审计就是加一条描述。早先每种审计各写一份表格渲染，两份几乎一样的代码各自演化；
  * 那不是风格问题，是"唯一实现"的问题。
  *
@@ -75,15 +76,11 @@ const TABS = {
     title: '每一次后台请求：谁、从哪个 IP、调了什么、结果如何',
     kind: 'calls',
     time: (row) => row.requested_at,
-    headers: ['类别', '调用方', '设备', '请求', '状态', '耗时', '问题'],
+    headers: ['调用方', '请求', '状态', '耗时', '问题'],
     cells: (row) => [
-      row.kind === 'gateway'
-        ? `<span class="badge badge-blue">网关${row.status_code === 0 ? '连接' : '断开'}</span>`
-        : esc(row.method),
       `${mono(row.actor_kind)}${
         row.client_ip ? `<div class="muted" title="来源 IP">${esc(row.client_ip)}</div>` : ''
       }`,
-      deviceCell(row.device_id),
       `${mono(`${row.method} ${row.path}`)}${
         row.query ? `<span class="muted">?${esc(row.query)}</span>` : ''
       }`,
@@ -114,14 +111,31 @@ const TABS = {
     headers: ['设备', '喷头', '学号', '功能', '动作', '结果', '阈值', '原因'],
     cells: (row) => [
       deviceCell(row.device_id),
-      mono(row.door_no),
-      codeCell(row.cert_no),
+      row.door_no === null ? PLACEHOLDER : mono(row.door_no),
+      row.cert_no === null ? PLACEHOLDER : codeCell(row.cert_no),
       mono(row.job),
       mono(row.action),
       mono(row.outcome),
       row.threshold_s === null ? PLACEHOLDER : mono(`${row.threshold_s} 秒`),
       muted(row.reason),
     ],
+  },
+  install: {
+    label: '安装记录',
+    title: '逐设备的版本安装确认：哪台设备在何时装上了哪个版本',
+    kind: 'installs',
+    time: (row) => row.applied_at,
+    headers: ['设备', '版本'],
+    cells: (row) => [deviceCell(row.device_id), mono(row.version)],
+  },
+  link: {
+    label: '链路历史',
+    title: '设备的上线与下线事件（当前设备的链路历史）',
+    kind: 'link-events',
+    deviceScoped: true,
+    time: (row) => row.occurred_at,
+    headers: ['事件', '原因'],
+    cells: (row) => [mono(row.event), muted(row.reason)],
   },
 }
 
@@ -199,12 +213,14 @@ async function reload() {
   const deviceId = scope === 'device' ? store.deviceId : ''
   const keys = Object.keys(TABS)
   try {
-    // 三类各自取数、一起等待：加第四类只改 TABS，这里一行不动
-    const loaded = await Promise.all(
-      keys.map((key) => api.audit(TABS[key].kind, { device_id: deviceId, limit })),
-    )
+    // 各类各自取数、一起等待：加一类只改 TABS，这里一行不动；链路历史挂在设备资源树下，
+    // 单独按当前设备取（设备页切换后 store.deviceId 变化，刷新即对齐）
+    const [loaded, linkRows] = await Promise.all([
+      Promise.all(keys.filter((key) => !TABS[key].deviceScoped).map((key) => api.audit(TABS[key].kind, { device_id: deviceId, limit }))),
+      api.deviceLinkEvents(store.deviceId, { limit }),
+    ])
     keys.forEach((key, index) => {
-      state.rows[key] = loaded[index]
+      state.rows[key] = TABS[key].deviceScoped ? linkRows : loaded[keys.filter((k) => !TABS[k].deviceScoped).indexOf(key)]
       state.selected[key] = -1
     })
     rerenderTable()
