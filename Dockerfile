@@ -40,4 +40,6 @@ EXPOSE 8110
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8110/healthz', timeout=2)"]
 
+# 单进程 uvicorn：进程内存态（网关连接表、core.device_clock 的偏差缓存）以单进程为
+# 前提；横向扩容前必须先把这类状态外置，而不是加 --workers。
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8110"]

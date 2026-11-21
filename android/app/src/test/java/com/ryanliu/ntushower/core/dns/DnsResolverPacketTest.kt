@@ -86,6 +86,17 @@ class DnsResolverPacketTest {
         assertNull(resolver.parseFirstA(full.copyOf(full.size - 2)))
     }
 
+    @Test
+    fun `returns null when an answer header crosses the buffer edge`() {
+        // 声明两条 answer 但只给一条的字节：第二条的 2 字节名字头与 10 字节固定段
+        // 各自越界都归 null——解析器按声明计数消费，越界即中止，不读缓冲区外
+        val one = aAnswer("1.2.3.4")
+        val full = dnsResponse(answers = listOf(aAnswer("9.9.9.9"), aAnswer("1.2.3.4")))
+
+        assertNull(resolver.parseFirstA(full.copyOf(full.size - one.size - 1)))
+        assertNull(resolver.parseFirstA(full.copyOf(full.size - one.size - 9)))
+    }
+
     // ── parseFirstA 的接受路径 ──
 
     @Test

@@ -235,4 +235,12 @@ class DoorRawTest {
         assertEquals(false, partial.complete)
         assertEquals(1, partial.doors.size)
     }
+
+    @Test
+    fun parseRow_nullOnBadDoorNoOrStatus() {
+        // 两个编号字段是行解析的硬前提：doorNo 或 status 非数字，整行作废——
+        // 不猜一个喷头号出来（猜测会污染派生层的状态判定）
+        assertNull(DoorRaw.parseRow("x|0|c|a|20260930003029|||0|0"))
+        assertNull(DoorRaw.parseRow("1|0|c|a|20260930003029|||0|s"))
+    }
 }

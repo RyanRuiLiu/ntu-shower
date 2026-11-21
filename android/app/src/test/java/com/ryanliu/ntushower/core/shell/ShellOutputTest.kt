@@ -32,6 +32,13 @@ class ShellOutputTest {
     }
 
     @Test
+    fun `an unparsable exit code becomes unknown`() {
+        // 标记行尾不是数字（输出把标记行截断了、或流被污染）：取 UNKNOWN_EXIT_CODE，
+        // 与真实的 0 分得开——调用方读不到退出码只能猜成没成，这条路径是防线
+        assertEquals(ShellOutput.UNKNOWN_EXIT_CODE, collect("x", "${mark}junk")?.exitCode)
+    }
+
+    @Test
     fun `reads the marker glued to output that has no trailing newline`() {
         // 真机上踩过这个：head -c 的输出没有结尾换行，标记直接贴在了内容后面。
         // 按整行匹配的写法会把这条命令的输出和退出码一起丢掉，而调用方读不到退出码

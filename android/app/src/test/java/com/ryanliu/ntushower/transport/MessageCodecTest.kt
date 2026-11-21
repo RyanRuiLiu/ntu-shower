@@ -25,6 +25,16 @@ class MessageCodecTest {
     }
 
     @Test
+    fun encode_fallsBackToWallClockWithoutAnAnchor() {
+        // 无锚点（尚未握上手）时信封 ts 回退设备墙钟：帧仍带上时刻，服务端按偏差
+        // 口径换算（architecture.md 时间轴节）。回退是"服务端轴"缺失时的既定形态，
+        // 不是第二套时间方案——锚一立即回到主路。
+        com.ryanliu.ntushower.core.clock.ServerClock.reset()
+        val obj = JSONObject(MessageCodec.encode("door.snapshot", JSONObject()))
+        assertTrue(obj.getString("ts").endsWith("Z"))
+    }
+
+    @Test
     fun decode_roundtrip() {
         val raw = MessageCodec.encode("link.ping", JSONObject().put("sender_time", "t"))
         val env = MessageCodec.decode(raw)!!

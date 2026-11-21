@@ -206,6 +206,57 @@ class WaterBoardClientTest {
         }
     }
 
+    @Test
+    fun `an io error after connect maps to board unreachable`() {
+        // 请求写出后读回包阶段连接被掐断（对端半途死亡）：这不是超时——连不上与
+        // "连上了但死了"是两种处境，前者才是 unreachable 之外的超时语义
+        val server = FakeBoardServer { conn, _ ->
+            conn.setSoLinger(true, 0)
+            conn.close()
+            // 写请求给假服务器自己用：真实客户端的请求发出后，读回包拿到的是 IOException
+        }
+        try {
+            val client = WaterBoardClient(connectTimeoutMs = 500, readTimeoutMs = 500)
+            assertReason(ReasonCodes.WATER_BOARD_UNREACHABLE) {
+                client.open(board.copy(port = server.port), boardDoor = 1)
+            }
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    fun `pack id wraps around after the max`() {
+        // 1..254 环回：序号随请求递增，到 254 后回到 1。断言只看**相邻关系**——
+        // PACK_ID 是静态状态，起点取决于此前跑过多少请求，绝对值断不住。
+        // 假服务器存的是反转回正常序的帧：packid 在 6+payload+3（单字节，高字节为 0）。
+        val server = FakeBoardServer { conn, request ->
+            write(conn, response(request, byteArrayOf(0)))
+        }
+        try {
+            val client = WaterBoardClient(connectTimeoutMs = 500, readTimeoutMs = 500)
+            fun requestPackId(index: Int): Int = server.requests[index][14].toInt() and 0xFF
+
+            repeat(300) { client.open(board.copy(port = server.port), boardDoor = 1) }
+            assertEquals(300, server.requests.size)
+            var wraps = 0
+            for (i in 1 until 300) {
+                val previous = requestPackId(i - 1)
+                val current = requestPackId(i)
+                if (previous >= 254) {
+                    wraps += 1
+                    assertEquals(1, current)
+                } else {
+                    assertEquals(previous + 1, current)
+                }
+            }
+            // 300 次请求必然至少跨过一次 254→1，环回不是纸面推演
+            assertTrue("300 次请求应至少环回一次", wraps >= 1)
+        } finally {
+            server.close()
+        }
+    }
+
     private fun assertReason(expected: String, block: () -> Unit) {
         try {
             block()

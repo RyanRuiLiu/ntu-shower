@@ -200,6 +200,14 @@ class WaterFrameTest {
         WaterFrame.build(1, ByteArray(0), 1)
     }
 
+    @Test
+    fun `rejects a frame whose declared length exceeds the bytes given`() {
+        // 头部声明 length=1 但只给到 12 字节整（不含 payload）：长度账在 CRC 之前对不上
+        val frame = normal(byteArrayOf(0, 0xB1.toByte(), 7, 20))
+        val truncated = frame.copyOf(12)
+        assertNull(WaterFrame.parseFrame(truncated))
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun `build rejects an oversized payload`() {
         WaterFrame.build(1, ByteArray(256), 1)

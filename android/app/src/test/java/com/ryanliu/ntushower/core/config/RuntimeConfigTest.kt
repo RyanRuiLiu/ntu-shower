@@ -269,4 +269,32 @@ class RuntimeConfigTest {
 
         assertEquals(true, RuntimeConfig.bathDbArchiveEnabled)
     }
+
+    @Test
+    fun apply_coversAutomationTimingKeys() {
+        // 四个自动化时序键：下发生效、下限收口到 1（0 毫秒的超时/窗口不是合法值）。
+        // 逐键断言映射没有错位——键名与属性的对应是纯手写的，错位只有显式断言能抓
+        RuntimeConfig.apply(
+            JSONObject(
+                "{\"command_dedup_max_count\": 512, \"bath_response_timeout_ms\": 8000, " +
+                    "\"cert_verify_wait_ms\": 3000, \"home_timeout_ms\": 12000}",
+            ),
+        )
+
+        assertEquals(512L, RuntimeConfig.commandDedupMaxCount)
+        assertEquals(8000L, RuntimeConfig.serverResponseTimeoutMs)
+        assertEquals(3000L, RuntimeConfig.idVerifyWaitMs)
+        assertEquals(12000L, RuntimeConfig.homeBudgetMs)
+
+        RuntimeConfig.apply(
+            JSONObject(
+                "{\"command_dedup_max_count\": 0, \"bath_response_timeout_ms\": -5, " +
+                    "\"cert_verify_wait_ms\": 0, \"home_timeout_ms\": -1}",
+            ),
+        )
+        assertEquals(1L, RuntimeConfig.commandDedupMaxCount)
+        assertEquals(1L, RuntimeConfig.serverResponseTimeoutMs)
+        assertEquals(1L, RuntimeConfig.idVerifyWaitMs)
+        assertEquals(1L, RuntimeConfig.homeBudgetMs)
+    }
 }

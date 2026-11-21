@@ -58,6 +58,19 @@ class CappedLogFileTest {
         CappedLogFile.append(java.io.File("/nonexistent-dir/log.txt"), "boom\n", CAP)
     }
 
+    @Test
+    fun `a file under the keep size is never trimmed`() {
+        // 恰好压线（文件 <= 上限一半）时不裁剪：trim 的守门分支，与"超限裁一半"
+        // 的既有用例合起来盖住裁剪判定的两侧
+        val file = folder.newFile("small.txt")
+        val newline = "\n"
+        val content = (1..2).joinToString("") { "%03d".format(it) + "x".repeat(96) + newline } // 200 字节 = CAP 的一半
+
+        content.forEach { CappedLogFile.append(file, it.toString(), CAP) }
+
+        assertEquals(content, file.readText())
+    }
+
     private companion object {
         const val CAP = 500L
     }

@@ -86,6 +86,38 @@ class VoiceClipSpecTest {
     }
 
     @Test
+    fun `clip parse rejects every boundary outside its identity`() {
+        // 身份四元组各自越界都要拒：哈希形状、字节数上下界、时长上下界。
+        // 边界值本身合法（1 字节、30 秒、1 毫秒）——拒的是越界，不是贴近值。
+        assertNull(VoiceClipSpec.parse(clip().put("size_bytes", 0L)))
+        assertNull(VoiceClipSpec.parse(clip().put("size_bytes", 5L * 1024 * 1024 + 1)))
+        assertNull(VoiceClipSpec.parse(clip().put("duration_ms", 0L)))
+        assertNull(VoiceClipSpec.parse(clip().put("duration_ms", 30_001L)))
+        assertNull(VoiceClipSpec.parse(clip().put("size_bytes", -1L)))
+        assertEquals(1L, VoiceClipSpec.parse(clip().put("size_bytes", 1L))!!.sizeBytes)
+        assertEquals(30_000L, VoiceClipSpec.parse(clip().put("duration_ms", 30_000L))!!.durationMs)
+    }
+
+    @Test
+    fun `play and prepare reject a segment that is not an object`() {
+        // 数组里混进字符串（形状攻击）：逐项取对象时当场拒，不在后面炸
+        val mixed = JSONArray().put("not-an-object")
+        assertNull(
+            VoicePlaySpec.parse(
+                JSONObject().put("segments", mixed).put("volume", 3).put("download_budget_ms", 60_000L),
+            ),
+        )
+        assertNull(VoicePlaySpec.parsePrepare(JSONObject().put("clips", JSONArray().put("not-an-object"))))
+        assertNull(
+            VoicePlaySpec.parse(
+                JSONObject().put("segments", JSONArray().put(clipSegment().put("sha256", "xyz")))
+                    .put("volume", 3)
+                    .put("download_budget_ms", 60_000L),
+            ),
+        )
+    }
+
+    @Test
     fun `rejects malformed playlists`() {
         assertNull(VoicePlaySpec.parse(JSONObject().put("volume", 3)))
         assertNull(

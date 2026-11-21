@@ -299,6 +299,32 @@ class WaterHandlerTest {
     }
 
     @Test
+    fun `open and close transport failures carry their own log wording`() {
+        // 传输异常的失败文案就是异常 message；方向措辞（授权/断水）在拒绝路径与
+        // 日志里。这里钉的是：两种方向都把异常原因与 reason code 如实带出，且
+        // 目标板信息随失败一起回（target 不因失败丢失）。
+        val failing = FakeBoard(failure = WaterBoardException(ReasonCodes.WATER_TIMEOUT, "板子超时"))
+        val openOutcome = WaterHandler.execute(
+            CommandScheduler.Command.WaterOpen("c-open-timeout", 3),
+            resolveTarget = { target },
+            board = failing,
+        )
+        val closeOutcome = WaterHandler.execute(
+            CommandScheduler.Command.WaterClose("c-close-timeout", 3),
+            resolveTarget = { target },
+            board = failing,
+        )
+
+        assertEquals(OutcomeStatus.FAILED, openOutcome.status)
+        assertEquals(ReasonCodes.WATER_TIMEOUT, openOutcome.reasonCode)
+        assertEquals("板子超时", openOutcome.terminalMessage)
+        assertEquals(3, requireNotNull(openOutcome.data).getInt("board_door"))
+        assertEquals(OutcomeStatus.FAILED, closeOutcome.status)
+        assertEquals(ReasonCodes.WATER_TIMEOUT, closeOutcome.reasonCode)
+        assertEquals(3, requireNotNull(closeOutcome.data).getInt("board_door"))
+    }
+
+    @Test
     fun `a non water command is rejected without touching the board`() {
         val fake = FakeBoard()
         val outcome = WaterHandler.execute(CommandScheduler.Command.Photo("c-photo"), board = fake)

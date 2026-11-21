@@ -51,6 +51,12 @@ class WaterTargetResolverTest {
         val last = WaterTargetResolver.targetIn(boards, 7)
         assertEquals(7, last!!.boardDoor)
         assertNull(WaterTargetResolver.targetIn(boards, 8))
+
+        // contains 是 targetIn 的判定本体：起点前一位与终点后一位都在窗外
+        assertTrue(board.contains(1))
+        assertTrue(board.contains(7))
+        assertTrue(!board.contains(0))
+        assertTrue(!board.contains(8))
     }
 
     @Test

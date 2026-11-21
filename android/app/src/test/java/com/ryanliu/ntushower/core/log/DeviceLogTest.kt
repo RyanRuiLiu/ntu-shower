@@ -74,6 +74,7 @@ class DeviceLogTest {
         val log = DeviceLog(folder.root)
 
         log.gateway(connected = true, detail = "trusted=true")
+        log.gateway(connected = false, detail = "close")
         log.lifecycle("service.started", "action=watchdog")
         log.warn("notice.window-failed", "addView failed")
         log.error("bridge.open-failed", "adbd not responding")
@@ -81,11 +82,27 @@ class DeviceLogTest {
         val lines = readLines(File(folder.root, DeviceLog.FILE_NAME))
         assertEquals("gateway.connected", lines[0].getString("event"))
         assertEquals(DeviceLog.SEVERITY_INFO, lines[0].getString("severity"))
-        assertEquals("service.started", lines[1].getString("event"))
-        assertEquals("action=watchdog", lines[1].getString("detail"))
-        assertEquals(DeviceLog.SEVERITY_WARN, lines[2].getString("severity"))
-        assertEquals("bridge.open-failed", lines[3].getString("event"))
-        assertEquals(DeviceLog.SEVERITY_ERROR, lines[3].getString("severity"))
+        assertEquals("gateway.disconnected", lines[1].getString("event"))
+        assertEquals("service.started", lines[2].getString("event"))
+        assertEquals("action=watchdog", lines[2].getString("detail"))
+        assertEquals(DeviceLog.SEVERITY_WARN, lines[3].getString("severity"))
+        assertEquals("bridge.open-failed", lines[4].getString("event"))
+        assertEquals(DeviceLog.SEVERITY_ERROR, lines[4].getString("severity"))
+    }
+
+    @Test
+    fun `ts falls back to wall clock without an anchor`() {
+        // 无锚点时 ts 回退墙钟（设备刚启动、还没握上手）：日志仍带时刻，锚一立
+        // 即回到服务端轴。回退是既定形态，不是第二套时间方案。
+        com.ryanliu.ntushower.core.clock.ServerClock.reset()
+        val log = DeviceLog(folder.root)
+
+        log.gateway(connected = true, detail = "first line after boot")
+
+        val line = readLines(File(folder.root, DeviceLog.FILE_NAME)).single()
+        assertEquals("gateway.connected", line.getString("event"))
+        assertTrue(line.getString("ts").endsWith("Z"))
+        assertTrue("uptime_ms 不受拨钟影响，恒在", line.getLong("uptime_ms") >= 0)
     }
 
     @Test

@@ -34,6 +34,21 @@ class VoicePcmAssemblerTest {
     }
 
     @Test
+    fun `pause before any clip sets the stream format`() {
+        // 清单以停顿开头：格式在第一段 Clip 之前就要定下来，用约定采样率合成静音，
+        // 后续 Clip 必须与之一致——先静音后音频的清单是合法形态
+        val stream = VoicePcmAssembler.assemble(
+            listOf(VoicePcmAssembler.Part.Pause(50), VoicePcmAssembler.Part.Clip(pcm(1_000, 1_000), 44_100, 1)),
+        )
+
+        assertNotNull(stream)
+        requireNotNull(stream)
+        assertEquals(44_100, stream.sampleRate)
+        assertEquals(4_410, VoicePcmAssembler.silenceBytes(50, 44_100, 1))
+        assertTrue(stream.bytes.size > 4_410)
+    }
+
+    @Test
     fun `assembles clips and pause into one stream`() {
         val clip = pcm(0, 0, 1_000, 1_000, 1_000, 1_000)
         val stream = VoicePcmAssembler.assemble(

@@ -98,6 +98,15 @@ class ConditionRuleTest {
     }
 
     @Test
+    fun unparsableTimeEndHidesAsInvalidTime() {
+        // 配置的时刻坏掉（服务端 spec.parse_time 的对侧拒绝）即隐藏：屏幕提示的
+        // 时段窗宁可不见，也不按猜出来的窗显示
+        val decision = decide(settings(timeEnabled = true, timeEnd = "24:61"), moment = moment(1, 7, 22 * 60))
+
+        assertEquals(OverlayReason.INVALID_TIME, decision.reason)
+    }
+
+    @Test
     fun sameDayWindowStartsInclusiveEndsExclusive() {
         val rule = settings(timeEnabled = true, timeStart = "22:00", timeEnd = "23:00", weekdays = "1")
 
