@@ -505,30 +505,30 @@ def test_event_type_names_use_dots() -> None:
     assert events.DOOR_UPDATE == "door.update"
 
 
-def test_server_ping_loop_probes_and_enforces_pong(
+def test_anchor_loop_sends_periodic_pings_and_keeps_the_link(
     client: TestClient,
     fresh_db: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """服务端按配置间隔主动 ping：回 pong 则链路保持，一个周期无 pong 则主动关链。"""
+    """锚点循环按周期发 link.ping（唯一职责：时间锚点刷新），无论是否应答。
+
+    链路判活不在此列：服务端由 uvicorn 的 WS 协议层 ping 承担（默认 20 秒、
+    pong 超时断连），设备端由 OkHttp pingInterval 承担——app 层不再重复判活，
+    不回 pong 的连接也保持打开。
+    """
     # 间隔给 0.2 秒：两个完整周期亚秒级跑完，行为与真实间隔无关
     monkeypatch.setattr("app.gateway.routes.PING_INTERVAL_S", 0.2)
-    device_id = "dev-ping-loop"
+    device_id = "dev-anchor-loop"
     with client.websocket_connect("/gateway/device") as ws:
         ws.send_text(frames.hello_frame(device_id))
         frames.recv_until(ws, "link.hello_ack")
 
         ping1 = frames.recv_until(ws, "link.ping")
         ws.send_text(frames.frame("link.pong", {"device_time": now_rfc3339()}, reply_to=ping1["id"]))
-        frames.recv_until(ws, "link.ping")  # 回了 pong：下一个周期照常探测
+        frames.recv_until(ws, "link.ping")  # 回了 pong：下一个周期照常锚定
 
-        # 不再回 pong：一个完整周期后服务端主动关闭链路
-        def _recv_until_closed() -> None:
-            while True:
-                ws.receive_text()
-
-        with pytest.raises(WebSocketDisconnect):
-            _recv_until_closed()
+        # 不回 pong：链路保持，锚点照常下发（判活不在此列）
+        frames.recv_until(ws, "link.ping")
 
 
 def test_link_events_record_connect_and_disconnect(client: TestClient, fresh_db: str) -> None:

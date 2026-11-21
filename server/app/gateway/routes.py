@@ -9,7 +9,6 @@
 """
 
 import asyncio
-import contextlib
 from collections.abc import Callable
 from typing import cast
 
@@ -53,8 +52,6 @@ from app.modules.voice import service as voice_service
 
 router = APIRouter()
 
-#: 主动关闭连接时用的 WS 状态码。与设备端 `GatewayClient.CLOSE_GOING_AWAY` 同值。
-CLOSE_GOING_AWAY = 1001
 
 #: 设备已停用（RFC 6455 §7.4.2 的应用私用段 4000-4999，两端约定同一解释）。
 #: 与 1008 的分工：1008 = 凭据无效 → 设备清凭据重走注册；4403 = 设备被除名 →
@@ -104,10 +101,6 @@ async def device_gateway(ws: WebSocket) -> None:
         return
     ip = ""
     ping_task: asyncio.Task[None] | None = None
-    #: 每次收到设备 pong 由 `_handle_frame` 置位；`_server_ping_loop` 用它判断链路是否还活着。
-    pong_seen = asyncio.Event()
-    #: 服务端自己发起断开的原因（pong 超时）；设备/网络侧断开服务端无从得知，留空。
-    offline_reason: list[str] = []
     device_id: str | None = None
     try:
         hello_state = await _accept_hello(ws, token_device_id)
@@ -115,13 +108,13 @@ async def device_gateway(ws: WebSocket) -> None:
             return
         device_id, trusted, ip = hello_state
 
-        # 立刻主动探测一轮，不等周期探测（PING_INTERVAL_S）：设备刚连上时手上还没有时间锚点，而
+        # 立刻主动锚定一轮，不等周期锚定（PING_INTERVAL_S）：设备刚连上时手上还没有时间锚点，而
         # 它采集的每一帧都要带采集时刻——越早把服务端时刻交给它，最初那几帧时刻越准。
         await ws.send_text(protocol.envelope(LINK_PING, {"sender_time": now_rfc3339()}))
 
         with _db_session(ws) as session:
             devices_service.publish_device_update(session, device_id)
-        ping_task = asyncio.create_task(_server_ping_loop(ws, device_id, pong_seen, offline_reason))
+        ping_task = asyncio.create_task(_anchor_ping_loop(ws, device_id))
 
         while True:
             msg = protocol.parse(await ws.receive_text())
@@ -149,7 +142,7 @@ async def device_gateway(ws: WebSocket) -> None:
                 await ws.close(code=1002)
                 break
             # 未知类型只回错不断开：这是协议的前向扩展点
-            await _handle_frame(ws, msg, device_id, trusted, pong_seen)
+            await _handle_frame(ws, msg, device_id, trusted)
     except WebSocketDisconnect:
         # 设备离线是常态（移动网络/重启），不作为异常处理
         pass
@@ -169,9 +162,10 @@ async def device_gateway(ws: WebSocket) -> None:
         if device_id:
             # 只有我这条连接确实是当前那条才算一次真离线。重连是新连接顶替旧连接，
             # 被顶替的那条随后走这里收尾——那一刻设备仍在线，不该记 offline。
+            # 掉线原因由设备在重连后的 hello 里自报（last_offline_reason），服务端
+            # 不再自行推断。
             if manager.unregister(device_id, ws):
-                reason = offline_reason[0] if offline_reason else ""
-                await _call(ws, devices_service.record_link_event, device_id, LINK_OFFLINE, reason)
+                await _call(ws, devices_service.record_link_event, device_id, LINK_OFFLINE, "")
             await _call(ws, devices_service.set_device_offline, device_id)
             await run_in_threadpool(audit_middleware.record_gateway, device_id, "disconnect", ip)
             log_event("INFO", "gateway.device-disconnected", "设备断开", device_id=device_id)
@@ -310,21 +304,23 @@ async def _handle_frame(
     msg: JsonObject,
     device_id: str,
     trusted: bool,
-    pong_seen: asyncio.Event,
 ) -> None:
     """分发一帧入站报文。未信任设备只放行链路层消息，业务帧静默忽略。"""
     mtype = text_of(msg, "type")
     frame_id = text_of(msg, "id")
     payload = payload_of(msg)
 
+    # 存活证据的唯一实现：任何入站帧都刷新 last_seen（帧入口一处，不按帧类型各写）。
+    # 锚点 ping 的周期（PING_INTERVAL_S）是空闲时刷新的上界。
+    await _call(ws, devices_service.touch_seen, device_id)
+
     if mtype == LINK_PONG:
-        # 两件事：判活，以及用设备带回来的墙上时刻更新钟偏差。那个偏差把帧里的
-        # open_time / in_time 平移到服务端时间轴——那两个字段是"这次会话从什么时候
-        # 开始"的唯一线索（见 core/device_clock）。
+        # 用设备带回来的墙上时刻更新钟偏差。那个偏差把帧里的 open_time / in_time
+        # 平移到服务端时间轴——那两个字段是"这次会话从什么时候开始"的唯一线索
+        # （见 core/device_clock）。空闲时段偏差的维持全靠这条通路。
         #
         # `received_at` 在这一层取一次就往下传：函数执行已经晚于报文到达，让下游再取
         # 一次只会白添一个调用栈的误差。
-        await _call(ws, devices_service.touch_seen, device_id)
         await _call(
             ws,
             devices_service.update_clock_skew,
@@ -332,7 +328,6 @@ async def _handle_frame(
             payload.get("device_time"),
             now_rfc3339(),
         )
-        pong_seen.set()
     elif mtype == CONFIG_UPDATE_ACK:
         device_actions.resolve_config_ack(device_id, as_int(payload.get("revision")))
     elif mtype == DOOR_SNAPSHOT:
@@ -466,49 +461,34 @@ async def _handle_frame(
 
 #: 服务端 ping 周期（秒）。一个周期既确认链路存活，也把服务端时刻交给设备刷新
 #: 时间锚点。曾是配置键（运维从未改过，2026-11-17 精简收编为常量）。
-PING_INTERVAL_S = 60
+#: 锚点 ping 周期（秒）：把服务端时刻交给设备刷新时间锚点。周期取 5 分钟——
+#: 锚龄内的偏差只有单调钟晶振漂移（8.5 秒/天，5 分钟漂 0.02 秒），远小于秒级
+#: 刻度；链路判活不在此列，由 uvicorn 的 WS 协议层 ping 承担（默认 20 秒）。
+#: 曾是配置键（运维从未改过，2026-11-17 精简收编为常量）。
+PING_INTERVAL_S = 300
 
 
-async def _server_ping_loop(ws: WebSocket, device_id: str, pong_seen: asyncio.Event, offline_reason: list[str]) -> None:
-    """按固定周期向设备发服务器 ping：判活，并给设备刷新时间锚点。
+async def _anchor_ping_loop(ws: WebSocket, device_id: str) -> None:
+    """按固定周期向设备发锚点 ping：把服务端时刻交给设备刷新时间锚点。
 
-    两个职责共用同一条报文：ping 里带着服务端此刻的时刻，设备收到就更新自己的时间
-    锚点（core/clock/ServerClock），它采集的每一帧都带上那个时刻。
+    ping 里带着服务端此刻的时刻，设备收到就更新自己的时间锚点
+    （core/clock/ServerClock），它采集的每一帧都带上那个时刻。这是 link.ping
+    的唯一职责——链路判活由 uvicorn 的 WS 协议层 ping 承担（ws_ping_interval
+    默认 20 秒、pong 超时断连），app 层不再重复判活。
 
-    判活靠它，是因为这是连接唯一的存活探针：TCP 半开时 receive_text 不会抛错，没有它
-    服务端会长期以为设备在线。每轮发 ping 前清掉标记，最多等一个 ping 周期；没等到
-    pong 就主动断开，让 finally 里的 device.update 正常推出。等待时长取 ping 间隔
-    本身：设备处理 pong 是即时的，一个完整周期没有回应不是慢，是断了。
-
-    连接关闭即正常退出；其他异常记录后退出，静默吞掉会让存活判定无声失效。
+    连接关闭即正常退出（发送失败一并退出）；静默吞掉异常会让锚点无声失效。
     """
     while True:
-        interval = PING_INTERVAL_S
-        # 先等满一个周期再发首个 ping：刚握手成功的连接不需要立刻验证存活
-        await asyncio.sleep(interval)
-        pong_seen.clear()
+        # 先等满一个周期再发首个 ping：刚握手成功的连接已在 hello_ack 里拿到锚点
+        await asyncio.sleep(PING_INTERVAL_S)
         try:
             await ws.send_text(protocol.envelope(LINK_PING, {"sender_time": now_rfc3339()}))
         except (WebSocketDisconnect, RuntimeError) as exc:
             log_event(
                 "DEBUG",
                 "gateway.ping-loop-ended",
-                "服务端 ping 循环结束（链路已断）",
+                "服务端锚点循环结束（链路已断）",
                 device_id=device_id,
                 error=str(exc),
             )
-            return
-        try:
-            await asyncio.wait_for(pong_seen.wait(), timeout=interval)
-        except TimeoutError:
-            log_event(
-                "WARNING",
-                "gateway.pong-timeout",
-                "设备一个周期内没有应答 pong，关闭链路",
-                device_id=device_id,
-                interval_s=int(interval),
-            )
-            offline_reason.append("pong-timeout")
-            with contextlib.suppress(RuntimeError):
-                await ws.close(code=CLOSE_GOING_AWAY)
             return
