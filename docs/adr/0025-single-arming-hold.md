@@ -51,5 +51,6 @@ chrony makestep 的「写后重锚」（写钟后旧偏差作废）；DHCP/etcd 
 - 落点前的手动 resume 是尽力取消：重布一个更早的截止，MCU 接受更早截止时生效，
   否则被忽略——断电仍落在落点 + 余量。
 - 事故时间线以用例钉死（`tests/test_power.py::test_incident_timeline_replay`）。
-- MCU 的重布替换规则与 0 分钟延时语义仍未定论，受控实验定论后记入
-  docs/device-poweroff.md；单次布防的设计对所有候选结论鲁棒。
+- MCU 的重布替换规则、0 分钟延时语义与 enable 位行为已由受控实验定论
+  （2026-11-21，见 docs/device-poweroff.md §12）：最后写入唯一生效、0 延时无立即
+  语义、enable=0 使挂起布防失效。单次布防的设计对所有候选结论鲁棒。
