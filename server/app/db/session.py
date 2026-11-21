@@ -1,5 +1,10 @@
 """会话工厂与 FastAPI 依赖。
 
+引擎按 URL 单例缓存：SQLAlchemy 官方模型是"Engine 进程内只创建一次、自持连接
+池"（docs.sqlalchemy.org/tutorial/engine.html）——连接池的生命周期必须与引擎
+一致，按次创建再销毁等于连接池永不生效。URL 变化（测试换库、配置切换）即换库：
+旧引擎归还、新引擎按新 URL 建立。
+
 `expire_on_commit=False`：提交后对象仍可读。默认 True 会让所有属性在提交后过期，
 序列化响应时再触发一轮 SELECT，把刚写进去的数据又查一遍。
 `autoflush=False`：查询不隐式刷写，写库时机由事务边界决定，不靠框架猜。
@@ -7,6 +12,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -16,7 +22,14 @@ from .engine import create_db_engine
 
 
 class Database:
-    """数据库连接的唯一入口：引擎、会话工厂、生命周期。"""
+    """数据库连接的显式生命周期：引擎、会话工厂、释放。
+
+    两条使用路径的生命周期语义不同：
+    - **显式持有**（app.state、测试装配）：构造持引擎，宿主结束时 dispose——
+      连接池与宿主同寿；
+    - **随用随取**（session_scope）：走 [_database_for] 的按 URL 单例，进程内
+      复用，不逐次销毁。
+    """
 
     def __init__(self, url: str) -> None:
         self.engine = create_db_engine(url)
@@ -43,6 +56,25 @@ class Database:
         self.engine.dispose()
 
 
+_lock = threading.Lock()
+_database: Database | None = None
+_database_url: str = ""
+
+
+def _database_for(url: str) -> Database:
+    """按 URL 取随用随取的 Database：同 URL 复用（连接池因此生效），URL 变化
+    （测试换库）即归还旧的、按新 URL 建立。加锁只护住创建窗口，会话的使用
+    在锁外。"""
+    global _database, _database_url
+    with _lock:
+        if _database is None or _database_url != url:
+            if _database is not None:
+                _database.dispose()
+            _database = Database(url)
+            _database_url = url
+        return _database
+
+
 @contextmanager
 def session_scope() -> Iterator[Session]:
     """非请求路径（后台任务、asyncio 任务、脚本）的短生命周期会话。
@@ -53,13 +85,10 @@ def session_scope() -> Iterator[Session]:
     """
     from app.core.config import settings
 
-    database = Database(settings.effective_database_url)
-    try:
-        with database.new_session() as session:
-            yield session
-            session.commit()
-    finally:
-        database.dispose()
+    database = _database_for(settings.effective_database_url)
+    with database.new_session() as session:
+        yield session
+        session.commit()
 
 
 __all__: list[str] = ["Database", "session_scope"]
