@@ -26,7 +26,7 @@ API 路由先注册，不会被静态文件抢走。
 """
 
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
@@ -44,6 +44,7 @@ from .auth.routes import identity_router as users_identity_router
 from .auth.routes import router as auth_router
 from .core.background import Background
 from .core.config import settings
+from .core.connections import manager
 from .core.errors import install_error_handlers, problem_responses
 from .core.logging import configure_logging, log_event
 from .core.problems import REGISTRY
@@ -105,6 +106,23 @@ class HealthStatus(TypedDict):
     version: str
 
 
+#: 主动断开设备时使用的 WS 关闭码（RFC 6455 §7.4.1：1001 = Going Away，端点
+#: 主动离开的标准码）。不能用 uvicorn 默认关闭的 1012——那是基础设施保留码，
+#: OkHttp 会以 ProtocolException 拒收。
+WS_CLOSE_GOING_AWAY = 1001
+
+
+async def _close_device_connections() -> None:
+    """lifespan 关闭时向全部在线设备发 1001 关闭帧，抢在 uvicorn 的 1012 之前。
+
+    不在这里做收尾（记 link event、刷 last_seen）——那些由各连接自己的 finally
+    路径完成，这里只负责让设备收到一个协议上正确的关闭码。
+    """
+    for _device_id, ws in manager.online_connections():
+        with suppress(Exception):
+            await ws.close(code=WS_CLOSE_GOING_AWAY)
+
+
 class ProblemDoc(BaseModel):
     """问题类型的可解析说明（RFC 9457 type URI 的目标）。"""
 
@@ -152,6 +170,12 @@ def create_app() -> FastAPI:
         # 事件驱动型任务保持自己的模型：按设备惰性起 worker，不占统一循环。
         sessions_scheduler.start()
         yield
+        # 先断设备 WS 再拆底层：uvicorn 关闭时对每条 WS 发 close code 1012
+        # （Service Restart），但 RFC 6455 §7.4.1 明确 1012 保留给基础设施、
+        # 应用不得发送——OkHttp 正确抛 ProtocolException 拒收，设备看到的是
+        # 协议错误而不是正常的部署断开。这里抢先发 1001（Going Away，端点
+        # 主动离开的标准码），设备收到 onClosed(1001) 走正常重连。
+        await _close_device_connections()
         await sessions_scheduler.stop()
         await background.stop()
         await power_service.stop()
