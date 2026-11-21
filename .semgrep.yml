@@ -6,6 +6,20 @@
 # 每条规则都对应一次真实发生过的漂移，不是假想的整洁偏好。
 
 rules:
+  - id: no-cleartext-url
+    languages: [generic]
+    severity: ERROR
+    message: |
+      运行时代码禁止明文 URL 字符串。设备平台（API 19）没有禁明文的系统开关——
+      usesCleartextTraffic 与 networkSecurityConfig 都是 API 23/24 起（AOSP
+      attrs_manifest.xml 实核，4.4 无此属性），收口靠"唯一客户端工厂 + 全部
+      https"。XML 命名空间、SVG 命名空间与开发代理配置不是网络请求，不在此列。
+    paths:
+      include:
+        - "*.kt"
+        - "*.py"
+    pattern-regex: "[\"']http://"
+
   - id: no-emoji
     languages: [generic]
     severity: ERROR
