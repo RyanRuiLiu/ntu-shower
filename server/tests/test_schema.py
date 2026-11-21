@@ -14,10 +14,19 @@ from pathlib import Path
 
 from sqlalchemy import Engine
 
+# 模型注册不能依赖其他测试文件的 import 顺序（单跑本文件时全量跑不发生）：
+# 与 migrations/env.py 同一份注册清单，Base.metadata 才是完整的。
+from app.auth.models import ApiKey, User  # noqa: F401
 from app.contracts import CommandStatus
 from app.core import outcomes
 from app.db.base import Base
 from app.db.engine import create_db_engine
+from app.modules.config.models import AppSettings  # noqa: F401
+from app.modules.devices.models import Device, DeviceCredential, DeviceLinkEvent, DeviceLog  # noqa: F401
+from app.modules.doors.models import DoorSegment, DoorSession, DoorSnapshot, DoorState, DoorStateEvent  # noqa: F401
+from app.modules.ota.models import OtaRelease, OtaReleaseInstall  # noqa: F401
+from app.modules.voice.models import VoiceAsset, VoiceDelivery, VoiceRule, VoiceUnit  # noqa: F401
+from app.persistence.audit import ApiCall, CommandAudit, JobRun  # noqa: F401
 
 EXPECTED_TABLES: set[str] = {
     "api_calls",
@@ -99,7 +108,6 @@ def test_database_roundtrip_keeps_timezone(tmp_path: Path) -> None:
     from sqlalchemy import select
 
     from app.db.session import Database
-    from app.modules.devices.models import Device
 
     db = Database(f"sqlite:///{tmp_path / 'roundtrip.db'}")
     Base.metadata.create_all(db.engine)

@@ -10,6 +10,7 @@
 
 ### Changed
 
+- **迁移链重置为单一基准**：全部历史增量迁移（initial schema、power hold、列更名、审计标准化）删除，从当前模型自动生成一份干净的 baseline（21 张表一次建齐，与 metadata 逐字节一致）。此后结构变更只在基准上生成增量。审计两表（api_calls/job_runs）为滚动窗口数据随旧表弃用，不写兼容搬运；生产切换经一次性结转脚本（用完即删）完成业务数据迁移。
 - **审计按官方标准逐条对账修订**（OWASP Logging Cheat Sheet / NIST SP 800-92 / OpenTelemetry Logs Data Model / W3C Trace Context，官方现文核实，ADR-0014 修订）：自创项清零——api_calls 删 kind 列（网关生命周期行的唯一出处是 device_link_events）与 device_id 列（从路径或查询串推断设备属自创关联，调用审计只记录请求本身）；actor_kind 词表删 identity（X-Identity 已于 ADR-0019 删除）；job_runs 的 door_no/cert_no 改可空，0/空串哨兵占位废除，旧行哨兵值改写 NULL；stdout 日志字段名换 OTel 官方键（timestamp/severity_text/body/event_name/attributes/exception.stacktrace/resource.service.name）；X-Problem-Type 自创响应头删除，problem 的 type 与 detail 改从 RFC 9457 响应体官方字段读取。
 - **历史可见性补齐**（管理面板此前只覆盖三类）：设备上下线历史（`GET /devices/{id}/link-events`）、日志上送历史（`GET /devices/{id}/logs/history`）、OTA 安装记录（`GET /ota/installs`，新 ota:read 作用域）三个只读出口新增，web 两套审计面板补齐安装与链路两类。
 
