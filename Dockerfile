@@ -10,7 +10,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 FROM node:26-alpine AS web-builder
 
 WORKDIR /build
-COPY server/web/package.json server/web/pnpm-lock.yaml ./
+# pnpm-workspace.yaml 与 lockfile 同批 COPY：overrides 等解析配置住在里面，
+# 少 COPY 它 frozen install 会报 "configuration doesn't match the lockfile"
+COPY server/web/package.json server/web/pnpm-lock.yaml server/web/pnpm-workspace.yaml ./
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     npm install -g pnpm && pnpm install --frozen-lockfile
 COPY server/web/ ./
