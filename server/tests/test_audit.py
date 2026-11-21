@@ -143,6 +143,26 @@ def test_invalid_traceparent_falls_back_to_generated(client: TestClient, admin_h
     assert len(str(row["trace_id"])) == 32
 
 
+def test_traceparent_form_violations_fall_back_to_generated(
+    client: TestClient, admin_headers: dict[str, str], fresh_db: str
+) -> None:
+    """W3C Trace Context 的三种禁止形态：version ff、全零 trace-id、大写十六进制。
+
+    官方 ABNF 是 HEXDIGLC（仅小写）且全零标识无效——违规的 traceparent 按规范
+    整体忽略，服务端生成自己的 trace-id，不沿用任何一段。
+    """
+    violations = (
+        "ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",  # version ff
+        "00-00000000000000000000000000000000-00f067aa0ba902b7-01",  # 全零 trace-id
+        "00-4BF92F3577B34DA6A3CE929D0E0E4736-00f067aa0ba902b7-01",  # 大写十六进制
+    )
+    for traceparent in violations:
+        client.get("/api/v1/ota/releases", headers={**admin_headers, "traceparent": traceparent})
+        row = _calls(client, admin_headers)[0]
+        assert str(row["trace_id"]) != "4bf92f3577b34da6a3ce929d0e0e4736", traceparent
+        assert len(str(row["trace_id"])) == 32
+
+
 def test_gateway_lifecycle_is_recorded(client: TestClient, admin_headers: dict[str, str]) -> None:
     """设备网关接入记一行 connect（kind=gateway，status 0=连接 1=断开），可按类别过滤。"""
     device_id = "dev-gw-audit"

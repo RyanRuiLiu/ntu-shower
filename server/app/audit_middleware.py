@@ -11,6 +11,14 @@ JSON 请求体与响应体原文入库，全有或全无、不截断、不脱敏
 
 存储在 persistence/api_calls.py：采集归 HTTP 侧，落库归持久化层——core 保持
 零向上依赖。
+
+## 纯 ASGI 中间件
+
+Starlette 官方文档对 BaseHTTPMiddleware 明示了限制（contextvar 不向上传播、
+WebSocket 不支持、流式与内存问题），推荐直接实现 ASGI 中间件——本装配采用该
+形态：请求体经 receive 缓冲后回放给下游，响应体经包装 send 旁路累积、消息原样
+透传（不重建响应对象）。WebSocket（scope type 非 http）原样放行，网关生命周期
+由 gateway 调 record_gateway 记录。
 """
 
 import contextlib
@@ -18,15 +26,11 @@ import json
 import re
 import time
 import uuid
-from collections.abc import Awaitable, Callable
-from typing import cast
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI
 from starlette.concurrency import run_in_threadpool
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
-from starlette.responses import Response, StreamingResponse
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.contracts import ApiCallKind
 from app.core.logging import request_id_var, trace_id_var
@@ -40,7 +44,11 @@ from app.persistence import api_calls
 #: 有跨域覆盖钉住它。
 _AUDITED_PREFIXES = ("/api/v1", "/ota/manifest")
 
-_TRACEPARENT = re.compile(r"^[0-9a-f]{2}-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$", re.IGNORECASE)
+#: W3C Trace Context 1.0 的 traceparent 形态（官方 ABNF）：version 2 位小写十六进制
+#: （`ff` 禁止）、trace-id 32 位小写十六进制（全零禁止）、parent-id 16 位小写十六
+#: 进制（全零禁止）、flags 2 位小写十六进制。不合法的 traceparent 一律忽略，按
+#: 规范由本端生成 trace-id。
+_TRACEPARENT = re.compile(r"^(?!ff-)(?!00-0{32}-)[0-9a-f]{2}-([0-9a-f]{32})-(?!0{16}-)[0-9a-f]{16}-[0-9a-f]{2}$")
 
 
 def resolve_trace_id(traceparent: str | None) -> str:
@@ -51,11 +59,20 @@ def resolve_trace_id(traceparent: str | None) -> str:
     if traceparent:
         match = _TRACEPARENT.match(traceparent.strip())
         if match:
-            return match.group(1).lower()
+            return match.group(1)
     return uuid.uuid4().hex
 
 
-def _actor_of(request: Request) -> tuple[str, str]:
+def _scope_header(scope: Scope, name: str) -> str:
+    """读 scope 头部的第一个值；不存在给空串。头名按 HTTP 语义不区分大小写。"""
+    key = name.lower().encode("latin-1")
+    for field, value in scope.get("headers") or ():
+        if field == key:
+            return str(value.decode("latin-1"))
+    return ""
+
+
+def _actor_of(scope: Scope) -> tuple[str, str]:
     """判定调用方种类，不记录凭据明文。
 
     凭据明文进审计等于把密钥又抄了一份；这里只记种类与可关联的标识：
@@ -64,10 +81,10 @@ def _actor_of(request: Request) -> tuple[str, str]:
     """
     from app.core.tokens import extract_bearer, hash_token
 
-    username = request.session.get("u")
+    username = (scope.get("session") or {}).get("u")
     if isinstance(username, str) and username:
         return "session", username
-    token = extract_bearer(request.headers.get("authorization"))
+    token = extract_bearer(_scope_header(scope, "authorization"))
     if token:
         return "token", hash_token(token)[:12]
     return "anonymous", ""
@@ -87,6 +104,181 @@ def store_body(body: str) -> str:
     if len(body.encode()) <= BODY_MAX_BYTES:
         return body
     return f"[JSON 体 {len(body.encode())} 字节，超出 {BODY_MAX_BYTES} 字节上限未存储]"
+
+
+def _device_of(path: str, query: str) -> str:
+    """本次调用作用于哪台设备就记哪台。解析优先级：
+
+    ① 路径段 `/devices/{id}/...`（设备动作与档案）；
+    ② query 的 `device_id`（如 /doors?device_id=）。
+    都没有就为空——调用不针对任何设备（如配置、名单本身）。
+    """
+    parts = path.split("/")
+    if "devices" in parts:
+        index = parts.index("devices")
+        if index + 1 < len(parts):
+            return parts[index + 1]
+    if query:
+        value = parse_qs(query).get("device_id", [""])[0]
+        if value:
+            return value
+    return ""
+
+
+class AuditMiddleware:
+    """一行一个 API 调用，并回填 X-Request-ID 响应头。
+
+    写库经线程池走 SQLAlchemy 会话（db.session 的 session_scope），不在事件循环里
+    做同步 IO。
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or not scope["path"].startswith(_AUDITED_PREFIXES):
+            await self.app(scope, receive, send)
+            return
+        await self._audit(scope, receive, send)
+
+    async def _audit(self, scope: Scope, receive: Receive, send: Send) -> None:
+        path = scope["path"]
+        method = scope["method"]
+        request_id = uuid.uuid4().hex
+        trace_id = resolve_trace_id(_scope_header(scope, "traceparent"))
+        request_id_var.set(request_id)
+        trace_id_var.set(trace_id)
+
+        # 请求体原文落库。只对 JSON 体做：multipart（APK 上传）本体已存
+        # ota_releases，审计行记版本与大小即完整事实。按 "json" 判定而非全等：
+        # application/problem+json 也含 json，而与 application/json 全等反而
+        # 匹配不上它。读完缓冲回放，下游照常解析。
+        request_body = ""
+        if method in ("POST", "PUT", "PATCH", "DELETE") and "json" in _scope_header(scope, "content-type"):
+            body_bytes = await self._drain(receive)
+
+            async def replay_receive() -> Message:
+                return {"type": "http.request", "body": body_bytes, "more_body": False}
+
+            receive = replay_receive
+            request_body = store_body(body_bytes.decode(errors="replace"))
+
+        started = time.perf_counter()
+        captured = _ResponseCapture(path)
+
+        async def send_wrapper(message: Message) -> None:
+            await send(captured.observe(message, request_id))
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        finally:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            await self._record(scope, path, method, request_body, captured, duration_ms)
+
+    async def _drain(self, receive: Receive) -> bytes:
+        """读干请求体消息流；断连时返回已收到的部分。"""
+        body = b""
+        while True:
+            message = await receive()
+            if message["type"] == "http.request":
+                body += message.get("body") or b""
+                if not message.get("more_body"):
+                    return body
+            elif message["type"] == "http.disconnect":
+                return body
+
+    async def _record(
+        self,
+        scope: Scope,
+        path: str,
+        method: str,
+        request_body: str,
+        captured: "_ResponseCapture",
+        duration_ms: int,
+    ) -> None:
+        query = (scope.get("query_string") or b"").decode("latin-1")
+        # 来源 IP：经 nginx 代理而来，真实地址在 X-Real-IP 里
+        client_ip = _scope_header(scope, "x-real-ip")
+        if not client_ip:
+            client = scope.get("client")
+            client_ip = client[0] if client else ""
+        actor_kind, actor = _actor_of(scope)
+        await run_in_threadpool(
+            api_calls.record,
+            method=method,
+            path=path,
+            query=query,
+            status_code=captured.status_code,
+            duration_ms=duration_ms,
+            actor_kind=actor_kind,
+            actor=actor,
+            client_ip=client_ip,
+            user_agent=_scope_header(scope, "user-agent"),
+            request_body=request_body,
+            response_body=captured.stored_body(),
+            device_id=_device_of(path, query),
+            problem_type=captured.problem_type,
+            detail=captured.detail,
+        )
+
+
+class _ResponseCapture:
+    """响应消息的旁路观察者：状态码、响应体与 problem 明细。
+
+    content-type 判定在 response.start 到达后生效——媒体类响应（截图、拍照的
+    base64）不累积，数据重型路径（_DATA_HEAVY_PATH）不累积；其余 JSON 响应的
+    体量在 KB 量级，累积副本在审计写库时消费。消息原样透传，不重建响应。
+    """
+
+    def __init__(self, path: str) -> None:
+        self._path = path
+        self._chunks: list[bytes] = []
+        self._capture = False
+        self.status_code = 0
+        self.problem_type = ""
+        self._problem_body = b""
+
+    def observe(self, message: Message, request_id: str) -> Message:
+        """观察一条响应消息并原样返回（response.start 会追加 X-Request-ID）。"""
+        if message["type"] == "http.response.start":
+            self.status_code = int(message.get("status") or 0)
+            self.problem_type = _message_header(message, "x-problem-type")
+            self._capture = "json" in _message_header(message, "content-type") and not _DATA_HEAVY_PATH.search(
+                self._path
+            )
+            headers = list(message.get("headers") or ())
+            headers.append((b"x-request-id", request_id.encode("latin-1")))
+            message = {**message, "headers": headers}
+        elif message["type"] == "http.response.body":
+            if self._capture:
+                self._chunks.append(message.get("body") or b"")
+            if self.problem_type:
+                self._problem_body += message.get("body") or b""
+        return message
+
+    def stored_body(self) -> str:
+        """审计行的响应体字段：不落库的路径给空串，其余按体积上限原文化。"""
+        if not self._chunks:
+            return ""
+        return store_body(b"".join(self._chunks).decode(errors="replace"))
+
+    @property
+    def detail(self) -> str:
+        """problem 响应的 detail：失败说明的中文原文，供审计行直接展示。"""
+        if not self.problem_type or not self._problem_body:
+            return ""
+        with contextlib.suppress(Exception):
+            return str(json.loads(self._problem_body).get("detail") or "")
+        return ""
+
+
+def _message_header(message: Message, name: str) -> str:
+    """读响应起始消息头部的第一个值；不存在给空串。"""
+    key = name.lower().encode("latin-1")
+    for field, value in message.get("headers") or ():
+        if field == key:
+            return str(value.decode("latin-1"))
+    return ""
 
 
 def record_gateway(device_id: str, event: str, client_ip: str = "") -> None:
@@ -109,113 +301,9 @@ def record_gateway(device_id: str, event: str, client_ip: str = "") -> None:
         )
 
 
-def _device_of(path: str, query: str) -> str:
-    """本次调用作用于哪台设备就记哪台。解析优先级：
-
-    ① 路径段 `/devices/{id}/...`（设备动作与档案）；
-    ② query 的 `device_id`（如 /doors?device_id=）。
-    都没有就为空——调用不针对任何设备（如配置、名单本身）。
-    """
-    parts = path.split("/")
-    if "devices" in parts:
-        index = parts.index("devices")
-        if index + 1 < len(parts):
-            return parts[index + 1]
-    if query:
-        value = parse_qs(query).get("device_id", [""])[0]
-        if value:
-            return value
-    return ""
-
-
 def install_audit(app: FastAPI) -> None:
-    """装配审计中间件：一行一个 API 调用，并回填 X-Request-ID 响应头。
+    """装配审计中间件。
 
-    写库经线程池走 SQLAlchemy 会话（db.session 的 session_scope），不在事件循环里做同步 IO。
     WebSocket 不经过 HTTP 中间件，网关生命周期由 gateway 调 record_gateway 记录。
     """
-
-    class AuditMiddleware(BaseHTTPMiddleware):
-        async def dispatch(
-            self,
-            request: Request,
-            call_next: Callable[[Request], Awaitable[Response]],
-        ) -> Response:
-            path = request.url.path
-            if not path.startswith(_AUDITED_PREFIXES):
-                return await call_next(request)
-
-            request_id = uuid.uuid4().hex
-            trace_id = resolve_trace_id(request.headers.get("traceparent"))
-            request_id_var.set(request_id)
-            trace_id_var.set(trace_id)
-
-            # 请求体原文落库。只对 JSON 体做：multipart（APK 上传）本体已存
-            # ota_releases，审计行记版本与大小即完整事实。按 "json" 判定而非全等：
-            # application/problem+json 也含 json，而与 application/json 全等反而
-            # 匹配不上它。读完放回，下游照常解析。
-            request_body = ""
-            content_type = request.headers.get("content-type", "")
-            if request.method in ("POST", "PUT", "PATCH", "DELETE") and "json" in content_type:
-                body_bytes = await request.body()
-
-                async def receive() -> dict[str, object]:
-                    return {"type": "http.request", "body": body_bytes, "more_body": False}
-
-                request = Request(request.scope, receive=receive)
-                request_body = store_body(body_bytes.decode(errors="replace"))
-
-            started = time.perf_counter()
-            response = await call_next(request)
-            duration_ms = int((time.perf_counter() - started) * 1000)
-            response.headers["X-Request-ID"] = request_id
-
-            # JSON 响应体全文入库。缓冲响应：处理器产出的体量在 KB 量级，MB 级的
-            # 媒体 base64 由 store_body 的上限挡下；problem 响应顺带取出 detail。
-            # 截图、拍照、UI 树三个端点的响应不落库（见 _DATA_HEAVY_PATH）。
-            response_body = ""
-            detail = ""
-            if "json" in response.headers.get("content-type", "") and not _DATA_HEAVY_PATH.search(path):
-                # BaseHTTPMiddleware 返回的实际是流式响应子类（Starlette 约定）
-                streaming = cast(StreamingResponse, response)
-                chunks: list[bytes] = []
-                async for chunk in streaming.body_iterator:
-                    if isinstance(chunk, (bytes, bytearray, memoryview)):
-                        chunks.append(bytes(chunk))
-                    else:
-                        chunks.append(str(chunk).encode())
-                body = b"".join(chunks)
-                response = Response(
-                    content=body,
-                    status_code=response.status_code,
-                    headers=dict(response.headers),
-                    media_type=response.media_type,
-                )
-                response_body = store_body(body.decode(errors="replace"))
-                if response.headers.get("X-Problem-Type"):
-                    with contextlib.suppress(Exception):
-                        detail = str(json.loads(body).get("detail") or "")
-
-            # 来源 IP：经 nginx 代理而来，真实地址在 X-Real-IP 里
-            client_ip = request.headers.get("x-real-ip") or (request.client.host if request.client else "")
-            actor_kind, actor = _actor_of(request)
-            await run_in_threadpool(
-                api_calls.record,
-                method=request.method,
-                path=path,
-                query=request.url.query,
-                status_code=response.status_code,
-                duration_ms=duration_ms,
-                actor_kind=actor_kind,
-                actor=actor,
-                client_ip=client_ip,
-                user_agent=request.headers.get("user-agent", ""),
-                request_body=request_body,
-                response_body=response_body,
-                device_id=_device_of(path, request.url.query),
-                problem_type=response.headers.get("X-Problem-Type", ""),
-                detail=detail,
-            )
-            return response
-
     app.add_middleware(AuditMiddleware)

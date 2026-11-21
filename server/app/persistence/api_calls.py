@@ -1,8 +1,8 @@
 """HTTP 调用审计的存储：写行、查询、保留期清理。
 
 审计的存储归持久化层（核心层不向上依赖 auth/db/models），HTTP 侧的采集与装配在
-app/audit_middleware.py。两张审计表（api_call 与 command_audit）的清理共用
-一个事务，见 [prune]。
+app/audit_middleware.py。全部保留表的清理共用一个事务，见 [prune]——登记清单
+（retention.py 的 RETENTIONS）横跨各域，不止审计两表。
 """
 
 from __future__ import annotations
