@@ -8,6 +8,22 @@
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-11-21
+
+### Changed
+
+- **两端基础代码按 14 个功能方面完成全面重写**（协议契约、持久化基座、时间、安全网络栈、身份与链路、命令通道、电源设备端、配置、审计、采集、OTA、外设、组合根、web），行为语义由既有测试钉住。要点：
+  - 消息类型单源化到 protocol/schema（生成两端登记表）；config.ack → config.update_ack、ota.upgrade_available → ota.update_available 按行业用词改名。
+  - session_scope 的引擎按 URL 单例缓存（SQLAlchemy 官方模型：进程内创建一次）。
+  - 设备端跨端时刻统一到服务端时间轴（信封 ts、日志 ts、落盘配置时刻均取 ServerClock）；ServerClock 锚点改单引用整体交换，消除并发交错下的负增量。
+  - TLS 信任面收窄到单一根（ISRG Root X2，生产链实测单根可达）；DNS 事务 ID 换安全随机源；明文 URL 禁入运行时代码并入 semgrep 门禁。
+  - 链路心跳三层收敛两层：设备侧判活移交 OkHttp pingInterval（WS 协议层），设备自发 ping 删除；关闭码按 RFC 6455 私用段分工（1008 凭据无效重注册、4403 设备停用停机）。
+  - 命令传输层锁等待换标准 wait_for（3.12 起官方重实现）；审计路径收敛两条；维护通道执行前判过期。
+  - MCU 写入器按受控实验定论重写：最后写入唯一生效、0 延时在唯一入口拒绝（无立即语义）、enable 固定 3；写钟配对语义对齐单次布防（ADR-0025）。
+  - 采集中间件迁纯 ASGI（Starlette 官方推荐形态）；traceparent 按 W3C 规范收紧（小写、拒全零、拒 version ff）。
+  - 网关单进程前提写入 Dockerfile；配置登记表自描述对齐实际（归档默认开、四份名单）。
+  - 全部注释按正式书面语言标准重述；emoji 全项目禁用并入 semgrep 门禁。
+
 ## [0.8.3] - 2026-11-21
 
 ### Fixed
