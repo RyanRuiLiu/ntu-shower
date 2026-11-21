@@ -47,10 +47,11 @@ def test_hello_with_wrong_protocol_version_is_rejected(client: TestClient, fresh
 
 
 def test_retired_device_handshake_is_rejected(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:
-    """已停用设备握手即拒：回 device.retired 并按策略码关闭（1008）。
+    """已停用设备握手即拒：回 device.retired 并按应用私用码关闭（4403）。
 
     停用的意义就在这里：设备还开着旧 APK 也收不上来数据——hello 在注册档案
-    之前就被拒，业务帧永远进不来。
+    之前就被拒，业务帧永远进不来。4403（RFC 6455 §7.4.2 私用段，两端约定）让
+    设备停止重连；1008 的"清凭据重注册"救不回一个被除名的设备。
     """
     device_link.register_trusted_device("dev-retired")
     r = client.patch("/api/v1/devices/dev-retired", headers=admin_headers, json={"retired": True})
@@ -60,6 +61,9 @@ def test_retired_device_handshake_is_rejected(client: TestClient, admin_headers:
         ws.send_text(frames.hello_frame("dev-retired"))
         err = frames.recv_until(ws, "link.error")
         assert err["payload"]["code"] == "device.retired"
+        with pytest.raises(WebSocketDisconnect) as exc:
+            ws.receive_text()
+        assert exc.value.code == 4403
 
 
 def test_frame_with_wrong_protocol_version_closes_the_link(
@@ -87,11 +91,16 @@ def test_bad_json_gets_structured_error(client: TestClient, fresh_db: str) -> No
         assert err["payload"]["code"] == "proto.bad_json"
 
         ws.send_text(frames.frame("link.ping", {"sender_time": "2026-09-30T12:00:01.000Z"}))
-        assert frames.recv_until(ws, "link.pong")["reply_to"]
+        err = frames.recv_until(ws, "link.error")
+        assert err["payload"]["code"] == "proto.unknown_type"
 
 
 def test_unknown_type_gets_error_but_stays_connected(client: TestClient, fresh_db: str) -> None:
-    """未知 type 回结构化错误但不断开：协议的前向扩展点。"""
+    """未知 type 回结构化错误但不断开：协议的前向扩展点。
+
+    设备主动发的 link.ping 同样按未知类型回错——link.ping 方向已收窄为
+    server→device（设备判活走 WS 协议层 ping，不占应用帧）。
+    """
     with client.websocket_connect("/gateway/device") as ws:
         ws.send_text(frames.hello_frame("dev-frames-unknown"))
         frames.recv_until(ws, "link.hello_ack")
@@ -101,7 +110,8 @@ def test_unknown_type_gets_error_but_stays_connected(client: TestClient, fresh_d
         assert err["payload"]["code"] == "proto.unknown_type"
 
         ws.send_text(frames.frame("link.ping", {"sender_time": "2026-09-30T12:00:02.000Z"}))
-        assert frames.recv_until(ws, "link.pong")["reply_to"]
+        err = frames.recv_until(ws, "link.error")
+        assert err["payload"]["code"] == "proto.unknown_type"
 
 
 def test_device_pong_updates_clock_skew(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:
@@ -133,11 +143,13 @@ def _settle(ws: WebSocketTestSession) -> None:
     """等前面发出的帧被处理完。
 
     `send_text` 是发出去就返回的，服务端在另一个线程里处理——不设同步点的话，紧接着读库
-    很可能读到的是处理前的值。帧在同一连接上是顺序处理的，所以一帧 ping 等到它的 pong，
-    就说明之前那些帧都已经走完了。
+    很可能读到的是处理前的值。帧在同一连接上是顺序处理的，所以一帧等到它的回帧，
+    就说明之前那些帧都已经走完了。同步用设备发的 link.ping：它已不是协议的一部分
+    （方向收窄为 server→device），服务端按未知类型回错——回帧必然到来且不断开。
     """
     ws.send_text(frames.frame("link.ping", {"sender_time": now_rfc3339()}))
-    frames.recv_until(ws, "link.pong")
+    err = frames.recv_until(ws, "link.error")
+    assert err["payload"]["code"] == "proto.unknown_type"
 
 
 def test_device_pong_without_device_time_keeps_the_previous_skew(
@@ -231,25 +243,31 @@ def test_untrusted_device_business_frames_are_ignored(client: TestClient, fresh_
         ws.send_text(frames.frame("door.snapshot", {"doors": [{"door_no": 1}]}))
         ws.send_text(frames.frame("device.command_result", {"status": "ok"}))
 
-        # 下一条回帧是 ping 的 pong，证明前面两帧确实被忽略
+        # 下一条回帧是 ping 的错误回帧，证明前面两帧确实被忽略（连接未断）
         ws.send_text(frames.frame("link.ping", {"sender_time": "2026-09-30T12:00:00.000Z"}))
-        assert frames.recv_until(ws, "link.pong")["reply_to"]
+        err = frames.recv_until(ws, "link.error")
+        assert err["payload"]["code"] == "proto.unknown_type"
 
 
-def test_link_roundtrip_replies_empty_pong(client: TestClient, fresh_db: str) -> None:
-    """ping/pong 回路工作：pong 是回执，载荷为空。
+def test_device_initiated_ping_gets_unknown_type(client: TestClient, fresh_db: str) -> None:
+    """设备主动发 link.ping：按未知类型回错，连接保持。
 
-    设备的时间锚点取自服务端发来的 ping，反方向不需要任何信息——pong 只回答
-    "我还活着"，判活用它，时刻不从它取。
+    心跳方向在两端约定里只有 server→device（判活 + 时间锚点都由那一侧承担）；
+    设备侧判活走 WS 协议层 ping（OkHttp pingInterval），不占应用帧。旧版设备
+    仍会发 ping——回错而不是断开，等 OTA 收敛。
     """
     with client.websocket_connect("/gateway/device") as ws:
         ws.send_text(frames.hello_frame("dev-link-1"))
         frames.recv_until(ws, "link.hello_ack")
 
         ws.send_text(frames.frame("link.ping", {"sender_time": "2026-09-30T12:00:01.000Z"}))
-        pong = frames.recv_until(ws, "link.pong")
-        assert pong["reply_to"]
-        assert pong["payload"] == {}
+        err = frames.recv_until(ws, "link.error")
+        assert err["payload"]["code"] == "proto.unknown_type"
+
+        # 连接仍然活着：后续业务帧照常受理
+        ws.send_text(frames.frame("made.up", {}))
+        err = frames.recv_until(ws, "link.error")
+        assert err["payload"]["code"] == "proto.unknown_type"
 
 
 def test_trust_flow_and_device_listing(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:
@@ -266,7 +284,7 @@ def test_trust_flow_and_device_listing(client: TestClient, admin_headers: dict[s
         assert "renew_wait_enabled" not in ack["payload"]["config"]
 
         ws.send_text(frames.frame("link.ping", {"sender_time": "2026-09-30T12:00:01.000Z"}))
-        frames.recv_until(ws, "link.pong")
+        frames.recv_until(ws, "link.error")
 
     patched = client.patch(f"/api/v1/devices/{device_id}", headers=admin_headers, json={"trusted": True})
     assert patched.status_code == 200
@@ -328,11 +346,14 @@ def test_force_release_not_repushed_after_install_confirmation(
     assert _ota_call("is_installed", device_id, "0.3.1") is True
 
 
-def test_heartbeat_refreshes_last_seen(client: TestClient, fresh_db: str) -> None:
-    """心跳刷新 last_seen_at；先改成显然过期的值再验证推进。"""
+def test_server_ping_refreshes_last_seen(client: TestClient, fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """服务端 ping 循环刷新 last_seen_at：设备对 ping 的 pong 应答是服务端眼里的
+    存活证据（touch_seen）；先改成显然过期的值再验证推进。"""
+    from app.gateway import routes as gateway_routes
     from app.modules.devices import service as devices_service
 
     device_id = "dev-heartbeat"
+    monkeypatch.setattr(gateway_routes, "PING_INTERVAL_S", 0.2)
     with client.websocket_connect("/gateway/device") as ws:
         ws.send_text(frames.hello_frame(device_id))
         frames.recv_until(ws, "link.hello_ack")
@@ -344,8 +365,14 @@ def test_heartbeat_refreshes_last_seen(client: TestClient, fresh_db: str) -> Non
         with _svc_session() as session:
             devices_store.touch_seen(session, device_id, datetime(2020, 1, 1, tzinfo=UTC))
 
-        ws.send_text(frames.frame("link.ping", {"sender_time": "2026-09-30T12:00:01.000Z"}))
-        frames.recv_until(ws, "link.pong")
+        # pong 落地后的下一个入站信号触发帧处理完成：等下一个服务端 ping 到来，
+        # 立即回 pong，再发一帧设备 ping 等未知类型回帧——此时 pong 的 touch_seen
+        # 必已按序执行完（帧在同一连接上顺序处理），读库一次即可，不轮询
+        frames.recv_until(ws, "link.ping")
+        ws.send_text(frames.frame("link.pong", {"device_time": now_rfc3339()}))
+        ws.send_text(frames.frame("link.ping", {"sender_time": now_rfc3339()}))
+        err = frames.recv_until(ws, "link.error")
+        assert err["payload"]["code"] == "proto.unknown_type"
 
         with _svc_session() as session:
             record = devices_service.get_device(session, device_id)
@@ -585,15 +612,14 @@ def test_snapshot_that_cannot_be_stored_gets_no_ack(
 
     with device_link.trusted_online(client, "dev-snap-not-stored", admin_headers) as ws:
         ws.send_text(frames.frame("door.snapshot", {"snapshot_id": "not-stored-1", "doors": [{"door_no": 1}]}))
-        # 下一条非 ping、非状态行的帧必须是 pong（链路还活着、ack 被扣下）
+        # 下一条回帧是设备 ping 的未知类型错误（链路还活着、ack 被扣下）
         ws.send_text(frames.frame("link.ping", {"sender_time": now_rfc3339()}))
         while True:
             msg = json.loads(ws.receive_text())
             if msg["type"] in ("link.ping", "status_line.update"):
-                if msg["type"] == "link.ping":
-                    ws.send_text(frames.frame("link.pong", {}))
                 continue
-            assert msg["type"] == "link.pong", f"先到的帧是 {msg['type']}，ack 未被扣下"
+            assert msg["type"] == "link.error", f"先到的帧是 {msg['type']}，ack 未被扣下"
+            assert msg["payload"]["code"] == "proto.unknown_type"
             break
 
 
@@ -636,7 +662,7 @@ def test_device_log_upload_is_stored_and_queryable(
         ws.send_text(frames.frame("device.log_upload", {"kind": "crash", "content": "boom\n"}))
         ws.send_text(frames.frame("device.log_upload", {"kind": "ota", "content": "Success\n"}))
         ws.send_text(frames.frame("link.ping", {"sender_time": now_rfc3339()}))
-        frames.recv_until(ws, "link.pong")
+        frames.recv_until(ws, "link.error")
 
     device = "dev-log-upload"
     r = client.get(f"/api/v1/devices/{device}/logs?kind=device", headers=admin_headers)
@@ -662,7 +688,7 @@ def test_device_log_upload_rejects_oversized_content(
         err = frames.recv_until(ws, "link.error")
         assert err["payload"]["code"] == "proto.bad_json"
         ws.send_text(frames.frame("link.ping", {"sender_time": now_rfc3339()}))
-        frames.recv_until(ws, "link.pong")
+        frames.recv_until(ws, "link.error")
 
     assert client.get("/api/v1/devices/dev-log-too-large/logs?kind=device", headers=admin_headers).status_code == 404
 
@@ -676,7 +702,8 @@ def test_device_log_upload_requires_trusted_and_valid_kind(
         frames.recv_until(ws, "link.hello_ack")
         ws.send_text(frames.frame("device.log_upload", {"kind": "device", "content": "x"}))
         ws.send_text(frames.frame("link.ping", {"sender_time": now_rfc3339()}))
-        assert frames.recv_until(ws, "link.pong")["reply_to"]
+        err = frames.recv_until(ws, "link.error")
+        assert err["payload"]["code"] == "proto.unknown_type"
 
     with device_link.trusted_online(client, "dev-log-badkind", admin_headers) as ws:
         ws.send_text(frames.frame("device.log_upload", {"kind": "nope", "content": "x"}))
@@ -695,7 +722,7 @@ def test_device_log_upload_keeps_only_recent_per_kind(
         for round_no in range(7):
             ws.send_text(frames.frame("device.log_upload", {"kind": "device", "content": f"round-{round_no}"}))
         ws.send_text(frames.frame("link.ping", {"sender_time": now_rfc3339()}))
-        frames.recv_until(ws, "link.pong")
+        frames.recv_until(ws, "link.error")
 
     body = client.get("/api/v1/devices/dev-log-trim/logs?kind=device", headers=admin_headers).json()
     assert body["content"] == "round-6"
@@ -749,9 +776,10 @@ def test_device_status_frame_lands_power_facts(client: TestClient, fresh_db: str
             )
         )
 
-        # WS 帧按序处理：后发的 ping 收到 pong 即证明 status 帧已处理完
+        # WS 帧按序处理：后发的 ping 收到未知类型回帧即证明 status 帧已处理完
         ws.send_text(frames.frame("link.ping", {"sender_time": now_rfc3339()}))
-        assert frames.recv_until(ws, "link.pong")["reply_to"]
+        err = frames.recv_until(ws, "link.error")
+        assert err["payload"]["code"] == "proto.unknown_type"
 
         with session_scope() as session:
             assert devices_store.power_facts(session, "dev-status-frame") == ("23:58", "10:55", 480)

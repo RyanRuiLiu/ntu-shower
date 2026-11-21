@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.com/schema/link.ping.json",
-  "title": "Heartbeat ping (either side)",
+  "title": "Heartbeat ping (server to device)",
   "allOf": [
     {
       "$ref": "https://example.com/schema/envelope.json"

@@ -60,10 +60,20 @@ class EnrollmentTest {
     }
 
     @Test
+    fun `device revoked close code stops reconnects`() {
+        // 4403（RFC 6455 §7.4.2 私用段，两端约定）：设备被除名。重注册救不回来——
+        // 停机等人工；1008 的重注册路径不得被它触发
+        assertTrue(Enrollment.shouldStop(Enrollment.WS_CLOSE_DEVICE_REVOKED))
+        assertFalse(Enrollment.shouldStop(Enrollment.WS_CLOSE_POLICY_VIOLATION))
+        assertFalse(Enrollment.shouldReEnroll(Enrollment.WS_CLOSE_DEVICE_REVOKED))
+    }
+
+    @Test
     fun `ordinary close codes only reconnect without re-enrolling`() {
         // 正常关闭、端点离开、网络异常、内部错误：一律走普通重连，清掉有效凭据反而多余
         listOf(1000, 1001, 1006, 1011, 4000).forEach { code ->
             assertFalse("close=$code should not re-enroll", Enrollment.shouldReEnroll(code))
+            assertFalse("close=$code should not stop", Enrollment.shouldStop(code))
         }
     }
 }

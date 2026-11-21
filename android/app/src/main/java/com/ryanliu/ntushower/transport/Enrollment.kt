@@ -4,10 +4,22 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * 设备自注册的纯逻辑：请求组装与响应解析，不碰 android 类型，JVM 单测直接覆盖。
+ * 设备自注册与链路关闭码的纯逻辑：请求组装、响应解析、关闭码判定，
+ * 不碰 android 类型，JVM 单测直接覆盖。
  *
- * 协议与服务端 `POST /api/v1/devices/enroll` 对应：Bearer 传 APK 内置的 claim 令牌，
- * 请求体是设备自报档案（与 link.hello 的同一组字段），响应 `{device_id, token}`。
+ * 注册协议与服务端 `POST /api/v1/devices/enroll` 对应：Bearer 传 APK 内置的
+ * claim 令牌，请求体是设备自报档案（与 link.hello 的同一组字段），响应
+ * `{device_id, token}`。
+ *
+ * ## 关闭码：两种结局，两个码
+ *
+ * - [WS_CLOSE_POLICY_VIOLATION]（1008，RFC 6455 §7.4.1 的泛用策略违规码）——
+ *   凭据无效或缺失：清凭据重走 claim 注册（[shouldReEnroll]）；
+ * - [WS_CLOSE_DEVICE_REVOKED]（4403）——设备已停用：重注册救不回来
+ *   （服务端会拒绝停用设备的注册请求），停下不再重连（[shouldStop]）。
+ *   4000-4999 是 RFC 6455 §7.4.2 保留给应用私用的段，两端以这份约定解释同一个值。
+ *
+ * 其余关闭码与异常断连一律走普通重连：网络问题靠退避，不靠换身份。
  */
 object Enrollment {
 
@@ -15,10 +27,19 @@ object Enrollment {
     const val WS_CLOSE_POLICY_VIOLATION = 1008
 
     /**
+     * 设备已停用（应用私用段，RFC 6455 §7.4.2：4000-4999 由两端约定解释）。
+     * 收到它意味着服务端档案上这台设备已除名——清凭据与重注册都救不回来。
+     */
+    const val WS_CLOSE_DEVICE_REVOKED = 4403
+
+    /**
      * 该关闭码是否意味着要清凭据重新走 claim 自注册（纯逻辑，JVM 可测）。
      * 只有 1008 触发；网络断连、正常关闭等一律走普通重连，不重注册。
      */
     fun shouldReEnroll(closeCode: Int): Boolean = closeCode == WS_CLOSE_POLICY_VIOLATION
+
+    /** 该关闭码是否意味着设备已被服务端停用：停止重连，等现场人工处理。 */
+    fun shouldStop(closeCode: Int): Boolean = closeCode == WS_CLOSE_DEVICE_REVOKED
 
     fun encodeRequest(
         deviceId: String,

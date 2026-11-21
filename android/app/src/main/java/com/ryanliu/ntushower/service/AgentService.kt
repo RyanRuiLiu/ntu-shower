@@ -397,7 +397,6 @@ class AgentService : Service() {
         worker.execute { ConfigCache.save(this, config) }
         configRevision = revision
         syncConfigDependents()
-        client.refreshHeartbeat()
         scheduleOtaCheck()
         // 看门狗间隔变更：重建监视器与看门狗
         startWatchdog()

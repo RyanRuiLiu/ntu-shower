@@ -2,7 +2,8 @@
 
 帧处理规则：
 - 第一帧必须是 link.hello，否则报错断开；
-- link.ping → link.pong（心跳回路）；
+- 服务端周期发 link.ping，设备以 link.pong 应答（判活 + 时间锚点；设备主动发的
+  ping 不是本协议的一部分，来了按未知类型回错）；
 - 未知 type → link.error(proto.unknown_type)，不断开（协议扩展点）；
 - 未信任设备保持连接但不进入任何业务。
 """
@@ -54,6 +55,11 @@ router = APIRouter()
 
 #: 主动关闭连接时用的 WS 状态码。与设备端 `GatewayClient.CLOSE_GOING_AWAY` 同值。
 CLOSE_GOING_AWAY = 1001
+
+#: 设备已停用（RFC 6455 §7.4.2 的应用私用段 4000-4999，两端约定同一解释）。
+#: 与 1008 的分工：1008 = 凭据无效 → 设备清凭据重走注册；4403 = 设备被除名 →
+#: 注册救不回来，设备停止重连等人工。
+WS_CLOSE_DEVICE_REVOKED = 4403
 
 
 def _db_session(ws: WebSocket) -> Session:
@@ -185,8 +191,13 @@ async def _verify_device_token(ws: WebSocket) -> tuple[bool, str | None]:
     token = extract_bearer(ws.headers.get("authorization"))
     token_device_id: str | None = None
     if token is not None:
-        with ws.app.state.database.new_session() as auth_session:
-            token_device_id = devices_crud.authenticate_device(auth_session, token)
+        # 会话生在死在线程函数里（WS 全路径的唯一例外面不在这里——与本文件
+        # _call 的线程纪律一致）：事件循环上不开库
+        def _authenticate() -> str | None:
+            with ws.app.state.database.new_session() as auth_session:
+                return devices_crud.authenticate_device(auth_session, token)
+
+        token_device_id = await run_in_threadpool(_authenticate)
     if token_device_id is None:
         log_event("WARNING", "gateway.device-token-rejected", "设备令牌无效，连接被拒")
         await ws.close(code=1008)
@@ -232,8 +243,10 @@ async def _accept_hello(ws: WebSocket, token_device_id: str | None) -> tuple[str
     version_code = as_int(hello_payload.get("version_code"))
     row = await _call(ws, devices_service.get_device, device_id)
     if row is not None and row["retired"]:
+        # 4403（应用私用段）：设备被除名。1008 会让设备清凭据重注册——对停用设备那是
+        # 一个"enroll→拒绝→退避"的永久循环；4403 让它停下等人工。凭据无效仍走 1008。
         await ws.send_text(protocol.error(reason_codes.DEVICE_RETIRED.code, reason_codes.DEVICE_RETIRED.message))
-        await ws.close(code=1008)
+        await ws.close(code=WS_CLOSE_DEVICE_REVOKED)
         return None
     trusted = bool(row and row["trusted"])
     # 经 Caddy 代理而来：真实设备 IP 在 X-Real-IP 头里
@@ -304,13 +317,7 @@ async def _handle_frame(
     frame_id = text_of(msg, "id")
     payload = payload_of(msg)
 
-    if mtype == LINK_PING:
-        # 先记录再回 pong：反过来时 pong 已发出而记录未落，外部会看到时序颠倒。
-        # 服务端回的这一份 pong 载荷为空——反方向那份才带 device_time，那是给服务端
-        # 算钟偏差用的（见下一条分支）。
-        await _call(ws, devices_service.touch_seen, device_id)
-        await ws.send_text(protocol.envelope(LINK_PONG, {}, reply_to=frame_id))
-    elif mtype == LINK_PONG:
+    if mtype == LINK_PONG:
         # 两件事：判活，以及用设备带回来的墙上时刻更新钟偏差。那个偏差把帧里的
         # open_time / in_time 平移到服务端时间轴——那两个字段是"这次会话从什么时候
         # 开始"的唯一线索（见 core/device_clock）。
