@@ -617,7 +617,10 @@ class AgentService : Service() {
         private const val DEVICE_EXEC_MAX_OUTPUT_BYTES = 32_768
 
         /** 首次 OTA 检查的延迟：覆盖安装后尽快对齐版本，之后按 OTA_CHECK_INTERVAL_S 周期。 */
-        private const val OTA_CHECK_INTERVAL_S = 3_600L
+        // 6 小时：升级触达的主通道是发布推送（在线设备）与 hello_ack 的 upgrade 字段
+        //（重连设备），轮询只兜「推送静默失败且设备持续在线不重连」的罕见场景——
+        // 业主裁定降频到 6 小时。
+        private const val OTA_CHECK_INTERVAL_S = 21_600L
         private const val FIRST_OTA_CHECK_DELAY_S = 30L
 
         /** 日志上送检查周期。 */
