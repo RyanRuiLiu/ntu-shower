@@ -330,7 +330,9 @@ class AgentService : Service() {
         }
         if (DeviceMaintenance.handles(action)) {
             val executor = if (DeviceMaintenance.isTerminating(action)) terminatingExecutor else maintenanceExecutor
-            executor.execute { DeviceMaintenance.handle(action, params, commandId, ::sendOutcome) }
+            executor.execute {
+                DeviceMaintenance.handle(action, params, commandId, checkpoint + timeoutMs, ::sendOutcome)
+            }
             return
         }
         sendOutcome(

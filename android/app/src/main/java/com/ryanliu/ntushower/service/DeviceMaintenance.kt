@@ -3,6 +3,7 @@ package com.ryanliu.ntushower.service
 import android.util.Log
 import com.ryanliu.ntushower.BuildConfig
 import com.ryanliu.ntushower.core.a11y.A11yRuntime
+import com.ryanliu.ntushower.core.clock.Uptime
 import com.ryanliu.ntushower.core.config.AppConfig
 import com.ryanliu.ntushower.core.log.DeviceLog
 import com.ryanliu.ntushower.core.log.LogTail
@@ -18,12 +19,19 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * 设备自身的维护命令：执行 shell、重启本程序、重启整机、重启浴室 APP、设置系统时钟、
- * 重布定时开关机。
+ * 设备自身的维护命令：执行 shell、读日志、重启本程序、重启整机、重启浴室 APP、
+ * 设置系统时钟、重布定时开关机、读写免费名单。
  *
  * 独立于 [AgentService]：那是传输层的宿主，而这里的命令共同点是
  * **不经调度队列、即时执行**——重启本程序与重启整机会停掉本进程，排队没有意义；
  * 执行类是同步取回输出的短操作。
+ *
+ * 过期判定与调度器通道同一语义：服务端给的是相对预算（从收到算起），换算成本机
+ * 单调钟上的截止点后，在**真正开始执行前**判——维护动作有真实副作用（clock.set
+ * 拨钟、freelist.write 覆写文件、power.schedule 重布 MCU），服务端已经不再等结果的
+ * 命令不执行。终结名动作（重启本程序/整机）同判：执行器是独立的、命令本身毫秒级，
+ * 会过期只剩网络延迟一种来源，而那种延迟下"机器重启"仍是调用方要的结果与否，
+ * 以统一语义为准——过期即拒，调用方重发。
  *
  * 重启本程序、重启整机**先回报再动作**：它们会杀死本进程，若不先回报，命令方只能等超时。
  */
@@ -97,8 +105,26 @@ object DeviceMaintenance {
      * 再执行**（那两个操作会杀掉本进程），所以它们的收尾动作跑在结果已发出之后。
      * 那之后崩了不影响服务端——它已经拿到答复了，不该再收到第二条。
      */
-    fun handle(action: String, params: JSONObject, commandId: String, onOutcome: (CommandOutcome) -> Unit): Boolean {
+    fun handle(
+        action: String,
+        params: JSONObject,
+        commandId: String,
+        expireAtMs: Long,
+        onOutcome: (CommandOutcome) -> Unit,
+    ): Boolean {
         if (action !in HANDLED) return false
+        if (expireAtMs > 0 && Uptime.nowMs() > expireAtMs) {
+            Log.w(TAG, "maintenance command expired before start, rejecting: $commandId ($action)")
+            onOutcome(
+                CommandOutcome(
+                    commandId,
+                    OutcomeStatus.REJECTED,
+                    ReasonCodes.COMMAND_DEADLINE_EXCEEDED,
+                    "命令已过期，未执行",
+                ),
+            )
+            return true
+        }
         var reported = false
         try {
             when (action) {
@@ -285,7 +311,8 @@ object DeviceMaintenance {
     private fun clockSetOutcome(params: JSONObject, commandId: String): CommandOutcome {
         val ok = TimeSync.setWallClock(
             params.optString("datetime", ""),
-            // rearm=false：延长服务流程内部拨钟时自己管理 MCU 的滚动重布，不需要这里配对
+            // rearm=false：hold 施加自己管理 MCU 布防——一次布防承担整晚
+            // （ADR-0025），不需要写钟方配对重布
             params.optBoolean("rearm", true),
         )
         return if (ok) {
