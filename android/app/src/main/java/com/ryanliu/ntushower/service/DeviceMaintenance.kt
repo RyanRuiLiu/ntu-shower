@@ -407,7 +407,7 @@ object DeviceMaintenance {
      * `device.exec` 的等待上限。
      *
      * 比服务端的 30 秒略短：让设备先超时并回报一次 timeout，而不是服务端等满上限
-     * 后自己放弃——后者调用方只知道"没等到"，无从判断命令是还在跑还是已经卡死。
+     * 后自己放弃——后者调用方只能得知未收到结果，无从判断命令是仍在执行还是已陷入停滞。
      */
     private const val EXEC_TIMEOUT_MS = 25_000L
 }

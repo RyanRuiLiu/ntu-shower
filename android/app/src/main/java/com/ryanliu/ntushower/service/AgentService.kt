@@ -70,9 +70,9 @@ class AgentService : Service() {
     /**
      * 维护命令执行器。
      *
-     * 独立于 [worker]：`device.exec` 会阻塞到命令结束（上限 25 秒），塞进 [worker]
-     * 会连带把喷头状态采集与上报停掉同样久；塞进主线程更糟——心跳、看门狗广播、
-     * 无障碍事件都在那儿排队（见 [dispatchCommand]）。
+     * 独立于 [worker]：`device.exec` 会阻塞到命令结束（上限 25 秒），占用 [worker]
+     * 会连带使喷头状态采集与上报停顿同样久；占用主线程更不可取——心跳、看门狗广播
+     * 与无障碍事件都在该线程排队（见 [dispatchCommand]）。
      */
     private val maintenanceExecutor = Executors.newSingleThreadExecutor()
 

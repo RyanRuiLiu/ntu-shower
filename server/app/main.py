@@ -157,7 +157,7 @@ def create_app() -> FastAPI:
         _app.state.database.dispose()
 
     # 调试 UI（/docs、/redoc）不对外：对外契约是 /openapi.json（外部调用方拿它
-    # 生成客户端），调试面没有消费方，暴露它只是白送接口拓扑（OWASP API8）。
+    # 生成客户端），调试面没有消费方，暴露它只会泄露接口拓扑（OWASP API8）。
     # info.description 是外部调用方的唯一入口说明：认证方式、密钥签发渠道、
     # 错误形状——openapi.json 的其余部分只描述端点本身，回答不了"拿什么调"。
     app = FastAPI(

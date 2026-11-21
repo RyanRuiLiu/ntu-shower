@@ -184,7 +184,7 @@ class A11yService :
      */
     override fun performSetText(node: AccessibilityNodeInfo, text: String): Boolean {
         var clipboardOk = false
-        // 主线程若被长时间占用，这里必须能放弃：无限等待会让调用方线程永久卡死
+        // 主线程若被长时间占用，这里必须能够放弃：无限等待会使调用方线程永久停滞
         val done = MainThread.runAndWait {
             try {
                 val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
@@ -238,7 +238,7 @@ class A11yService :
      * root shell，见 [launchBathMainActivity]。
      *
      * 免费名单有改动待生效时改走完整通路：名单只在启动时读一次，走主界面不做初始化，
-     * 名单就白等了（见 [A11yRuntime.bathFullLaunchPending]）。
+     * 名单的更新就失去意义（见 [A11yRuntime.bathFullLaunchPending]）。
      */
     override fun launchBathApp(): Boolean {
         if (!A11yRuntime.bathFullLaunchPending) return launchBathMainActivity()
