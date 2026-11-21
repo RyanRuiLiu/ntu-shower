@@ -73,6 +73,7 @@ def _reset_process_singletons() -> Iterator[None]:
         device_clock.clear()
         power_service._tasks.clear()
         power_service._last_warn_at.clear()
+        power_service._install_reboot_at.clear()
         voice_service._tasks.clear()
 
     clear()

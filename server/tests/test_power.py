@@ -172,15 +172,21 @@ def _get_hold(fresh_db: str) -> dict[str, object] | None:
 
 
 def test_resume_offset_targets_ten_past_midnight() -> None:
-    """偏移量按表盘现算，恢复时刻恒为"午夜后 10 分钟"：午夜前、午夜后触发都成立。"""
+    """偏移量按表盘现算，恢复时刻恒为"午夜后 10 分钟"；凌晨晚关门改为 close+10。"""
 
     def local(hh: int, mm: int) -> datetime:
         return datetime(2026, 11, 20, hh, mm)
 
-    assert power._resume_offset_s(local(23, 49)) == 21 * 60
-    assert power._resume_offset_s(local(23, 55)) == 15 * 60
-    assert power._resume_offset_s(local(0, 5)) == 5 * 60
-    assert power._resume_offset_s(local(0, 10)) == 0
+    open_minute = 10 * 60 + 55  # 上报的 open 10:55
+
+    assert power._resume_offset_s(local(23, 49), 23 * 60 + 58, open_minute) == 21 * 60
+    assert power._resume_offset_s(local(23, 55), 23 * 60 + 58, open_minute) == 15 * 60
+    assert power._resume_offset_s(local(0, 5), 5, open_minute) == 5 * 60
+    assert power._resume_offset_s(local(0, 10), 5, open_minute) == 0
+    # 凌晨晚关门（close 00:30 早于 open 10:55，且已越过午夜+10）：恢复时刻 = close + 10
+    assert power._resume_offset_s(local(0, 25), 30, open_minute) == 15 * 60
+    # close 在 00:10 之前不进该分支：午夜+10 已在 close 之后，语义不变
+    assert power._resume_offset_s(local(23, 57), 5, open_minute) == 13 * 60
 
 
 def test_hold_due_window_and_its_cross_midnight_form() -> None:
@@ -351,6 +357,32 @@ def test_hold_requested_after_midnight_pends_until_tonight(fresh_db: str, monkey
         assert row["arming_deadline"] == datetime(2026, 11, 22, 15, 58, tzinfo=UTC)
 
 
+def test_late_close_hold_dials_to_close_plus_margin(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """凌晨晚关门（close 00:30 早于 open 10:55）：布防截止 = 次日 00:30，恢复时刻
+    = close + 10。拨钟只前进 15 分钟到 00:40——按午夜+10 会形成近一整天的跳变。"""
+    sent: list[tuple[str, object]] = []
+    _prepare(monkeypatch, "2026-11-21 00:25:00", sent)
+    with session_scope() as session:
+        devices_store.set_power_facts(session, DEVICE, "00:30", OPEN_AT, ZONE_MINUTES)
+
+    with session_scope() as session:
+        power.request_hold(session, DEVICE)
+    _tick()
+
+    hold = _get_hold(fresh_db)
+    assert hold is not None
+    assert hold["offset_s"] == 15 * 60
+    assert sent == [
+        ("power.schedule", {"off_at": "00:30", "on_at": "10:55", "off_day_offset": 1}),
+        ("clock.set", {"datetime": "2026-11-21 00:40:00", "rearm": False}),
+    ]
+
+    with session_scope() as session:
+        row = devices_store.get_hold(session, DEVICE)
+        assert row is not None
+        assert row["arming_deadline"] == datetime(2026, 11, 21, 16, 30, tzinfo=UTC)
+
+
 def test_incident_timeline_replay(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """用 2026-11-20 事故的真实参数逐 tick 重演：整夜覆盖布防一次到位，恢复时刻
     写准回真实轴，恢复后不再有任何命令。
@@ -412,7 +444,7 @@ def test_incident_timeline_replay(fresh_db: str, monkeypatch: pytest.MonkeyPatch
 
 
 def test_intent_outside_the_window_pends_without_commands(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """触发窗前的意图 pending 到窗内再施加：close 还没到，拨钟只会白白跳过 App 的放人线。"""
+    """触发窗前的意图 pending 到窗内再施加：close 还没到，拨钟只会无谓地跳过 App 的放人线。"""
     sent: list[tuple[str, object]] = []
     _prepare(monkeypatch, "2026-11-20 23:30:00", sent)
     _seed_hold(fresh_db, "2026-11-20T15:30:00.000Z", offset_s=None, monkeypatch=monkeypatch)  # 23:30 手动点击
@@ -571,6 +603,51 @@ def test_armed_hold_offline_after_the_arming_deadline_is_not_flagged(
 
     with session_scope() as session:
         assert session.query(JobRun).filter(JobRun.outcome == "hold-failed").count() == 0
+
+
+def test_install_reboot_offline_is_not_flagged(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """OTA 自安装的重启掉线（installing 后宽限内）：预期表现，不留痕。"""
+    sent: list[tuple[str, object]] = []
+    _prepare(monkeypatch, "2026-11-20 23:51:00", sent, skew_s=-660.0, online=False)
+    _seed_hold(
+        fresh_db,
+        "2026-11-20T15:49:00.000Z",
+        offset_s=660,
+        arming_deadline=datetime(2026, 11, 21, 15, 58, tzinfo=UTC),
+        monkeypatch=monkeypatch,
+    )
+    power.note_install_started(DEVICE)
+
+    _tick()
+
+    assert sent == []
+    from app.persistence.audit import JobRun
+
+    with session_scope() as session:
+        assert session.query(JobRun).filter(JobRun.outcome == "hold-failed").count() == 0
+
+
+def test_install_reboot_grace_expires_back_to_flagging(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """宽限窗已过（安装结束、设备仍未回连）：布防可见性恢复正常告警。"""
+    sent: list[tuple[str, object]] = []
+    _prepare(monkeypatch, "2026-11-20 23:51:00", sent, skew_s=-660.0, online=False)
+    _seed_hold(
+        fresh_db,
+        "2026-11-20T15:49:00.000Z",
+        offset_s=660,
+        arming_deadline=datetime(2026, 11, 21, 15, 58, tzinfo=UTC),
+        monkeypatch=monkeypatch,
+    )
+    power.note_install_started(DEVICE)
+    # 记录时刻拨回宽限窗外（循环单调钟只在此处注入一次）
+    power._install_reboot_at[DEVICE] = power.time_module.monotonic() - (power.OTA_INSTALL_REBOOT_GRACE_S + 1)
+
+    _tick()
+
+    from app.persistence.audit import JobRun
+
+    with session_scope() as session:
+        assert session.query(JobRun).filter(JobRun.outcome == "hold-failed").count() == 1
 
 
 # ── 重分配（帧驱动）──────────────────────────────────────────────────────

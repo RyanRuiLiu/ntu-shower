@@ -187,9 +187,11 @@ def test_ota_progress_is_received_not_rejected(
 
     设备端 AgentService 在升级过程中每次进度都发 ota.progress；协议有 Schema 而此前
     服务端没有分支，每帧进度都收到错误帧。修复后只记日志——进度是一次性中间态，
-    "装到没有"由 hello 的 version_code 回答。
+    "是否已安装"由 hello 的 version_code 回答；installing 一帧通知电源计划的布防
+    可见性（随后的进程重启掉线是预期表现，豁免告警）。
     """
     from app.gateway import routes as gateway_routes
+    from app.modules.power import service as power_service
 
     seen: list[dict[str, str]] = []
 
@@ -201,8 +203,15 @@ def test_ota_progress_is_received_not_rejected(
     with device_link.trusted_online(client, "dev-ota-progress", admin_headers) as ws:
         ws.send_text(frames.frame("ota.progress", {"version": "0.6.6", "stage": "downloading", "detail": "1/3"}))
         _settle(ws)
+        assert power_service._install_reboot_at == {}
+        ws.send_text(frames.frame("ota.progress", {"version": "0.6.6", "stage": "installing"}))
+        _settle(ws)
 
-    assert seen == [{"device_id": "dev-ota-progress", "version": "0.6.6", "stage": "downloading"}]
+    assert seen == [
+        {"device_id": "dev-ota-progress", "version": "0.6.6", "stage": "downloading"},
+        {"device_id": "dev-ota-progress", "version": "0.6.6", "stage": "installing"},
+    ]
+    assert "dev-ota-progress" in power_service._install_reboot_at
 
 
 def test_unparsable_snapshot_is_acknowledged_and_recorded(
@@ -626,10 +635,10 @@ def test_snapshot_that_cannot_be_stored_gets_no_ack(
 def test_marking_trusted_kicks_the_live_connection(
     client: TestClient, admin_headers: dict[str, str], fresh_db: str
 ) -> None:
-    """改信任位必须掐断现有连接，否则设备带着旧信任聋到底。
+    """改信任位必须断开现有连接，否则设备带着旧信任持续失效。
 
     信任只在 hello 握手时判定一次：先连接、后标记信任的设备，业务帧与命令结果会被
-    当作未信任静默丢弃——首台新设备入网实测「设备在线、功能全坏」。掐断后设备按
+    当作未信任静默丢弃——首台新设备入网实测「设备在线、功能全坏」。断开后设备按
     重连退避几秒内带着新信任回来。
     """
     device_id = "dev-kick-on-trust"

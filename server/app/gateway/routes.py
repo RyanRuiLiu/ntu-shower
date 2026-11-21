@@ -443,9 +443,13 @@ async def _handle_frame(
         if not trusted:
             return
         # 设备自更新的进度上报（一次性流程，设备端 AgentService 的 onProgress 发出）：
-        # 只记日志。它不落库——进度是一次性的中间态，收完即失效；"装到没有"由 hello 的
-        # version_code 回答（ota_release_install）。协议里有 Schema 而此前没有分支，
-        # 设备的每一帧进度都会收到 proto.unknown_type 错误帧，两侧日志互相指责。
+        # installing 通知电源计划的布防可见性（随后的进程重启掉线是预期表现，豁免），
+        # 其余只记日志。它不落库——进度是一次性的中间态，收完即失效；"是否已安装"由
+        # hello 的 version_code 回答（ota_release_install）。协议里有 Schema 而此前
+        # 没有分支，设备的每一帧进度都会收到 proto.unknown_type 错误帧，两侧日志均
+        # 记录对方的错误。
+        if text_of(payload, "stage") == "installing":
+            power_service.note_install_started(device_id)
         log_event(
             "INFO",
             "ota.progress-reported",

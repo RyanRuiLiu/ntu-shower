@@ -18,7 +18,7 @@ MCU 的 0xA1 布防把"距现在几小时几分钟"换算成**布防那刻钟面
 此后钟面走到那个时刻即断电（docs/device-poweroff.md：拨过截止立即断电、
 回拨等量推迟）。由此两条铁律：
 
-1. **拨钟会吃掉钟面距离**。布防写在拨钟前（此刻墙钟=真实轴），拨钟把墙钟推前
+1. **拨钟会缩短钟面距离**。布防写在拨钟前（此刻墙钟=真实轴），拨钟把墙钟推前
    offset_s，布防截止的真实映射随之提前 offset_s——截止目标必须按偏置后钟面计算
    （2026-11-20 事故：六台因截止预补偿少算一个偏移量，在施加+租期集体断电）。
 2. **滚动续写与钟面检查冲突**。每次续写的截止可能不晚于已在位的那个，写下去要么
@@ -99,7 +99,8 @@ HOLD_TRIGGER_MARGIN_MIN = 10
 
 #: 恢复时刻 = 午夜后这个余量（分钟）：跳过 App 的一天边界，它的 autoCloseTime 变成
 #: 约 24 小时后，整夜不再触发「新人分配闸门」与「关机前放人」。偏移量按施加时刻的
-#: 表盘现算——平台把 close 改到 00:30 之类的场景同样成立。
+#: 表盘现算；close 在凌晨的晚关门（close 早于上报的 open）恢复时刻改为 close + 此值，
+#: 见 [_resume_offset_s]。
 RESUME_AFTER_MIDNIGHT_MIN = 10
 
 #: 校正阈值（秒）：设备钟晶振日漂移秒级，累积数日才到 60 秒——避免为小偏差频繁拨钟。
@@ -108,10 +109,20 @@ TIME_SYNC_THRESHOLD_S = 60
 #: 同设备同事件的 WARNING 限频（秒）：对账每轮重试，失败日志不刷屏。
 WARN_THROTTLE_S = 60.0
 
+#: OTA 自安装的重启宽限（秒）：设备上报 ota.progress/installing 后进程重启回连，
+#: 实测 6-20 秒。宽限内的掉线是安装重启的预期表现，不是「布防可能未生效」。
+#: 安装中状态由 gateway 的 ota.progress 分支写入（[note_install_started]），进程内
+#: 持有——重启丢失只影响一窗告警豁免，方向安全。
+OTA_INSTALL_REBOOT_GRACE_S = 300.0
+
 _tasks: set[asyncio.Task[None]] = set()
 #: 同设备同事件的 WARNING 限频标记（循环单调钟）。进程级：重启后的首轮多做一次
 #: 幂等留痕（内容相同），注释即承诺。
 _last_warn_at: dict[str, float] = {}
+
+#: OTA 自安装进入 installing 的时刻（循环单调钟）：[_watch_armed] 据此豁免宽限内的
+#: 掉线。键恒为在册设备 id，集合有限；stop 时清空。
+_install_reboot_at: dict[str, float] = {}
 
 _running = False
 
@@ -209,7 +220,7 @@ def _fact_minute(text: str) -> int:
     """上报事实的时刻（`HH:MM`，close/open 都用）→ 当天分钟数。
 
     事实在网关入口已按 HH:MM 校验（device.status 分支），此处的非 None 是入口
-    校验的推论；assert 只是把这条不变式写在明面上，不是兜底。"""
+    校验的推论；assert 只是把这条不变式写在明面上，不是失效保护。"""
     minute = parse_time(text)
     assert minute is not None, f"事实时刻形状损坏（网关入口应已拦截）：{text!r}"
     return minute
@@ -231,13 +242,18 @@ def _wall_text(moment_local: datetime) -> str:
     return moment_local.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _resume_offset_s(local_now: datetime) -> int:
-    """偏移量（秒）：从表盘此刻到"午夜后 [RESUME_AFTER_MIDNIGHT_MIN] 分钟"（恢复时刻）。
+def _resume_offset_s(local_now: datetime, close_minute: int, open_minute: int) -> int:
+    """偏移量（秒）：从表盘此刻到恢复时刻。
 
-    对午夜前后的触发都成立：23:49 触发偏移 21 分钟到 00:10；00:05 触发（close=00:30）
-    偏移 5 分钟同样到 00:10。
+    恢复时刻 = 午夜后 [RESUME_AFTER_MIDNIGHT_MIN] 分钟（午夜前后的触发都成立：
+    23:49 触发偏移 21 分钟到 00:10；00:05 触发偏移 5 分钟同样到 00:10）。
+    close 在凌晨的晚关门（close 早于上报的 open，且已越过午夜+10）改用
+    close + [RESUME_AFTER_MIDNIGHT_MIN]：恢复时刻必须落在被跳过的 close 之后，
+    午夜+10 在此刻已是过去，按它会拨出近一整天的跳变。
     """
     minute_of_day = local_now.hour * 60 + local_now.minute
+    if close_minute < open_minute and close_minute > RESUME_AFTER_MIDNIGHT_MIN:
+        return ((close_minute + RESUME_AFTER_MIDNIGHT_MIN - minute_of_day) % (24 * 60)) * 60
     return ((24 * 60 - minute_of_day + RESUME_AFTER_MIDNIGHT_MIN) % (24 * 60)) * 60
 
 
@@ -259,7 +275,7 @@ def _skipped_close_moment(hold_started_at: datetime, close_minute: int, zone_off
     """
     started_local = hold_started_at.astimezone(timezone(timedelta(minutes=zone_offset_minutes)))
     # 当日候选若早于建立时刻（hold 建立当晚 close 已过），次日的同一时刻必然晚于它
-    # ——日期严格后移一天。因此循环恒有返回，不需要兜底分支。
+    # ——日期严格后移一天。因此循环恒有返回，不需要失效安全分支。
     for day_offset in (0, 1):
         moment = started_local.replace(
             hour=close_minute // 60, minute=close_minute % 60, second=0, microsecond=0
@@ -367,7 +383,7 @@ async def _apply_hold(
         _warn_once(device_id, "no-skew", "power.no-skew", "还没有钟偏差记录，暂缓施加")
         return
     local_now = _local_now(device_id, zone)
-    offset_s = _resume_offset_s(local_now)
+    offset_s = _resume_offset_s(local_now, _fact_minute(close), _fact_minute(open_at))
     assignments = [
         {"door_no": item.door_no, "cert_no": item.cert_no, "done": False, "failed": False}
         for item in doors_service.open_sessions(session, device_id)
@@ -404,17 +420,31 @@ async def _apply_hold(
     _record("hold-applied", "今晚 hold 已施加（整夜覆盖）", device_id, offset_s=offset_s, students=len(assignments))
 
 
+def note_install_started(device_id: str) -> None:
+    """gateway 通知：该设备的 OTA 自安装进入 installing，随后进程重启掉线是预期。"""
+    _install_reboot_at[device_id] = time_module.monotonic()
+
+
+def _install_reboot_recent(device_id: str) -> bool:
+    """该设备是否处于安装重启宽限窗内（[OTA_INSTALL_REBOOT_GRACE_S]）。"""
+    moment = _install_reboot_at.get(device_id)
+    return moment is not None and time_module.monotonic() - moment < OTA_INSTALL_REBOOT_GRACE_S
+
+
 def _watch_armed(device_id: str, hold: dict[str, Any]) -> None:
     """已施加的 hold：提前掉线的可见性。
 
     布防只有一次，MCU 又可能静默丢弃（docs/device-poweroff.md 的实测记录）——设备在
-    恢复时刻前掉线意味着"延长可能没生效"，这一条必须有人看得见。掉线本身不触发任何
-    补救（人不在就是断电，方向安全）；恢复时刻后掉线是断电的正常表现，不告警。
+    布防截止前掉线意味着"延长可能没生效"，这一条必须有人看得见。OTA 自安装的重启
+    掉线是预期表现，豁免；掉线本身不触发任何补救（人不在就是断电，方向安全）；
+    截止后掉线是断电的正常表现，不告警。
     """
     deadline = hold["arming_deadline"]
     if deadline is None or _now_utc() >= deadline:
         return
     if manager.is_online(device_id):
+        return
+    if _install_reboot_recent(device_id):
         return
     if _warn_once(device_id, "hold-offline", "power.hold-offline", "延长期间设备掉线，布防可能未生效"):
         _record("hold-failed", "延长期间设备掉线，请人工确认今晚是否延长", device_id, level="WARNING")
@@ -633,7 +663,7 @@ async def _cancel_arming_if_pending(
 
     只在布防已在位、恢复时刻未到、设备在线时尝试；任何前提不满足就跳过（清状态
     照常，断电由既有截止承担）。墙钟刚写回真实轴，截止取"真实此刻 + 1.5 分钟"
-    ——比此刻晚、比恢复时刻早，且不与同分钟的 0 延时撞车。上电目标随常规计划
+    ——比此刻晚、比恢复时刻早，且避免与同分钟的 0 延时重合。上电目标随常规计划
     （恢复时刻后的断电之后，次日 auto_open_time 照常上电）。
     """
     if hold["offset_s"] is None or hold["started_at"] is None:
@@ -701,13 +731,16 @@ async def stop() -> None:
         await asyncio.gather(*list(_tasks), return_exceptions=True)
     _tasks.clear()
     _last_warn_at.clear()
+    _install_reboot_at.clear()
 
 
 __all__ = [
     "HOLD_TRIGGER_MARGIN_MIN",
+    "OTA_INSTALL_REBOOT_GRACE_S",
     "RESUME_AFTER_MIDNIGHT_MIN",
     "TICK_INTERVAL_S",
     "holds",
+    "note_install_started",
     "on_frame",
     "request_hold",
     "resume",
