@@ -28,11 +28,13 @@ import org.json.JSONObject
  * - 连接成功后首帧发 link.hello；
  * - hello_ack 带回配置（提示与状态行的样式等）与 trusted 标志；[HANDSHAKE_TIMEOUT_MS]
  *   内等不到就断掉重连；
- * - 判活两层分工唯一：**服务端**的 app 层 `link.ping`（60s，兼给 [ServerClock] 立时间
- *   锚点）由本端回 `link.pong` 应答；**本端**的链路存活由 OkHttp 的
- *   [OkHttpClient.Builder.pingInterval] 负责（WS 协议层 ping，等不到 pong 框架自动断开
- *   走 [WebSocketListener.onFailure]）——半开连接（拔线、NAT 超时）不再靠服务端替本端
- *   发现，服务端死了本端也能自己断开重连；
+ * - 判活与锚点分工唯一：**服务端**的 app 层 `link.ping`（300s，唯一职责是给
+ *   [ServerClock] 立时间锚点，不承担判活）由本端回 `link.pong` 应答；判活由两端
+ *   各自的 WS 协议层 ping 承担——本端是 OkHttp 的
+ *   [OkHttpClient.Builder.pingInterval]（等不到 pong 框架自动断开走
+ *   [WebSocketListener.onFailure]），服务端是其 uvicorn 协议层 ping（默认 20 秒）
+ *   ——半开连接（拔线、NAT 超时）不再靠服务端替本端发现，服务端死了本端也能
+ *   自己断开重连；
  * - 断线自动重连，指数退避加抖动（5s 起、60s 封顶；实际等待落在各级的一半到上限之间，
  *   几十台设备共用一次断网时不至于同一波次同时重连）；
  * - 业务消息一律回调 onMessage 交给上层。
@@ -241,15 +243,19 @@ class GatewayClient(private val context: Context, private val callback: Callback
             }
             when (env.type) {
                 MessageTypes.LINK_PING -> {
-                    // 服务端 ping 的应答。三件事，顺序不能反：先用这一轮的服务端时刻刷新
-                    // 锚点，再回一个带着本机墙上时刻的 pong 报活。帧的产生时刻取自锚点，
-                    // 锚点越新越准。
+                    // 服务端锚点 ping 的应答。两件事，顺序不能反：先用这一轮的服务端时刻
+                    // 刷新锚点，再回一个带着本机墙上时刻的 pong（它唯一的用途是给服务端
+                    // 供偏差测量的原料）。帧的产生时刻取自锚点，锚点越新越准。
                     //
                     // pong 里的 `device_time` 是给服务端算偏差用的，用途与我们这边的锚点
                     // 不同：服务端要拿它把帧中的 `open_time`/`in_time` 平移到服务端时间
                     // 轴——那两个字段是"这次会话从什么时候开始"的唯一线索，而设备钟的
                     // 绝对值不可信。这里报的是**墙上时钟**（[Clock]），不是锚点：锚点本身
                     // 就是从服务端时刻推出来的，拿它去算偏差等于自己减自己。
+                    //
+                    // 链路判活不在此列：本端由 OkHttp 的协议层 ping 承担（pingInterval），
+                    // 服务端由其 WS 协议层 ping 承担——锚点 ping 周期（300 秒）只服务
+                    // 锚点精度，与判活无关。
                     ServerClock.anchor(env.payload.optString("sender_time"))
                     val deviceTime = JSONObject().put("device_time", Clock.wallClockRfc3339())
                     send(MessageTypes.LINK_PONG, deviceTime, replyTo = env.id)
