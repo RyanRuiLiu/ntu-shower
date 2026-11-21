@@ -4,7 +4,7 @@ services:
     restart: "no"
     user: "997:997"
     env_file:
-      - /etc/ntu-shower/ntu-shower.env
+      - ntu-shower.env
     environment:
       DB_PATH: /var/lib/ntu-shower/ntu-shower.db
     volumes:
@@ -27,7 +27,7 @@ services:
     restart: unless-stopped
     user: "997:997"
     env_file:
-      - /etc/ntu-shower/ntu-shower.env
+      - ntu-shower.env
     environment:
       DB_PATH: /var/lib/ntu-shower/ntu-shower.db
       OTA_DIR: /var/lib/ntu-shower/ota_releases
@@ -61,11 +61,11 @@ services:
     container_name: ntu-shower-litestream
     restart: unless-stopped
     user: "997:997"
-    command: ["replicate", "-config", "/etc/ntu-shower/litestream.yml"]
+    command: ["replicate", "-config", "/etc/litestream/litestream.yml"]
     volumes:
       - /var/lib/ntu-shower:/var/lib/ntu-shower
       - /var/backups/ntu-shower/litestream:/var/backups/ntu-shower/litestream
-      - /etc/ntu-shower/litestream.yml:/etc/ntu-shower/litestream.yml:ro
+      - ./litestream.yml:/etc/litestream/litestream.yml:ro
     read_only: true
     tmpfs:
       - /tmp
