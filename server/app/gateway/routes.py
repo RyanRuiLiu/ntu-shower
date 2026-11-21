@@ -459,8 +459,6 @@ async def _handle_frame(
         await ws.send_text(protocol.error(reason_codes.UNKNOWN_TYPE.code, f"不认识的消息类型：{mtype}"))
 
 
-#: 服务端 ping 周期（秒）。一个周期既确认链路存活，也把服务端时刻交给设备刷新
-#: 时间锚点。曾是配置键（运维从未改过，2026-11-17 精简收编为常量）。
 #: 锚点 ping 周期（秒）：把服务端时刻交给设备刷新时间锚点。周期取 5 分钟——
 #: 锚龄内的偏差只有单调钟晶振漂移（8.5 秒/天，5 分钟漂 0.02 秒），远小于秒级
 #: 刻度；链路判活不在此列，由 uvicorn 的 WS 协议层 ping 承担（默认 20 秒）。

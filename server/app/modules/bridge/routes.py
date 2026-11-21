@@ -20,7 +20,6 @@ import uuid
 
 from fastapi import APIRouter, Depends, Security, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
-from starlette.concurrency import run_in_threadpool
 
 from app.auth.dependencies import caller, device_scope_guard, require_trusted_online_device
 from app.contracts import CommandStatus
@@ -66,18 +65,6 @@ def _bridge_audit_id() -> str:
     return f"bridge-{uuid.uuid4()}"
 
 
-def _read_bridge_timeouts() -> tuple[float, float]:
-    """设备 WS 握手路径读两个桥超时。
-
-    两值收编为常量后这里不再读库（2026-11-17 精简）；保留函数为握手路径留一个
-    单一出口。
-    """
-    return (
-        BRIDGE_MAX_LIFETIME_S,
-        BRIDGE_PAIR_TIMEOUT_S,
-    )
-
-
 #: 桥的绝对寿命与配对超时（秒）。曾是配置键（运维从未改过，2026-11-17 精简
 #: 收编为常量）：寿命 3600 是调试会话的实际上限，配对 30 秒覆盖设备侧 start adbd
 #: 到 WS 连入的全程。
@@ -103,11 +90,12 @@ async def device_bridge(ws: WebSocket, device_id: str) -> None:
     被关），一律拒绝。桥只能由 `bridge/open` 建立。
     """
     nonce = ws.headers.get("sec-websocket-protocol", "")
-    lifetime_s, pair_s = await run_in_threadpool(_read_bridge_timeouts)
     loop = asyncio.get_running_loop()
 
     bridge = registry.get(device_id)
-    generation = registry.consume_nonce(device_id, nonce, loop.time(), pair_s) if bridge and nonce else None
+    generation = (
+        registry.consume_nonce(device_id, nonce, loop.time(), BRIDGE_PAIR_TIMEOUT_S) if bridge and nonce else None
+    )
     if bridge is None or generation is None:
         # accept 之前直接关闭：客户端看到的是握手失败，而非建立后被拒
         await ws.close(code=4401)
@@ -133,7 +121,7 @@ async def device_bridge(ws: WebSocket, device_id: str) -> None:
     reason = "tunnel closed"
     try:
         while bridge.device_ws is ws:
-            remaining = lifetime_s - (loop.time() - bridge.opened_at)
+            remaining = BRIDGE_MAX_LIFETIME_S - (loop.time() - bridge.opened_at)
             if remaining <= 0:
                 reason = "lifetime reached"
                 log_event(
