@@ -75,6 +75,7 @@ const TABS = {
     label: '接口调用',
     title: '每一次后台请求：谁、从哪个 IP、调了什么、结果如何',
     kind: 'calls',
+    source: 'audit',
     time: (row) => row.requested_at,
     headers: ['调用方', '请求', '状态', '耗时', '问题'],
     cells: (row) => [
@@ -93,6 +94,7 @@ const TABS = {
     label: '命令流水',
     title: '每条发到设备的命令：参数、结果、设备回报',
     kind: 'commands',
+    source: 'audit',
     time: (row) => row.created_at,
     headers: ['设备', '动作', '状态', '原因', '耗时'],
     cells: (row) => [
@@ -107,6 +109,7 @@ const TABS = {
     label: '后台任务',
     title: '配置好的后台任务自动替谁做了什么、为什么（时间与命令流水对照即知发了哪条命令）',
     kind: 'job-runs',
+    source: 'audit',
     time: (row) => row.occurred_at,
     headers: ['设备', '喷头', '学号', '功能', '动作', '结果', '阈值', '原因'],
     cells: (row) => [
@@ -123,7 +126,7 @@ const TABS = {
   install: {
     label: '安装记录',
     title: '逐设备的版本安装确认：哪台设备在何时装上了哪个版本',
-    kind: 'installs',
+    source: 'installs',
     time: (row) => row.applied_at,
     headers: ['设备', '版本'],
     cells: (row) => [deviceCell(row.device_id), mono(row.version)],
@@ -131,8 +134,7 @@ const TABS = {
   link: {
     label: '链路历史',
     title: '设备的上线与下线事件（当前设备的链路历史）',
-    kind: 'link-events',
-    deviceScoped: true,
+    source: 'link',
     time: (row) => row.occurred_at,
     headers: ['事件', '原因'],
     cells: (row) => [mono(row.event), muted(row.reason)],
@@ -213,14 +215,19 @@ async function reload() {
   const deviceId = scope === 'device' ? store.deviceId : ''
   const keys = Object.keys(TABS)
   try {
-    // 各类各自取数、一起等待：加一类只改 TABS，这里一行不动；链路历史挂在设备资源树下，
-    // 单独按当前设备取（设备页切换后 store.deviceId 变化，刷新即对齐）
-    const [loaded, linkRows] = await Promise.all([
-      Promise.all(keys.filter((key) => !TABS[key].deviceScoped).map((key) => api.audit(TABS[key].kind, { device_id: deviceId, limit }))),
+    // 各类各自取数、一起等待：加一类只改 TABS，这里只挑取数方式。审计三类走
+    // /audit/{kind}；安装记录挂在 /ota/installs（发布域）；链路历史挂在设备
+    // 资源树下、按当前设备取（设备页切换后 store.deviceId 变化，刷新即对齐）。
+    const auditKeys = keys.filter((key) => TABS[key].source === 'audit')
+    const [loaded, installs, linkRows] = await Promise.all([
+      Promise.all(auditKeys.map((key) => api.audit(TABS[key].kind, { device_id: deviceId, limit }))),
+      api.otaInstalls({ device_id: deviceId, limit }),
       api.deviceLinkEvents(store.deviceId, { limit }),
     ])
-    keys.forEach((key, index) => {
-      state.rows[key] = TABS[key].deviceScoped ? linkRows : loaded[keys.filter((k) => !TABS[k].deviceScoped).indexOf(key)]
+    const loadedByKey = new Map(auditKeys.map((key, index) => [key, loaded[index]]))
+    keys.forEach((key) => {
+      state.rows[key] =
+        TABS[key].source === 'link' ? linkRows : TABS[key].source === 'installs' ? installs : loadedByKey.get(key)
       state.selected[key] = -1
     })
     rerenderTable()

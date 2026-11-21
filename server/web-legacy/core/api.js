@@ -193,8 +193,10 @@ export const api = {
     send(`${API_V1}/ota/releases/${encodeURIComponent(version)}/rearm`, post({ device_id: deviceId })),
 
   // ── 审计与历史 ──（admin）
-  /** 审计与历史共用这一条：`kind` 取 `calls` / `commands` / `job-runs` / `installs` / `link-events`。 */
+  /** 审计三类共用这一条：`kind` 取 `calls` / `commands` / `job-runs`。 */
   audit: (kind, params) => send(`${API_V1}/audit/${kind}${query(params)}`),
+  /** 逐设备安装记录（发布域的资源，挂在 /ota/installs）。 */
+  otaInstalls: (params) => send(`${API_V1}/ota/installs${query(params)}`),
   /** 设备域的链路历史（链路事件挂在设备资源树下）。 */
   deviceLinkEvents: (deviceId, params) =>
     send(`${API_V1}/devices/${encodeURIComponent(deviceId)}/link-events${query(params)}`),
