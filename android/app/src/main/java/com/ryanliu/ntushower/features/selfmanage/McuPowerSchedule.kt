@@ -50,10 +50,12 @@ object McuPowerSchedule {
     private val deviceLog = DeviceLog(File(AppConfig.WORK_DIR))
 
     /**
-     * 重布定时开关机：[offAt] 为断电时刻、[onAt] 为上电时刻，均为设备表盘上的 HH:MM。
-     * 返回驱动是否收下（0）；格式不符、延时为 0 或设备打开失败均视为失败，结果落 device.log。
+     * 重布定时开关机：[offAt] 断电时刻、[onAt] 上电时刻，都是设备表盘上的 HH:MM；
+     * [offDayOffset] 为断电目标顺延的天数（0 = 下一个该时刻，1 = 明天同一时刻，
+     * 整夜覆盖布防用——hold 的断电目标 = 次日 auto_close_time）。
+     * 返回驱动是否收下（0）；格式不符、延时非正或打不开设备都算失败，结果落 device.log。
      */
-    fun schedule(offAt: String, onAt: String): Boolean {
+    fun schedule(offAt: String, onAt: String, offDayOffset: Int = 0): Boolean {
         val offMinuteOfDay = parseMinuteOfDay(offAt)
         val onMinuteOfDay = parseMinuteOfDay(onAt)
         if (offMinuteOfDay == null || onMinuteOfDay == null) {
@@ -63,10 +65,10 @@ object McuPowerSchedule {
         }
         val now = Calendar.getInstance()
         val nowMinuteOfDay = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
-        val delays = computeDelays(nowMinuteOfDay, offMinuteOfDay, onMinuteOfDay)
+        val delays = computeDelays(nowMinuteOfDay, offMinuteOfDay, onMinuteOfDay, offDayOffset)
         if (delays == null) {
-            Log.w(TAG, "rejected zero delay: off=$offAt on=$onAt")
-            deviceLog.error("power.schedule-failed", "延时为 0（目标与当前时刻同分钟）: off=$offAt on=$onAt")
+            Log.w(TAG, "rejected non-positive delay: off=$offAt on=$onAt")
+            deviceLog.error("power.schedule-failed", "延时非正（目标与当前时刻同分钟且无天数顺延）: off=$offAt on=$onAt")
             return false
         }
         val (offMinutes, onMinutes) = delays
@@ -104,17 +106,21 @@ object McuPowerSchedule {
     }
 
     /**
-     * 换算一对相对延时（分钟）：关机延时自 [nowMinuteOfDay] 起算，开机延时自断电时刻
-     * 起算，目标时刻已过即顺延至次日（"下一个"语义）。
+     * 换算一对相对延时（分钟）：关机延时自 [nowMinuteOfDay] 起算并加 [offDayOffset]
+     * 个整日顺延，开机延时自断电时刻起算，目标时刻已过即顺延至次日（"下一个"语义）。
      *
-     * 任一延时为 0 时返回 null（语义见类注释）。生产路径的目标时刻均与当前时刻相差
-     * 分钟以上：常规夜为 23:58/10:55，服务端取消路径为 now+90 秒；延时为 0 只源于
-     * 调用方误用。
+     * 总关机延时非正时返回 null（语义见类注释）。day 顺延使总延时 ≥ 1440，天然远离
+     * 0 延时；开机延时仍单独把守。
      */
-    internal fun computeDelays(nowMinuteOfDay: Int, offMinuteOfDay: Int, onMinuteOfDay: Int): Pair<Int, Int>? {
-        val offMinutes = delayMinutes(nowMinuteOfDay, offMinuteOfDay)
-        if (offMinutes == 0) return null
-        val offMomentMinuteOfDay = (nowMinuteOfDay + offMinutes) % MINUTES_PER_DAY
+    internal fun computeDelays(
+        nowMinuteOfDay: Int,
+        offMinuteOfDay: Int,
+        onMinuteOfDay: Int,
+        offDayOffset: Int = 0,
+    ): Pair<Int, Int>? {
+        val offMinutes = delayMinutes(nowMinuteOfDay, offMinuteOfDay) + offDayOffset * MINUTES_PER_DAY
+        if (offMinutes <= 0) return null
+        val offMomentMinuteOfDay = (nowMinuteOfDay + delayMinutes(nowMinuteOfDay, offMinuteOfDay)) % MINUTES_PER_DAY
         val onMinutes = delayMinutes(offMomentMinuteOfDay, onMinuteOfDay)
         if (onMinutes == 0) return null
         return offMinutes to onMinutes

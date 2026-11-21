@@ -327,9 +327,13 @@ object DeviceMaintenance {
         }
     }
 
-    /** 重布定时开关机：off_at 断电、on_at 上电，都是设备表盘上的 HH:MM。 */
+    /** 重布定时开关机：off_at 断电、on_at 上电，都是设备表盘上的 HH:MM；off_day_offset 顺延天数。 */
     private fun powerScheduleOutcome(params: JSONObject, commandId: String): CommandOutcome {
-        val ok = McuPowerSchedule.schedule(params.optString("off_at", ""), params.optString("on_at", ""))
+        val ok = McuPowerSchedule.schedule(
+            params.optString("off_at", ""),
+            params.optString("on_at", ""),
+            params.optInt("off_day_offset", 0),
+        )
         return if (ok) {
             CommandOutcome(commandId, OutcomeStatus.OK, "", "")
         } else {

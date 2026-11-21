@@ -48,6 +48,20 @@ class McuPowerScheduleTest {
     }
 
     @Test
+    fun `computeDelays adds a whole day for the night covering arm`() {
+        // 整夜覆盖布防（hold）：23:50 施加，断电目标 = 明天 23:58（日偏移 1）——
+        // 总延时 24 小时 08 分钟，上电延时自断电时刻起算仍是 10 小时 57 分
+        val delays = McuPowerSchedule.computeDelays(
+            nowMinuteOfDay = 23 * 60 + 50,
+            offMinuteOfDay = 23 * 60 + 58,
+            onMinuteOfDay = 10 * 60 + 55,
+            offDayOffset = 1,
+        )
+
+        assertEquals(24 * 60 + 8 to (10 * 60 + 57), delays)
+    }
+
+    @Test
     fun `computeDelays rejects a zero off delay`() {
         // 断电目标与当前同分钟：MCU 对 0 延时没有立即语义，唯一写入入口如实拒绝
         assertNull(
