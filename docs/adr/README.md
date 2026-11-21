@@ -28,4 +28,4 @@
 | [ADR-0022](0022-android-api19-freeze.md) | 设备端依赖冻结：API 19 兼容线 | Accepted |
 | [ADR-0023](0023-permission-rewrite.md) | 权限体系重写——用户与密钥分离、resource:action scopes、长期密钥 | Accepted |
 | [ADR-0024](0024-power-hold.md) | 电源计划域——设备自报计划、hold 替代拨钟、对账与租约 | Accepted（第 4 条被 0025 取代） |
-| [ADR-0025](0025-single-arming-hold.md) | hold 改单次布防、恢复等落点——2026-11-21 事故的结构性修正 | Accepted |
+| [ADR-0025](0025-single-arming-hold.md) | hold 单次布防——整夜覆盖，恢复写准（2026-11-21 事故的结构性修正） | Accepted |
