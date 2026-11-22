@@ -40,6 +40,16 @@ def hold_device(device_id: str, session: Session = Depends(get_db)) -> HoldStatu
     return service.request_hold(session, device_id)
 
 
+@router.get(
+    "/{device_id}/hold",
+    dependencies=[Security(caller, scopes=["devices:read"])],
+    summary="今晚延长状态",
+)
+def hold_status(device_id: str, session: Session = Depends(get_db)) -> HoldStatus:
+    """今晚延长的只读现状：不在 hold 中时 404。纯读——登记意图走 POST /hold。"""
+    return service.hold_status(session, device_id)
+
+
 @router.post(
     "/{device_id}/resume",
     dependencies=[Security(caller, scopes=["devices:write"])],

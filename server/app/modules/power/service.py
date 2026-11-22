@@ -67,6 +67,7 @@ from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
+from starlette.exceptions import HTTPException
 
 from app.contracts import HoldSource, JobOutcome
 from app.core import actions, device_clock, outcomes, problems
@@ -617,6 +618,20 @@ def request_hold(session: Session, device_id: str) -> HoldStatus:
         existing = devices_crud.get_hold(session, device_id)
     assert existing is not None  # start_hold 刚建立了它；设备不在册的早一步被守卫挡下
     return _hold_view(session, device_id, existing)
+
+
+def hold_status(session: Session, device_id: str) -> HoldStatus:
+    """今晚延长的只读现状（GET /hold）：未建立意图时 404。
+
+    纯读：不建立、不清除、不施加——意图登记走 POST /hold，恢复走 POST /resume；
+    形状与派生判据同源（[_hold_view]），与看板的 holds 列表逐字段一致。
+    """
+    if devices_service.get_device(session, device_id) is None:
+        raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {device_id} 不在档案里")
+    hold = devices_crud.get_hold(session, device_id)
+    if hold is None:
+        raise HTTPException(status_code=404, detail=f"设备 {device_id} 未在今晚 hold 中")
+    return _hold_view(session, device_id, hold)
 
 
 async def resume(session: Session, device_id: str) -> dict[str, object]:

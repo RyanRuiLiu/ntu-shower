@@ -778,6 +778,41 @@ def test_manual_hold_is_idempotent(
     assert second.json()["hold_started_at"] == first.json()["hold_started_at"]
 
 
+def test_hold_status_endpoint_reads_the_current_intent(
+    client: TestClient, admin_headers: dict[str, str], fresh_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GET /hold 纯读现状：未建立意图 404，建立后回与 POST 幂等响应同形状。"""
+    _seed_facts(fresh_db)
+    _register_device_for_http()
+    monkeypatch.setattr(config_store, "effective", lambda _s, _d: CONFIG)
+
+    before = client.get("/api/v1/devices/dev-hold/hold", headers=admin_headers)
+    assert before.status_code == 404
+    assert before.headers["content-type"].startswith("application/problem+json")
+
+    client.post("/api/v1/devices/dev-hold/hold", headers=admin_headers)
+
+    resp = client.get("/api/v1/devices/dev-hold/hold", headers=admin_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["device_id"] == DEVICE
+    assert body["hold_source"] == "manual"
+    assert body["arming_deadline"] == ""  # 意图已建、尚未施加
+
+
+def test_hold_status_requires_read_scope(client: TestClient, fresh_db: str) -> None:
+    """读端点要 devices:read：只给 devices:write 的密钥拿不到状态。"""
+    from tests.identity import bearer, register_key
+
+    _seed_facts(fresh_db)
+    _register_device_for_http()
+    token = register_key("hold-status-ro", ["devices:write"], device_scope=["*"])
+
+    resp = client.get("/api/v1/devices/dev-hold/hold", headers=bearer(token))
+
+    assert resp.status_code == 403
+
+
 def test_manual_hold_after_apply_does_not_rearm(
     client: TestClient, admin_headers: dict[str, str], fresh_db: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
