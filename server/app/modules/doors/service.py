@@ -621,22 +621,20 @@ def _gap(previous: DoorLiveView | None, at: str) -> int:
     return seconds_between(str(previous["reported_at"]), at)
 
 
-def _close_segment(session: Session, segment: DoorSegmentView, door: JsonObject, device_id: str, at: str) -> None:
+def _close_segment(session: Session, segment: DoorSegmentView, door: JsonObject, at: str) -> None:
     """关掉一段出水，定下它的长度与来源。
 
     **A**（设备轴）：`close_time − in_time`。两个读数取自设备的同一口钟，偏差在里面
-    相减抵消——这是唯一**不经过换算**的段长来源，因此比观测差更可信。
+    相减抵消——这是唯一**不经过换算**的段长来源。
 
     **B**（服务端轴）：本帧到段起点，纯观测，含"我们看见关阀"的那点延迟。
 
     两者相差不超过 [AB_TOLERANCE_S] 就采信 A：说明这一段从头到尾都在同一段偏差里，
-    设备自己结算的那个值就是真相。**不得超过它**——段内被拨钟时 A 会带上整个拨钟量，
-    而 B 不受影响，交叉校验正是为此。
-
-    **但两者必须同起点才可比**：B 的起点是段的服务端轴起点，只有当那个起点**就是设备
-    报的 `in_time` 平移来的**时，两个差才在同一条起跑线上。平移失败（这台设备还没有
-    偏差记录）时段起点退回了帧时刻，B 会偏小；那时拿 B 去否决 A 就错了——A 是同一口钟
-    上两个读数之差，它根本不依赖平移。
+    设备自己结算的那个值就是真相。**分歧则退回 B**——分歧只有两种来历：段内钟被拨
+    （OTA 重启把无 RTC 的盒子送回出厂钟面、hold 拨钟落在段内），此时 A 带着整个跳变
+    量、B 不受影响；或段起点是观测值、B 的起点退回了帧时刻而偏小。后者代价是帧延迟
+    （秒级），前者是小时级虚增——分歧时宁取 B。**不得用 A 的原值跨越分歧**：2026-11-22
+    生产实证，OTA 重启的钟跳段 A=7131 秒被原样入库，而观测 B 只有 257 秒。
 
     B 越过一次占用的物理上限时截断并标 `capped`：截断过的段与"它真的洗了那么久"
     必须分得开，否则统计会把"我们不知道有多长"当成"就那么长"。
@@ -656,10 +654,6 @@ def _close_segment(session: Session, segment: DoorSegmentView, door: JsonObject,
     # 读数不可能差 0 秒，据此把归零值当"没有 A"退回 B。
     if a == 0 and in_raw != close_raw:
         a = None
-    shifted_in = device_clock.to_server(in_raw, device_id) if in_raw else None
-    if a is not None and (shifted_in is None or shifted_in != str(segment["opened_at"])):
-        crud.close_segment(session, int(segment["id"]), _moment(at), a, SegmentSource.MEASURED, close_raw)
-        return
     b = seconds_between(str(segment["opened_at"]), at)
     if a is not None and abs(a - b) <= AB_TOLERANCE_S:
         flow, source = a, "measured"
@@ -918,7 +912,7 @@ def _maintain_segment(
             crud.open_segment(session, session_id, device_id, door_no, _moment(opened), str(door.get("in_time")))
         return
     if segment is not None:
-        _close_segment(session, segment, door, device_id, at)
+        _close_segment(session, segment, door, at)
         return
     _derive_segment(session, device_id, door_no, session_id, assigned_at, door, at)
 
@@ -976,7 +970,7 @@ def _close(session: Session, open_session: DoorSessionView, door: JsonObject, at
 
     segment = crud.get_open_segment(session, device_id, door_no)
     if segment is not None:
-        _close_segment(session, segment, door, device_id, at)
+        _close_segment(session, segment, door, at)
 
     segments = crud.segments_of_session(session, session_id)
     flow = sum(int(s["flow_s"]) for s in segments)

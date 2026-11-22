@@ -129,6 +129,34 @@ def test_snapshot_updates_live_state_and_records_events(fresh_db: str) -> None:
     assert segments[0]["flow_s"] == session["total_flow_s"]  # 会话时长就是段之和
 
 
+def test_clock_jump_mid_segment_falls_back_to_the_observed_span(fresh_db: str) -> None:
+    """段内钟跳（OTA 重启把无 RTC 的盒子送回出厂钟面）：AB 分歧退回观测。
+
+    2026-11-22 生产实证：OTA 重启后钟面短暂 +2 小时，段关闭时设备轴差 7331 秒被
+    原样入库，而观测差只有 257 秒。分歧时宁取观测——跳变量不得计入段长。
+    """
+    device_id = "dev-clock-jump-01"
+    device_clock.load(device_id, 0.0)  # 钟面与服务端对齐
+
+    t0 = "2026-09-30T12:00:00.000Z"
+    opened = "2026-09-30T12:00:30.000Z"
+    t1 = "2026-09-30T12:01:00.000Z"
+    t2 = "2026-09-30T12:02:00.000Z"
+    jumped_close = "2026-09-30T14:01:40.000Z"  # 跳变后的钟面：真实关阀 12:01:40 + 2 小时
+
+    door_link.feed(device_id, _snapshot([_door(1, card_no=1, cert_no="C1")], t0))
+    door_link.feed(device_id, _snapshot([_door(1, card_no=1, cert_no="C1", in_time=opened)], t1))
+    # OTA 重启：钟面跳到真实 +2 小时，跳变被偏差更新直接采信为新值
+    device_clock.load(device_id, -7200.0)
+    door_link.feed(device_id, _snapshot([_door(1, close_time=jumped_close)], t2))
+
+    segments = door_link.list_segments_of(door_link.list_sessions(device_id)[0]["id"])
+    assert len(segments) == 1
+    assert segments[0]["source"] == "observed"
+    assert segments[0]["flow_s"] == 90  # 观测差：opened_at 12:00:30 → t2 12:02:00
+    assert segments[0]["closed_raw"] == jumped_close  # 设备原话照存，时刻上的跳变有迹可查
+
+
 def test_live_time_fields_are_on_the_server_axis(fresh_db: str) -> None:
     """现态的三个时间字段是**服务端轴**上的值，不是设备报的原话。
 
