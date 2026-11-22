@@ -6,7 +6,17 @@
 > 0.6.3 直接升到 0.6.5（提交 d9e29d2），该节原为一次记档性条目。其内容已并入
 > 下方 0.6.5 的 Fixed；不保留一个没有对应版本状态的版本号。
 
-## [Unreleased]
+## [0.8.8] - 2026-11-22
+
+### Changed
+
+- **部署关闭发 1001 而非 uvicorn 默认 1012**：uvicorn 优雅关闭时对 WS 发 close code 1012（Service Restart），但 RFC 6455 §7.4.1 明确 1012 保留给基础设施、应用不得发送；OkHttp 正确抛 ProtocolException 拒收——设备看到的是协议错误而非部署断开。lifespan 关闭时先向全部在线设备发 1001（Going Away）。
+- **校园网静默断连三层修复**（生产实锤：`connection open` = 2 / `connection closed` = 0，服务端从未感知到任何断连）：校园网 NAT/防火墙静默丢弃 TCP 连接（不发 FIN/RST），服务端 `receive_text()` 永远阻塞——处理协程变僵尸（finally 不跑、offline 不记、device-disconnected 不写）。修复：① 重连时关闭被顶替的旧 WS，旧协程的 `receive_text()` 当场解除阻塞、finally 正常收尾；② 锚点 ping 循环发失败时主动关闭 WS，设备关机或断网（无重连）时服务端也能感知断开；③ 设备端 `classifyFailure` 附带异常消息（截取 120 字符），排障能看到 OkHttp 的具体原因而非只有类名。
+- **基础设施迁移**：`/etc/ntu-shower/` 与 `/etc/status-panel/` 不再存在——env_file 与 litestream.yml 迁入部署目录（env 600 gitignored，litestream.yml 版本化），compose 引用改相对路径，与 infra 仓库 README 的纪律声明对齐（`/etc` 只保留主机级系统配置）。xyp-license 为主机级 PHP 应用（非容器），`/etc/xyp-license/` 按 FHS 保留。
+- 逐文件复读清理两处半成品残留：gateway/routes.py 的 PING_INTERVAL_S 注释叠放（锚点收敛时旧注释没删净）；bridge/routes.py 的 `_read_bridge_timeouts` 透传函数（配置收编为常量后存在理由消失，还挂着不必要的 `run_in_threadpool`）。
+- **跨面 URL 对账入测试门**（`tests/test_web_apis.py` 三钉）：web 两套界面引用的全部取数 URL 与 openapi 逐条对账、audit/{kind} 的 kind 词表单独钉住——漏一个 404 即在测试阶段当场红，不再依赖生产现场发现。
+
+## [0.8.7] - 2026-11-22
 
 ### Changed
 
