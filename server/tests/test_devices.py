@@ -741,3 +741,26 @@ def test_link_history_enforces_the_device_scope(client: TestClient, fresh_db: st
     in_scope = client.get(f"/api/v1/devices/link-events?device_id={DEVICE_ID}", headers=bearer(token))
     assert in_scope.status_code == 200
     assert in_scope.json() == []
+
+
+def test_empty_device_filter_means_the_fleet(client: TestClient, fresh_db: str, admin_headers: dict[str, str]) -> None:
+    """空串过滤与缺省同义（页面以空串表达"全部设备"）：三个 fleet 端点都不得把它当成过滤器。"""
+    from app.db.base import utcnow
+    from app.modules.devices.models import DeviceLinkEvent
+    from app.modules.devices.schemas import LINK_ONLINE
+
+    device_link.register_trusted_device(DEVICE_ID)
+    with device_link.db() as session:
+        session.add(DeviceLinkEvent(device_id=DEVICE_ID, occurred_at=utcnow(), event=LINK_ONLINE))
+        session.commit()
+
+    for url in (
+        "/api/v1/devices/link-events?device_id=",
+        "/api/v1/audit/commands?device_id=",
+        "/api/v1/ota/installs?device_id=",
+    ):
+        rows = client.get(url, headers=admin_headers).json()
+        assert isinstance(rows, list), url
+        if url.endswith("link-events="):
+            assert rows
+            assert rows[0]["device_id"] == DEVICE_ID

@@ -204,12 +204,13 @@ def device_scope_filter(
     """可选设备过滤的对象级检查（全队读取型端点用，过滤值经此依赖注入）。
 
     给了过滤设备就必须在作用域内；不给（全队）须持通配作用域——设备作用域密钥
-    无过滤地读全队等于绕开对象级边界。
+    无过滤地读全队等于绕开对象级边界。空串与缺省同义（既有调用方以空串表达
+    "不过滤"），在此归一为 None，下游只面对一种"无过滤"的形状。
     """
     scope = caller["device_scope"]
     if Scope.WILDCARD in scope:
-        return device_id
-    if device_id is None:
+        return device_id or None
+    if not device_id:
         raise ApiProblemError(INSUFFICIENT_SCOPE, "全队读取需要通配设备作用域")
     if device_id not in scope:
         raise ApiProblemError(INSUFFICIENT_SCOPE, f"作用域不含设备：{device_id}")

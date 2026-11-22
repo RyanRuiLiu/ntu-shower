@@ -11,7 +11,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Security
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import caller
+from app.auth.dependencies import caller, device_scope_filter
 from app.contracts import ActorKind
 from app.core.errors import problem_responses
 from app.db.deps import get_db
@@ -38,7 +38,7 @@ def list_calls_endpoint(
 
 @admin_router.get("/audit/commands", summary="命令审计")
 def list_commands_endpoint(
-    device_id: Annotated[str | None, Query(description="按设备过滤")] = None,
+    device_id: str | None = Depends(device_scope_filter),
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
     session: Session = Depends(get_db),
 ) -> list[CommandAuditRecord]:
@@ -48,7 +48,7 @@ def list_commands_endpoint(
 
 @admin_router.get("/audit/job-runs", summary="后台任务审计")
 def list_job_runs_endpoint(
-    device_id: Annotated[str | None, Query(description="按设备过滤")] = None,
+    device_id: str | None = Depends(device_scope_filter),
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
     session: Session = Depends(get_db),
 ) -> list[JobRun]:

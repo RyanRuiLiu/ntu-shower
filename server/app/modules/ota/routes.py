@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, File, Form, Path, Query, Security, Uploa
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import caller, device_scope_guard
+from app.auth.dependencies import caller, device_scope_filter, device_scope_guard
 from app.contracts import Caller
 from app.core.config import settings
 from app.core.errors import problem_responses
@@ -229,7 +229,7 @@ async def upload_release(
 
 @admin_router.get("/installs", summary="安装记录")
 def list_installs(
-    device_id: Annotated[str | None, Query(description="按设备过滤")] = None,
+    device_id: str | None = Depends(device_scope_filter),
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     session: Session = Depends(get_db),
 ) -> list[OtaInstallRow]:
