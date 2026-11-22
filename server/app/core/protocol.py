@@ -17,6 +17,11 @@ from app.core.message_types import LINK_ERROR
 
 PROTOCOL_VERSION = 1
 
+#: RFC 6455 §7.4.1 的 1001 = Going Away：端点主动离开的标准关闭码。部署关闭、
+#: 重连顶替旧连接、清理死连接都用它——不能用 uvicorn 关闭时默认发的 1012，那是
+#: 基础设施保留码，OkHttp 以 ProtocolException 拒收。
+WS_CLOSE_GOING_AWAY = 1001
+
 # 协议负载的形状：设备报文是外部 JSON 输入，逐字段建模会与 protocol/schema 重复。
 # 用别名而不是裸 Any——既表达"这是 JSON 边界"的意图，也满足签名不得出现 Any 的规则。
 JsonObject = dict[str, Any]

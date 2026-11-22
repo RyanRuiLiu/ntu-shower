@@ -31,4 +31,6 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
 
 # 单进程 uvicorn：进程内存态（网关连接表、core.device_clock 的偏差缓存）以单进程为
 # 前提；横向扩容前必须先把这类状态外置，而不是加 --workers。
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8110"]
+# 部署入口是 app/serve.py：Server 子类在 uvicorn 收尾前先向设备发 1001——uvicorn
+# CLI 的 shutdown 先发 1012（基础设施保留码，OkHttp 拒收），lifespan 补救永远晚于它
+CMD ["python", "-m", "app.serve"]

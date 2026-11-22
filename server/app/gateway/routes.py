@@ -35,7 +35,7 @@ from app.core.message_types import (
     LINK_PONG,
     OTA_PROGRESS,
 )
-from app.core.protocol import JsonObject, as_int, list_of, payload_of, text_of
+from app.core.protocol import WS_CLOSE_GOING_AWAY, JsonObject, as_int, list_of, payload_of, text_of
 from app.core.tokens import extract_bearer
 from app.db.session import Database
 from app.modules.config import store as config_store
@@ -55,9 +55,8 @@ router = APIRouter()
 
 #: 设备已停用（RFC 6455 §7.4.2 的应用私用段 4000-4999，两端约定同一解释）。
 #: 与 1008 的分工：1008 = 凭据无效 → 设备清凭据重走注册；4403 = 设备被除名 →
-#: 注册救不回来，设备停止重连等人工。
+#: 注册救不回来，设备停止重连等人工。1001 的单一出处是 core.protocol。
 WS_CLOSE_DEVICE_REVOKED = 4403
-WS_CLOSE_GOING_AWAY = 1001
 
 
 def _db_session(ws: WebSocket) -> Session:
