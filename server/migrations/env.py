@@ -39,7 +39,11 @@ from app.persistence.audit import ApiCall, CommandAudit, JobRun  # noqa: F401
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers 默认 True：fileConfig 会把此刻已存在的其他 logger
+    # 全部置 disabled——应用 logger（app.core.logging 在导入时创建）被殃及后，
+    # 同进程内后续的日志全部静默。应用自己装配日志（configure_logging），
+    # alembic 的 ini 只管 alembic 自己的 logger。
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 
