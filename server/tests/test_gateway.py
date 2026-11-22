@@ -23,8 +23,6 @@ from app.db.session import session_scope
 from app.modules.devices import crud as devices_store
 from app.modules.devices.models import Device, DeviceLinkEvent, DeviceLog
 from app.modules.devices.schemas import LINK_OFFLINE, LINK_ONLINE
-from app.modules.doors import service as doors_service
-from app.modules.doors.models import DoorSnapshot
 
 
 def test_first_frame_must_be_hello(client: TestClient, fresh_db: str) -> None:
@@ -214,23 +212,16 @@ def test_ota_progress_is_received_not_rejected(
     assert "dev-ota-progress" in power_service._install_reboot_at
 
 
-def test_unparsable_snapshot_is_acknowledged_and_recorded(
-    client: TestClient, admin_headers: dict[str, str], fresh_db: str
-) -> None:
-    """坏载荷照收回执，并如实落进原始层。
+def test_unparsable_snapshot_is_acknowledged(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:
+    """坏载荷照收回执：派生跳过即可。
 
     回错误会让设备端不删发件箱里那一行、把队列堵死，而它对内容能否解析无能为力——
-    设备端只管送达，判断是服务端的事。原始层留下"设备报过这么一帧"，派生跳过即可。
+    设备端只管送达，判断是服务端的事。
     """
     with device_link.trusted_online(client, "dev-bad-snap", admin_headers) as ws:
         ws.send_text(frames.frame("door.snapshot", {"snapshot_id": "bad-1", "doors": "not-a-list"}))
         ack = frames.recv_until(ws, "door.snapshot_ack")
         assert ack["payload"]["snapshot_id"] == "bad-1"
-
-    with session_scope() as session:
-        stored = session.scalars(select(DoorSnapshot.doors).where(DoorSnapshot.snapshot_id == "bad-1")).all()
-    # doors 是 JSON 列：ORM 读出的是反序列化后的值，与写入的空列表同构
-    assert stored == [[]]
 
 
 def test_valid_snapshot_gets_ack(client: TestClient, admin_headers: dict[str, str], fresh_db: str) -> None:
@@ -601,35 +592,6 @@ def test_reconnect_does_not_record_a_false_offline(client: TestClient, fresh_db:
     assert events.count(LINK_ONLINE) == 2
     # 两条连接都收尾了，但设备全程在线——只有最后真正断开那一次才算
     assert events.count(LINK_OFFLINE) == 1
-
-
-def test_snapshot_that_cannot_be_stored_gets_no_ack(
-    client: TestClient, admin_headers: dict[str, str], fresh_db: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """原始帧落库失败：不回执——设备保留发件箱那一行，稍后重发。
-
-    回执与「原始帧已落库」严格等价。若在这种时刻照发 ack，设备会删掉那一行，
-    而它承载的是这条事实的仅存载体。
-    """
-
-    failure = RuntimeError("disk full")
-
-    def boom(*_args: object, **_kwargs: object) -> object:
-        raise failure
-
-    monkeypatch.setattr(doors_service.crud, "insert_snapshot", boom)
-
-    with device_link.trusted_online(client, "dev-snap-not-stored", admin_headers) as ws:
-        ws.send_text(frames.frame("door.snapshot", {"snapshot_id": "not-stored-1", "doors": [{"door_no": 1}]}))
-        # 下一条回帧是设备 ping 的未知类型错误（链路还活着、ack 被扣下）
-        ws.send_text(frames.frame("link.ping", {"sender_time": now_rfc3339()}))
-        while True:
-            msg = json.loads(ws.receive_text())
-            if msg["type"] in ("link.ping", "status_line.update"):
-                continue
-            assert msg["type"] == "link.error", f"先到的帧是 {msg['type']}，ack 未被扣下"
-            assert msg["payload"]["code"] == "proto.unknown_type"
-            break
 
 
 def test_marking_trusted_kicks_the_live_connection(

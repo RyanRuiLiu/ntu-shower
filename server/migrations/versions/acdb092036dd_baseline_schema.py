@@ -1,4 +1,4 @@
-"""基线 schema：全部 21 张表一次建齐（迁移链重置后的唯一基准）。
+"""基线 schema：全部 20 张表一次建齐（迁移链重置后的唯一基准）。
 
 按业主裁定清空迁移历史——此前的增量链（initial schema、power hold、列更名、
 审计标准化）合并为这一份从当前模型自动生成的基准；此后结构变更在其上生成
@@ -243,24 +243,6 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_door_sessions_cert_no'), ['cert_no'], unique=False)
         batch_op.create_index('ix_door_sessions_device_id_door_no_assigned_at', ['device_id', 'door_no', 'assigned_at'], unique=False)
 
-    op.create_table('door_snapshots',
-    sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('device_id', sa.String(length=64), nullable=False),
-    sa.Column('snapshot_id', sa.String(length=64), nullable=False),
-    sa.Column('seq', sa.Integer(), nullable=True),
-    sa.Column('source', sa.String(length=16), nullable=False),
-    sa.Column('captured_at', UtcDateTime(), nullable=True),
-    sa.Column('received_at', UtcDateTime(), nullable=False),
-    sa.Column('doors', sa.JSON(), nullable=False),
-    sa.Column('device_clock', sa.String(length=64), nullable=True),
-    sa.Column('created_at', UtcDateTime(), nullable=False),
-    sa.ForeignKeyConstraint(['device_id'], ['devices.id'], name=op.f('fk_door_snapshots_device_id_devices'), ondelete='RESTRICT'),
-    sa.PrimaryKeyConstraint('id', name=op.f('pk_door_snapshots')),
-    sa.UniqueConstraint('device_id', 'snapshot_id', name='uq_door_snapshots_device_id_snapshot_id')
-    )
-    with op.batch_alter_table('door_snapshots', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_door_snapshots_received_at'), ['received_at'], unique=False)
-
     op.create_table('door_state_events',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('device_id', sa.String(length=64), nullable=False),
@@ -420,10 +402,6 @@ def downgrade() -> None:
         batch_op.drop_index('ix_door_state_events_device_id_door_no_occurred_at')
 
     op.drop_table('door_state_events')
-    with op.batch_alter_table('door_snapshots', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_door_snapshots_received_at'))
-
-    op.drop_table('door_snapshots')
     with op.batch_alter_table('door_sessions', schema=None) as batch_op:
         batch_op.drop_index('ix_door_sessions_device_id_door_no_assigned_at')
         batch_op.drop_index(batch_op.f('ix_door_sessions_cert_no'))

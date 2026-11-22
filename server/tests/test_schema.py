@@ -23,7 +23,7 @@ from app.db.base import Base
 from app.db.engine import create_db_engine
 from app.modules.config.models import AppSettings  # noqa: F401
 from app.modules.devices.models import Device, DeviceCredential, DeviceLinkEvent, DeviceLog  # noqa: F401
-from app.modules.doors.models import DoorSegment, DoorSession, DoorSnapshot, DoorState, DoorStateEvent  # noqa: F401
+from app.modules.doors.models import DoorSegment, DoorSession, DoorState, DoorStateEvent  # noqa: F401
 from app.modules.ota.models import OtaRelease, OtaReleaseInstall  # noqa: F401
 from app.modules.voice.models import VoiceAsset, VoiceDelivery, VoiceRule, VoiceUnit  # noqa: F401
 from app.persistence.audit import ApiCall, CommandAudit, JobRun  # noqa: F401
@@ -37,7 +37,6 @@ EXPECTED_TABLES: set[str] = {
     "device_link_events",
     "device_logs",
     "devices",
-    "door_snapshots",
     "door_state_events",
     "door_states",
     "api_keys",

@@ -48,11 +48,6 @@ def list_segments_of(session_id: int) -> list[dict[str, Any]]:
         return repository.segments_of_session(session, session_id)
 
 
-def list_snapshots(device_id: str) -> list[dict[str, Any]]:
-    with session_scope() as session:
-        return repository.list_snapshots(session, device_id)
-
-
 def clear_live(device_id: str) -> None:
     """清掉这台设备的现态行：模拟「会话还在、门的现态却没了」这类残缺现场。"""
     from sqlalchemy import delete

@@ -102,7 +102,6 @@ selected > free。"有人" = `cardno ≠ 0` **或** `accno` 既非空串也非 `
 import threading
 from dataclasses import dataclass
 from datetime import datetime
-from typing import NoReturn
 
 from sqlalchemy.orm import Session
 
@@ -390,16 +389,6 @@ def _start_readings_agree(start: str, door: JsonObject, at: str, device_id: str,
     return opened is None or seconds_between(start, opened) <= SESSION_MAX_S
 
 
-def _no_persist(device_id: str) -> NoReturn:
-    """原始帧没有落下去（设备已不在册）：抛错让网关扣下回执，设备保留那一行重发。
-
-    ack 与「原始帧已落库」严格等价——库满、库锁超时经 SQLAlchemy 自然抛错，这里补上
-    外键设计下唯一剩下的「落不了行」路径。
-    """
-    message = f"设备 {device_id} 不在册，原始帧未落库"
-    raise RuntimeError(message)
-
-
 def _dt(value: object) -> datetime | None:
     """RFC 3339 文本 → UTC datetime；空串或解析不了给 None（可空列的空值语义）。
 
@@ -472,21 +461,20 @@ def process_snapshot(session: Session, device_id: str, payload: JsonObject) -> S
 
 
 def _apply_snapshot(session: Session, device_id: str, payload: JsonObject) -> SnapshotResult:
-    """一帧的完整处理：先落原始帧，再派生状态、diff 记事件、更新现态、维护会话。
+    """一帧的完整处理：派生状态、diff 记事件、更新现态、维护会话。
 
     帧时刻取设备锚定的采集时刻（`captured_at`）——它在库变化那一刻就定了，不受积压
     与重发影响；设备尚未建立锚点时退回本机接收时刻。**这是本系统唯一的时间来源**：
-    设备的三个原始时间字段逐字保留供溯源；它们的**值**只在推导时刻时经偏差平移使用。
+    设备报的时间字段不落库，它们的**值**只在推导时刻时经偏差平移使用。
 
-    ## 回执语义：收到 ack ⇔ 原始帧已落库
+    ## 回执语义：收到 ack ⇔ 帧已受理
 
-    本函数只有「原始帧没有落下去」（库满、库锁超时这一类）才会抛错——网关据此**扣下
-    回执**，设备保留发件箱那一行稍后重发，原始数据不丢。派生的任何失败在此止住并照常
-    返回：帧已经收下，原始帧留底可查；回执让设备删掉发件箱那一行才是对的。
+    派生的任何失败在此止住并照常返回 ok：回执让设备删掉发件箱那一行，队列继续流动，
+    失败本身记入日志。扣下回执只会让设备重发同一条——派生由相邻帧 diff 驱动，漏掉的
+    边沿由下一帧补上（时刻略迟），重发不会补回更多。
 
     空的一帧不是错误：设备读库失败时会照送一条空的（见 DoorSnapshotSender），那本身
-    就是一条事实。落库留痕、派生跳过即可——回错误会让设备端不删发件箱那一行，把整个
-    队列堵死。
+    就是一条事实。派生跳过即可——回错误会让设备端不删发件箱那一行，把整个队列堵死。
     """
     received_at = now_rfc3339()
     captured_at = text_of(payload, "captured_at")
@@ -495,24 +483,13 @@ def _apply_snapshot(session: Session, device_id: str, payload: JsonObject) -> Sn
 
     doors = payload.get("doors")
     raw_doors = [d for d in doors if isinstance(d, dict)] if isinstance(doors, list) else []
-    crud.insert_snapshot(
-        session,
-        device_id,
-        text_of(payload, "snapshot_id"),
-        as_int(payload.get("seq")) or None,
-        text_of(payload, "source"),
-        _moment(occurred_at),
-        text_of(payload, "device_clock"),
-        _moment(received_at),
-        raw_doors,
-    ) or _no_persist(device_id)
     try:
         return _derive_snapshot(session, device_id, text_of(payload, "source"), raw_doors, occurred_at)
     except Exception:  # noqa: BLE001 —— 派生可以以任何方式失败，而这一帧已经收下了
         log_event(
             "ERROR",
             "doors.snapshot-derive-failed",
-            "派生失败，原始帧已落库",
+            "派生失败，帧已受理",
             device_id=device_id,
             error=exc_info_text(),
         )
@@ -522,7 +499,7 @@ def _apply_snapshot(session: Session, device_id: str, payload: JsonObject) -> Sn
 def _derive_snapshot(
     session: Session, device_id: str, source: str, raw_doors: list[JsonObject], occurred_at: str
 ) -> SnapshotResult:
-    """派生半场：diff 记事件、维护会话、刷新现态、发布推送。原始帧已在此前落库。"""
+    """派生半场：diff 记事件、维护会话、刷新现态、发布推送。"""
     prev_live = crud.get_all_live(session, device_id)
     # 全貌帧只刷新现态，不派生（判据与理由见 SOURCE_STARTUP）。
     snapshot_only = source == SOURCE_STARTUP
@@ -531,8 +508,8 @@ def _derive_snapshot(
     collected: list[DoorEvent] = []
 
     # 先收敛、再按门号去重：同一帧里重复的门号取最后一条——设备按门号整行读取，重复
-    # 只可能来自拼装错误，取后者与"后来者覆盖"的直觉一致。收敛发生在派生之前，所以
-    # 后面几处用的都是干净值；而落进原始层的是**未清洗的原话**（上面那一步已经落完）。
+    # 只可能来自拼装错误，取后者与"后来者覆盖"的直觉一致。收敛发生在派生之前，后面
+    # 几处用的都是干净值。
     by_door: dict[int, JsonObject] = {}
     for raw_door in raw_doors:
         cleaned = _clean(raw_door)
@@ -588,7 +565,7 @@ def _derive_snapshot(
             }
             collected.extend(event for event in door_events if event.kind in lifecycle)
 
-        # 现态对外的三个时间字段是**服务端轴**的：设备那口钟的读数只保留在原始帧里
+        # 现态对外的三个时间字段是**服务端轴**的：设备那口钟的读数不落库
         # （为什么对外不能出现设备轴，见 docs/architecture.md 的「两条时间轴」）。
         view = dict(door)
         for key in ("open_time", "in_time", "close_time"):

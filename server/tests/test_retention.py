@@ -18,12 +18,11 @@ from app import retention
 from app.core.config import settings
 from app.core.connections import manager
 from app.modules.devices.models import DeviceCredential, DeviceLinkEvent, DeviceLog
-from app.modules.doors.models import DoorSnapshot
 from app.modules.voice.models import VoiceDelivery
 from app.persistence import api_calls
 from app.persistence.audit import ApiCall, CommandAudit, JobRun
 
-DECLARED_TABLES = {ApiCall, CommandAudit, JobRun, DeviceLinkEvent, DoorSnapshot, VoiceDelivery}
+DECLARED_TABLES = {ApiCall, CommandAudit, JobRun, DeviceLinkEvent, VoiceDelivery}
 
 
 @pytest.fixture
@@ -53,13 +52,12 @@ def test_permanent_tables_are_not_registered(session: Session) -> None:
     assert registered_tables.isdisjoint(permanent)
 
 
-def _seed_old_snapshot(session: Session, days_ago: int, seq: int) -> None:
+def _seed_old_command(session: Session, days_ago: int, seq: int) -> None:
     session.add(
-        DoorSnapshot(
-            device_id="dev-retain-1",
-            snapshot_id=f"snap-{seq}",
-            received_at=datetime.now(UTC) - timedelta(days=days_ago),
-            doors="[]",
+        CommandAudit(
+            command_id=f"cmd-retain-{seq}",
+            action="clock.set",
+            created_at=datetime.now(UTC) - timedelta(days=days_ago),
         )
     )
     session.commit()
@@ -68,22 +66,17 @@ def _seed_old_snapshot(session: Session, days_ago: int, seq: int) -> None:
 def test_prune_follows_the_single_knob(session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     """保留期是单一旋钮：改 audit_retention_days 一处，全部表同时生效。
 
-    以 door_snapshots 为钉（原 30 天档改统一 90 天档的回归点）：旋钮 30 时
-    60 天前的行被清，旋钮 90 时同一行保留。
+    以 command_audits 为钉：旋钮 30 时 60 天前的行被清，旋钮 90 时同一行保留。
     """
-    from app.modules.devices.models import Device
-
-    session.add(Device(id="dev-retain-1", trusted=True))
-    session.commit()
-    _seed_old_snapshot(session, days_ago=60, seq=1)
+    _seed_old_command(session, days_ago=60, seq=1)
 
     monkeypatch.setattr(settings, "audit_retention_days", 30)
     assert api_calls.prune(session, 30, retention.RETENTIONS) == 1
 
-    _seed_old_snapshot(session, days_ago=60, seq=1)
+    _seed_old_command(session, days_ago=60, seq=1)
     monkeypatch.setattr(settings, "audit_retention_days", 90)
     assert api_calls.prune(session, 90, retention.RETENTIONS) == 0
-    remaining = session.scalars(select(DoorSnapshot.received_at)).all()
+    remaining = session.scalars(select(CommandAudit.created_at)).all()
     assert len(remaining) == 1
 
 

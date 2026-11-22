@@ -123,8 +123,7 @@ com.ryanliu.ntushower
 | 设备轴 | `yyyyMMddHHmmss`，设备墙钟读数，不含时区 | 浴室 App 的 `t_doorlist`、设备上报的帧载荷 |
 | 服务端轴 | RFC 3339 UTC 毫秒 | 库内一切时刻、对外一切时刻、帧里的 `captured_at`（由设备侧锚定，见 `core/clock/ServerClock`） |
 
-设备轴的原值只在原始层保留（`door_snapshot.doors`），供溯源与重放；派生层与对外接口一律是
-服务端轴。
+设备轴的原值不落库——帧载荷是它唯一的载体，派生换算完即弃；库内与对外一律是服务端轴。
 
 **两处例外**：`link.pong` 的 `device_time` 与帧载荷里的 `device_clock`，都是设备墙钟上的当前
 读数，但经过设备侧格式化、呈 RFC 3339 形态。格式不改变它们的轴——它们必须与 `t_doorlist` 的

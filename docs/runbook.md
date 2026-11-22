@@ -142,12 +142,11 @@ ssh <deploy-user>@<deploy-host> 'cd /opt/ntu-shower && NTU_SHOWER_TAG=<上一个
 - **应用**：部署时 compose 的 `migrate` 服务先于业务容器执行 `alembic upgrade head`，
   失败则业务容器根本不拉起；不在服务器上手动执行迁移。
 - **演练**：结构变更先在备份副本上演练（`DATABASE_URL=sqlite:///<副本>` 后
-  `alembic upgrade head`），再用 `tools/audit_timeline.py` 核对时间轴与派生结果。
-  2026-10-04 在生产备份副本上的演练记录：36168 帧 → 会话 5625 / 段 9676，越界检查
-  全 0，帧数一帧不少。
-- **历史重算**：原始帧保留 30 天。更早的历史在 backups 的旧系统原始库里；重放工具
-  是 v1→v2 切换期的产物，v2 层就位后已随旧持久化层一并移除（git 历史可查）——若将来
-  要按新口径重算，需要新写面向 v2 持久化层的重放入口。
+  `alembic upgrade head`），起一次应用冒烟并核对关键读数。2026-10-04 历史导入的
+  演练记录：36168 帧 → 会话 5625 / 段 9676，越界检查全 0。
+- **历史重算**：原始帧不落库，派生层是唯一记录——规则口径变更无法对既有历史重算
+  （ADR-0003 后记）。更早的历史在 backups 的旧系统原始库里；v1→v2 切换期的重放与
+  核对工具已随旧持久化层一并移除（git 历史可查）。
 
 （2026-11-09 实测：空库 `alembic upgrade head` 建出全部表，`alembic check` 无差异，
 两条由 `test_migrations.py` 常驻看守。）

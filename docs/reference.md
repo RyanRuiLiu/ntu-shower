@@ -40,7 +40,7 @@
 | `opened_at` / `opened_raw` | 服务端轴 / 设备轴 | 对外只能出服务端轴；原文只用于复核 |
 | `status_raw` / `state` | 设备报的原始整数 / 本项目派生的七个取值 | 直接判整数，新增状态时静默走错分支 |
 | `card_no` / `cert_no` | 卡 / 人 | 本机无卡，卡号恒 0；拿它当人等于没判 |
-| `device.clock_skew_s` / `door_snapshots.device_clock` | 持久化的偏差 / 那一刻的墙钟读数 | 偏差随时间变，只能从后者算出来 |
+| `device.clock_skew_s` / 帧 `device_clock` | 持久化的偏差 / 帧里的墙钟读数（不落库） | 偏差随时间变，只能从后者算出来 |
 | `revision` / `version_code` | 配置修订号 / 设备端版本号 | 两个"版本"毫不相干 |
 | `last_used_at` / `last_used_s` / `last_used_cert`（`DoorView` 视图字段，不是表列） | 上次**开阀**时刻 / 那次的出水秒数 / 那次是谁用的 | 只在喷头**没有进行中的会话**时才有展示意义；判据是**有没有过段**——"分配后直接结算"那种从没出水的会话说不出任何一段 |
 

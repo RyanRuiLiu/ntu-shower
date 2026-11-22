@@ -132,8 +132,8 @@ def test_snapshot_updates_live_state_and_records_events(fresh_db: str) -> None:
 def test_live_time_fields_are_on_the_server_axis(fresh_db: str) -> None:
     """现态的三个时间字段是**服务端轴**上的值，不是设备报的原话。
 
-    设备那口钟的读数只保留在原始帧里。这台设备还没有偏差记录（帧比首次 pong 先到），
-    所以换算不出来，字段是空的：给空值比给设备轴的原值安全。
+    这台设备还没有偏差记录（帧比首次 pong 先到），所以换算不出来，字段是空的：
+    给空值比给设备轴的原值安全。
     """
     device_id = "dev-rawtime-01"
     opened = "2026-09-30T12:00:00.000Z"
@@ -142,9 +142,6 @@ def test_live_time_fields_are_on_the_server_axis(fresh_db: str) -> None:
 
     live = door_link.get_all_live(device_id)
     assert live[1]["in_time"] == ""
-    # 原话仍然完整地留在原始层里：现态是解释过的视图，原始帧才是设备说过什么。
-    raw = door_link.list_snapshots(device_id)
-    assert opened in json.dumps(raw[0]["doors"], ensure_ascii=False)
 
 
 def test_session_owner_change_closes_old_and_opens_new(fresh_db: str) -> None:
@@ -166,18 +163,16 @@ def test_session_owner_change_closes_old_and_opens_new(fresh_db: str) -> None:
     assert current["cert_no"] == "B"
 
 
-def test_snapshot_records_missing_doors_and_skips_nonpositive_door_no(fresh_db: str) -> None:
-    """doors 缺失照收照落（记成空数组）；door_no 非正的条目跳过。
+def test_missing_doors_are_accepted_and_nonpositive_door_no_skipped(fresh_db: str) -> None:
+    """doors 缺失照收（派生跳过）；door_no 非正的条目跳过。
 
-    缺失的 doors 不是协议错误，而是"设备这一帧没有可用的门数据"这条事实：原始层要
-    留下它，派生跳过。回错误会让设备端不删发件箱那一行，把队列堵死。
+    缺失的 doors 不是协议错误，而是"设备这一帧没有可用的门数据"这条事实。回错误
+    会让设备端不删发件箱那一行，把队列堵死。
     """
     device_id = "dev-bad-snap-1"
     empty = door_link.feed(device_id, {"snapshot_id": "s", "source": "db_watch"})
     assert empty.processed == 0
     assert empty.events == ()
-    recorded = door_link.list_snapshots(device_id)
-    assert recorded[0]["doors"] == []
 
     device_link.register_trusted_device(device_id)
     result = door_link.feed(device_id, _snapshot([_door(0), _door(1)]))
@@ -589,11 +584,10 @@ def test_occupant_falls_back_to_acc_no_when_cert_no_is_blank(fresh_db: str) -> N
     assert session["cert_no"] == "7000000001"
 
 
-def test_derivation_failure_returns_ok_and_keeps_the_raw_frame(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """派生失败在 service 内部止住：返回 ok、原始帧在库。
+def test_derivation_failure_returns_ok(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """派生失败在 service 内部止住：返回 ok，回执照发。
 
-    这是回执语义的上半句：帧已经收下，派生可以事后从原始层重算，回执让设备删掉
-    发件箱那一行才是对的。
+    扣下回执只会让设备重发同一条、把队列堵死；漏掉的边沿由下一帧的 diff 补上。
     """
 
     failure = RuntimeError("boom")
@@ -607,29 +601,6 @@ def test_derivation_failure_returns_ok_and_keeps_the_raw_frame(fresh_db: str, mo
 
     assert result.processed == 0
     assert result.events == ()
-    row = {"n": len(door_link.list_snapshots("dev-derive-fail"))}
-    assert row is not None
-    assert row["n"] == 1
-
-
-def test_raw_insert_failure_propagates_for_the_gateway_to_withhold_the_ack(
-    fresh_db: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """原始帧落不下去就抛错：网关据此扣下回执，设备保留那一行稍后重发。
-
-    这是回执语义的下半句——ack 与「原始帧已落库」严格等价，磁盘满、库锁超时
-    都不会让一帧事实从世界上消失。
-    """
-
-    failure = RuntimeError("disk full")
-
-    def boom(*_args: object, **_kwargs: object) -> object:
-        raise failure
-
-    monkeypatch.setattr("app.modules.doors.crud.insert_snapshot", boom)
-
-    with pytest.raises(RuntimeError, match="disk full"):
-        door_link.feed("dev-raw-fail", _snapshot([_door(1)]))
 
 
 def test_every_door_state_has_a_label() -> None:

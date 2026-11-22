@@ -282,7 +282,7 @@ class DoorView(TypedDict):
     直接结算"那种从没出过水的会话说不出任何一段。
 
     **三个时间字段都在服务端轴上**。为什么对外不能出现设备轴，见
-    docs/architecture.md 的「两条时间轴」——设备报的原话只留在原始帧里。
+    docs/architecture.md 的「两条时间轴」——设备报的原话不落库。
     """
 
     device_id: str

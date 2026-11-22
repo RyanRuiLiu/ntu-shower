@@ -1,4 +1,4 @@
-"""门域：现态、状态流水、原始帧、会话与出水段。
+"""门域：现态、状态流水、会话与出水段。
 
 读写原语。状态派生、会话判定、盲区推断属于业务逻辑，留在 `modules/doors/service`。
 时刻序列化成 RFC 3339，设备标识用业务字符串。
@@ -19,7 +19,6 @@ from app.modules.devices.models import Device
 from app.modules.doors.models import (
     DoorSegment,
     DoorSession,
-    DoorSnapshot,
     DoorState,
     DoorStateEvent,
 )
@@ -147,45 +146,7 @@ def upsert_door_live(
     session.commit()
 
 
-# ── 原始帧与状态流水 ──
-
-
-def insert_snapshot(
-    session: Session,
-    device_id: str,
-    snapshot_id: str,
-    seq: int | None,
-    source: str,
-    captured_at: datetime | None,
-    device_clock: str | None,
-    received_at: datetime,
-    doors: list[dict[str, Any]],
-) -> bool:
-    """落一帧原始数据。返回「此刻是否已在库中」。
-
-    同一 `snapshot_id` 重复投递只留第一份，但重复**算已落库**（True）：设备在收到 ack
-    前会重发同一条，重发与首投对回执是同一件事，照常让设备清发件箱。False 只留给
-    「帧没有落下去」一种情形——设备不在册（外键落不了行），调用方据此扣下回执。
-    """
-    exists = session.scalars(
-        select(DoorSnapshot.id).where(DoorSnapshot.device_id == device_id, DoorSnapshot.snapshot_id == snapshot_id)
-    ).one_or_none()
-    if exists is not None:
-        return True
-    session.add(
-        DoorSnapshot(
-            device_id=device_id,
-            snapshot_id=snapshot_id,
-            seq=seq,
-            source=source,
-            captured_at=captured_at,
-            device_clock=device_clock,
-            received_at=received_at,
-            doors=doors,
-        )
-    )
-    session.commit()
-    return True
+# ── 状态流水 ──
 
 
 def insert_event(
@@ -508,25 +469,6 @@ def list_events(session: Session, device_id: str, door_no: int | None = None) ->
     ]
 
 
-def list_snapshots(session: Session, device_id: str) -> list[dict[str, Any]]:
-    """这台设备的原始帧：设备说的原话按帧 id 留底，doors 是落库时的原样载荷。"""
-    rows = session.scalars(
-        select(DoorSnapshot).where(DoorSnapshot.device_id == device_id).order_by(DoorSnapshot.id)
-    ).all()
-    return [
-        {
-            "snapshot_id": str(row.snapshot_id),
-            "seq": int(row.seq) if row.seq is not None else None,
-            "source": str(row.source),
-            "captured_at": _ts(row.captured_at),
-            "received_at": _ts(row.received_at),
-            "device_clock": str(row.device_clock or ""),
-            "doors": row.doors,
-        }
-        for row in rows
-    ]
-
-
 # ── 窗口读 ──
 # 窗口条件在这里换算成 datetime，出去的行仍经统一视图（时刻是 RFC 3339 文本），
 # 调用方不碰存储形状。
@@ -585,14 +527,12 @@ __all__: list[str] = [
     "get_open_session",
     "get_session",
     "insert_event",
-    "insert_snapshot",
     "latest_segment_opened_at",
     "latest_usage_by_door",
     "list_doors",
     "list_events",
     "list_open_sessions_of",
     "list_sessions",
-    "list_snapshots",
     "open_segment",
     "open_session",
     "run_started_at",

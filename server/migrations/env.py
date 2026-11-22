@@ -30,7 +30,6 @@ from app.modules.devices.models import (  # noqa: F401
 from app.modules.doors.models import (  # noqa: F401
     DoorSegment,
     DoorSession,
-    DoorSnapshot,
     DoorStateEvent,
 )
 from app.modules.ota.models import OtaRelease, OtaReleaseInstall  # noqa: F401

@@ -354,25 +354,10 @@ async def _handle_frame(
                 device_clock_text,
                 captured_at,
             )
-        # 回执语义：**收到 ack ⇔ 原始帧已落库**。process_snapshot 只有「原始帧没落下去」
-        # （库满、库锁超时这一类）才抛错——那一步不回执、直接返回，设备保留发件箱那一行
-        # 稍后重发，原始数据不丢。派生的失败已在 service 内部止住并照常返回：帧已经收下，
-        # 原始帧留底可查，回执让设备删掉那一行才是对的。
-        #
-        # 这里的失败也不能向会话层抛：异常冒泡会断开 WS，把一个数据问题升级成连接问题——
-        # `finally` 记 offline、推 device.update（网页上看到设备闪断），其他门正在推进的
-        # 会话也被打断。
-        try:
-            result = await _call(ws, doors_service.process_snapshot, device_id, payload)
-        except Exception as exc:  # noqa: BLE001 —— 原始帧没落下去：不回执，设备保留重发
-            log_event(
-                "ERROR",
-                "doors.snapshot-not-stored",
-                "原始帧未落库，不回执",
-                device_id=device_id,
-                error=str(exc),
-            )
-            return
+        # 回执语义：**收到 ack ⇔ 帧已受理**。派生的失败已在 service 内部止住并照常返回
+        # ok：回执让设备删掉发件箱那一行，队列继续流动，失败记入 doors.snapshot-derive-failed。
+        # 扣下回执救不回什么——重发同一条帧不会得到不同的结果，漏掉的边沿由下一帧补上。
+        result = await _call(ws, doors_service.process_snapshot, device_id, payload)
         # 帧是后台任务的心跳：门刚被占用、刚被释放，都只能从帧看出来。调度器据此重算这台
         # 设备每个喷头的"下一个到点"，并把待补的那次分配接上——**不轮询**。
         sessions_scheduler.on_frame(device_id)

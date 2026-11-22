@@ -1,16 +1,13 @@
-"""门域五张表：现态、状态迁移流水、原始帧、使用会话与出水段。
+"""门域四张表：现态、状态迁移流水、使用会话与出水段。
 
-`door_snapshots` 是原始层（设备说什么记什么，保留期随 audit_retention_days）；`door_states`、
-`door_state_events`、`door_sessions`、`door_segments` 是从它派生的长期历史。
-派生可从原始层重算的前提是原始层还在——原始层清了，派生层就是唯一事实。
+四张表都是从设备帧派生的长期历史：帧载荷处理完即弃，库里的派生层是设备陈述的唯一记录。
 """
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 
-from sqlalchemy import JSON, Boolean, ForeignKey, Index, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.contracts import AssignedSource, ObservedSpan, SegmentSource
@@ -75,32 +72,6 @@ class DoorStateEvent(CreatedAtMixin, Base):
     cert_no: Mapped[str] = mapped_column(String(32), default="")
     bath_time_s: Mapped[int] = mapped_column(Integer, default=0)
     occurred_at: Mapped[datetime] = mapped_column(UtcDateTime, index=True)
-
-
-class DoorSnapshot(CreatedAtMixin, Base):
-    """设备上报的原始帧，保留期随 audit_retention_days（统一单一旋钮）。
-
-    清理任务按 `received_at` 删除，所以它必须有独立索引；复合索引的第一列不是它，
-    用不上。
-    """
-
-    __tablename__ = "door_snapshots"
-    __table_args__ = (UniqueConstraint("device_id", "snapshot_id", name="uq_door_snapshots_device_id_snapshot_id"),)
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    device_id: Mapped[str] = mapped_column(ForeignKey("devices.id", ondelete="RESTRICT"))
-    #: 设备为这一帧生成的标识，用于幂等去重
-    snapshot_id: Mapped[str] = mapped_column(String(64))
-    seq: Mapped[int | None] = mapped_column(Integer, default=None)
-    #: 帧来源原话。原始层不解释：协议外的取值也照记（回执语义要求原话落库），
-    #: 派生层判定用的词汇表是 modules/doors/service.py 的 SOURCE_* 常量。
-    source: Mapped[str] = mapped_column(String(16), default="")
-    captured_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
-    received_at: Mapped[datetime] = mapped_column(UtcDateTime, index=True)
-    #: 帧内全部门的状态原文，不解释
-    doors: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
-    #: 设备自报的时钟字符串，原文保留
-    device_clock: Mapped[str | None] = mapped_column(String(64), default=None)
 
 
 class DoorSession(TimestampMixin, Base):
@@ -173,4 +144,4 @@ class DoorSegment(CreatedAtMixin, Base):
     source: Mapped[SegmentSource | None] = mapped_column(enum_column(SegmentSource, "segment_source"), default=None)
 
 
-__all__: list[str] = ["DoorSegment", "DoorSession", "DoorSnapshot", "DoorState", "DoorStateEvent"]
+__all__: list[str] = ["DoorSegment", "DoorSession", "DoorState", "DoorStateEvent"]

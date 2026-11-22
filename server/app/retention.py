@@ -1,6 +1,6 @@
 """审计与观测数据的保留与库维护（横切运维，不住在任何业务域里）。
 
-清单横跨各域的表（审计三表、设备链接事件、门快照、语音投递），所以住在 app 根
+清单横跨各域的表（审计三表、设备链接事件、语音投递），所以住在 app 根
 的装配侧：持久化层不得反向 import 各域模型，核心层不得向上依赖，业务模块彼此
 零引用——唯一能同时看见全部这些表的地方就是组合根这一层。
 
@@ -21,7 +21,6 @@ from app.core.config import settings
 from app.core.logging import log_event
 from app.db.session import session_scope
 from app.modules.devices.models import DeviceLinkEvent
-from app.modules.doors.models import DoorSnapshot
 from app.modules.voice.models import VoiceDelivery
 from app.persistence import api_calls
 from app.persistence.audit import ApiCall, CommandAudit, JobRun
@@ -38,7 +37,6 @@ RETENTIONS: tuple[tuple[Any, Any], ...] = (
     (CommandAudit, CommandAudit.created_at),
     (JobRun, JobRun.occurred_at),
     (DeviceLinkEvent, DeviceLinkEvent.occurred_at),
-    (DoorSnapshot, DoorSnapshot.received_at),
     (VoiceDelivery, VoiceDelivery.occurred_at),
 )
 

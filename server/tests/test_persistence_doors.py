@@ -1,4 +1,4 @@
-"""新数据层：门现态、原始帧、会话与出水段。"""
+"""新数据层：门现态、状态流水、会话与出水段。"""
 
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ from app.db.base import Base
 from app.db.session import Database
 from app.modules.devices import crud as devices
 from app.modules.doors import crud as doors
-from app.modules.doors import service as doors_service
 
 T0 = datetime(2026, 11, 7, 12, 0, 0, tzinfo=UTC)
 
@@ -66,19 +65,6 @@ def test_live_state_upsert_and_list(session: Session) -> None:
     assert doors.get_door_live(session, "dev-a", 1)["state"] == "free"  # type: ignore[index]
     assert doors.get_occupied_by_cert(session, "dev-a", "c1") is None
     assert len(doors.list_doors(session, "dev-a")) == 1
-
-
-def test_snapshot_is_idempotent(session: Session) -> None:
-    _device(session)
-    first = doors.insert_snapshot(
-        session, "dev-a", "s1", 1, doors_service.SOURCE_DB_WATCH, T0, "12:00", T0, [{"door_no": 1}]
-    )
-    second = doors.insert_snapshot(
-        session, "dev-a", "s1", 1, doors_service.SOURCE_DB_WATCH, T0, "12:00", T0, [{"door_no": 1}]
-    )
-    assert first is True
-    # 重复投递按「已落库」回真：设备在收到 ack 前重发同一条，回执语义不变
-    assert second is True
 
 
 def test_session_and_segment_lifecycle(session: Session) -> None:
@@ -189,7 +175,4 @@ def test_missing_device_reads_are_empty(session: Session) -> None:
     session.rollback()
     with pytest.raises(IntegrityError):
         doors.open_session(session, "missing", 1, 0, "", T0, "observed")
-    session.rollback()
-    with pytest.raises(IntegrityError):
-        doors.insert_snapshot(session, "missing", "s", None, doors_service.SOURCE_STARTUP, T0, "", T0, [])
     session.rollback()
