@@ -9,6 +9,7 @@
 """
 
 import asyncio
+import contextlib
 from collections.abc import Callable
 from typing import cast
 
@@ -56,6 +57,7 @@ router = APIRouter()
 #: 与 1008 的分工：1008 = 凭据无效 → 设备清凭据重走注册；4403 = 设备被除名 →
 #: 注册救不回来，设备停止重连等人工。
 WS_CLOSE_DEVICE_REVOKED = 4403
+WS_CLOSE_GOING_AWAY = 1001
 
 
 def _db_session(ws: WebSocket) -> Session:
@@ -262,7 +264,14 @@ async def _accept_hello(ws: WebSocket, token_device_id: str | None) -> tuple[str
     await _call(ws, ota_crud.mark_installed_upto, device_id, version_code)
     # 设备随 hello 带回的上一次断开原因（0.4.35+）：记进 online 事件的 reason
     last_offline_reason = text_of(hello_payload, "last_offline_reason")
-    manager.register(device_id, ws)
+    old_ws = manager.register(device_id, ws)
+    if old_ws is not None:
+        # 被顶替的旧连接必须关掉：校园网静默丢包时旧处理协程挂在 receive_text()
+        # 上永不返回（TCP 层没有 FIN/RST，ASGI 层不抛 WebSocketDisconnect）。
+        # 关闭旧 WS 让 receive_text() 当场抛，旧协程的 finally 才能执行——
+        # 记 offline、刷 last_seen、写 device-disconnected 日志全在那一处。
+        with contextlib.suppress(Exception):
+            await old_ws.close(code=WS_CLOSE_GOING_AWAY)
     # 载入上次记下的钟偏差。从上线到首次 pong 之间有一小段窗口，不载入的话那段时间
     # 读到的是 0（等于不平移）——而刚接手、那边还被占着恰恰最常落在窗口里。
     await _call(ws, devices_service.load_clock_skew, device_id)
@@ -474,7 +483,9 @@ async def _anchor_ping_loop(ws: WebSocket, device_id: str) -> None:
     的唯一职责——链路判活由 uvicorn 的 WS 协议层 ping 承担（ws_ping_interval
     默认 20 秒、pong 超时断连），app 层不再重复判活。
 
-    连接关闭即正常退出（发送失败一并退出）；静默吞掉异常会让锚点无声失效。
+    发送失败（含 TCP 静默丢包后的 WS 关闭）时主动关闭 WS：让 handler 的
+    receive_text() 当场抛 WebSocketDisconnect、finally 正常收尾——否则
+    handler 挂在死连接上永不返回（校园网静默丢包不发 FIN/RST）。
     """
     while True:
         # 先等满一个周期再发首个 ping：刚握手成功的连接已在 hello_ack 里拿到锚点
@@ -489,4 +500,9 @@ async def _anchor_ping_loop(ws: WebSocket, device_id: str) -> None:
                 device_id=device_id,
                 error=str(exc),
             )
+            # 关闭 WS 让 handler 的 receive_text() 解除阻塞——不关的话 handler
+            # 永远等不到下一个帧（网络静默丢包，TCP 层没有 FIN/RST）
+            with contextlib.suppress(Exception):
+                await ws.close(code=WS_CLOSE_GOING_AWAY)
+            return
             return

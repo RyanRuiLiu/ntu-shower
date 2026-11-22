@@ -21,11 +21,17 @@ class ConnectionManager:
         #: 不必等下一次内容变化或保活周期——刚握手的设备应当立刻拿到现态。
         self._generations: dict[str, int] = {}
 
-    def register(self, device_id: str, ws: WebSocket) -> bool:
-        replaced = device_id in self._connections
+    def register(self, device_id: str, ws: WebSocket) -> WebSocket | None:
+        """注册连接，返回被顶替的旧连接（如有）。
+
+        调用方（网关握手）拿到旧连接后必须关闭它：校园网静默丢包时旧连接在 TCP
+        层已死但没有 FIN/RST，旧处理协程挂在 receive_text() 上永不返回——关闭
+        旧 WS 让 receive_text() 当场抛 WebSocketDisconnect，finally 才能跑。
+        """
+        old_ws = self._connections.get(device_id)
         self._connections[device_id] = ws
         self._generations[device_id] = self._generations.get(device_id, 0) + 1
-        return replaced
+        return old_ws
 
     def generation_of(self, device_id: str) -> int:
         """这条设备连接的身份代数；没有连接时为 0。

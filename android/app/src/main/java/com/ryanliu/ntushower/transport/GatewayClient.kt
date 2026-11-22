@@ -161,7 +161,7 @@ class GatewayClient(private val context: Context, private val callback: Callback
         is java.net.UnknownHostException -> "dns"
         is javax.net.ssl.SSLException -> "tls"
         is java.net.ConnectException, is java.net.SocketTimeoutException -> "tcp"
-        else -> "error:${t.javaClass.simpleName}"
+        else -> "error:${t.javaClass.simpleName}:${t.message?.take(120) ?: ""}"
     }
 
     /** 在后台线程预建 HTTP 客户端（TLS 上下文读盘），把首次构造移出主线程。 */
