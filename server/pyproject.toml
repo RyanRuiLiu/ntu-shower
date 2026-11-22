@@ -94,7 +94,9 @@ timeout_method = "thread"
 # 18 进程 14.1s / auto(32) 16.4s——峰值在 12，过多进程的调度开销反超并行收益。
 # 覆盖率在并行下由 pytest-cov 合并各进程数据，统计已验证正确。
 # 需要串行时用 `pytest -n 0` 覆盖。
-addopts = "-ra --strict-markers -n 12"
+# --cov-fail-under 让 [tool.coverage.report] 的 fail_under 真正拦截退出码：
+# 没有它，覆盖率不足只在报告里打印一行 FAIL，门等于不存在。
+addopts = "-ra --strict-markers -n 12 --cov-fail-under=96"
 
 [tool.coverage.run]
 source = ["app"]

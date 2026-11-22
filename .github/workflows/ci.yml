@@ -104,7 +104,7 @@ jobs:
         if: needs.changes.outputs.server == 'true'
       - run: lint-imports
         if: needs.changes.outputs.server == 'true'
-      - run: pytest -q -n auto --cov=app --cov-report=term-missing
+      - run: pytest -q -n auto --cov=app --cov-fail-under=96 --cov-report=term-missing
         if: needs.changes.outputs.server == 'true'
       - name: Markdown lint
         working-directory: .
