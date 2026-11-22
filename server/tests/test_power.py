@@ -491,6 +491,12 @@ def test_resume_at_the_moment_writes_back_and_clears(fresh_db: str, monkeypatch:
     hold = _get_hold(fresh_db)
     assert hold is None
     assert sent == [("clock.set", {"datetime": "2026-11-21 00:30:00", "rearm": False})]
+    from app.persistence.audit import JobRun
+
+    with device_link.db() as session:
+        resumed = session.query(JobRun).filter(JobRun.outcome == "resumed").all()
+    assert len(resumed) == 1
+    assert resumed[0].device_id == DEVICE
 
 
 def test_resume_waits_while_a_roster_student_is_occupying(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -873,6 +879,11 @@ def test_resume_endpoint_resumes_when_holding(
     assert resp.json()["resumed"] is True
     assert _get_hold(fresh_db) is None
     assert sent == [("clock.set", {"datetime": "2026-11-21 00:30:00", "rearm": False})]
+    # 手动恢复不冒充后台任务：它的审计在接口调用与命令流水，不在 job_runs
+    from app.persistence.audit import JobRun
+
+    with device_link.db() as session:
+        assert session.query(JobRun).filter(JobRun.outcome == "resumed").count() == 0
 
 
 def test_resume_endpoint_before_the_moment_attempts_a_cancel_arming(

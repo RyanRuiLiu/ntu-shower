@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Security
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import caller, device_scope_guard
+from app.contracts import HoldSource
 from app.core.errors import problem_responses
 from app.db.deps import get_db
 
@@ -57,7 +58,7 @@ def hold_status(device_id: str, session: Session = Depends(get_db)) -> HoldStatu
 )
 async def resume_device(device_id: str, session: Session = Depends(get_db)) -> PowerActionResult:
     """把墙钟写回真实时刻、清 hold 列，回到 following_schedule。未在 hold 中时幂等（resumed=false）。"""
-    result = await service.resume(session, device_id)
+    result = await service.resume(session, device_id, origin=HoldSource.MANUAL)
     return PowerActionResult(
         device_id=str(result["device_id"]),
         resumed=bool(result["resumed"]),

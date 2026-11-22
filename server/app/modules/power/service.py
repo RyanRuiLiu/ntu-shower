@@ -467,7 +467,7 @@ async def _resume_if_due(session: Session, device_id: str, hold: dict[str, Any])
         return  # 有人在用：钟跳会清掉会话，等人走再恢复
     if not manager.is_online(device_id):
         return  # 设备已失联（截止到点即断电）：恢复等它回连、空闲后自动进行
-    await resume(session, device_id)
+    await resume(session, device_id, origin=HoldSource.AUTOMATED)
 
 
 # ── 校正（following_schedule 下才进行；hold 期间的偏差是故意的）────────────
@@ -634,15 +634,19 @@ def hold_status(session: Session, device_id: str) -> HoldStatus:
     return _hold_view(session, device_id, hold)
 
 
-async def resume(session: Session, device_id: str) -> dict[str, object]:
+async def resume(session: Session, device_id: str, *, origin: HoldSource) -> dict[str, object]:
     """恢复（Resume Schedule）：墙钟写回真实时刻（hold 自己的第二步，无条件执行
-    ——不依赖 time_sync 开关：偏置若不写回，表盘永远快一个偏移量，下一晚施加的
-    恢复时刻算术即被破坏），清 hold 列，回到 following_schedule。
+    ——不依赖 time_sync 开关：偏置若不写回，表盘永远快一个偏移量，下一晚的恢复
+    时刻算术即被破坏），清 hold 列，回到 following_schedule。
 
     恢复时刻前的手动恢复同时是**尽力取消**：写准后的表盘此刻 + 1.5 分钟断电，让设备
     按操作者意图尽早停机；恢复时刻后的自动恢复不取消——整夜覆盖布防的截止（次日
     auto_close_time）让设备运行到次日自然关闭。写准即偏差纪元作废，表盘回到真实轴，
     布防截止的真实映射随之固定。
+
+    origin 区分两类调用方：后台对账的自动恢复记入 job_runs（后台任务审计的本体）；
+    运维经 API 的手动恢复不冒充后台任务——它在接口调用与命令流水里已各有审计行
+    （POST /resume 与由此下发的 clock.set），只留 stdout 日志。
 
     未在 hold 中时幂等返回 resumed=false。
     """
@@ -653,15 +657,24 @@ async def resume(session: Session, device_id: str) -> dict[str, object]:
         return {"device_id": device_id, "resumed": False}
     facts = devices_service.power_facts(session, device_id)
     if facts is None:
-        _record("resume-failed", "上报事实缺失，无法写回墙钟", device_id, level="WARNING")
+        if origin is HoldSource.AUTOMATED:
+            _record("resume-failed", "上报事实缺失，无法写回墙钟", device_id, level="WARNING")
+        else:
+            log_event("WARNING", "power.resume-failed", "上报事实缺失，无法写回墙钟", device_id=device_id)
         return {"device_id": device_id, "resumed": False}
     real_local = _now_utc().astimezone(timezone(timedelta(minutes=facts[2])))
     if not await _step_wall_clock(session, device_id, _wall_text(real_local), rearm=False):
-        _record("resume-failed", "墙钟写回没成功，hold 保持，下一轮重试", device_id, level="WARNING")
+        if origin is HoldSource.AUTOMATED:
+            _record("resume-failed", "墙钟写回没成功，hold 保持，下一轮重试", device_id, level="WARNING")
+        else:
+            log_event("WARNING", "power.resume-failed", "墙钟写回没成功，hold 保持，下一轮重试", device_id=device_id)
         return {"device_id": device_id, "resumed": False}
     await _cancel_arming_if_pending(session, device_id, hold, facts[1], real_local)
     devices_crud.clear_hold(session, device_id)
-    _record("resumed", "已恢复常规电源计划", device_id)
+    if origin is HoldSource.AUTOMATED:
+        _record("resumed", "已恢复常规电源计划", device_id)
+    else:
+        log_event("INFO", "power.resumed", "运维手动恢复常规电源计划", device_id=device_id)
     return {"device_id": device_id, "resumed": True}
 
 
