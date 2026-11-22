@@ -531,6 +531,32 @@ def test_anchor_loop_sends_periodic_pings_and_keeps_the_link(
         frames.recv_until(ws, "link.ping")
 
 
+def test_anchor_loop_closes_a_dead_link(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ping 发送失败（TCP 静默丢包后的死连接）：主动关闭让 handler 的 receive_text() 解除阻塞。"""
+    from app.gateway import routes as gateway_routes
+
+    monkeypatch.setattr(gateway_routes, "PING_INTERVAL_S", 0.01)
+    closed: dict[str, int | None] = {}
+
+    class _DeadLink:
+        async def send_text(self, _text: str) -> None:
+            message = "link is dead"
+            raise RuntimeError(message)
+
+        async def close(self, code: int | None = None) -> None:
+            closed["code"] = code
+
+    events: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        gateway_routes, "log_event", lambda _l, event, _m, **attrs: events.append({"event": event, **attrs})
+    )
+
+    asyncio.run(gateway_routes._anchor_ping_loop(_DeadLink(), "dev-anchor-dead"))
+
+    assert closed["code"] == gateway_routes.WS_CLOSE_GOING_AWAY
+    assert any(record["event"] == "gateway.ping-loop-ended" for record in events)
+
+
 def test_link_events_record_connect_and_disconnect(client: TestClient, fresh_db: str) -> None:
     """设备上线与下线各留一条记录。
 

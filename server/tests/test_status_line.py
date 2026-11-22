@@ -174,3 +174,75 @@ def test_device_without_door_data_still_receives_the_fleet_status(
     assert message["payload"]["floors"] == [
         {"device_id": device_id, "name": "6F", "online": True, "free": None},
     ]
+
+
+def test_tick_failure_is_logged_with_throttle(monkeypatch: pytest.MonkeyPatch) -> None:
+    """汇总读库失败：记一条错误并交还统一循环下一轮重试；间隔内不重复刷屏。"""
+    import asyncio
+
+    def boom() -> object:
+        message = "db busy"
+        raise RuntimeError(message)
+
+    events: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(status_line_service, "_snapshot_in_own_session", boom)
+    monkeypatch.setattr(status_line_service, "log_event", lambda _l, event, _m, **attrs: events.append((event, attrs)))
+
+    pusher = status_line_service._Pusher()
+    asyncio.run(pusher.tick())
+    asyncio.run(pusher.tick())
+
+    failures = [event for event, _attrs in events if event == "status_line.snapshot-failed"]
+    assert len(failures) == 1
+    assert pusher.last_payload is None
+
+
+def test_push_failure_is_logged_and_does_not_poison_the_round(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """单条连接发送失败：记警告、按未送达处理，不影响其余设备与下一轮。"""
+    import asyncio
+
+    snapshot = status_line_service._Snapshot({"floors": []}, (status_line_service._Recipient("dev-push-fail", 1),))
+    monkeypatch.setattr(status_line_service, "_snapshot_in_own_session", lambda: snapshot)
+
+    events: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(status_line_service, "log_event", lambda _l, event, _m, **attrs: events.append((event, attrs)))
+
+    async def dead_send(_device_id: str, _payload: object) -> bool:
+        message = "broken pipe"
+        raise RuntimeError(message)
+
+    monkeypatch.setattr(status_line_service.manager, "send_to", dead_send)
+
+    pusher = status_line_service._Pusher()
+    asyncio.run(pusher.tick())
+
+    assert [event for event, _attrs in events if event == "status_line.push-failed"]
+    assert pusher.last_payload == {"floors": []}
+    assert "dev-push-fail" not in pusher.last_sent
+
+
+def test_unchanged_payload_skips_the_resend_within_the_keepalive_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """载荷没变且连接未换代：保活窗口内不重发，设备按收帧判活。"""
+    import asyncio
+
+    snapshot = status_line_service._Snapshot({"floors": []}, (status_line_service._Recipient("dev-keepalive", 1),))
+    monkeypatch.setattr(status_line_service, "_snapshot_in_own_session", lambda: snapshot)
+    monkeypatch.setattr(status_line_service, "log_event", lambda *_args, **_kwargs: None)
+
+    sends: list[str] = []
+
+    async def send(_device_id: str, _payload: object) -> bool:
+        sends.append(_device_id)
+        return True
+
+    monkeypatch.setattr(status_line_service.manager, "send_to", send)
+
+    pusher = status_line_service._Pusher()
+    asyncio.run(pusher.tick())
+    asyncio.run(pusher.tick())
+
+    assert sends == ["dev-keepalive"]

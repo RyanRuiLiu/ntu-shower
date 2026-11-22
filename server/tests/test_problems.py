@@ -2,6 +2,7 @@
 
 import re
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core import errors, problems
@@ -52,6 +53,48 @@ def test_http_exception_is_rendered_as_problem_json(client: TestClient, fresh_db
     body = api_miss.json()
     assert body["type"].endswith("/problems/http-404")
     assert {"type", "title", "status", "detail"} <= set(body)
+
+
+def test_unhandled_exception_returns_500_and_logs_the_trace(monkeypatch: pytest.MonkeyPatch) -> None:
+    """未登记异常的最后防线：500 统一形状，栈与路径进日志而非框架默认 detail。
+
+    Starlette 的 ServerErrorMiddleware 发出响应后会把异常重新抛出（供服务器层记
+    日志），共享 client 夹具因此拿到的是重抛；这里用独立小应用关掉重抛，直接
+    钉响应体与日志两样产物。
+    """
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.core.errors import install_error_handlers
+    from app.modules.doors import service as doors_service
+
+    events: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "app.core.logging.log_event", lambda _l, event, _m, **attrs: events.append({"event": event, **attrs})
+    )
+
+    probe = FastAPI()
+    install_error_handlers(probe)
+
+    @probe.get("/boom")
+    def route() -> list[object]:
+        return doors_service.list_doors(None, None)  # type: ignore[arg-type]
+
+    def explode(*_args: object, **_kwargs: object) -> object:
+        message = "exploded"
+        raise RuntimeError(message)
+
+    monkeypatch.setattr(doors_service, "list_doors", explode)
+
+    with TestClient(probe, raise_server_exceptions=False) as probe_client:
+        response = probe_client.get("/boom")
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Internal Server Error"}
+    logged = [event for event in events if event["event"] == "http.unhandled"]
+    assert logged
+    assert "RuntimeError('exploded')" in str(logged[0]["error"])
+    assert logged[0]["path"] == "/boom"
 
 
 def test_api_problem_error_carries_problem_and_detail() -> None:

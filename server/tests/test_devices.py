@@ -691,3 +691,31 @@ def test_link_events_record_the_reasons(client: TestClient, admin_headers: dict[
         assert rows
         assert rows[-1].event == "online"
         assert rows[-1].reason == "dns"
+
+
+def test_link_event_and_log_history_endpoints(client: TestClient, fresh_db: str, admin_headers: dict[str, str]) -> None:
+    """链路历史与日志上送历史两个只读出口：未知设备 404，已登记设备按倒序列出。"""
+    from app.contracts import DeviceLogKind
+    from app.db.base import utcnow
+    from app.modules.devices.models import DeviceLog
+    from app.modules.devices.schemas import LINK_ONLINE
+
+    missing = client.get(f"/api/v1/devices/{DEVICE_ID}/link-events", headers=admin_headers)
+    assert missing.status_code == 404
+
+    device_link.register_trusted_device(DEVICE_ID)
+    with device_link.db() as session:
+        session.add(DeviceLinkEvent(device_id=DEVICE_ID, occurred_at=utcnow(), event=LINK_ONLINE))
+        session.add(DeviceLog(device_id=DEVICE_ID, kind=DeviceLogKind.DEVICE, content="log-1", uploaded_at=utcnow()))
+        session.commit()
+
+    rows = client.get(f"/api/v1/devices/{DEVICE_ID}/link-events", headers=admin_headers).json()
+    assert rows
+    assert rows[0]["event"] == "online"
+
+    logs = client.get(f"/api/v1/devices/{DEVICE_ID}/logs/history", headers=admin_headers).json()
+    assert logs
+    assert logs[0]["content"] == "log-1"
+
+    no_logs = client.get("/api/v1/devices/dev-missing/logs/history", headers=admin_headers)
+    assert no_logs.status_code == 404
