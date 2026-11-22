@@ -6,6 +6,16 @@
 > 0.6.3 直接升到 0.6.5（提交 d9e29d2），该节原为一次记档性条目。其内容已并入
 > 下方 0.6.5 的 Fixed；不保留一个没有对应版本状态的版本号。
 
+## [0.8.12] - 2026-11-23
+
+### Changed
+
+- **链路历史全队化并标注设备**：新增 `GET /api/v1/devices/link-events`（全队或按 device_id 过滤，行内 device_id 回答"是哪台设备"），取代按设备的 `/devices/{id}/link-events`——审计页的链路历史此前无视页内设备过滤、固定显示某台设备且不标设备名。审计页与其他四类一致走页内过滤，表格新增设备列。全队读取型端点的对象级边界以 `device_scope_filter` 统一判定：过滤设备须在作用域内，无过滤读全队须持通配作用域（/audit/commands、/audit/job-runs、/ota/installs 同批接入）。
+
+### Fixed
+
+- **部署关闭的 1001 提前到 uvicorn 收尾之前**（0.8.8 修复的更正）：uvicorn 的 shutdown 先对全部连接发 1012、之后才进 lifespan——lifespan 里的发码永远晚于它（2026-11-22 生产实证：设备在部署重启时仍记录 "Code 1012 is reserved"）。部署入口改为 `app/serve.py` 的 `uvicorn.Server` 子类，在 shutdown 最前向全部设备发 1001（Going Away）再交还 uvicorn；关闭码单源化到 core.protocol（消除 main 与 gateway 的重复定义）。
+
 ## [0.8.11] - 2026-11-22
 
 ### Added
