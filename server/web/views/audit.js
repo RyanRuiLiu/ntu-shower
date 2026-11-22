@@ -65,12 +65,20 @@ function renderDetail(row, title) {
 const mono = (text) => `<span class="mono">${esc(text ?? '')}</span>`
 const muted = (text) => `<span class="muted">${esc(text ?? PLACEHOLDER)}</span>`
 
-/** 参数对象的表格摘要：`k=v` 平铺、超长截断（完整原文在详情面板）。 */
+/** 参数的表格摘要：API 以 JSON 文本携带，解析成 `k=v` 平铺、超长截断（完整原文在详情面板）。 */
 const paramSummary = (params) => {
-  const flat = Object.entries(params)
-    .map(([key, value]) => `${key}=${typeof value === 'string' ? value : JSON.stringify(value)}`)
+  let value = params
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value)
+    } catch {
+      return value
+    }
+  }
+  const flat = Object.entries(value)
+    .map(([key, item]) => `${key}=${typeof item === 'string' ? item : JSON.stringify(item)}`)
     .join(' ')
-  return flat.length > 48 ? `${flat.slice(0, 48)}…` : flat
+  return flat ? (flat.length > 48 ? `${flat.slice(0, 48)}…` : flat) : undefined
 }
 
 /**
