@@ -82,17 +82,26 @@ def latest_for(session: Session, device_id: str, current_version_code: int) -> J
 
 
 def mark_installed_upto(session: Session, device_id: str, version_code: int) -> None:
-    """设备上报了某版本：把所有 ≤ 该版本的未确认发布标记为已安装。"""
+    """设备上报了某版本：记录该版本的安装确认；更早的 force 发布补抑制标记。
+
+    历史只含设备真实确认过的版本——不把更早的发布伪造成本设备的安装记录
+    （2026-11-23 业主裁定，此前 ≤ 上报版本的未确认发布全部补记、时刻失实）。
+    force 例外：它们 ≤ 已装版本时若不标记会永远重推（is_installed 抑制重推），
+    补的是抑制标记而非安装事实。
+    """
     device = _device(session, device_id)
     if device is None:
         return
-    releases = session.scalars(select(OtaRelease).where(OtaRelease.version_code <= version_code)).all()
     existing = {
         install.release_id
         for install in session.scalars(select(OtaReleaseInstall).where(OtaReleaseInstall.device_id == device.id)).all()
     }
     applied_at = utcnow()
-    for release in releases:
+    reported = session.scalars(select(OtaRelease).where(OtaRelease.version_code == version_code)).all()
+    older_force = session.scalars(
+        select(OtaRelease).where(OtaRelease.version_code < version_code, OtaRelease.force.is_(True))
+    ).all()
+    for release in (*reported, *older_force):
         if release.id not in existing:
             session.add(OtaReleaseInstall(release_id=release.id, device_id=device.id, applied_at=applied_at))
     session.commit()

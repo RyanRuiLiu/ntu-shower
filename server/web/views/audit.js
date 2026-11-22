@@ -65,6 +65,14 @@ function renderDetail(row, title) {
 const mono = (text) => `<span class="mono">${esc(text ?? '')}</span>`
 const muted = (text) => `<span class="muted">${esc(text ?? PLACEHOLDER)}</span>`
 
+/** 参数对象的表格摘要：`k=v` 平铺、超长截断（完整原文在详情面板）。 */
+const paramSummary = (params) => {
+  const flat = Object.entries(params)
+    .map(([key, value]) => `${key}=${typeof value === 'string' ? value : JSON.stringify(value)}`)
+    .join(' ')
+  return flat.length > 48 ? `${flat.slice(0, 48)}…` : flat
+}
+
 /**
  * 三种审计的差异，**只在这里**。内容以原值为主（见模块注释），所以这里不做中文映射。
  *
@@ -96,10 +104,11 @@ const TABS = {
     kind: 'commands',
     source: 'audit',
     time: (row) => row.created_at,
-    headers: ['设备', '动作', '状态', '原因', '耗时'],
+    headers: ['设备', '动作', '参数', '状态', '原因', '耗时'],
     cells: (row) => [
       deviceCell(row.device_id),
       mono(row.action),
+      muted(row.params === null ? undefined : paramSummary(row.params)),
       statusBadge(row.status),
       muted(row.reason_code),
       mono(row.finished_at ? `${new Date(row.finished_at) - new Date(row.created_at)} ms` : PLACEHOLDER),
@@ -117,7 +126,7 @@ const TABS = {
       row.door_no === null ? PLACEHOLDER : mono(row.door_no),
       row.cert_no === null ? PLACEHOLDER : codeCell(row.cert_no),
       mono(row.job),
-      mono(row.action),
+      row.action === null ? PLACEHOLDER : mono(row.action),
       mono(row.outcome),
       row.threshold_s === null ? PLACEHOLDER : mono(`${row.threshold_s} 秒`),
       muted(row.reason),

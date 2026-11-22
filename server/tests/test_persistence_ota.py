@@ -64,6 +64,18 @@ def test_force_release_stops_after_install(session: Session) -> None:
     assert ota.latest_for(session, "dev-a", 605) is None
 
 
+def test_install_history_records_only_the_reported_version(session: Session) -> None:
+    """安装确认只记设备真实上报的版本：更早的非 force 发布不得伪造安装记录。"""
+    _device(session)
+    ota.insert_release(session, "0.6.3", 603, "b" * 64, False, ["*"])
+    ota.insert_release(session, "0.6.5", 605, "a" * 64, False, ["*"])
+
+    ota.mark_installed_upto(session, "dev-a", 605)
+
+    assert ota.is_installed(session, "dev-a", "0.6.5") is True
+    assert ota.is_installed(session, "dev-a", "0.6.3") is False
+
+
 def test_target_whitelist(session: Session) -> None:
     _device(session, "dev-a")
     _device(session, "dev-b")

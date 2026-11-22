@@ -88,14 +88,15 @@ def test_force_higher_version_wins_over_normal(fresh_db: str) -> None:
     assert rel["force"] is True
 
 
-def test_mark_installed_upto_marks_all_lower_versions(fresh_db: str) -> None:
+def test_mark_installed_upto_records_only_the_reported_version(fresh_db: str) -> None:
+    """安装确认只记真实上报的版本：更早的非 force 发布不得伪造安装记录。"""
     device_link.register_device_raw("dev-x")
     _publish("0.1.0", 1)
     _publish("0.2.0", 2)
 
     _repo("mark_installed_upto", "dev-x", 2)
-    assert _repo("is_installed", "dev-x", "0.1.0")
     assert _repo("is_installed", "dev-x", "0.2.0")
+    assert not _repo("is_installed", "dev-x", "0.1.0")
     assert not _repo("is_installed", "dev-y", "0.2.0")
 
 
