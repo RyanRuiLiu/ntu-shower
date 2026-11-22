@@ -490,4 +490,3 @@ async def _anchor_ping_loop(ws: WebSocket, device_id: str) -> None:
             with contextlib.suppress(Exception):
                 await ws.close(code=WS_CLOSE_GOING_AWAY)
             return
-            return
