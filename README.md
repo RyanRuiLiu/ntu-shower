@@ -19,7 +19,7 @@
  ▼
 服务端（FastAPI 模块化单体）
  ├─ 设备网关：凭据握手、命令下发与回执、幂等接收
- ├─ HTTP API（scope 权限化）+ WebSocket 推送 → 网页管理台（React）
+ ├─ HTTP API（scope 权限化）+ WebSocket 推送 → 网页管理台（零构建单页）
  └─ 后台自动化：会话与喷头生命周期的判据、调度与执行
 ```
 
