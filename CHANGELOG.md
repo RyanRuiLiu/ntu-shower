@@ -6,6 +6,12 @@
 > 0.6.3 直接升到 0.6.5（提交 d9e29d2），该节原为一次记档性条目。其内容已并入
 > 下方 0.6.5 的 Fixed；不保留一个没有对应版本状态的版本号。
 
+## [0.8.11] - 2026-11-22
+
+### Added
+
+- **今晚延长补纯读端点 `GET /api/v1/devices/{device_id}/hold`**：状态读取此前只能借看板全量（`jobs:read`）或 POST 幂等响应（`devices:write`），缺单台纯读出口。读语义配 `devices:read` + device_scope_guard，形状与派生判据同源（与看板 holds 列表逐字段一致）；未建立意图时 404 problem+json。
+
 ## [0.8.10] - 2026-11-22
 
 ### Changed
