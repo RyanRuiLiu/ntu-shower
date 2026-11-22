@@ -6,6 +6,20 @@
 > 0.6.3 直接升到 0.6.5（提交 d9e29d2），该节原为一次记档性条目。其内容已并入
 > 下方 0.6.5 的 Fixed；不保留一个没有对应版本状态的版本号。
 
+## [0.8.9] - 2026-11-22
+
+### Removed
+
+- **door_snapshots 原始帧表删除**（ADR-0003 后记）：原始层自 v2 数据层上线起没有任何生产读者——派生四表（现态、状态迁移、会话、段）完整覆盖全部业务信息，207MB（全库 66%）的原始帧是纯成本。回执语义相应改为「收到 ack ⇔ 帧已受理」：派生失败在 service 内部止住并照常返回 ok，漏掉的边沿由下一帧 diff 补上，网关据此扣回执的路径一并删除。迁移基线同步改为 20 张表（生产库已先行 DROP，本次部署无迁移动作）；v1 时代的核对工具（audit_timeline、find_out_of_hours，只认旧系统单数表名）随原始层叙事一并移除。
+
+### Changed
+
+- **覆盖率门强化为真拦截**：`fail_under = 96` 之前只让报告打印一行 FAIL，pytest 与 CI 的退出码不受影响——门等于不存在（0.8.8 的 CI 在 95.80% 下仍然绿）。addopts 与 CI 命令显式加 `--cov-fail-under=96`，不足即失败。覆盖率缺口本身（errors.py 的 http.unhandled、status_line 的 tick 失败分支等错误分支）以真实行为测试补齐，恢复到 96.6% 以上。
+
+### Fixed
+
+- **alembic 的 fileConfig 不再殃及应用 logger**：stdlib 的 `fileConfig` 默认 `disable_existing_loggers=True`，alembic 运行时把此刻已存在的 logger 全部置 disabled——应用 logger（导入时创建）被殃及后，同进程内后续日志全部静默（测试并行 worker 的偶发丢日志由此而来）。env.py 显式传 `disable_existing_loggers=False`。
+
 ## [0.8.8] - 2026-11-22
 
 ### Changed
