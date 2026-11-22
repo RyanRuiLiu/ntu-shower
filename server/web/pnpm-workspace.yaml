@@ -1,9 +1,0 @@
-overrides:
-  # minimatch < 11.0.1 的 globParts 放大 DoS（GHSA 对 minimatch 的 medium 级公告）：
-  # 两条引入链都在 devDependencies（eslint / typescript-eslint），但构建机同样执行
-  # 它，按行业惯例 dev 依赖的已知漏洞一并收口。
-  "minimatch@<11.0.1": ">=11.0.1"
-
-minimumReleaseAgeExclude:
-  - '@eslint/config-array@0.23.6'
-  - eslint@10.15.0

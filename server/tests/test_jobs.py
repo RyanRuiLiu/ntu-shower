@@ -70,10 +70,8 @@ def test_frontend_groups_scheduled_rows_by_the_job_field() -> None:
     jobs 改名时服务端字段从 task/feature 定为 job，前端漏改的表现是四个任务段
     永远显示"当前没有排定的动作"——静默且无人报错，这里钉住消费的字段名。
     """
-    source = (Path(__file__).resolve().parents[1] / "web" / "src" / "pages" / "OverviewPage.tsx").read_text(
-        encoding="utf-8"
-    )
-    assert "byJob.get(row.job)" in source
+    source = (Path(__file__).resolve().parents[1] / "web" / "views" / "overview.js").read_text(encoding="utf-8")
+    assert "row.job" in source
     assert "row.task" not in source
 
 

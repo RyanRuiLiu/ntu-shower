@@ -47,7 +47,6 @@ jobs:
               - '.github/workflows/ci.yml'
             web:
               - 'server/web/**'
-              - 'server/web-legacy/**'
             docs:
               - '**/*.md'
 
@@ -110,18 +109,13 @@ jobs:
         working-directory: .
         if: needs.changes.outputs.docs == 'true'
         run: npx --yes markdownlint-cli2@0.20.0 "*.md" "docs/*.md" "docs/adr/*.md" "deploy/*.md" ".github/*.md" --config .markdownlint.json
-      - name: Web (tsc + eslint + stylelint + vitest)
+      - name: Web (eslint + stylelint)
         working-directory: server/web
         if: needs.changes.outputs.web == 'true'
         run: |
-          corepack enable pnpm
-          pnpm install --frozen-lockfile
-          pnpm exec tsc -b
-          pnpm exec eslint src --config eslint.config.mjs
-          pnpm exec vitest run
-          cd ..
-          node web/node_modules/eslint/bin/eslint.js --config web-legacy/eslint.config.mjs web-legacy
-          node web/node_modules/stylelint/bin/stylelint.mjs "web-legacy/style/*.css" --config web-legacy/.stylelintrc.json
+          npm ci
+          npx eslint . --config eslint.config.mjs
+          npx stylelint "style/*.css" --config .stylelintrc.json
       - name: Semgrep（安装：不进应用 venv，见 requirements-dev.txt 的说明）
         if: needs.changes.outputs.server == 'true'
         run: pip install semgrep==1.184.0

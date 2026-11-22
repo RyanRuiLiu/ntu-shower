@@ -13,12 +13,9 @@ cd "$(dirname "$0")/../server"
 .venv/Scripts/pre-commit.exe run semgrep-sast --hook-stage manual
 .venv/Scripts/pre-commit.exe run semgrep-project --hook-stage manual
 .venv/Scripts/python.exe -m pytest -q --cov=app --cov-report=term-missing
-# 网页端门禁由 pnpm 执行：新版（React/TS）走 tsc + eslint + vitest，构建在 docker
-# 镜像里跑。旧版（web-legacy/，零构建 JS）走 eslint no-undef + stylelint CSS 令牌
-# 纪律——检查写了没人跑等于没有（2026-11-10 漏导入事故的教训）；两条都从 server/
-# 起跑，因为 ESLint v10 要求 CLI 目标落在 config 所在目录之内，从 web/ 指向兄弟
-# 目录会被整体忽略。与 CI 的 web job 逐条一致。
-( cd web && pnpm exec tsc -b && pnpm exec eslint src --config eslint.config.mjs && pnpm exec vitest run )
-node web/node_modules/eslint/bin/eslint.js --config web-legacy/eslint.config.mjs web-legacy
-node web/node_modules/stylelint/bin/stylelint.mjs "web-legacy/style/*.css" --config web-legacy/.stylelintrc.json
+# 网页端门禁：eslint no-undef（漏导入即红——2026-11-10 生产事故的教训）+ stylelint
+# CSS 令牌纪律。零构建前端，工具链自持（devDependencies 仅 eslint/stylelint，npm ci）；
+# 从 web/ 目录内跑，ESLint v10 要求 CLI 目标落在 config 所在目录之内。与 CI 的 web
+# job 逐条一致。
+( cd web && npx eslint . --config eslint.config.mjs && npx stylelint "style/*.css" --config .stylelintrc.json )
 ( cd .. && npx --yes markdownlint-cli2@0.20.0 "*.md" "docs/*.md" "docs/adr/*.md" "deploy/*.md" ".github/*.md" --config .markdownlint.json )

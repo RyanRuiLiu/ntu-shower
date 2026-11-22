@@ -71,12 +71,9 @@ cp gradle.properties.example gradle.properties
 
 ## 网页端开发
 
-网页端有两个界面，共用同一套 API 契约，区别只在界面实现：
+网页端是 `server/web/` 下的零构建单页（index.html + views/ 视图切换），由服务端直接托管在根路径，修改后刷新页面即可。网络访问只能经统一 API 客户端 `core/api.js`，路径与参数只在其中出现。
 
-- **新版**（主入口）：`server/web/src/`，React + TypeScript（HeroUI）。本地开发 `pnpm dev`；构建在 Docker 的 web-builder 阶段执行。网络访问统一走 `api/client.ts`，路径与参数只在 `api/queries.ts` 出现。
-- **旧版**（`/legacy/` 并存入口）：`server/web-legacy/` 下的零构建静态文件，由服务端直接托管，修改后刷新页面即可。网络访问只能经统一 API 客户端 `core/api.js`。
-
-- 旧版使用 ES 模块、`const`/`let`、单引号、不写分号；新版遵循 eslint（typescript-eslint）约束。
+- 使用 ES 模块、`const`/`let`、单引号、不写分号；eslint（no-undef）约束漏导入。
 - 共享状态集中管理；组件卸载时解除订阅与定时器；异步失败必须落到界面上。
 - 不得把未转义的外部内容写入 `innerHTML`；不得写内联事件处理器。
 - 交互必须可键盘完成、焦点可见；颜色不是唯一信息载体；尊重减少动态效果的系统设置。

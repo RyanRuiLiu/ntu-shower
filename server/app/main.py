@@ -30,7 +30,6 @@ from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -275,30 +274,13 @@ def create_app() -> FastAPI:
                 return ProblemDoc(code=problem.code, title=problem.title, status=problem.status)
         raise StarletteHTTPException(status_code=404)
 
-    # 网页端挂在根路径：它就是这个服务唯一的人机界面，而 API 路由已在前注册。
-    # history 路由的 SPA fallback 用 catch-all 路由（FastAPI 社区主流写法）：
-    # - API/网关/健康检查前缀的未匹配路径回 404 problem+json——接口错误绝不能
-    #   伪装成 200 的 HTML；
-    # - 其余未匹配路径：dist 里真实存在的文件（assets、favicon）按文件回，
-    #   否则回 dist/index.html，让 /devices 等前端路由刷新时落到应用入口。
-    # 本地开发时 dist 不存在则回退 web/ 根的源 index.html（Vite dev server 供 JS）。
-    # legacy 前缀例外：它是与新版并存的旧版界面（同一套新契约、不同界面实现），
-    # 源码树是 server/web-legacy/（零构建，服务端直接托管），不回 SPA 入口。
-    server_dir = Path(__file__).resolve().parent.parent
-    dist_dir = server_dir / "web" / "dist"
-    legacy_dir = server_dir / "web-legacy"
+    # 网页端挂在根路径：零构建单页（index.html + views/ 视图切换，无前端路由），
+    # StaticFiles html=True 直接托管源码树。挂在全部 API 路由之后，未匹配路径才
+    # 落到这里；StaticFiles 对不存在的文件抛 404，经统一错误面回 problem+json——
+    # 接口错误与未知路径都不伪装成 200 的 HTML。
+    web_dir = Path(__file__).resolve().parent.parent / "web"
 
-    app.mount("/legacy", StaticFiles(directory=str(legacy_dir), html=True), name="legacy")
-
-    @app.get("/{spa_path:path}", include_in_schema=False)
-    async def spa_fallback(spa_path: str) -> Response:
-        if spa_path.startswith(("api/", "gateway/", "ota/", "healthz", "problems/", "legacy/")):
-            raise StarletteHTTPException(status_code=404)
-        base = dist_dir if dist_dir.is_dir() else server_dir / "web"
-        candidate = base / spa_path
-        if "." in Path(spa_path).name and candidate.is_file():
-            return FileResponse(candidate)
-        return FileResponse(base / "index.html")
+    app.mount("/", StaticFiles(directory=str(web_dir), html=True), name="web")
 
     # 前端资源要求浏览器每次都回来验一遍：no-cache 不是"不缓存"，而是带 ETag
     # 协商，没变 304，变了才重新下载。实时状态 API 则一律 no-store：不带任何缓存

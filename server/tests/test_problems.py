@@ -42,10 +42,10 @@ def test_unregistered_status_gets_generated_type() -> None:
 
 
 def test_http_exception_is_rendered_as_problem_json(client: TestClient, fresh_db: str) -> None:
-    """API 面的未登记 404 走 problem+json；非 API 的未知路径回 SPA 入口（history 路由刷新）。"""
-    spa = client.get("/definitely-not-a-route")
-    assert spa.status_code == 200
-    assert "text/html" in spa.headers["content-type"]
+    """未登记的 404 一律走 problem+json：接口错误与未知路径都不伪装成 200 的 HTML。"""
+    unknown = client.get("/definitely-not-a-route")
+    assert unknown.status_code == 404
+    assert unknown.headers["content-type"].startswith("application/problem+json")
 
     api_miss = client.get("/api/v1/definitely-not-a-route")
     assert api_miss.status_code == 404
