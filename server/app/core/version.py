@@ -8,4 +8,4 @@
 一致性由 tests/test_version_consistency.py 强制校验——是执行机制，不是人工约定。
 """
 
-APP_VERSION = "0.8.15"
+APP_VERSION = "0.8.16"
