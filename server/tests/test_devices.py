@@ -694,14 +694,11 @@ def test_link_events_record_the_reasons(client: TestClient, admin_headers: dict[
 
 
 def test_link_event_and_log_history_endpoints(client: TestClient, fresh_db: str, admin_headers: dict[str, str]) -> None:
-    """链路历史与日志上送历史两个只读出口：未知设备 404，已登记设备按倒序列出。"""
+    """链路历史（全队端点）与日志上送历史：行带 device_id，过滤与倒序生效。"""
     from app.contracts import DeviceLogKind
     from app.db.base import utcnow
     from app.modules.devices.models import DeviceLog
     from app.modules.devices.schemas import LINK_ONLINE
-
-    missing = client.get(f"/api/v1/devices/{DEVICE_ID}/link-events", headers=admin_headers)
-    assert missing.status_code == 404
 
     device_link.register_trusted_device(DEVICE_ID)
     with device_link.db() as session:
@@ -709,9 +706,17 @@ def test_link_event_and_log_history_endpoints(client: TestClient, fresh_db: str,
         session.add(DeviceLog(device_id=DEVICE_ID, kind=DeviceLogKind.DEVICE, content="log-1", uploaded_at=utcnow()))
         session.commit()
 
-    rows = client.get(f"/api/v1/devices/{DEVICE_ID}/link-events", headers=admin_headers).json()
-    assert rows
-    assert rows[0]["event"] == "online"
+    fleet = client.get("/api/v1/devices/link-events", headers=admin_headers).json()
+    assert fleet
+    assert fleet[0]["event"] == "online"
+    assert fleet[0]["device_id"] == DEVICE_ID
+
+    filtered = client.get(f"/api/v1/devices/link-events?device_id={DEVICE_ID}", headers=admin_headers).json()
+    assert filtered
+    assert all(row["device_id"] == DEVICE_ID for row in filtered)
+
+    missing = client.get("/api/v1/devices/link-events?device_id=dev-missing", headers=admin_headers).json()
+    assert missing == []
 
     logs = client.get(f"/api/v1/devices/{DEVICE_ID}/logs/history", headers=admin_headers).json()
     assert logs
@@ -719,3 +724,20 @@ def test_link_event_and_log_history_endpoints(client: TestClient, fresh_db: str,
 
     no_logs = client.get("/api/v1/devices/dev-missing/logs/history", headers=admin_headers)
     assert no_logs.status_code == 404
+
+
+def test_link_history_enforces_the_device_scope(client: TestClient, fresh_db: str) -> None:
+    """全队读取型端点的对象级边界：作用域密钥无过滤读全队 403，越界过滤 403，域内过滤放行。"""
+    from tests.identity import bearer, register_key
+
+    token = register_key("link-scope", ["devices:read"], device_scope=[DEVICE_ID])
+
+    unfiltered = client.get("/api/v1/devices/link-events", headers=bearer(token))
+    assert unfiltered.status_code == 403
+
+    out_of_scope = client.get("/api/v1/devices/link-events?device_id=dev-other", headers=bearer(token))
+    assert out_of_scope.status_code == 403
+
+    in_scope = client.get(f"/api/v1/devices/link-events?device_id={DEVICE_ID}", headers=bearer(token))
+    assert in_scope.status_code == 200
+    assert in_scope.json() == []

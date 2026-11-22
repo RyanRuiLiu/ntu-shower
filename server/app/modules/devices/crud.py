@@ -281,19 +281,18 @@ def link_events(session: Session, device_id: str, before: datetime) -> list[dict
     return [{"occurred_at": format_rfc3339(item.occurred_at), "event": str(item.event)} for item in events]
 
 
-def list_link_events(session: Session, device_id: str, limit: int = 100) -> list[dict[str, str]]:
-    """最近的上线下线事件，按时间倒序（链路历史的只读出口）。"""
-    row = _find(session, device_id)
-    if row is None:
-        return []
-    events = session.scalars(
-        select(DeviceLinkEvent)
-        .where(DeviceLinkEvent.device_id == row.id)
-        .order_by(DeviceLinkEvent.id.desc())
-        .limit(limit)
-    ).all()
+def list_link_events(session: Session, device_id: str | None = None, limit: int = 100) -> list[dict[str, str]]:
+    """上下线事件，按时间倒序（链路历史的只读出口）；device_id 给定时只看该设备。"""
+    statement = select(DeviceLinkEvent).order_by(DeviceLinkEvent.id.desc()).limit(limit)
+    if device_id is not None:
+        row = _find(session, device_id)
+        if row is None:
+            return []
+        statement = statement.where(DeviceLinkEvent.device_id == row.id)
+    events = session.scalars(statement).all()
     return [
         {
+            "device_id": str(item.device_id),
             "occurred_at": format_rfc3339(item.occurred_at),
             "event": str(item.event),
             "reason": item.reason or "",

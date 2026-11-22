@@ -26,7 +26,7 @@ API 路由先注册，不会被静态文件抢走。
 """
 
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
@@ -43,7 +43,6 @@ from .auth.routes import identity_router as users_identity_router
 from .auth.routes import router as auth_router
 from .core.background import Background
 from .core.config import settings
-from .core.connections import manager
 from .core.errors import install_error_handlers, problem_responses
 from .core.logging import configure_logging, log_event
 from .core.problems import REGISTRY
@@ -58,6 +57,7 @@ from .modules.config import notifier as config_notifier
 from .modules.config.routes import admin_router as config_admin_router
 from .modules.devices import push as devices_push
 from .modules.devices.routes import admin_router as devices_admin_router
+from .modules.devices.routes import device_history_router as devices_device_history_router
 from .modules.devices.routes import device_read_router as devices_device_read_router
 from .modules.devices.routes import device_router as devices_device_router
 from .modules.devices.routes import router as devices_router
@@ -103,23 +103,6 @@ class HealthStatus(TypedDict):
     status: str
     name: str
     version: str
-
-
-#: 主动断开设备时使用的 WS 关闭码（RFC 6455 §7.4.1：1001 = Going Away，端点
-#: 主动离开的标准码）。不能用 uvicorn 默认关闭的 1012——那是基础设施保留码，
-#: OkHttp 会以 ProtocolException 拒收。
-WS_CLOSE_GOING_AWAY = 1001
-
-
-async def _close_device_connections() -> None:
-    """lifespan 关闭时向全部在线设备发 1001 关闭帧，抢在 uvicorn 的 1012 之前。
-
-    不在这里做收尾（记 link event、刷 last_seen）——那些由各连接自己的 finally
-    路径完成，这里只负责让设备收到一个协议上正确的关闭码。
-    """
-    for _device_id, ws in manager.online_connections():
-        with suppress(Exception):
-            await ws.close(code=WS_CLOSE_GOING_AWAY)
 
 
 class ProblemDoc(BaseModel):
@@ -169,12 +152,9 @@ def create_app() -> FastAPI:
         # 事件驱动型任务保持自己的模型：按设备惰性起 worker，不占统一循环。
         sessions_scheduler.start()
         yield
-        # 先断设备 WS 再拆底层：uvicorn 关闭时对每条 WS 发 close code 1012
-        # （Service Restart），但 RFC 6455 §7.4.1 明确 1012 保留给基础设施、
-        # 应用不得发送——OkHttp 正确抛 ProtocolException 拒收，设备看到的是
-        # 协议错误而不是正常的部署断开。这里抢先发 1001（Going Away，端点
-        # 主动离开的标准码），设备收到 onClosed(1001) 走正常重连。
-        await _close_device_connections()
+        # 部署关闭的 1001 不在这里发：uvicorn 的 shutdown 先对全部连接发 1012、
+        # 之后才进 lifespan——此处发码永远晚于它（2026-11-22 生产实证）。发码
+        # 序列在部署入口 app/serve.py 的 Server 子类里，先于 uvicorn 的收尾。
         await sessions_scheduler.stop()
         await background.stop()
         await power_service.stop()
@@ -232,6 +212,9 @@ def create_app() -> FastAPI:
     app.include_router(devices_router)
     app.include_router(devices_admin_router)
     app.include_router(devices_device_router)
+    # 字面量 /devices/link-events 必须先于 device_read_router 的 /{device_id} 注册，
+    # 否则会被设备详情路由截走（Starlette 按注册顺序匹配，见 devices/routes.py）。
+    app.include_router(devices_device_history_router)
     app.include_router(devices_device_read_router)
     app.include_router(freelist_router)
     app.include_router(power_router)

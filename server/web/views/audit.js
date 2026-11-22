@@ -133,11 +133,11 @@ const TABS = {
   },
   link: {
     label: '链路历史',
-    title: '设备的上线与下线事件（当前设备的链路历史）',
+    title: '设备的上线与下线事件（全队，或按上方设备过滤看单台）',
     source: 'link',
     time: (row) => row.occurred_at,
-    headers: ['事件', '原因'],
-    cells: (row) => [mono(row.event), muted(row.reason)],
+    headers: ['设备', '事件', '原因'],
+    cells: (row) => [deviceCell(row.device_id), mono(row.event), muted(row.reason)],
   },
 }
 
@@ -216,13 +216,13 @@ async function reload() {
   const keys = Object.keys(TABS)
   try {
     // 各类各自取数、一起等待：加一类只改 TABS，这里只挑取数方式。审计三类走
-    // /audit/{kind}；安装记录挂在 /ota/installs（发布域）；链路历史挂在设备
-    // 资源树下、按当前设备取（设备页切换后 store.deviceId 变化，刷新即对齐）。
+    // /audit/{kind}；安装记录挂在 /ota/installs（发布域）；链路历史挂在设备域、
+    // 与上方设备过滤同档（全队或单台），行内 device_id 回答"是哪台设备"。
     const auditKeys = keys.filter((key) => TABS[key].source === 'audit')
     const [loaded, installs, linkRows] = await Promise.all([
       Promise.all(auditKeys.map((key) => api.audit(TABS[key].kind, { device_id: deviceId, limit }))),
       api.otaInstalls({ device_id: deviceId, limit }),
-      api.deviceLinkEvents(store.deviceId, { limit }),
+      api.linkEvents({ device_id: deviceId, limit }),
     ])
     const loadedByKey = new Map(auditKeys.map((key, index) => [key, loaded[index]]))
     keys.forEach((key) => {

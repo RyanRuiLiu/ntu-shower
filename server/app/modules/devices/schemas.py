@@ -52,8 +52,12 @@ class DeviceLogHistoryRow(BaseModel):
 
 
 class LinkEventRow(BaseModel):
-    """链路历史的一行：一次上线或下线（occurred_at RFC 3339）。"""
+    """链路历史的一行：一次上线或下线（occurred_at RFC 3339）。
 
+    device_id 随行给出：全队视图要回答"是哪台设备"，调用方不另查档案。
+    """
+
+    device_id: str
     occurred_at: str
     event: str
     reason: str

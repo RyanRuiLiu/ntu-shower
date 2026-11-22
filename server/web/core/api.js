@@ -197,9 +197,8 @@ export const api = {
   audit: (kind, params) => send(`${API_V1}/audit/${kind}${query(params)}`),
   /** 逐设备安装记录（发布域的资源，挂在 /ota/installs）。 */
   otaInstalls: (params) => send(`${API_V1}/ota/installs${query(params)}`),
-  /** 设备域的链路历史（链路事件挂在设备资源树下）。 */
-  deviceLinkEvents: (deviceId, params) =>
-    send(`${API_V1}/devices/${encodeURIComponent(deviceId)}/link-events${query(params)}`),
+  /** 设备域的链路历史（全队，或按 device_id 过滤看单台）。 */
+  linkEvents: (params) => send(`${API_V1}/devices/link-events${query(params)}`),
 
   // ── 后台任务 ──（admin）
   /** 当前态：四任务的开关与名单、延长中的设备、调度器的即时计划。只读组合。 */

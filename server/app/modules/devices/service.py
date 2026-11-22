@@ -146,8 +146,8 @@ def list_device_logs(session: Session, device_id: str, kind: str, limit: int = 2
     return crud.list_device_logs(session, device_id, DeviceLogKind(kind), limit)
 
 
-def list_link_events(session: Session, device_id: str, limit: int = 100) -> list[dict[str, str]]:
-    """最近的上线下线事件，按时间倒序（链路历史）。"""
+def list_link_events(session: Session, device_id: str | None = None, limit: int = 100) -> list[dict[str, str]]:
+    """上下线事件，按时间倒序（链路历史）；device_id 给定时只看该设备。"""
     return crud.list_link_events(session, device_id, limit)
 
 

@@ -33,8 +33,9 @@
 """
 
 import time
+from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import Depends, Query, Request
 from fastapi.security import OAuth2PasswordBearer, SecurityScopes
 from sqlalchemy.orm import Session
 
@@ -196,6 +197,25 @@ def device_scope_guard(device_id: str, caller: Caller = Depends(caller)) -> Call
     return caller
 
 
+def device_scope_filter(
+    device_id: Annotated[str | None, Query(description="按设备过滤")] = None,
+    caller: Caller = Depends(caller),
+) -> str | None:
+    """可选设备过滤的对象级检查（全队读取型端点用，过滤值经此依赖注入）。
+
+    给了过滤设备就必须在作用域内；不给（全队）须持通配作用域——设备作用域密钥
+    无过滤地读全队等于绕开对象级边界。
+    """
+    scope = caller["device_scope"]
+    if Scope.WILDCARD in scope:
+        return device_id
+    if device_id is None:
+        raise ApiProblemError(INSUFFICIENT_SCOPE, "全队读取需要通配设备作用域")
+    if device_id not in scope:
+        raise ApiProblemError(INSUFFICIENT_SCOPE, f"作用域不含设备：{device_id}")
+    return device_id
+
+
 def require_trusted_online_device(device_id: str, session: Session) -> DeviceRecord:
     """设备面守卫：设备必须存在且已信任、当前在线；否则拒绝进入业务。
 
@@ -219,6 +239,7 @@ __all__: list[str] = [
     "RENEW_AFTER_S",
     "caller",
     "current_user",
+    "device_scope_filter",
     "device_scope_guard",
     "oauth2_scheme",
     "optional_caller",

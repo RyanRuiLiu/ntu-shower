@@ -25,7 +25,7 @@ import hmac
 from fastapi import APIRouter, Depends, Query, Request, Security
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import caller, device_scope_guard, optional_caller
+from app.auth.dependencies import caller, device_scope_filter, device_scope_guard, optional_caller
 from app.auth.permissions import allowed_actions
 from app.contracts import Caller, CommandOutcome, DeviceLogKind
 from app.core import actions
@@ -135,6 +135,27 @@ device_read_router = APIRouter(
     responses=problem_responses(401, 403, 404, 422),
 )
 
+# 全队读取型端点单独一个 router：device_read_router 的对象级守卫按路径 device_id
+# 判定，本端点的过滤值是查询参数（可缺省=全队），对象级边界由 device_scope_filter
+# 按调用方作用域判定。字面量 /link-events 必须先于 /{device_id} 注册——Starlette 按
+# 注册顺序匹配，否则会被设备详情路由截走。
+device_history_router = APIRouter(
+    prefix="/api/v1/devices",
+    dependencies=[Security(caller, scopes=["devices:read"])],
+    tags=["devices-admin"],
+    responses=problem_responses(401, 403, 422),
+)
+
+
+@device_history_router.get("/link-events", summary="设备上下线历史（全队或按设备过滤）")
+def list_device_link_events(
+    device_id: str | None = Depends(device_scope_filter),
+    limit: int = Query(default=100, ge=1, le=500),
+    session: Session = Depends(get_db),
+) -> list[schemas.LinkEventRow]:
+    """链路历史，按时间倒序；device_id 给定看单台，缺省全队。device_id 随行回答"是哪台设备"。"""
+    return [schemas.LinkEventRow.model_validate(row) for row in service.list_link_events(session, device_id, limit)]
+
 
 def _ui_timeout_s() -> float:
     """界面操作的等待上限。
@@ -202,17 +223,6 @@ def list_device_log_history(
         schemas.DeviceLogHistoryRow.model_validate(row)
         for row in service.list_device_logs(session, device_id, kind, limit)
     ]
-
-
-@device_read_router.get("/{device_id}/link-events", summary="设备上下线历史")
-def list_device_link_events(
-    device_id: str,
-    limit: int = Query(default=100, ge=1, le=500),
-    session: Session = Depends(get_db),
-) -> list[schemas.LinkEventRow]:
-    """该设备最近的上线下线事件，按时间倒序（链路历史的唯一出处）。"""
-    _require_device(session, device_id)
-    return [schemas.LinkEventRow.model_validate(row) for row in service.list_link_events(session, device_id, limit)]
 
 
 @device_read_router.get("/{device_id}/logs/live", summary="设备日志尾部现读", responses=problem_responses(409, 502))
