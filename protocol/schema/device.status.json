@@ -30,6 +30,21 @@
               "pattern": "^\\d{2}:\\d{2}$",
               "description": "平台每日开启时刻（`HH:MM`，V8 autoOpenTime）。恢复常规计划时的 MCU 上电目标。"
             },
+            "max_batch_space_time_min": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "关阀后无水释放线（分钟，maxbatchspacetime）：暂停/结算后持续这么久浴室端即释放。缺报时回退默认 5。"
+            },
+            "max_batch_time_min": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "单次占用上限（分钟，浴室 App `data.xml` 的 maxbatchtime，如实上报）。服务端的段长上限、盲区划断与会话续期阈值按它取值——同一参数在各楼配置不同（2026-11-23 体检：六楼 30 分钟、其余 20 分钟）。缺报（旧 APK/读取失败）时服务端回退默认 20。"
+            },
+            "max_in_space_time_min": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "等待无水释放线（分钟，maxinspacetime）：未开阀持续这么久浴室端即释放。缺报时回退默认 5。"
+            },
             "zone_offset_minutes": {
               "type": "integer",
               "minimum": -720,
