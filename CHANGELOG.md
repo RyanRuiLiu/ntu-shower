@@ -6,6 +6,12 @@
 > 0.6.3 直接升到 0.6.5（提交 d9e29d2），该节原为一次记档性条目。其内容已并入
 > 下方 0.6.5 的 Fixed；不保留一个没有对应版本状态的版本号。
 
+## [0.8.17] - 2026-11-23
+
+### Changed
+
+- **浴室 App 参数按设备取值（per-device maxbatchtime）**：各楼浴室 App 配置不同（2026-11-23 体检：六楼占用上限 30 分钟、其余 20 分钟），段长上限、盲区划断与会话续期阈值此前写死 1200 秒——六楼的段长真伪全靠交叉校验硬扛、会话续期提前 11 分钟结算。设备端 `PowerFacts` 重构为 `BathAppFacts`（同一份 data.xml 一次 root 读取：电源计划 + maxbatchtime/maxinspacetime/maxbatchspacetime 三阈值，阈值键为属性形态），`device.status` 契约增三键（缺报可过，服务端回退默认 1200/300/300）；服务端 devices 表增三列（基线 schema 直接修订，生产以一次性脚本加列，无增量迁移文件）、facts 改 NamedTuple 六项，caps 由组合根从 facts 换算传入 doors/sessions（上行合同不破坏）；会话续期阈值 = 设备占用上限 − 60 秒（JobSpec 存提前量而非定值，六楼自动 1740、其余 1140 零变化），job_runs.threshold_s 记录实际按设备值。
+
 ## [0.8.16] - 2026-11-23
 
 ### Fixed
