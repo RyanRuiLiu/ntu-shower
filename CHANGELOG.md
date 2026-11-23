@@ -6,6 +6,18 @@
 > 0.6.3 直接升到 0.6.5（提交 d9e29d2），该节原为一次记档性条目。其内容已并入
 > 下方 0.6.5 的 Fixed；不保留一个没有对应版本状态的版本号。
 
+## [0.8.18] - 2026-11-24
+
+### Fixed
+
+- **设备关机时建立的 hold 意图现在可以离线取消**：`hold_offset_s` 为空的意图尚未拨钟、没有要写回的偏置，`POST /resume` 此前仍去写设备墙钟，离线必然失败并返回 `resumed=false`——界面把它显示成「设备未在延长中，无需恢复」，看板却继续显示 hold，两处互相矛盾。恢复对未施加意图改为只清状态、不发任何命令（离线亦然）；布防已写入而拨钟未完成的意图仍拒绝取消，清状态会把整夜覆盖布防留在 MCU 上（`arming_deadline` 在布防写入时即落库，作为该状态的唯一标记）。概览对未施加的意图显示「待生效」，不再显示尚未成立的「恢复时刻未到」。
+
+### Changed
+
+- **hold 状态收口为三态 `pending / arming / applied`**：`HoldStatus` 新增派生字段 `state` 与 `resume_at`（恢复时刻 = 施加时刻 + 偏移），看板与设备页不再各自用 `hold_offset_s` 是否为空推断状态。设备页显示 hold 现状、恢复时刻与布防截止，按钮文案随状态变化；Flash App 同步以四态（本机 `NONE` + 服务端三态）驱动状态卡边框与提示文案。
+- **`POST /resume` 改为管理动作风格（BREAKING CHANGE）**：成功族返回 `ResumeResult {previous_state, outcome, clock_restored}`，`outcome` 为 `resumed / cancelled / not-holding`；失败一律 problem+json：正在施加 `409 hold-applying`、布防半施加 `409 hold-arming-pending`（两者带 `Retry-After`）、事实缺失 `409 hold-facts-missing`、设备离线 `409 device-offline`、设备超时 `504 device-timeout`、设备命令失败 `502 device-command-failed`。`PowerActionResult` 与 `reason` 字符串移除。路径版本不变，服务端与 Flash App 同版本发布。
+- **0 点附近与 hold 期间的防误操作**：设备离线时点「今晚延长」的确认框明确说明只能预约下一次生效窗口、无法立即开机；hold 存在时（含尚未施加的意图），服务端拒绝 `clock.set`、`restart-bath`、`reboot`（409 `hold-active`）——三者都会平移 MCU 截止或让 App/SmdtService 按偏置钟面重布，只能先恢复常规计划（零命令）或走调试终端。
+
 ## [0.8.17] - 2026-11-23
 
 ### Changed

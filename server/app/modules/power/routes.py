@@ -4,8 +4,9 @@
 守卫与管理面一致：`devices:write` + 对象级 device_scope（router 级依赖）。
 
 hold 不要求设备在线：意图持久在影子行上，离线错过触发窗由对账器按
-「close 已过」守卫作废；resume 把墙钟写回真实时刻（hold 自己的第二步）后清状态，
-写不进（离线、事实缺失）则 hold 保持，等下一轮重试。
+「close 已过」守卫作废；resume 把墙钟写回真实时刻（hold 自己的第二步）后清状态。
+尚未施加的意图没有拨钟可写回，恢复只清状态、不发命令（离线亦可取消）；已施加的
+写不进（离线、事实缺失）则 hold 保持，以 problem+json 报告失败，等下一轮重试。
 """
 
 from fastapi import APIRouter, Depends, Security
@@ -17,13 +18,13 @@ from app.core.errors import problem_responses
 from app.db.deps import get_db
 
 from . import service
-from .schemas import HoldStatus, PowerActionResult
+from .schemas import HoldStatus, ResumeResult
 
 router = APIRouter(
     prefix="/api/v1/devices",
     dependencies=[Depends(device_scope_guard)],
     tags=["power"],
-    responses=problem_responses(401, 403, 404, 422),
+    responses=problem_responses(401, 403, 404, 409, 422, 502, 504),
 )
 
 
@@ -56,13 +57,14 @@ def hold_status(device_id: str, session: Session = Depends(get_db)) -> HoldStatu
     dependencies=[Security(caller, scopes=["devices:write"])],
     summary="恢复常规电源计划",
 )
-async def resume_device(device_id: str, session: Session = Depends(get_db)) -> PowerActionResult:
-    """把墙钟写回真实时刻、清 hold 列，回到 following_schedule。未在 hold 中时幂等（resumed=false）。"""
-    result = await service.resume(session, device_id, origin=HoldSource.MANUAL)
-    return PowerActionResult(
-        device_id=str(result["device_id"]),
-        resumed=bool(result["resumed"]),
-    )
+async def resume_device(device_id: str, session: Session = Depends(get_db)) -> ResumeResult:
+    """把墙钟写回真实时刻、清 hold 列，回到 following_schedule。
+
+    成功族返回 `ResumeResult`：applied 写回钟并清状态、pending 零命令取消、本来
+    不在延长中三种幂等结果。失败（正在施加、布防半施加、事实缺失、设备离线/超时/
+    失败）一律 problem+json；`hold-applying` 与 `hold-arming-pending` 带 Retry-After。
+    """
+    return await service.resume(session, device_id, origin=HoldSource.MANUAL)
 
 
 __all__ = ["router"]

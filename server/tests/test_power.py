@@ -163,6 +163,7 @@ def _get_hold(fresh_db: str) -> dict[str, object] | None:
             "source": str(hold["source"].value) if hold["source"] else None,
             "offset_s": hold["offset_s"],
             "assignments": hold["assignments"],
+            "arming_deadline": hold["arming_deadline"],
         }
 
 
@@ -766,7 +767,8 @@ def test_manual_hold_is_rejected_when_the_master_switch_is_off(
 
     resp = client.post("/api/v1/devices/dev-hold/hold", headers=admin_headers)
 
-    assert resp.status_code == 422
+    assert resp.status_code == 409
+    assert resp.json()["type"].endswith("/problems/hold-disabled")
 
 
 def test_manual_hold_is_idempotent(
@@ -876,7 +878,10 @@ def test_resume_endpoint_resumes_when_holding(
     resp = client.post("/api/v1/devices/dev-hold/resume", headers=admin_headers)
 
     assert resp.status_code == 200
-    assert resp.json()["resumed"] is True
+    body = resp.json()
+    assert body["outcome"] == "resumed"
+    assert body["previous_state"] == "applied"
+    assert body["clock_restored"] is True
     assert _get_hold(fresh_db) is None
     assert sent == [("clock.set", {"datetime": "2026-11-21 00:30:00", "rearm": False})]
     # 手动恢复不冒充后台任务：它的审计在接口调用与命令流水，不在 job_runs
@@ -908,7 +913,7 @@ def test_resume_endpoint_before_the_moment_attempts_a_cancel_arming(
     resp = client.post("/api/v1/devices/dev-hold/resume", headers=admin_headers)
 
     assert resp.status_code == 200
-    assert resp.json()["resumed"] is True
+    assert resp.json()["outcome"] == "resumed"
     assert _get_hold(fresh_db) is None
     # 先写准（真实表盘此刻 23:51），再取消重布：截止取 23:52（此刻 + 1.5 分钟），上电目标取上报的 open
     assert sent == [
@@ -925,7 +930,107 @@ def test_resume_endpoint_is_idempotent_when_not_holding(
     resp = client.post("/api/v1/devices/dev-hold/resume", headers=admin_headers)
 
     assert resp.status_code == 200
-    assert resp.json()["resumed"] is False
+    body = resp.json()
+    assert body["outcome"] == "not-holding"
+    assert body["previous_state"] is None
+    assert body["clock_restored"] is False
+
+
+def test_resume_endpoint_cancels_a_pending_intent_without_commands(
+    client: TestClient, admin_headers: dict[str, str], fresh_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """设备关机时建立的意图没有拨钟：恢复只清状态、不发命令，离线也能取消。
+
+    2026-11-24 00:01 现场：设备已关机，手动 hold 只落意图；旧实现仍去写墙钟，失败后
+    返回 resumed=false，界面把它说成「未在延长中」，看板却继续显示 hold。
+    """
+    _register_device_for_http()
+    _seed_facts(fresh_db)
+    _seed_hold(fresh_db, "2026-11-23T16:01:31.000Z", offset_s=None, monkeypatch=monkeypatch)
+    monkeypatch.setattr(power.manager, "is_online", lambda _d: False)
+
+    async def no_command(_session: object, _device_id: str, _action: str, _params: object, **_kw: object) -> object:
+        msg = "取消未施加的意图不应下发任何命令"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(power.device_actions, "send_command_and_wait", no_command)
+
+    resp = client.post("/api/v1/devices/dev-hold/resume", headers=admin_headers)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["outcome"] == "cancelled"
+    assert body["previous_state"] == "pending"
+    assert body["clock_restored"] is False
+    assert _get_hold(fresh_db) is None
+
+
+def test_resume_endpoint_defers_a_pending_intent_inside_the_apply_window(
+    client: TestClient, admin_headers: dict[str, str], fresh_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """触发窗内且设备在线：对账器可能正在施加，恢复暂缓到下一轮。"""
+    _register_device_for_http()
+    _seed_facts(fresh_db)
+    _seed_hold(fresh_db, "2026-11-20T15:49:00.000Z", offset_s=None, monkeypatch=monkeypatch)
+    device_clock.load(DEVICE, 0.0)  # 有偏差记录才具备施加条件；无记录时施加本就不会发命令
+    monkeypatch.setattr(power, "_now_utc", lambda: datetime(2026, 11, 20, 15, 50, tzinfo=UTC))  # 23:50 local
+    monkeypatch.setattr(power.manager, "is_online", lambda _d: True)
+
+    async def no_command(_session: object, _device_id: str, _action: str, _params: object, **_kw: object) -> object:
+        msg = "施加进行中的取消不应下发命令"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(power.device_actions, "send_command_and_wait", no_command)
+
+    resp = client.post("/api/v1/devices/dev-hold/resume", headers=admin_headers)
+
+    assert resp.status_code == 409
+    assert resp.json()["type"].endswith("/problems/hold-applying")
+    assert resp.headers["retry-after"] == "30"
+    assert _get_hold(fresh_db) is not None
+
+
+def test_resume_endpoint_clears_an_expired_intent_inside_the_next_window(
+    client: TestClient, admin_headers: dict[str, str], fresh_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """过期意图即使落在下一天的触发窗内也不再施加，恢复直接清掉。"""
+    _register_device_for_http()
+    _seed_facts(fresh_db)
+    _seed_hold(fresh_db, "2026-11-20T15:49:00.000Z", offset_s=None, monkeypatch=monkeypatch)
+    device_clock.load(DEVICE, 0.0)
+    monkeypatch.setattr(power, "_now_utc", lambda: datetime(2026, 11, 21, 15, 50, tzinfo=UTC))  # 次日 23:50
+    monkeypatch.setattr(power.manager, "is_online", lambda _d: True)
+
+    resp = client.post("/api/v1/devices/dev-hold/resume", headers=admin_headers)
+
+    assert resp.status_code == 200
+    assert resp.json()["outcome"] == "cancelled"
+    assert _get_hold(fresh_db) is None
+
+
+def test_resume_endpoint_keeps_a_pending_intent_whose_arming_was_written(
+    client: TestClient, admin_headers: dict[str, str], fresh_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """布防已写入而拨钟未完成：不能只清状态，否则整夜覆盖布防留在 MCU 上。"""
+    _register_device_for_http()
+    _seed_facts(fresh_db)
+    _seed_hold(fresh_db, "2026-11-20T15:49:00.000Z", offset_s=None, monkeypatch=monkeypatch)
+    with session_scope() as session:
+        devices_store.mark_hold_armed(session, DEVICE, datetime(2026, 11, 21, 15, 58, tzinfo=UTC))
+    monkeypatch.setattr(power.manager, "is_online", lambda _d: False)
+
+    async def no_command(_session: object, _device_id: str, _action: str, _params: object, **_kw: object) -> object:
+        msg = "arming-pending 不应下发任何命令"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(power.device_actions, "send_command_and_wait", no_command)
+
+    resp = client.post("/api/v1/devices/dev-hold/resume", headers=admin_headers)
+
+    assert resp.status_code == 409
+    assert resp.json()["type"].endswith("/problems/hold-arming-pending")
+    assert resp.headers["retry-after"] == "30"
+    assert _get_hold(fresh_db) is not None
 
 
 def test_record_device_status_lands_the_shadow_row(fresh_db: str) -> None:
@@ -1047,6 +1152,8 @@ def test_step_failure_after_arm_records_hold_failed(fresh_db: str, monkeypatch: 
     hold = _get_hold(fresh_db)
     assert hold is not None
     assert hold["offset_s"] is None
+    # 布防已在位（拨钟失败）：截止必须落库，恢复才能拒绝「只清状态」的取消
+    assert hold["arming_deadline"] == datetime(2026, 11, 21, 15, 58, tzinfo=UTC)
     assert calls["n"] == 2
 
 
@@ -1086,7 +1193,7 @@ def test_resume_endpoint_offline_keeps_the_hold(
     client: TestClient, admin_headers: dict[str, str], fresh_db: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """恢复 = 墙钟写回真实轴，写不进就保持 hold（偏置不写回则下一晚恢复时刻算术
-    永久破坏）：离线时命令发不出，返回 resumed=false，等回连后对账自动恢复。"""
+    永久破坏）：离线时命令发不出，返回 409 device-offline，等回连后对账自动恢复。"""
     _register_device_for_http()
     _seed_facts(fresh_db)
     _seed_hold(fresh_db, "2026-11-20T15:49:00.000Z", offset_s=660, monkeypatch=monkeypatch)
@@ -1102,10 +1209,45 @@ def test_resume_endpoint_offline_keeps_the_hold(
 
     resp = client.post("/api/v1/devices/dev-hold/resume", headers=admin_headers)
 
-    assert resp.status_code == 200
-    assert resp.json()["resumed"] is False
+    assert resp.status_code == 409
+    assert resp.json()["type"].endswith("/problems/device-offline")
     assert _get_hold(fresh_db) is not None
     assert sent == [("clock.set", {"datetime": "2026-11-21 00:30:00", "rearm": False})]
+
+
+@pytest.mark.parametrize(
+    ("status", "reason_code", "expected_status", "problem_code"),
+    [
+        ("timeout", "deadline.exceeded", 504, "device-timeout"),
+        ("failed", "clock.write_failed", 502, "device-command-failed"),
+    ],
+)
+def test_resume_endpoint_maps_device_command_failure(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    fresh_db: str,
+    monkeypatch: pytest.MonkeyPatch,
+    status: str,
+    reason_code: str,
+    expected_status: int,
+    problem_code: str,
+) -> None:
+    """墙钟写入的其他失败按命令终态映射为 504/502，hold 保持不变。"""
+    _register_device_for_http()
+    _seed_facts(fresh_db)
+    _seed_hold(fresh_db, "2026-11-20T15:49:00.000Z", offset_s=660, monkeypatch=monkeypatch)
+    monkeypatch.setattr(power, "_now_utc", lambda: datetime(2026, 11, 20, 16, 30, tzinfo=UTC))
+
+    async def failing_send(_session: object, _device_id: str, _action: str, _params: object, **_kw: object) -> object:
+        return {"status": status, "reason_code": reason_code, "terminal_message": "", "data": None}
+
+    monkeypatch.setattr(power.device_actions, "send_command_and_wait", failing_send)
+
+    resp = client.post("/api/v1/devices/dev-hold/resume", headers=admin_headers)
+
+    assert resp.status_code == expected_status
+    assert resp.json()["type"].endswith(f"/problems/{problem_code}")
+    assert _get_hold(fresh_db) is not None
 
 
 def test_holds_view_without_reported_facts_reports_recovery_undecided(
@@ -1153,8 +1295,31 @@ def test_hold_view_without_reported_facts_reports_recovery_undecided_2(
         holds = power.holds(session)
 
     assert len(holds) == 1
+    assert holds[0]["state"] == "pending"
+    assert holds[0]["resume_at"] == ""
     assert holds[0]["past_close"] is False
     assert holds[0]["idle"] is True
+
+
+def test_hold_view_reports_derived_state_and_resume_at(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """看板状态是派生的：applied 给恢复时刻，arming 只给布防截止，pending 两者皆空。"""
+    _prepare(monkeypatch, "2026-11-20 23:51:00", skew_s=-660.0)
+    _seed_hold(fresh_db, "2026-11-20T15:49:00.000Z", offset_s=660, monkeypatch=monkeypatch)
+
+    with session_scope() as session:
+        applied = power.holds(session)[0]
+    assert applied["state"] == "applied"
+    assert applied["resume_at"] == "2026-11-20T16:00:00.000Z"
+
+    with session_scope() as session:
+        devices_store.clear_hold(session, DEVICE)
+        devices_store.start_hold(session, DEVICE, HoldSource.MANUAL)
+        devices_store.mark_hold_armed(session, DEVICE, datetime(2026, 11, 21, 15, 58, tzinfo=UTC))
+    with session_scope() as session:
+        arming = power.holds(session)[0]
+    assert arming["state"] == "arming"
+    assert arming["resume_at"] == ""
+    assert arming["arming_deadline"] == "2026-11-21T15:58:00.000Z"
 
 
 # ── 边界：触发窗外的让位与恢复的失败路径 ──────────────────────────────────
@@ -1297,8 +1462,8 @@ def test_resume_endpoint_keeps_the_hold_without_facts(
 
     resp = client.post("/api/v1/devices/dev-hold/resume", headers=admin_headers)
 
-    assert resp.status_code == 200
-    assert resp.json()["resumed"] is False
+    assert resp.status_code == 409
+    assert resp.json()["type"].endswith("/problems/hold-facts-missing")
     assert _get_hold(fresh_db) is not None
 
 

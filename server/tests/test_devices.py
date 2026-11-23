@@ -1,5 +1,6 @@
 """设备域 API：精简清单与 actions、运维档案、档案 PATCH 与远程动作端点。"""
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -8,11 +9,13 @@ from sqlalchemy import select
 from tests import device_link, frames
 from tests.identity import bearer
 
+from app.contracts import HoldSource
 from app.core import actions
 from app.core.clock import now_rfc3339
 from app.core.connections import manager
 from app.db.session import session_scope
 from app.modules.devices import actions as device_actions
+from app.modules.devices import crud as devices_store
 from app.modules.devices.models import Device, DeviceLinkEvent
 
 DEVICE_ID = "dev-debug-1"
@@ -460,6 +463,86 @@ def test_clock_set_rejects_malformed_datetime(client: TestClient, admin_headers:
     r = client.post("/api/v1/devices/ghost/clock-set", headers=admin_headers, json={"datetime": "nope"})
 
     assert r.status_code == 422
+
+
+def test_power_rewrite_is_blocked_when_the_hold_has_power_effect(
+    client: TestClient, admin_headers: dict[str, str], fresh_db: str
+) -> None:
+    """偏置或布防已在位：改钟、重启浴室 App、重启整机都会破坏整夜布防，一律 409。
+
+    仅凭意图（尚未发命令）不拦；这里种的是已施加 hold。
+    """
+    device_link.register_trusted_device(DEVICE_ID)
+    with session_scope() as session:
+        devices_store.start_hold(session, DEVICE_ID, HoldSource.MANUAL)
+        devices_store.mark_hold_applied(
+            session,
+            DEVICE_ID,
+            660,
+            [],
+            datetime(2026, 11, 25, 15, 58, tzinfo=UTC),
+        )
+
+    for path, payload in (
+        ("clock-set", {"datetime": "2026-11-24 23:00:00"}),
+        ("restart-bath", None),
+        ("reboot", None),
+    ):
+        r = client.post(f"/api/v1/devices/{DEVICE_ID}/{path}", headers=admin_headers, json=payload)
+        assert r.status_code == 409
+        assert r.json()["type"].endswith("/problems/hold-active")
+
+
+def test_power_rewrite_is_blocked_even_for_a_pending_intent(
+    client: TestClient, admin_headers: dict[str, str], fresh_db: str
+) -> None:
+    """意图也可能下一轮就施加：hold 存在即冻结维护动作，避免命令交错。"""
+    device_link.register_trusted_device(DEVICE_ID)
+    with session_scope() as session:
+        devices_store.start_hold(session, DEVICE_ID, HoldSource.MANUAL)
+
+    r = client.post(
+        f"/api/v1/devices/{DEVICE_ID}/clock-set",
+        headers=admin_headers,
+        json={"datetime": "2026-11-24 23:00:00"},
+    )
+
+    assert r.status_code == 409
+    assert r.json()["type"].endswith("/problems/hold-active")
+
+
+def test_power_rewrite_is_released_after_the_hold_is_cleared(
+    client: TestClient, admin_headers: dict[str, str], fresh_db: str
+) -> None:
+    """守卫绑定的是 hold 存在本身：恢复后维护动作回到常规的在线守卫。"""
+    device_link.register_trusted_device(DEVICE_ID)
+    with session_scope() as session:
+        devices_store.start_hold(session, DEVICE_ID, HoldSource.MANUAL)
+        devices_store.clear_hold(session, DEVICE_ID)
+
+    r = client.post(
+        f"/api/v1/devices/{DEVICE_ID}/clock-set",
+        headers=admin_headers,
+        json={"datetime": "2026-11-24 23:00:00"},
+    )
+
+    assert r.status_code == 409
+    assert r.json()["type"].endswith("/problems/device-offline")
+
+
+def test_power_rewrite_is_blocked_while_arming_is_half_applied(
+    client: TestClient, admin_headers: dict[str, str], fresh_db: str
+) -> None:
+    """布防已写入、拨钟未完成：同样不能改写，否则整夜布防会留在 MCU 上。"""
+    device_link.register_trusted_device(DEVICE_ID)
+    with session_scope() as session:
+        devices_store.start_hold(session, DEVICE_ID, HoldSource.MANUAL)
+        devices_store.mark_hold_armed(session, DEVICE_ID, datetime(2026, 11, 25, 15, 58, tzinfo=UTC))
+
+    r = client.post(f"/api/v1/devices/{DEVICE_ID}/reboot", headers=admin_headers)
+
+    assert r.status_code == 409
+    assert r.json()["type"].endswith("/problems/hold-active")
 
 
 def test_exec_dispatches_command_payload(

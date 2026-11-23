@@ -39,6 +39,16 @@ def list_devices(session: Session) -> list[DeviceRecord]:
     return records
 
 
+def hold_blocks_power_rewrite(session: Session, device_id: str) -> bool:
+    """hold 存在（含仅意图）即冻结改写设备钟或 MCU 计划的维护动作。
+
+    判据取整条 hold 而不是只看偏置/布防：意图可能在下一轮就被对账器施加，
+    此时改钟或重启会与施加的命令交错；而取消意图本身已是零命令操作，先恢复
+    再维护的代价很小。这样「hold 期间不动钟/计划」只有一条规则，没有窗口例外。
+    """
+    return crud.get_hold(session, device_id) is not None
+
+
 def set_order(session: Session, device_ids: list[str]) -> None:
     """按给定顺序重排设备（管理员手动调整，全部设备清单的唯一顺序来源）。
 

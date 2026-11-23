@@ -24,7 +24,7 @@ _COMPONENTS = _SCHEMA.get("components", {}).get("schemas", {})
 
 #: 管理动作端点不等待设备命令结果：桥（本地建桥/回收）与电源计划（hold/resume
 #: 是影子行状态动作，不是设备命令）返回各自的报告而非 CommandOutcome。
-_MANAGEMENT_REPORTS = {"BridgeOpened", "BridgeClosed", "HoldStatus", "PowerActionResult"}
+_MANAGEMENT_REPORTS = {"BridgeOpened", "BridgeClosed", "HoldStatus", "ResumeResult"}
 
 
 def _resolve_ref(schema: dict) -> str:

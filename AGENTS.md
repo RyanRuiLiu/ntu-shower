@@ -68,7 +68,7 @@ AI 协作者的唯一入口。人类协作者从 [README.md](README.md) 开始�
 | 动作名、执行通道、动作边界 | `server/app/core/actions.py` |
 | 用户、密钥与权限字典（scope 唯一出处） | `server/app/auth/` |
 | 会话续期、预约续期、自动结算 | `server/app/modules/sessions/` |
-| 延长服务时间、MCU 租约、hold、校时 | `server/app/modules/power/` |
+| 延长服务时间、MCU 布防、hold、校时 | `server/app/modules/power/` |
 | 免费名单 | `server/app/modules/freelist/` |
 | 语音规则、素材与播放 | `server/app/modules/voice/` |
 | HTTP 问题类型与命令失败原因 | `server/app/core/problems.py`、`server/app/core/reason_codes.py` |

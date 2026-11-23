@@ -130,6 +130,7 @@ export const api = {
   reboot: (id) => send(devicePath(id, '/reboot'), post()),
   bathRestart: (id) => send(devicePath(id, '/restart-bath'), post()),
   clockSet: (id, datetime) => send(devicePath(id, '/clock-set'), post({ datetime })),
+  holdStatus: (id) => send(devicePath(id, '/hold')),
   hold: (id) => send(devicePath(id, '/hold'), post()),
   resume: (id) => send(devicePath(id, '/resume'), post()),
   dumpTree: (id) => send(devicePath(id, '/ui-dump'), post()),

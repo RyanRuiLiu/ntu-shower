@@ -23,6 +23,14 @@ class Problem:
 # 里同码的那几条措辞一致：同一件事在 HTTP 层与命令回报层应当是同一句话。
 DEVICE_NOT_FOUND = Problem("device-not-found", 404, "找不到设备")
 DEVICE_OFFLINE = Problem("device-offline", 409, "设备离线")
+DEVICE_RETIRED = Problem("device-retired", 409, "设备已停用")
+DEVICE_TIMEOUT = Problem("device-timeout", 504, "设备响应超时")
+DEVICE_COMMAND_FAILED = Problem("device-command-failed", 502, "设备命令执行失败")
+HOLD_ACTIVE = Problem("hold-active", 409, "设备在今晚延长中")
+HOLD_DISABLED = Problem("hold-disabled", 409, "延长服务已停用")
+HOLD_APPLYING = Problem("hold-applying", 409, "今晚延长正在生效")
+HOLD_ARMING_PENDING = Problem("hold-arming-pending", 409, "今晚延长尚未完成时间写入")
+HOLD_FACTS_MISSING = Problem("hold-facts-missing", 409, "设备未上报电源计划")
 DEVICE_LOG_READ_FAILED = Problem("device-log-read-failed", 502, "设备日志读取失败")
 SERVER_OVERLOADED = Problem("server-overloaded", 409, "服务端同时处理的命令过多，请稍后再试")
 DOOR_NOT_FOUND = Problem("door-not-found", 404, "找不到喷头")
@@ -67,7 +75,15 @@ VALIDATION_FAILED = Problem("validation-failed", 422, "提交的内容有误")
 REGISTRY: tuple[Problem, ...] = (
     DEVICE_NOT_FOUND,
     DEVICE_OFFLINE,
+    DEVICE_RETIRED,
+    DEVICE_TIMEOUT,
+    DEVICE_COMMAND_FAILED,
     DEVICE_LOG_READ_FAILED,
+    HOLD_ACTIVE,
+    HOLD_DISABLED,
+    HOLD_APPLYING,
+    HOLD_ARMING_PENDING,
+    HOLD_FACTS_MISSING,
     SERVER_OVERLOADED,
     DOOR_NOT_FOUND,
     DOOR_NOT_FREE,
@@ -102,7 +118,14 @@ class ApiProblemError(Exception):
     路由只抛本异常；错误码必须先在本模块登记再抛，避免随手写字符串当错误码。
     """
 
-    def __init__(self, problem: Problem, detail: str = "") -> None:
+    def __init__(
+        self,
+        problem: Problem,
+        detail: str = "",
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         super().__init__(f"{problem.code}: {detail}" if detail else problem.code)
         self.problem = problem
         self.detail = detail
+        self.headers = headers or {}

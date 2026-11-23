@@ -133,9 +133,12 @@ def test_status_includes_the_holding_device(client: TestClient, admin_headers: d
     assert len(holds) == 1
     row = holds[0]
     assert row["device_id"] == "dev-status-hold"
+    assert row["state"] == "applied"
     assert row["hold_source"] == "automated"
     assert row["hold_started_at"] != ""  # 意图建立时刻由 start_hold 落库（真实钟）
     assert row["hold_offset_s"] == 660
+    assert row["resume_at"] != ""
+    assert row["arming_deadline"] != ""
     assert row["total"] == 1
     assert row["reassigned_count"] == 0
     assert row["pending"] == [{"door_no": 3, "cert_no": CERT_NO}]

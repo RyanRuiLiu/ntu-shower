@@ -18,6 +18,11 @@
 管理面要求 `devices:write`；对单台设备的端点额外做对象级 device_scope 检查，
 下发命令的端点还要求设备已信任且在线（require_trusted_online_device）——把命令
 发给离线设备只会白等超时。
+
+hold 存在时（含尚未施加的意图），`clock-set`、`restart-bath`、`reboot` 额外
+拒绝（409 hold-active）：这三条都会让 MCU 截止在真实时间里平移或让 App/
+SmdtService 按偏置钟面重布，破坏整夜延长；意图可能下一轮就施加。破例走调试
+终端。
 """
 
 import hmac
@@ -37,6 +42,7 @@ from app.core.outcomes import OK as OUTCOME_OK
 from app.core.problems import (
     DEVICE_LOG_READ_FAILED,
     DEVICE_NOT_FOUND,
+    HOLD_ACTIVE,
     INVALID_DEVICE_CLAIM,
     VALIDATION_FAILED,
     ApiProblemError,
@@ -134,6 +140,24 @@ device_read_router = APIRouter(
     tags=["devices-admin"],
     responses=problem_responses(401, 403, 404, 422),
 )
+
+
+def _reject_power_rewrite_during_hold(session: Session, device_id: str) -> None:
+    """hold 存在时，禁止改写设备钟或 MCU 布防（含尚未施加的意图）。
+
+    改钟会让 MCU 的钟面截止在真实时间里平移，重启浴室 App/整机会让浴室 App 或
+    SmdtService 按偏置后的钟面重布 MCU——两者都会破坏 hold 的单次整夜布防。
+    意图可能下一轮就施加，命令交错同样会破坏它；取消意图是零命令操作，先恢复
+    再维护。需要破例时走调试终端 `device.exec`，它的审计与权限本来就是运维的
+    最后入口。
+    """
+    if service.hold_blocks_power_rewrite(session, device_id):
+        raise ApiProblemError(
+            HOLD_ACTIVE,
+            "设备当前处于今晚延长状态，该操作会修改设备时间或 MCU 布防。"
+            "请先恢复常规电源计划；无法恢复时请使用调试终端。",
+        )
+
 
 # 全队读取型端点单独一个 router：device_read_router 的对象级守卫按路径 device_id
 # 判定，本端点的过滤值是查询参数（可缺省=全队），对象级边界由 device_scope_filter
@@ -355,6 +379,7 @@ async def restart_app(device_id: str, session: Session = Depends(get_db)) -> Com
 @device_router.post("/{device_id}/clock-set", summary="设置设备时钟")
 async def set_clock(device_id: str, req: DeviceClockSetRequest, session: Session = Depends(get_db)) -> CommandOutcome:
     """设置设备系统时钟（datetime 为设备本地墙钟时间）。浴室 App 的每日开关机计划依赖它。"""
+    _reject_power_rewrite_during_hold(session, device_id)
     return await device_action(
         session, device_id, actions.CLOCK_SET, {"datetime": req.datetime}, DEVICE_ACTION_TIMEOUT_S
     )
@@ -363,12 +388,14 @@ async def set_clock(device_id: str, req: DeviceClockSetRequest, session: Session
 @device_router.post("/{device_id}/restart-bath", summary="重启浴室 App")
 async def restart_bath_app(device_id: str, session: Session = Depends(get_db)) -> CommandOutcome:
     """重启浴室 App：先强制停止再冷启动。仅用于排障；延长服务流程已改用 power.schedule。"""
+    _reject_power_rewrite_during_hold(session, device_id)
     return await device_action(session, device_id, actions.BATH_RESTART, {}, DEVICE_ACTION_TIMEOUT_S)
 
 
 @device_router.post("/{device_id}/reboot", summary="重启整机")
 async def reboot_device(device_id: str, session: Session = Depends(get_db)) -> CommandOutcome:
     """重启整机。设备重启后 agent 重新接入，会话与喷头现态由重连后的全貌帧重建。"""
+    _reject_power_rewrite_during_hold(session, device_id)
     return await device_action(session, device_id, actions.DEVICE_REBOOT, {}, DEVICE_ACTION_TIMEOUT_S)
 
 

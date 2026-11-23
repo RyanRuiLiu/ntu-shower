@@ -40,6 +40,7 @@ _STATUS_DESCRIPTIONS: dict[int, str] = {
     413: "请求体超过体积上限",
     422: "请求内容校验失败",
     502: "设备侧执行失败（网关返回失败结果）",
+    504: "设备响应超时",
 }
 
 
@@ -54,7 +55,7 @@ def problem_responses(*statuses: int) -> "dict[int | str, dict[str, Any]]":
     return {status: {"description": _STATUS_DESCRIPTIONS[status], "model": ProblemDetail} for status in statuses}
 
 
-def _problem(problem: Problem, detail: str) -> JSONResponse:
+def _problem(problem: Problem, detail: str, headers: dict[str, str] | None = None) -> JSONResponse:
     base = settings.public_base_url.rstrip("/")
     return JSONResponse(
         status_code=problem.status,
@@ -65,6 +66,7 @@ def _problem(problem: Problem, detail: str) -> JSONResponse:
             "detail": detail,
         },
         media_type=PROBLEM_MEDIA_TYPE,
+        headers=headers,
     )
 
 
@@ -73,7 +75,7 @@ def install_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(ApiProblemError)
     async def api_problem(_request: Request, exc: ApiProblemError) -> JSONResponse:
-        return _problem(exc.problem, exc.detail)
+        return _problem(exc.problem, exc.detail, exc.headers)
 
     @app.exception_handler(StarletteHTTPException)
     async def http_exception(_request: Request, exc: StarletteHTTPException) -> JSONResponse:

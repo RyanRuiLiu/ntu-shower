@@ -56,6 +56,16 @@ def test_hold_lifecycle_round_trip(fresh_db: str) -> None:
         assert hold["source"] is HoldSource.MANUAL
         assert hold["offset_s"] is None  # 意图已建、尚未施加
         assert hold["assignments"] == []
+        assert hold["arming_deadline"] is None  # 意图未发命令：没有布防
+
+    # 布防写入、拨钟未完成：截止单独落库，作为「不能只清状态」的标记
+    with session_scope() as session:
+        devices_store.mark_hold_armed(session, DEVICE, started)
+    with session_scope() as session:
+        armed = devices_store.get_hold(session, DEVICE)
+        assert armed is not None
+        assert armed["offset_s"] is None
+        assert armed["arming_deadline"] == started
 
     with session_scope() as session:
         devices_store.mark_hold_applied(

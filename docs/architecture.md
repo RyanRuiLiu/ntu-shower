@@ -38,7 +38,8 @@
 **版本化的单一资源树**：对外 HTTP 面统一挂 `/api/v1` 前缀（路径版本化，破坏性
 变更升 v2）；URL 只表达资源，不表达权限，谁能调用由 scope 守卫决定。模块按
 领域划分，`/devices/*` 由 devices、sessions、bridge、config 各域按资源归属提供
-端点。
+端点。0.8.18 的 `POST /resume` 契约替换是第一方客户端（管理台与 Flash App）同版本
+发布的显式例外：不升 `/api/v2`，以 `BREAKING CHANGE` 标记，见 ADR-0025 第 9 条。
 
 | 域 | 职责（具体路径的权威在代码：各模块的 `APIRouter` 与 `core/protocol.py`） |
 |---|---|

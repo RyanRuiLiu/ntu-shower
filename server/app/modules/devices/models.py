@@ -57,8 +57,9 @@ class Device(TimestampMixin, Base):
     hold_offset_s: Mapped[int | None] = mapped_column(Integer, default=None)
     #: 施加瞬间的名单占用快照与重分配标记 [{door_no, cert_no, done}]。重分配是一次性的。
     hold_assignments: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, default=None)
-    #: MCU 布防截止到点（真实轴）：施加时一次写定（截止 = 次日 auto_close_time，整夜
-    #: 覆盖），此后不再重布；服务端消失它照常到点——到点断电正是期望终态。
+    #: MCU 布防截止到点（真实轴）：布防写入即落库（截止 = 次日 auto_close_time，整夜
+    #: 覆盖），正常在拨钟成功后与偏置一起就位；拨钟失败时也会非空——它同时也是
+    #: 「`hold_offset_s` 为空但布防已在位」的唯一标记（取消意图不能只清状态）。
     arming_deadline: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
     #: 单台配置覆盖。存的是与默认值的差异，空对象/修订号 0 即全部沿用默认。
     #: 生效值每次现算：默认 ← 全局 ← 设备。

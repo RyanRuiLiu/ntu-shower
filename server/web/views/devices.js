@@ -15,12 +15,17 @@ import { sessionActive } from '../core/api.js'
 import { copyText } from '../core/clipboard.js'
 import { codeCell } from '../core/cells.js'
 import { fmtFullDateTime } from '../core/clock.js'
-import { REBOOT_CONFIRM } from '../core/copy.js'
+import { HOLD_COPY, REBOOT_CONFIRM } from '../core/copy.js'
 import { promptClockSet, restartBathApp } from '../core/device-actions.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
 import { outcomeText, problemText, report } from '../core/outcome.js'
 import { refreshDevices, refreshRuntime, store, subscribe } from '../core/store.js'
 import { toast } from '../core/toast.js'
+
+/** 当前设备的 hold 现状（GET /hold）；null 表示未建立或尚未读到。 */
+let currentHold = null
+/** 非 404 的读取失败：与“未建立”区分，不把读不到伪装成没有。 */
+let holdStatusFailed = false
 
 function renderTable() {
   if (!sessionActive()) {
@@ -105,6 +110,11 @@ function updateCurrentDevice() {
 /** 命令与调试通道都只作用于"当前设备"，切换设备时连同上一台的状态一起收起来。 */
 function renderCurrent() {
   updateCurrentDevice()
+  currentHold = null
+  holdStatusFailed = false
+  $('holdStatus').textContent = store.deviceId ? HOLD_COPY.reading : HOLD_COPY.notSelected
+  $('btnHold').textContent = '今晚延长'
+  void refreshHoldStatus()
   $('bridgeSteps').hidden = true
   $('bridgeHint').hidden = false
   $('execOutput').hidden = true
@@ -112,6 +122,71 @@ function renderCurrent() {
   report('execResult', '', 'info')
   report('maintResult', '', 'info')
   report('bridgeResult', '', 'info')
+}
+
+/** 当前设备档案；未选择时为 null。 */
+function selectedDevice() {
+  return store.devices.find((item) => item.device_id === store.deviceId) || null
+}
+
+/**
+ * hold 现状的唯一展示点：状态、恢复时刻、布防截止都来自 GET /hold，不在前端
+ * 自行推断。切设备时清空，避免把上一台的“已延长”带到下一台。
+ */
+function renderHoldStatus() {
+  const node = $('holdStatus')
+  if (!node) return
+  if (!store.deviceId) {
+    node.textContent = HOLD_COPY.notSelected
+    $('btnHold').textContent = HOLD_COPY.buttonNone
+    return
+  }
+  if (holdStatusFailed) {
+    node.textContent = HOLD_COPY.failed
+    $('btnHold').textContent = HOLD_COPY.buttonNone
+    return
+  }
+  if (currentHold === null) {
+    node.textContent = HOLD_COPY.none
+    $('btnHold').textContent = HOLD_COPY.buttonNone
+    return
+  }
+  const source = currentHold.hold_source === 'manual' ? '手动' : '自动'
+  const offline = selectedDevice()?.online === false ? ' · 设备离线' : ''
+  if (currentHold.state === 'applied') {
+    node.textContent = HOLD_COPY.applied(
+      source,
+      fmtFullDateTime(currentHold.resume_at),
+      fmtFullDateTime(currentHold.arming_deadline),
+      offline,
+    )
+  } else if (currentHold.state === 'arming') {
+    node.textContent = HOLD_COPY.arming(source, offline)
+  } else {
+    node.textContent = HOLD_COPY.pending(source, offline)
+  }
+  $('btnHold').textContent = currentHold.state === 'applied' ? HOLD_COPY.buttonApplied : HOLD_COPY.buttonPending
+}
+
+/** 拉一次当前设备的 hold 状态；404 是“未建立”的有效回答，不是错误。 */
+async function refreshHoldStatus() {
+  if (!store.deviceId) return
+  if (!sessionActive()) {
+    currentHold = null
+    renderHoldStatus()
+    return
+  }
+  try {
+    currentHold = await api.holdStatus(store.deviceId)
+    holdStatusFailed = false
+  } catch (error) {
+    currentHold = null
+    holdStatusFailed = error.status !== 404
+    if (holdStatusFailed) {
+      report('maintResult', `今晚延长状态读取失败 · ${problemText(error)}`, 'err')
+    }
+  }
+  renderHoldStatus()
 }
 
 async function rename(deviceId) {
@@ -280,28 +355,63 @@ async function doAppRestart() {
 
 /** 重启整机：设备离线一段时间，重连后由全貌帧重建现态。这是四个里最重的一个，排在最后。 */
 async function doHold() {
-  if (!window.confirm('今晚延长？设备钟将被偏置并清空在场会话：名单内的学生自动重分配回原喷头，'
-    + '其他人需要重新进入；恢复在恢复时刻（午夜后 10 分钟）且无人占用后自动进行。')) return
-  report('maintResult', '正在建立今晚延长…', 'info')
+  // 页面可能跨过恢复时刻：先取最新状态，确认框才不会把“已自动恢复”误当成仍在延长
+  await refreshHoldStatus()
+  const device = selectedDevice()
+  const online = device?.online === true
+  const prompt = currentHold
+    ? HOLD_COPY.confirmExisting(currentHold.state)
+    : online
+      ? HOLD_COPY.confirmOnline
+      : HOLD_COPY.confirmOffline
+  if (!window.confirm(prompt)) return
+  report('maintResult', '正在设置今晚延长…', 'info')
   try {
-    await api.hold(store.deviceId)
-    report('maintResult', '已完成 · hold 意图已建立，对账器将在下一轮施加', 'ok')
+    const result = await api.hold(store.deviceId)
+    currentHold = result
+    holdStatusFailed = false
+    let text
+    if (result.state === 'applied') text = HOLD_COPY.resultApplied
+    else if (result.state === 'arming') text = HOLD_COPY.resultArming
+    else text = HOLD_COPY.resultPending
+    if (!online) text += HOLD_COPY.resultOffline
+    report('maintResult', text, result.state === 'applied' ? 'info' : 'ok')
+    renderHoldStatus()
   } catch (error) {
     report('maintResult', problemText(error), 'err')
   }
+}
+
+/**
+ * hold 存在时（含待生效），三条维护动作会与施加中的布防/拨钟交错，或平移
+ * MCU 截止。服务端有同样的 409 守卫；这里只避免先弹确认框再被拒的多余步骤，
+ * 判据仍是服务端给的 hold 状态。
+ */
+function holdLocksPowerRewrite() {
+  return currentHold !== null
 }
 
 async function doResume() {
   report('maintResult', '正在恢复常规电源计划…', 'info')
   try {
     const result = await api.resume(store.deviceId)
-    report('maintResult', result.resumed ? '已完成 · 已恢复常规计划' : '设备未在延长中，无需恢复', result.resumed ? 'ok' : 'info')
+    currentHold = null
+    holdStatusFailed = false
+    renderHoldStatus()
+    report('maintResult', HOLD_COPY.resumeOutcome[result.outcome] || HOLD_COPY.resumeFallback, result.outcome === 'not-holding' ? 'info' : 'ok')
   } catch (error) {
+    // 失败（正在施加、布防半施加、事实缺失、离线/超时）都走 problem+json；
+    // 重新拉一次状态，让按钮与状态行保持真实。
+    await refreshHoldStatus()
     report('maintResult', problemText(error), 'err')
   }
 }
 
 async function doReboot() {
+  if (holdLocksPowerRewrite()) {
+    report('maintResult', HOLD_COPY.lock, 'err')
+    return
+  }
   if (!window.confirm(REBOOT_CONFIRM)) return
   report('maintResult', '正在重启设备…', 'info')
   try {
@@ -494,6 +604,7 @@ export const devicesView = {
               <button type="button" class="btn btn-ghost btn-sm" id="btnResume">恢复计划</button>
               <button type="button" class="btn btn-danger btn-sm" id="btnReboot">重启设备</button>
             </div>
+            <div class="muted" id="holdStatus">${HOLD_COPY.notSelected}</div>
             <div class="result" id="maintResult"></div>
 
             <!-- 名单编辑区按需展开：那是个多行的框，常年摊在这里会把下面的命令区挤下去。
@@ -581,12 +692,28 @@ export const devicesView = {
     dispose.add(listen($('btnLoadLogLive'), 'click', loadLiveLog))
     dispose.add(listen($('inLogKind'), 'change', loadStoredLog))
     dispose.add(listen($('btnExec'), 'click', runExec))
-    dispose.add(listen($('btnClockSet'), 'click', () => promptClockSet(store.deviceId, sayMaint)))
+    dispose.add(
+      listen($('btnClockSet'), 'click', () => {
+        if (holdLocksPowerRewrite()) {
+          report('maintResult', HOLD_COPY.lock, 'err')
+          return
+        }
+        promptClockSet(store.deviceId, sayMaint)
+      }),
+    )
     dispose.add(listen($('btnFreelist'), 'click', openFreelist))
     dispose.add(listen($('btnFreelistSave'), 'click', saveFreelist))
     dispose.add(listen($('btnFreelistClose'), 'click', closeFreelist))
     dispose.add(listen($('btnRestart'), 'click', doAppRestart))
-    dispose.add(listen($('btnBathRestart'), 'click', () => restartBathApp(store.deviceId, sayMaint)))
+    dispose.add(
+      listen($('btnBathRestart'), 'click', () => {
+        if (holdLocksPowerRewrite()) {
+          report('maintResult', HOLD_COPY.lock, 'err')
+          return
+        }
+        restartBathApp(store.deviceId, sayMaint)
+      }),
+    )
     dispose.add(listen($('btnHold'), 'click', doHold))
     dispose.add(listen($('btnResume'), 'click', doResume))
     dispose.add(listen($('btnReboot'), 'click', doReboot))

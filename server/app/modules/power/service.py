@@ -37,6 +37,9 @@ MCU 的 0xA1 布防把"距现在几小时几分钟"换算成**布防那刻钟面
   time_sync 开关）→ 清 hold 列。整夜覆盖布防的截止（次日 auto_close_time）让设备
   运行到次日自然关闭，日夜节奏随之恢复正常。恢复时刻前的手动 resume 是尽力取消：
   写准后的表盘此刻 + 1.5 分钟断电，随后清状态。
+- **intent 取消**：尚未施加的意图没有拨钟、没有要写回的偏置；恢复只清状态、不发
+  任何命令（离线也可取消）。布防已写入而拨钟未完成的（`arming_deadline` 非空）
+  不在此列——清状态会把整夜覆盖布防留在 MCU 上，等对账补完施加后走已施加路径。
 
 ## 为什么偏置期间状态时间仍然正确
 
@@ -69,12 +72,12 @@ from typing import Any
 from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException
 
-from app.contracts import HoldSource, JobOutcome
-from app.core import actions, device_clock, outcomes, problems
+from app.contracts import CommandOutcome, HoldSource, JobOutcome
+from app.core import actions, device_clock, outcomes, problems, reason_codes
 from app.core.clock import format_rfc3339
 from app.core.connections import manager
 from app.core.logging import log_event
-from app.core.problems import DEVICE_NOT_FOUND, VALIDATION_FAILED, ApiProblemError
+from app.core.problems import DEVICE_NOT_FOUND, ApiProblemError
 from app.core.protocol import JsonObject
 from app.db.session import session_scope
 from app.modules.config import store as config_store
@@ -89,7 +92,7 @@ from app.modules.sessions.decision import students_of
 from app.modules.sessions.schemas import AssignRequest
 from app.persistence import audit as audit_store
 
-from .schemas import DoorAssignment, HoldStatus
+from .schemas import DoorAssignment, HoldState, HoldStatus, ResumeOutcome, ResumeResult
 
 #: 对账间隔（秒）。触发窗（close − 10 分钟起、到 close 止）按 30 秒一轮有约二十次机会。
 TICK_INTERVAL_S = 30.0
@@ -156,14 +159,8 @@ def _warn_once(device_id: str, key: str, event: str, message: str, **extra: obje
 # ── 原语：全库仅有的两个钟面/布防入口 ──────────────────────────────────────
 
 
-async def _step_wall_clock(session: Session, device_id: str, target_wall: str, *, rearm: bool) -> bool:
-    """把设备墙钟一次性写到一个绝对钟面（chrony makestep 语义）。
-
-    [target_wall] 是设备表盘上该显示的时刻（`YYYY-MM-DD HH:MM:SS`）。目标永远由
-    服务端轴计算，与设备当前读数无关——重复写结果一致，误差不可能累积。
-    [rearm] 由调用方按营业时段判定（见 [_correct_clock]）：设备端写钟后是否按本地
-    事实重布 MCU 常规计划。hold 施加传 false（它自己的布防已经就位）。
-    """
+async def _clock_write(session: Session, device_id: str, target_wall: str, *, rearm: bool) -> CommandOutcome:
+    """墙钟写入的原始结果：供 resume 把失败映射成 HTTP problem。"""
     result = await device_actions.send_command_and_wait(
         session, device_id, actions.CLOCK_SET, {"datetime": target_wall, "rearm": rearm}
     )
@@ -176,10 +173,22 @@ async def _step_wall_clock(session: Session, device_id: str, target_wall: str, *
             target=target_wall,
             reason_code=str(result.get("reason_code") or "-"),
         )
-        return False
+        return result
     device_clock.forget(device_id)  # 旧偏差描述的是旧钟面：作废，等下一帧重新收敛
     log_event("INFO", "power.step-applied", "设备墙钟已按绝对目标写准", device_id=device_id, target=target_wall)
-    return True
+    return result
+
+
+async def _step_wall_clock(session: Session, device_id: str, target_wall: str, *, rearm: bool) -> bool:
+    """把设备墙钟一次性写到一个绝对钟面（chrony makestep 语义）。
+
+    [target_wall] 是设备表盘上该显示的时刻（`YYYY-MM-DD HH:MM:SS`）。目标永远由
+    服务端轴计算，与设备当前读数无关——重复写结果一致，误差不可能累积。
+    [rearm] 由调用方按营业时段判定（见 [_correct_clock]）：设备端写钟后是否按本地
+    事实重布 MCU 常规计划。hold 施加传 false（它自己的布防已经就位）。
+    """
+    result = await _clock_write(session, device_id, target_wall, rearm=rearm)
+    return result.get("status") == outcomes.OK.value
 
 
 async def _arm_mcu(session: Session, device_id: str, off_at: str, on_at: str, day_offset: int = 0) -> bool:
@@ -395,9 +404,17 @@ async def _apply_hold(
     # =真实轴），拨钟把表盘推过午夜进入次日——布防截止在表盘轴上是次日 23:58，偏置
     # 存续期与写准回退后都不会在今晚触发。恢复时的墙钟写回把表盘拨回真实轴，截止的
     # 真实映射随之固定为真实次日 23:58。
+    close_minute = _fact_minute(close)
+    close_today_real = now_real_local + timedelta(
+        minutes=(close_minute - now_real_local.hour * 60 - now_real_local.minute) % (24 * 60)
+    )
+    arming_deadline = (close_today_real + timedelta(hours=24)).astimezone(UTC)
     if not await _arm_mcu(session, device_id, close, open_at, day_offset=1):
         _record("hold-failed", "整夜覆盖布防没成功，下一轮重试", device_id, level="WARNING")
         return
+    # 布防已在位：先落截止再拨钟。拨钟失败时意图仍是 pending，但这一行让恢复能
+    # 分辨「尚未发命令」与「布防已在位」——后者不能只清状态（见 resume）。
+    devices_crud.mark_hold_armed(session, device_id, arming_deadline)
     # ② 写钟到恢复时刻（绝对钟面；目标与设备当前读数无关，重复写结果一致）
     if not await _step_wall_clock(session, device_id, _wall_text(local_now + timedelta(seconds=offset_s)), rearm=False):
         _record("hold-failed", "墙钟写入没成功，下一轮重试", device_id, level="WARNING")
@@ -405,11 +422,6 @@ async def _apply_hold(
     # ③ 施加结果落库 + 审计（意图已在状态先行步落库）。started_at 就位为施加时刻：
     # 恢复时刻 = 施加时刻 + 偏移，恢复判定与看板都按这条轴算。布防截止的真实轴时刻
     # （次日 auto_close_time）随恢复时的墙钟写回而固定。
-    close_minute = _fact_minute(close)
-    close_today_real = now_real_local + timedelta(
-        minutes=(close_minute - now_real_local.hour * 60 - now_real_local.minute) % (24 * 60)
-    )
-    arming_deadline = (close_today_real + timedelta(hours=24)).astimezone(UTC)
     devices_crud.mark_hold_applied(
         session,
         device_id,
@@ -468,7 +480,10 @@ async def _resume_if_due(session: Session, device_id: str, hold: dict[str, Any])
         return  # 有人在用：钟跳会清掉会话，等人走再恢复
     if not manager.is_online(device_id):
         return  # 设备已失联（截止到点即断电）：恢复等它回连、空闲后自动进行
-    await resume(session, device_id, origin=HoldSource.AUTOMATED)
+    try:
+        await resume(session, device_id, origin=HoldSource.AUTOMATED)
+    except ApiProblemError:
+        return  # 失败终局已由 resume 记入 job_runs；对账下一轮重试
 
 
 # ── 校正（following_schedule 下才进行；hold 期间的偏差是故意的）────────────
@@ -608,10 +623,10 @@ def request_hold(session: Session, device_id: str) -> HoldStatus:
     if record is None:
         raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {device_id} 不在档案里")
     if record["retired"]:
-        raise ApiProblemError(VALIDATION_FAILED, f"设备 {device_id} 已停用")
+        raise ApiProblemError(problems.DEVICE_RETIRED, f"设备 {device_id} 已停用")
     config = config_store.effective(session, device_id)
     if not config.get(HOLD_ENABLED_KEY):
-        raise ApiProblemError(VALIDATION_FAILED, "延长服务已停用")
+        raise ApiProblemError(problems.HOLD_DISABLED, "延长服务已停用")
     existing = devices_crud.get_hold(session, device_id)
     if existing is None:
         devices_crud.start_hold(session, device_id, HoldSource.MANUAL)
@@ -635,7 +650,21 @@ def hold_status(session: Session, device_id: str) -> HoldStatus:
     return _hold_view(session, device_id, hold)
 
 
-async def resume(session: Session, device_id: str, *, origin: HoldSource) -> dict[str, object]:
+def _clock_failure_problem(outcome: CommandOutcome) -> problems.Problem:
+    """把墙钟写入的失败结果映射为 HTTP problem。"""
+    if str(outcome.get("reason_code") or "") == reason_codes.DEVICE_OFFLINE.code:
+        return problems.DEVICE_OFFLINE
+    if str(outcome.get("status") or "") == outcomes.TIMEOUT.value:
+        return problems.DEVICE_TIMEOUT
+    return problems.DEVICE_COMMAND_FAILED
+
+
+def _clock_failure_detail(outcome: CommandOutcome) -> str:
+    message = str(outcome.get("terminal_message") or "").strip()
+    return message or "设备未确认时间写入请求"
+
+
+async def resume(session: Session, device_id: str, *, origin: HoldSource) -> ResumeResult:
     """恢复（Resume Schedule）：墙钟写回真实时刻（hold 自己的第二步，无条件执行
     ——不依赖 time_sync 开关：偏置若不写回，表盘永远快一个偏移量，下一晚的恢复
     时刻算术即被破坏），清 hold 列，回到 following_schedule。
@@ -645,38 +674,96 @@ async def resume(session: Session, device_id: str, *, origin: HoldSource) -> dic
     auto_close_time）让设备运行到次日自然关闭。写准即偏差纪元作废，表盘回到真实轴，
     布防截止的真实映射随之固定。
 
+    **尚未施加的意图**（hold_offset_s 为空）没有拨钟、没有要写回的偏置：只清状态、
+    不发任何命令，设备离线也能取消。布防已写入而拨钟未完成（arming_deadline 非空）
+    是唯一例外——清状态会把整夜覆盖布防留在 MCU 上，抛 `hold-arming-pending`，等
+    对账补完施加后走已施加路径。
+
     origin 区分两类调用方：后台对账的自动恢复记入 job_runs（后台任务审计的本体）；
     运维经 API 的手动恢复不冒充后台任务——它在接口调用与命令流水里已各有审计行
     （POST /resume 与由此下发的 clock.set），只留 stdout 日志。
 
-    未在 hold 中时幂等返回 resumed=false。
+    返回 `ResumeResult` 只覆盖成功族：`resumed` / `cancelled` / `not-holding`。
+    失败（离线、超时、事实缺失、正在施加、布防半施加）一律抛 problem+json，由
+    HTTP 状态码与 problem type 表达，不再用 `resumed=false` 混装。
     """
     if devices_service.get_device(session, device_id) is None:
         raise ApiProblemError(problems.DEVICE_NOT_FOUND, f"设备 {device_id} 不在档案里")
     hold = devices_crud.get_hold(session, device_id)
     if hold is None:
-        return {"device_id": device_id, "resumed": False}
+        return {
+            "device_id": device_id,
+            "previous_state": None,
+            "outcome": ResumeOutcome.NOT_HOLDING,
+            "clock_restored": False,
+        }
+    if hold["offset_s"] is None:
+        if hold["arming_deadline"] is not None:
+            log_event(
+                "WARNING",
+                "power.resume-blocked",
+                "整夜布防已写入但拨钟未完成，不能只清状态",
+                device_id=device_id,
+            )
+            raise ApiProblemError(
+                problems.HOLD_ARMING_PENDING,
+                "整夜布防已设置，设备时间尚未写入，请稍后重试",
+                headers={"Retry-After": str(int(TICK_INTERVAL_S))},
+            )
+        facts = devices_service.device_facts(session, device_id)
+        if facts is not None:
+            real_local = _now_utc().astimezone(timezone(timedelta(minutes=facts.zone_offset_minutes)))
+            close_minute = _fact_minute(facts.auto_close_time)
+            expired = real_local > _skipped_close_moment(hold["started_at"], close_minute, facts.zone_offset_minutes)
+            if (
+                not expired
+                and manager.is_online(device_id)
+                and device_clock.has(device_id)
+                and _hold_due(real_local, close_minute)
+            ):
+                # 触发窗内且设备在线：对账器可能正在施加（命令 await 期间状态仍是
+                # pending）。让它跑完这一轮，下一轮再按 applied/arming 的路径恢复。
+                log_event("INFO", "power.resume-deferred", "hold 正在施加，暂缓取消", device_id=device_id)
+                raise ApiProblemError(
+                    problems.HOLD_APPLYING,
+                    "今晚延长正在生效，请稍后重试",
+                    headers={"Retry-After": str(int(TICK_INTERVAL_S))},
+                )
+        devices_crud.clear_hold(session, device_id)
+        log_event("INFO", "power.resumed", "运维取消尚未施加的今晚 hold（未下发任何命令）", device_id=device_id)
+        return {
+            "device_id": device_id,
+            "previous_state": HoldState.PENDING,
+            "outcome": ResumeOutcome.CANCELLED,
+            "clock_restored": False,
+        }
     facts = devices_service.device_facts(session, device_id)
     if facts is None:
         if origin is HoldSource.AUTOMATED:
             _record("resume-failed", "上报事实缺失，无法写回墙钟", device_id, level="WARNING")
         else:
             log_event("WARNING", "power.resume-failed", "上报事实缺失，无法写回墙钟", device_id=device_id)
-        return {"device_id": device_id, "resumed": False}
+        raise ApiProblemError(problems.HOLD_FACTS_MISSING, "设备未上报开关机计划，暂时无法恢复常规时间设置")
     real_local = _now_utc().astimezone(timezone(timedelta(minutes=facts.zone_offset_minutes)))
-    if not await _step_wall_clock(session, device_id, _wall_text(real_local), rearm=False):
+    outcome = await _clock_write(session, device_id, _wall_text(real_local), rearm=False)
+    if outcome.get("status") != outcomes.OK.value:
         if origin is HoldSource.AUTOMATED:
             _record("resume-failed", "墙钟写回没成功，hold 保持，下一轮重试", device_id, level="WARNING")
         else:
             log_event("WARNING", "power.resume-failed", "墙钟写回没成功，hold 保持，下一轮重试", device_id=device_id)
-        return {"device_id": device_id, "resumed": False}
+        raise ApiProblemError(_clock_failure_problem(outcome), _clock_failure_detail(outcome))
     await _cancel_arming_if_pending(session, device_id, hold, facts.auto_open_time, real_local)
     devices_crud.clear_hold(session, device_id)
     if origin is HoldSource.AUTOMATED:
         _record("resumed", "已恢复常规电源计划", device_id)
     else:
         log_event("INFO", "power.resumed", "运维手动恢复常规电源计划", device_id=device_id)
-    return {"device_id": device_id, "resumed": True}
+    return {
+        "device_id": device_id,
+        "previous_state": HoldState.APPLIED,
+        "outcome": ResumeOutcome.RESUMED,
+        "clock_restored": True,
+    }
 
 
 async def _cancel_arming_if_pending(
@@ -717,11 +804,20 @@ def holds(session: Session) -> list[HoldStatus]:
 
 
 def _hold_view(session: Session, device_id: str, hold: dict[str, Any]) -> HoldStatus:
-    past_close = False
     idle = not doors_service.open_sessions(session, device_id)
-    if hold["offset_s"] is not None and hold["started_at"] is not None:
-        # 恢复时刻已过 = 恢复条件之一（另一项是喷头空闲）；字段名沿用契约的 past_close
-        past_close = _now_utc() >= hold["started_at"] + timedelta(seconds=hold["offset_s"])
+    resume_at = ""
+    past_close = False
+    if hold["offset_s"] is not None:
+        state = HoldState.APPLIED
+        if hold["started_at"] is not None:
+            moment = hold["started_at"] + timedelta(seconds=hold["offset_s"])
+            resume_at = format_rfc3339(moment)
+            # 恢复时刻已过 = 恢复条件之一（另一项是喷头空闲）
+            past_close = _now_utc() >= moment
+    elif hold["arming_deadline"] is not None:
+        state = HoldState.ARMING
+    else:
+        state = HoldState.PENDING
     assignments = hold["assignments"] or []
     pending: list[DoorAssignment] = [
         {"door_no": int(item["door_no"]), "cert_no": str(item["cert_no"])}
@@ -730,9 +826,11 @@ def _hold_view(session: Session, device_id: str, hold: dict[str, Any]) -> HoldSt
     ]
     return {
         "device_id": device_id,
+        "state": state,
         "hold_source": str(hold["source"].value) if hold["source"] else "",
         "hold_started_at": format_rfc3339(hold["started_at"]) if hold["started_at"] else "",
         "hold_offset_s": hold["offset_s"],
+        "resume_at": resume_at,
         "arming_deadline": format_rfc3339(hold["arming_deadline"]) if hold["arming_deadline"] else "",
         "total": len(assignments),
         "reassigned_count": sum(1 for item in assignments if item.get("done")),

@@ -196,6 +196,23 @@ def start_hold(session: Session, device_id: str, source: HoldSource) -> None:
     row.hold_source = source
     row.hold_offset_s = None
     row.hold_assignments = None
+    row.arming_deadline = None
+    session.commit()
+
+
+def mark_hold_armed(session: Session, device_id: str, arming_deadline: datetime) -> None:
+    """布防已写入、拨钟未完成：先记下 MCU 截止。
+
+    这一步让「意图尚未发任何命令」与「整夜布防已在位、只是偏置未落」可区分
+    （见 power.service 的恢复分支）：前者取消意图不碰设备，后者清状态会把整夜
+    覆盖布防留在 MCU 上。
+
+    hold 已被清掉时是空操作：不让迟到的布防结果复活状态。
+    """
+    row = _find(session, device_id)
+    if row is None or row.hold_started_at is None:
+        return
+    row.arming_deadline = arming_deadline
     session.commit()
 
 
@@ -212,7 +229,7 @@ def mark_hold_applied(
     恢复判定与看板都按这条轴算，两者必须同轴。
     """
     row = _find(session, device_id)
-    if row is None:
+    if row is None or row.hold_started_at is None:
         return
     row.hold_started_at = utcnow()
     row.hold_offset_s = offset_s
@@ -510,6 +527,7 @@ __all__: list[str] = [
     "list_link_events",
     "mark_assignment",
     "mark_hold_applied",
+    "mark_hold_armed",
     "register",
     "revoke",
     "revoke_all",
