@@ -6,6 +6,11 @@ updates:
     directory: "/server"
     schedule:
       interval: "weekly"
+  # 网页端工具链（eslint/stylelint）：零构建单页 + npm lockfile
+  - package-ecosystem: "npm"
+    directory: "/server/web"
+    schedule:
+      interval: "weekly"
   - package-ecosystem: "gradle"
     directory: "/android"
     schedule:
