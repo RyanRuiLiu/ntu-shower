@@ -113,7 +113,7 @@ function renderCurrent() {
   currentHold = null
   holdStatusFailed = false
   $('holdStatus').textContent = store.deviceId ? HOLD_COPY.reading : HOLD_COPY.notSelected
-  $('btnHold').textContent = '今晚延长'
+  $('btnHold').textContent = HOLD_COPY.buttonNone
   void refreshHoldStatus()
   $('bridgeSteps').hidden = true
   $('bridgeHint').hidden = false
@@ -183,7 +183,7 @@ async function refreshHoldStatus() {
     currentHold = null
     holdStatusFailed = error.status !== 404
     if (holdStatusFailed) {
-      report('maintResult', `今晚延长状态读取失败 · ${problemText(error)}`, 'err')
+      report('maintResult', `${HOLD_COPY.statusReadFailed} · ${problemText(error)}`, 'err')
     }
   }
   renderHoldStatus()
@@ -365,7 +365,7 @@ async function doHold() {
       ? HOLD_COPY.confirmOnline
       : HOLD_COPY.confirmOffline
   if (!window.confirm(prompt)) return
-  report('maintResult', '正在设置今晚延长…', 'info')
+  report('maintResult', HOLD_COPY.setting, 'info')
   try {
     const result = await api.hold(store.deviceId)
     currentHold = result
@@ -392,7 +392,7 @@ function holdLocksPowerRewrite() {
 }
 
 async function doResume() {
-  report('maintResult', '正在恢复常规电源计划…', 'info')
+  report('maintResult', HOLD_COPY.resuming, 'info')
   try {
     const result = await api.resume(store.deviceId)
     currentHold = null
@@ -600,8 +600,8 @@ export const devicesView = {
               <button type="button" class="btn btn-ghost btn-sm" id="btnFreelist">免费名单</button>
               <button type="button" class="btn btn-ghost btn-sm" id="btnRestart">重启 NTU Shower</button>
               <button type="button" class="btn btn-ghost btn-sm" id="btnBathRestart">重启浴室 App</button>
-              <button type="button" class="btn btn-ghost btn-sm" id="btnHold">今晚延长</button>
-              <button type="button" class="btn btn-ghost btn-sm" id="btnResume">恢复计划</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnHold">${HOLD_COPY.buttonNone}</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnResume">${HOLD_COPY.buttonResume}</button>
               <button type="button" class="btn btn-danger btn-sm" id="btnReboot">重启设备</button>
             </div>
             <div class="muted" id="holdStatus">${HOLD_COPY.notSelected}</div>

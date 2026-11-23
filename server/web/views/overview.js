@@ -10,7 +10,7 @@
 import { api } from '../core/api.js'
 import { deviceCell } from '../core/cells.js'
 import { elapsedSince, fmtDateTime, fmtDuration, fmtFullDateTime, fmtTime, serverNowMs } from '../core/clock.js'
-import { NEED_DEVICE } from '../core/copy.js'
+import { HOLD_COPY, NEED_DEVICE } from '../core/copy.js'
 import { DOOR_STATES } from '../core/contract.js'
 import { $, disposer, esc, listen, PLACEHOLDER } from '../core/dom.js'
 import { outcomeText, problemText, report } from '../core/outcome.js'
@@ -406,38 +406,38 @@ function renderTaskBoard(data) {
     if (task.key === 'power') {
       const body =
         data.holds.length === 0
-          ? '<div class="task-hint">当前没有设备在延长中</div>'
+          ? `<div class="task-hint">${HOLD_COPY.overview.empty}</div>`
           : data.holds
               .map((hold) => {
                 // 状态判据只有服务端 hold.state 一处：pending/arming 都还没施加，
                 // 既没有拨钟，也没有恢复时刻，不能显示“恢复时刻未到”。
                 const applied = hold.state === 'applied'
-                const pendingText = hold.state === 'arming' ? '布防已写入，待拨钟' : '尚未施加'
+                const pendingText = HOLD_COPY.overview.pending(hold.state)
                 const flags = applied
                   ? [
-                      { ok: hold.past_close, yes: '恢复时刻已过', no: '恢复时刻未到' },
-                      { ok: hold.idle, yes: '喷头空闲', no: '仍有会话' },
+                      { ok: hold.past_close, ...HOLD_COPY.overview.pastClose },
+                      { ok: hold.idle, ...HOLD_COPY.overview.idle },
                     ]
                       .map(({ ok, yes, no }) => `<span class="task-flag ${ok ? 'ok' : 'no'}">${ok ? yes : no}</span>`)
                       .join('')
-                  + (hold.past_close && hold.idle ? '<span class="task-flag ok">即将恢复</span>' : '')
+                  + (hold.past_close && hold.idle ? `<span class="task-flag ok">${HOLD_COPY.overview.soon}</span>` : '')
                   : `<span class="task-flag no">${pendingText}</span>`
                 const pending =
                   hold.pending.length === 0
                     ? ''
-                    : `<div class="task-sub">待重分配 ${hold.pending.length} 人：${hold.pending
+                    : `<div class="task-sub">${HOLD_COPY.overview.pendingReassign} ${hold.pending.length} 人：${hold.pending
                         .map((item) => `#${esc(item.door_no)} ${esc(item.cert_no)}`)
                         .join('  ')}</div>`
                 return `
                 <div class="task-entry">
                   <div class="task-line">
                     ${deviceCell(hold.device_id, 'task-dev')}
-                    <span class="muted">${applied ? 'hold 中' : '待生效'}（${esc(hold.hold_source === 'manual' ? '手动' : '自动')}，${esc(fmtDateTime(hold.hold_started_at))}）</span>
+                    <span class="muted">${HOLD_COPY.overview.state(applied)}（${esc(HOLD_COPY.overview.source(hold.hold_source === 'manual'))}，${esc(fmtDateTime(hold.hold_started_at))}）</span>
                   </div>
                   <div class="task-sub">
-                    ${applied ? `<span>恢复时刻 <span class="mono">${esc(fmtFullDateTime(hold.resume_at))}</span></span>` : ''}
-                    <span>MCU 布防截止 <span class="mono">${esc(fmtFullDateTime(hold.arming_deadline))}</span></span>
-                    <span>已重分配 ${hold.reassigned_count}/${hold.total}</span>
+                    ${applied ? `<span>${HOLD_COPY.overview.resumeAt} <span class="mono">${esc(fmtFullDateTime(hold.resume_at))}</span></span>` : ''}
+                    <span>${HOLD_COPY.overview.armingDeadline} <span class="mono">${esc(fmtFullDateTime(hold.arming_deadline))}</span></span>
+                    <span>${HOLD_COPY.overview.reassigned} ${hold.reassigned_count}/${hold.total}</span>
                     ${flags}
                   </div>
                   ${pending}

@@ -20,7 +20,10 @@ export const HOLD_COPY = {
   reading: '今晚延长：读取中…',
   none: '今晚延长：未设置',
   failed: '今晚延长：状态读取失败',
+  statusReadFailed: '今晚延长状态读取失败',
   notSelected: '今晚延长：未选择设备',
+  setting: '正在设置今晚延长…',
+  resuming: '正在恢复常规电源计划…',
   applied: (source, resumeAt, deadline, offline) =>
     `今晚延长：生效中（${source}）· 恢复时刻 ${resumeAt} · MCU 布防截止 ${deadline}${offline}`,
   arming: (source, offline) => `今晚延长：待生效（${source}）· 布防已写入，拨钟未完成${offline}`,
@@ -28,6 +31,7 @@ export const HOLD_COPY = {
   buttonApplied: '延长生效中',
   buttonPending: '延长待生效',
   buttonNone: '今晚延长',
+  buttonResume: '恢复计划',
   confirmExisting: (state) =>
     `该设备当前已在今晚延长状态（${state === 'applied' ? '生效中' : '待生效'}）。`
     + '本次点击是幂等操作，不会新增一晚；如需恢复请用「恢复计划」。是否继续？',
@@ -48,5 +52,18 @@ export const HOLD_COPY = {
     'not-holding': '当前不在延长中，无需恢复',
   },
   resumeFallback: '已完成 · 已处理恢复请求',
+  overview: {
+    empty: '当前没有设备在延长中',
+    state: (applied) => (applied ? 'hold 中' : '待生效'),
+    pending: (state) => (state === 'arming' ? '布防已写入，待拨钟' : '尚未施加'),
+    source: (manual) => (manual ? '手动' : '自动'),
+    pastClose: { yes: '恢复时刻已过', no: '恢复时刻未到' },
+    idle: { yes: '喷头空闲', no: '仍有会话' },
+    soon: '即将恢复',
+    resumeAt: '恢复时刻',
+    armingDeadline: 'MCU 布防截止',
+    reassigned: '已重分配',
+    pendingReassign: '待重分配',
+  },
   lock: '今晚延长已建立（含待生效）：不能修改时间或重启；先恢复计划，无法恢复时用调试终端执行。',
 }
