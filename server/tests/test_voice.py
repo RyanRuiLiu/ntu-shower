@@ -162,7 +162,7 @@ def _seed_device_facts(*device_ids: str) -> None:
     ids = device_ids or (DEVICE_ID,)
     with session_scope() as session:
         for device_id in ids:
-            devices_service.record_status_report(session, device_id, "23:58", "10:55", 480)
+            devices_service.record_device_status(session, device_id, "23:58", "10:55", 480, 20, 5, 5)
 
 
 def _ok_outcome(downloaded: bool | None = None) -> CommandOutcome:
@@ -1585,7 +1585,7 @@ def test_dispatch_uses_device_reported_local_time(fresh_db: str, monkeypatch: py
     from app.modules.devices import service as devices_service
 
     with session_scope() as session:
-        devices_service.record_status_report(session, "dev-voice", "23:58", "10:55", 480)
+        devices_service.record_device_status(session, "dev-voice", "23:58", "10:55", 480, 20, 5, 5)
 
     def capture(_session: Session, _device_id: str, _cert_no: str, _event: str, local: object) -> list[object]:
         captured["local"] = local

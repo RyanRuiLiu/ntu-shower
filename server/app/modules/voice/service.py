@@ -941,7 +941,7 @@ async def _dispatch_event(session: Session, event: DoorEvent, max_age: int) -> N
         return
     if not event.cert_no:
         return
-    facts = devices_service.power_facts(session, event.device_id)
+    facts = devices_service.device_facts(session, event.device_id)
     if facts is None:
         log_event(
             "ERROR",
@@ -950,7 +950,7 @@ async def _dispatch_event(session: Session, event: DoorEvent, max_age: int) -> N
             device_id=event.device_id,
         )
         return
-    zone_offset = facts[2]
+    zone_offset = facts.zone_offset_minutes
     local = to_local(now_rfc3339(), zone_offset)
     if local is None:
         log_event("ERROR", "voice.local-time-invalid", "无法换算服务端当地时间，跳过语音匹配")

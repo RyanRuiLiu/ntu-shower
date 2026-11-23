@@ -105,7 +105,15 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from app.contracts import ASSIGNABLE_STATES, OCCUPIED_STATES, DoorState, SegmentSource
+from app.contracts import (
+    ASSIGNABLE_STATES,
+    DEFAULT_IN_SPACE_CAP_S,
+    DEFAULT_SESSION_CAP_S,
+    OCCUPIED_STATES,
+    DeviceCaps,
+    DoorState,
+    SegmentSource,
+)
 from app.core import device_clock, events
 from app.core.clock import now_rfc3339, parse_rfc3339, seconds_between, shift_rfc3339
 from app.core.logging import exc_info_text, log_event
@@ -120,33 +128,24 @@ RAW_STATUS_REPAIR = 1
 RAW_STATUS_SELECTED = 2
 RAW_STATUS_DISABLED = 3
 
-#: 一次会话（一个门从被占到被释放）的物理上限，秒 = 设备配置 maxbatchtime（20 分钟）。
+#: 一次会话（一个门从被占到被释放）的物理上限，秒 = 浴室 App 配置 maxbatchtime。
 #:
 #: 设备满这个时长会强制关阀释放，所以"一次占用超过它"本身不成立。它在这里的作用是
 #: 判"两帧之间的出水断没断"：间隔超过它，中间必然发生过一次我们没看见的释放，那段
 #: 出水没有任何证据，不并入时长。
 #:
-#: **这个值变过**：2026-05 之前是 1800 秒，换系统时改成 1200。四处互相独立的数据都
-#: 指到同一处断崖——设备流水的记录时长（老口径堆在 1806 秒后断崖、新口径堆在 1209
-#: 秒后断崖）、设备活跃库最大 1201 秒、本项目采集的 bathTime 最大 1154 秒（1200~1800
-#: 之间一条都没有）。要回溯 2026-05 之前的历史得按当时的配置另取一个值。
-#:
-#: **它不是各楼统一**：2026-11-23 生产体检发现六楼有 12 条设备轴差与观测差仅差 1-2 秒
-#: 的 21~28 分钟段（两个独立测量吻合），说明六楼浴室 App 的 maxbatchtime 配置长于 1200。
-#: 因此这个值不充当各楼段长的硬上界——段长真伪由 AB 交叉校验（[_close_segment]）判定，
-#: 这里的值只承担"两帧间隔超过它必然发生过释放"的划断与派生上限的保守角色。
-SESSION_MAX_S = 1200
-
-#: 一段**连续出水**的物理上限，秒。与一次占用同源——设备满 `maxbatchtime` 就强制释放，
-#: 那同时也结束了正在出水的那一段。所以直接引用 [SESSION_MAX_S]：两者不是同一个判断，
-#: 却由设备同一个参数决定，分开写两份数字迟早漂移。
-MAX_SEGMENT_S = SESSION_MAX_S
+#: **这个值变过、且各楼不同**：2026-05 之前是 1800 秒，换系统时改成 1200（四处互相
+#: 独立的数据指到同一处断崖）。2026-11-23 生产体检：六楼有 12 条设备轴差与观测差仅差
+#: 1-2 秒的 21~28 分钟段（两个独立测量吻合）——它的 maxbatchtime 配置仍是 30 分钟。
+#: 因此判定值按设备取（[contracts.DeviceCaps]，组合根从 facts 换算传入），本模块的
+#: [DEFAULT_SESSION_CAP_S] 只是 facts 缺报时的回退。
+SESSION_MAX_S = DEFAULT_SESSION_CAP_S  # 文档化别名：回退值，判定一律走 [contracts.DeviceCaps]
 
 #: 浴室 App"连续无水就释放"的门槛，秒：未开阀是 `maxinspacetime`、关阀后是
-#: `maxbathspacetime`，两者都是 300。它与 [SESSION_MAX_S] 同源（浴室 App 同一个参数家族），
-#: 所以住在一起而不各写一份。后台任务用它划断"同一串会话"：喷头空着超过这么久，说明那个
-#: 人的占用真的结束了（浴室端早释放了他、之后没人接手），预约续期的次数从头数。
-NO_WATER_RELEASE_S = 300
+#: `maxbatchspacetime`（现场实测同为 5 分钟）。后台任务用它划断"同一串会话"：喷头空着
+#: 超过这么久，说明那个人的占用真的结束了（浴室端早释放了他、之后没人接手），预约续期
+#: 的次数从头数。判定值随设备取（见 [contracts.DeviceCaps]），这里是回退值。
+NO_WATER_RELEASE_S = DEFAULT_IN_SPACE_CAP_S
 
 #: 交叉校验的容差，秒。段长的两种来源相差不超过它时采信设备轴差。
 #:
@@ -243,13 +242,13 @@ def open_sessions(session: Session, device_id: str) -> list[OpenSession]:
     ]
 
 
-def run_started_at(session: Session, device_id: str, door_no: int, cert_no: str) -> str:
+def run_started_at(session: Session, device_id: str, door_no: int, cert_no: str, limit_s: int) -> str:
     """这一串的第一场是什么时候分配的；一场都没有时给空串。
 
-    串由浴室 App 那条无水释放门槛划断（[NO_WATER_RELEASE_S]）——那是本域的规则，
-    所以阈值不由调用方给。
+    串由浴室 App 那条无水释放门槛划断——门槛随设备取（[contracts.DeviceCaps] 的
+    无水释放线），调用方按设备传入。
     """
-    return crud.run_started_at(session, device_id, door_no, cert_no, NO_WATER_RELEASE_S)
+    return crud.run_started_at(session, device_id, door_no, cert_no, limit_s)
 
 
 def can_assign(session: Session, device_id: str, door_no: int) -> tuple[bool, str] | None:
@@ -336,7 +335,9 @@ def _occupant(door: JsonObject) -> tuple[int, str]:
     return as_int(door.get("card_no")), cert_no or str(door.get("acc_no") or "")
 
 
-def _assigned_at(door: JsonObject, at: str, device_id: str, previous: DoorLiveView | None) -> tuple[str, str]:
+def _assigned_at(
+    door: JsonObject, at: str, device_id: str, previous: DoorLiveView | None, caps: DeviceCaps
+) -> tuple[str, str]:
     """会话起点与它的来源，一起返回。
 
     **优先**：把设备报的 `open_time` 加上钟偏差平移过来。那是**分配那一刻**设备写下的，
@@ -368,19 +369,26 @@ def _assigned_at(door: JsonObject, at: str, device_id: str, previous: DoorLiveVi
 
     1. 起点不晚于本帧——分配不可能发生在我们看见它之后；
     2. 起点不早于**上次看见这个门**的时刻——更早的会话我们已经见过了；
-    3. 与同帧 `in_time` 的平移值相差不超过 [SESSION_MAX_S]——两个读数出自同一口钟，而
-       一次占用压在 20 分钟内。
+    3. 与同帧 `in_time` 的平移值相差不超过设备占用上限（[contracts.DeviceCaps]）——
+       两个读数出自同一口钟，而一次占用压在它之内。
 
     第 3 条是**唯一能识破"拨钟时我们离线"**的：那时第 2 条没有参照（前一帧可能远在
     几小时前、或根本不存在），只剩它。
     """
     shifted = device_clock.to_server(door.get("open_time"), device_id)
-    if shifted is None or not _start_readings_agree(shifted, door, at, device_id, previous):
+    if shifted is None or not _start_readings_agree(shifted, door, at, device_id, previous, caps):
         return at, SESSION_ASSIGNED_OBSERVED
     return shifted, SESSION_ASSIGNED_INFERRED
 
 
-def _start_readings_agree(start: str, door: JsonObject, at: str, device_id: str, previous: DoorLiveView | None) -> bool:
+def _start_readings_agree(
+    start: str,
+    door: JsonObject,
+    at: str,
+    device_id: str,
+    previous: DoorLiveView | None,
+    caps: DeviceCaps,
+) -> bool:
     """`open_time` 平移出的起点，与同一帧里其他读数是否自洽（判据见 [_assigned_at]）。
 
     与 `in_time` 那一条用 [seconds_between]，它把"结束早于开始"归零——换人时新人的
@@ -391,7 +399,7 @@ def _start_readings_agree(start: str, door: JsonObject, at: str, device_id: str,
     if previous is not None and start < str(previous["reported_at"]):
         return False
     opened = device_clock.to_server(door.get("in_time"), device_id)
-    return opened is None or seconds_between(start, opened) <= SESSION_MAX_S
+    return opened is None or seconds_between(start, opened) <= caps.session_cap_s
 
 
 def _dt(value: object) -> datetime | None:
@@ -456,16 +464,21 @@ def _device_lock(device_id: str) -> threading.Lock:
         return lock
 
 
-def process_snapshot(session: Session, device_id: str, payload: JsonObject) -> SnapshotResult:
+def process_snapshot(
+    session: Session, device_id: str, payload: JsonObject, caps: DeviceCaps | None = None
+) -> SnapshotResult:
     """处理一帧；同一设备的帧串行（理由见 [_device_lock]）。
+
+    caps 是这台设备的浴室 App 参数上限（[contracts.DeviceCaps]）：组合根从 facts 换算
+    传入；缺省（facts 缺报）回退 fleet 通用值。
 
     锁覆盖整段：派生读的是刚写下的现态，把读放到锁外会读到别的帧的写入。
     """
     with _device_lock(device_id):
-        return _apply_snapshot(session, device_id, payload)
+        return _apply_snapshot(session, device_id, payload, caps or DeviceCaps())
 
 
-def _apply_snapshot(session: Session, device_id: str, payload: JsonObject) -> SnapshotResult:
+def _apply_snapshot(session: Session, device_id: str, payload: JsonObject, caps: DeviceCaps) -> SnapshotResult:
     """一帧的完整处理：派生状态、diff 记事件、更新现态、维护会话。
 
     帧时刻取设备锚定的采集时刻（`captured_at`）——它在库变化那一刻就定了，不受积压
@@ -489,7 +502,7 @@ def _apply_snapshot(session: Session, device_id: str, payload: JsonObject) -> Sn
     doors = payload.get("doors")
     raw_doors = [d for d in doors if isinstance(d, dict)] if isinstance(doors, list) else []
     try:
-        return _derive_snapshot(session, device_id, text_of(payload, "source"), raw_doors, occurred_at)
+        return _derive_snapshot(session, device_id, text_of(payload, "source"), raw_doors, occurred_at, caps)
     except Exception:  # noqa: BLE001 —— 派生可以以任何方式失败，而这一帧已经收下了
         log_event(
             "ERROR",
@@ -502,7 +515,12 @@ def _apply_snapshot(session: Session, device_id: str, payload: JsonObject) -> Sn
 
 
 def _derive_snapshot(
-    session: Session, device_id: str, source: str, raw_doors: list[JsonObject], occurred_at: str
+    session: Session,
+    device_id: str,
+    source: str,
+    raw_doors: list[JsonObject],
+    occurred_at: str,
+    caps: DeviceCaps,
 ) -> SnapshotResult:
     """派生半场：diff 记事件、维护会话、刷新现态、发布推送。"""
     prev_live = crud.get_all_live(session, device_id)
@@ -554,6 +572,7 @@ def _derive_snapshot(
             occurred_at,
             old,
             event_id,
+            caps,
             startup=source == SOURCE_STARTUP,
         )
         if voice_eligible:
@@ -626,7 +645,7 @@ def _gap(previous: DoorLiveView | None, at: str) -> int:
     return seconds_between(str(previous["reported_at"]), at)
 
 
-def _close_segment(session: Session, segment: DoorSegmentView, door: JsonObject, at: str) -> None:
+def _close_segment(session: Session, segment: DoorSegmentView, door: JsonObject, at: str, caps: DeviceCaps) -> None:
     """关掉一段出水，定下它的长度与来源。
 
     **A**（设备轴）：`close_time − in_time`。两个读数取自设备的同一口钟，偏差在里面
@@ -662,8 +681,8 @@ def _close_segment(session: Session, segment: DoorSegmentView, door: JsonObject,
     b = seconds_between(str(segment["opened_at"]), at)
     if a is not None and abs(a - b) <= AB_TOLERANCE_S:
         flow, source = a, "measured"
-    elif b > MAX_SEGMENT_S:
-        flow, source = MAX_SEGMENT_S, "capped"
+    elif b > caps.session_cap_s:
+        flow, source = caps.session_cap_s, "capped"
     else:
         flow, source = b, "observed"
     crud.close_segment(session, int(segment["id"]), _moment(at), flow, SegmentSource(source), close_raw)
@@ -765,6 +784,7 @@ def _maintain_session(
     at: str,
     previous: DoorLiveView | None,
     event_id: int | None,
+    caps: DeviceCaps,
     startup: bool,
 ) -> list[DoorEvent]:
     """维护会话与段：开、推进、收尾，并产出本帧的可播报事件。
@@ -772,7 +792,7 @@ def _maintain_session(
     `assigned_at` 与它的来源由 [_assigned_at] 一起给出：优先把设备报的 `openTime` 加上
     钟偏差平移回真实分配时刻，拿不到偏差时退回本帧时刻并如实标明那只是观测下界。
 
-    **先看盲区**：相邻两帧隔得超过一次占用的物理上限（[SESSION_MAX_S]）时，盲区前后
+    **先看盲区**：相邻两帧隔得超过一次占用的物理上限（设备值，[contracts.DeviceCaps]）时，盲区前后
     的状态不能当成连续。前一场在我们**最后看见它的时刻**收尾，本帧若仍占着就另起一场
     ——否则库里的陈旧占用（浴室 App 停了、人早走了）会被当成"它还被占着"，那场会话永不
     结束、起点还落在几小时前。盲区里的状态迁移不产出播报事件：中间发生过什么没有证据；
@@ -788,12 +808,12 @@ def _maintain_session(
     """
     out: list[DoorEvent] = []
     gap = _gap(previous, at)
-    blind = previous is None or gap > SESSION_MAX_S
+    blind = previous is None or gap > caps.session_cap_s
 
-    if gap > SESSION_MAX_S and previous is not None:
+    if gap > caps.session_cap_s and previous is not None:
         stale = crud.get_open_session(session, device_id, door_no)
         if stale is not None:
-            _close(session, stale, door, str(previous["reported_at"]), True)
+            _close(session, stale, door, str(previous["reported_at"]), True, caps)
 
     if state not in OCCUPIED_STATES:
         # 空闲态：只有上一帧还占着，才可能有会话要结。这一判据让绝大多数帧省掉一次查询
@@ -806,7 +826,7 @@ def _maintain_session(
             if open_session is not None:
                 session_id = int(open_session["id"])
                 session_cert = str(open_session["cert_no"])
-                _close(session, open_session, door, at, False)
+                _close(session, open_session, door, at, False, caps)
                 if not blind and session_cert:
                     out.append(
                         _door_event(
@@ -826,7 +846,7 @@ def _maintain_session(
     continued = open_session is not None and str(open_session["cert_no"]) == cert_no
     assigned: str
     if open_session is None:
-        assigned, source = _assigned_at(door, at, device_id, previous)
+        assigned, source = _assigned_at(door, at, device_id, previous, caps)
         session_id = crud.open_session(session, device_id, door_no, card_no, cert_no, _moment(assigned), source)
         # assigned 是会话生命周期事实，不是一次观测到的状态迁移：新会话一建立就产出。
         # 盲区/全貌帧里如果 open_time 能平移（source=inferred），用真实分配时刻补发；
@@ -849,8 +869,8 @@ def _maintain_session(
         # cardno 非 0 的一个都没有，拿卡号比等于没比（那 13 次换人会全漏）。
         #
         # 换人不为旧学号产出 `released`：门仍被占着，播「会话结束」与屏幕事实相反。
-        _close(session, open_session, door, at, False)
-        assigned, source = _assigned_at(door, at, device_id, previous)
+        _close(session, open_session, door, at, False, caps)
+        assigned, source = _assigned_at(door, at, device_id, previous, caps)
         session_id = crud.open_session(session, device_id, door_no, card_no, cert_no, _moment(assigned), source)
         if cert_no and (source == SESSION_ASSIGNED_INFERRED or (not blind and not startup)):
             out.append(
@@ -884,8 +904,8 @@ def _maintain_session(
                 )
             )
 
-    _maintain_segment(session, device_id, door_no, session_id, assigned, door, at)
-    _advance_session(session, device_id, door_no, session_id, door, at, gap)
+    _maintain_segment(session, device_id, door_no, session_id, assigned, door, at, caps)
+    _advance_session(session, device_id, door_no, session_id, door, at, gap, caps)
     return out
 
 
@@ -897,6 +917,7 @@ def _maintain_segment(
     assigned_at: str,
     door: JsonObject,
     at: str,
+    caps: DeviceCaps,
 ) -> None:
     """维护当前出水段：开一段、关一段、或从设备痕迹推回一条。
 
@@ -917,13 +938,20 @@ def _maintain_segment(
             crud.open_segment(session, session_id, device_id, door_no, _moment(opened), str(door.get("in_time")))
         return
     if segment is not None:
-        _close_segment(session, segment, door, at)
+        _close_segment(session, segment, door, at, caps)
         return
     _derive_segment(session, device_id, door_no, session_id, assigned_at, door, at)
 
 
 def _advance_session(
-    session: Session, device_id: str, door_no: int, session_id: int, door: JsonObject, at: str, gap: int
+    session: Session,
+    device_id: str,
+    door_no: int,
+    session_id: int,
+    door: JsonObject,
+    at: str,
+    gap: int,
+    caps: DeviceCaps,
 ) -> None:
     """把会话推进到本帧。
 
@@ -940,7 +968,7 @@ def _advance_session(
     segments = crud.segments_of_session(session, session_id)
     open_segment = crud.get_open_segment(session, device_id, door_no)
     in_flight = (
-        min(seconds_between(str(open_segment["opened_at"]), at), MAX_SEGMENT_S) if open_segment is not None else 0
+        min(seconds_between(str(open_segment["opened_at"]), at), caps.session_cap_s) if open_segment is not None else 0
     )
     crud.touch_session(
         session,
@@ -949,11 +977,18 @@ def _advance_session(
         at=_moment(at),
         total_flow_s=sum(int(s["flow_s"]) for s in segments) + in_flight,
         device_flow_s=as_int(door.get("bath_time_s")),
-        gap=gap > SESSION_MAX_S,
+        gap=gap > caps.session_cap_s,
     )
 
 
-def _close(session: Session, open_session: DoorSessionView, door: JsonObject, at: str, gap: bool) -> None:
+def _close(
+    session: Session,
+    open_session: DoorSessionView,
+    door: JsonObject,
+    at: str,
+    gap: bool,
+    caps: DeviceCaps,
+) -> None:
     """结束一次会话：先把这一帧的段收干净，再收尾。
 
     `gap` 表示这次收尾是因为发现了一个盲区（而不是看见喷头空了）。它要落进
@@ -975,7 +1010,7 @@ def _close(session: Session, open_session: DoorSessionView, door: JsonObject, at
 
     segment = crud.get_open_segment(session, device_id, door_no)
     if segment is not None:
-        _close_segment(session, segment, door, at)
+        _close_segment(session, segment, door, at, caps)
 
     segments = crud.segments_of_session(session, session_id)
     flow = sum(int(s["flow_s"]) for s in segments)

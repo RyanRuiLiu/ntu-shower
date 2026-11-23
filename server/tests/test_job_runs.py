@@ -215,7 +215,7 @@ REAL_SEGMENTS: tuple[tuple[object, ...], ...] = (
 def _read_snapshots(device_id: str) -> list:
     """直读 _snapshots 的短会话包装。"""
     with session_scope() as session:
-        return scheduler._snapshots(session, device_id)
+        return scheduler._snapshots(session, device_id, scheduler.DeviceCaps())
 
 
 def _moment(text: str) -> datetime:

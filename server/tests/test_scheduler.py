@@ -42,7 +42,7 @@ from app.persistence import audit as audit_repository
 def _read_snapshots(device_id: str) -> list:
     """直读 _snapshots 的短会话包装：测试直调辅助。"""
     with session_scope() as session:
-        return scheduler._snapshots(session, device_id)
+        return scheduler._snapshots(session, device_id, scheduler.DeviceCaps())
 
 
 SCHEDULER_PATH = Path(scheduler.__file__)
@@ -149,7 +149,7 @@ def _prepare(
     验一层。
     """
     monkeypatch.setattr(scheduler.config_store, "effective", lambda _session, _device_id: CONFIG)
-    monkeypatch.setattr(scheduler, "_snapshots", lambda _session, _device_id: candidates)
+    monkeypatch.setattr(scheduler, "_snapshots", lambda _session, _device_id, _caps: candidates)
     # WAITING 无条件落种子：它只是桩（_snapshots 只认 candidates），但手动 _fire 它的
     # 用例（如"会话已没了"）的审计行同样要过真外键——FK 完整与判定桩是两件事。
     _seed_session(WAITING)
@@ -226,7 +226,9 @@ def test_each_door_gets_exactly_one_timer(monkeypatch: pytest.MonkeyPatch) -> No
         assert list(handles) == [3]
         # 三个功能的状态互不相交，所以"已暂停"只有自动结算会认领
         with session_scope() as session:
-            assert next(iter(scheduler._plan(session, "dev-1").values()))[2].job == JOB_AUTO_SETTLE
+            assert (
+                next(iter(scheduler._plan(session, "dev-1", scheduler.DeviceCaps()).values()))[2].job == JOB_AUTO_SETTLE
+            )
 
     asyncio.run(body())
 

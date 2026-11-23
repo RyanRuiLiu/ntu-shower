@@ -5,7 +5,7 @@ reported 部分共用它。"设备不存在"以 404（DEVICE_NOT_FOUND）表达�
 里的 found: false。
 """
 
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from pydantic import BaseModel, Field
 
@@ -49,6 +49,21 @@ class DeviceLogHistoryRow(BaseModel):
 
     content: str
     uploaded_at: str
+
+
+class DeviceFacts(NamedTuple):
+    """设备自报事实（`device.status` 帧）：浴室 App 的开关机计划与出水/占用阈值。
+
+    电源计划三项为整体（缺任一即 facts 缺失，消费方按「计划未知」处理）；阈值三项
+    可空（旧 APK 不带、读取失败）——消费方按 contracts 的默认回退。
+    """
+
+    auto_close_time: str
+    auto_open_time: str
+    zone_offset_minutes: int
+    max_batch_time_min: int | None
+    max_in_space_time_min: int | None
+    max_batch_space_time_min: int | None
 
 
 class LinkEventRow(BaseModel):

@@ -21,6 +21,7 @@ from app.core.clock import format_rfc3339
 from app.core.tokens import generate_token, hash_token
 from app.db.base import utcnow
 from app.modules.devices.models import Device, DeviceCredential, DeviceLinkEvent, DeviceLog
+from app.modules.devices.schemas import DeviceFacts
 
 LOG_KEEP = 5
 
@@ -125,12 +126,15 @@ def set_retired(session: Session, device_id: str, retired: bool) -> bool:
     return True
 
 
-def set_power_facts(
+def set_device_facts(
     session: Session,
     device_id: str,
     auto_close_time: str,
     auto_open_time: str,
     zone_offset_minutes: int,
+    max_batch_time_min: int | None,
+    max_in_space_time_min: int | None,
+    max_batch_space_time_min: int | None,
 ) -> bool:
     """落一份 device.status 上报事实（影子行的 reported 部分）。设备不在册返回 False。"""
     row = _find(session, device_id)
@@ -139,23 +143,34 @@ def set_power_facts(
     row.auto_close_time = auto_close_time
     row.auto_open_time = auto_open_time
     row.zone_offset_minutes = zone_offset_minutes
+    row.max_batch_time_min = max_batch_time_min
+    row.max_in_space_time_min = max_in_space_time_min
+    row.max_batch_space_time_min = max_batch_space_time_min
     row.facts_at = utcnow()
     session.commit()
     return True
 
 
-def power_facts(session: Session, device_id: str) -> tuple[str, str, int] | None:
-    """上报事实（计划关闭、计划开启、时区偏移）；从未上报过时 None。
+def device_facts(session: Session, device_id: str) -> DeviceFacts | None:
+    """上报事实（开关机计划 + 出水/占用阈值）；电源计划未上报过时 None。
 
     唯一消费入口：hold 对账（触发与恢复都按它换算）、voice 生效时段的当地时刻、
-    设备页展示。缺哪一项都按整体缺失处理——半个计划没法对账。
+    段长与续期阈值的按设备取值、设备页展示。电源计划缺哪一项都按整体缺失处理
+    ——半个计划没法对账；阈值三项可空，消费方按 contracts 的默认回退。
     """
     row = _find(session, device_id)
     if row is None or not row.auto_close_time or not row.auto_open_time:
         return None
     if row.zone_offset_minutes is None:
         return None
-    return (str(row.auto_close_time), str(row.auto_open_time), int(row.zone_offset_minutes))
+    return DeviceFacts(
+        auto_close_time=str(row.auto_close_time),
+        auto_open_time=str(row.auto_open_time),
+        zone_offset_minutes=int(row.zone_offset_minutes),
+        max_batch_time_min=row.max_batch_time_min,
+        max_in_space_time_min=row.max_in_space_time_min,
+        max_batch_space_time_min=row.max_batch_space_time_min,
+    )
 
 
 def get_hold(session: Session, device_id: str) -> dict[str, Any] | None:
@@ -481,6 +496,7 @@ __all__: list[str] = [
     "as_record",
     "authenticate_device",
     "clear_hold",
+    "device_facts",
     "get",
     "get_clock_skew",
     "get_hold",
@@ -494,14 +510,13 @@ __all__: list[str] = [
     "list_link_events",
     "mark_assignment",
     "mark_hold_applied",
-    "power_facts",
     "register",
     "revoke",
     "revoke_all",
     "set_clock_skew",
+    "set_device_facts",
     "set_name",
     "set_order",
-    "set_power_facts",
     "set_retired",
     "set_trusted",
     "start_hold",

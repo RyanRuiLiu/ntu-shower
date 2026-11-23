@@ -28,10 +28,10 @@ import com.ryanliu.ntushower.features.doors.DoorSnapshotSender
 import com.ryanliu.ntushower.features.notice.NoticeController
 import com.ryanliu.ntushower.features.remote.AdbBridge
 import com.ryanliu.ntushower.features.selfmanage.A11yGuard
+import com.ryanliu.ntushower.features.selfmanage.BathAppFacts
 import com.ryanliu.ntushower.features.selfmanage.BathDbArchiver
 import com.ryanliu.ntushower.features.selfmanage.LogShipper
 import com.ryanliu.ntushower.features.selfmanage.OtaUpdater
-import com.ryanliu.ntushower.features.selfmanage.PowerFacts
 import com.ryanliu.ntushower.features.statusline.StatusLineController
 import com.ryanliu.ntushower.features.voice.VoiceClipStore
 import com.ryanliu.ntushower.features.voice.VoicePlayer
@@ -341,7 +341,7 @@ class AgentService : Service() {
     }
 
     /**
-     * 上报电源计划事实（device.status）：平台开关机时刻与本机时区。连上即报、变化才报
+     * 上报设备本地事实（device.status）：平台开关机时刻、出水与占用阈值、本机时区。连上即报、变化才报
      * （指纹比对，与 LogShipper 同一手法）——服务端的 hold 对账与语音当地时刻全按它
      * 换算，服务端不定任何时刻。读不到（App 从未启动）不发：服务端按"计划未知"处理。
      *
@@ -351,13 +351,15 @@ class AgentService : Service() {
      */
     private fun reportFactsIfChanged() {
         if (!::client.isInitialized || !client.isReady()) return
-        val facts = PowerFacts.read() ?: return
+        val facts = BathAppFacts.read() ?: return
         if (facts.fingerprint() == lastFactsHash) return
         lastFactsHash = facts.fingerprint()
         client.send(MessageTypes.DEVICE_STATUS, org.json.JSONObject(facts.toPayload()))
         deviceLog.lifecycle(
             "power.facts-reported",
-            "close=${facts.autoCloseTime} open=${facts.autoOpenTime} tz=${facts.zoneOffsetMinutes}",
+            "close=${facts.autoCloseTime} open=${facts.autoOpenTime} tz=${facts.zoneOffsetMinutes} " +
+                "batch=${facts.maxBatchTimeMin} inSpace=${facts.maxInSpaceTimeMin} " +
+                "batchSpace=${facts.maxBatchSpaceTimeMin}",
         )
     }
 

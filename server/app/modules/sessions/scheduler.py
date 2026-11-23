@@ -57,7 +57,7 @@ from typing import Protocol
 
 from sqlalchemy.orm import Session
 
-from app.contracts import CommandOutcome, DoorState
+from app.contracts import CommandOutcome, DeviceCaps, DoorState
 from app.core import actions, outcomes, problems
 from app.core.clock import now_rfc3339, shift_rfc3339
 from app.core.logging import log_event
@@ -280,7 +280,7 @@ def _now_s() -> float:
 # ── 取数：只读派生层 ──────────────────────────────────────────────────────
 
 
-def _snapshots(session: Session, device_id: str) -> list[Candidate]:
+def _snapshots(session: Session, device_id: str, caps: DeviceCaps) -> list[Candidate]:
     """这台设备上此刻所有未结束的会话，连同判据要用的现态。
 
     取数一律经 `doors` 域公开的功能，不读它的表：会话、现态、串的划断规则都是它的
@@ -305,20 +305,24 @@ def _snapshots(session: Session, device_id: str) -> list[Candidate]:
                 assigned_at=door_session.assigned_at,
                 paused_at=row.close_time,
                 run_started_at=doors_service.run_started_at(
-                    session, device_id, door_session.door_no, door_session.cert_no
+                    session, device_id, door_session.door_no, door_session.cert_no, caps.in_space_cap_s
                 ),
             )
         )
     return found
 
 
-def _plan(session: Session, device_id: str) -> dict[int, tuple[float, Candidate, Trigger]]:
-    """该设备每个喷头下一个到点：`door_no → (到点时刻, 候选, 触发)`。"""
+def _plan(session: Session, device_id: str, caps: DeviceCaps) -> dict[int, tuple[float, Candidate, Trigger]]:
+    """该设备每个喷头下一个到点：`door_no → (到点时刻, 候选, 触发)`。
+
+    caps 是这台设备的浴室 App 参数上限（组合根注入的 [caps_for] 按设备取）：续期
+    阈值与串划断都随它。
+    """
     config = config_store.effective(session, device_id)
     now = now_rfc3339()
     planned: dict[int, tuple[float, Candidate, Trigger]] = {}
-    for candidate in _snapshots(session, device_id):
-        trigger = decide(candidate, config, now)
+    for candidate in _snapshots(session, device_id, caps):
+        trigger = decide(candidate, config, now, caps)
         if trigger is None:
             continue
         if (candidate.device_id, candidate.session_id, trigger.job) in _attempted:
@@ -333,6 +337,17 @@ def _plan(session: Session, device_id: str) -> dict[int, tuple[float, Candidate,
 # ── 挂钩点：帧到达、配置保存 ──────────────────────────────────────────────
 
 
+#: 设备上限的提供器：组合根装配（devices 域按 facts 换算，缺报回退默认），本域
+# 不 import devices——上行合同由组合根装配，与 config_notifier 同款。
+def caps_for(session: Session, device_id: str) -> DeviceCaps:
+    """设备上限提供器：组合根装配（devices 域按 facts 换算，缺报回退默认）。
+
+    本域不 import devices——上行合同由组合根装配，与 config_notifier 同款。
+    """
+    _ = session, device_id
+    return DeviceCaps()
+
+
 def on_frame(device_id: str) -> None:
     """一帧刚派生完。重算该设备每个喷头的"下一个到点"，并把待补的分配接上。
 
@@ -343,7 +358,7 @@ def on_frame(device_id: str) -> None:
         return
     with session_scope() as session:
         _forget_closed_sessions(session, device_id)
-        planned = _plan(session, device_id)
+        planned = _plan(session, device_id, caps_for(session, device_id))
     _apply_plan(device_id, planned)
     _flush_pending_assign(device_id)
 
@@ -377,7 +392,7 @@ def reschedule(device_id: str) -> None:
     if not _running:
         return
     with session_scope() as session:
-        planned = _plan(session, device_id)
+        planned = _plan(session, device_id, caps_for(session, device_id))
     _apply_plan(device_id, planned)
 
 
@@ -462,7 +477,9 @@ def _fire(device_id: str, candidate: Candidate, trigger: Trigger) -> None:
     _worker(device_id).timers.pop(candidate.door_no, None)
     with session_scope() as session:
         config = config_store.effective(session, device_id)
-        fresh = {item.session_id: item for item in _snapshots(session, device_id)}.get(candidate.session_id)
+        fresh = {item.session_id: item for item in _snapshots(session, device_id, caps_for(session, device_id))}.get(
+            candidate.session_id
+        )
 
     reason = recheck(fresh, expected=candidate, trigger=trigger, config=config, now=now_rfc3339())
     if reason is not None:

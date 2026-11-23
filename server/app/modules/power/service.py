@@ -82,6 +82,7 @@ from app.modules.config.spec import HOLD_ENABLED_KEY, HOLD_STUDENTS_KEY, parse_t
 from app.modules.devices import actions as device_actions
 from app.modules.devices import crud as devices_crud
 from app.modules.devices import service as devices_service
+from app.modules.devices.schemas import DeviceFacts
 from app.modules.doors import service as doors_service
 from app.modules.sessions import service as sessions_service
 from app.modules.sessions.decision import students_of
@@ -299,11 +300,11 @@ async def tick_once() -> None:
 
 async def _reconcile_device(session: Session, device_id: str) -> None:
     """一台设备的对账：使影子行状态收敛于期望。每一步幂等，失败留痕等下一轮。"""
-    facts = devices_service.power_facts(session, device_id)
+    facts = devices_service.device_facts(session, device_id)
     if facts is None:
         _warn_once(device_id, "facts", "power.facts-missing", "设备尚未上报开关机计划，本轮跳过")
         return
-    close, _open_at, zone = facts
+    close, zone = facts.auto_close_time, facts.zone_offset_minutes
     config = config_store.effective(session, device_id)
     hold = devices_crud.get_hold(session, device_id)
 
@@ -357,14 +358,14 @@ async def _apply_hold(
     device_id: str,
     config: JsonObject,
     hold: dict[str, Any],
-    facts: tuple[str, str, int],
+    facts: DeviceFacts,
 ) -> None:
     """施加偏置：一次整夜覆盖布防（截止 = 次日 auto_close_time）+ 一次拨钟（到恢复时刻）。
 
     顺序硬约束：**布防先于拨钟**——墙钟被拨过旧布防的截止（今晚 23:58）即当场断电
     （docs/device-poweroff.md 的实测记录），必须先把截止推到拨后钟面之外（次日）。
     """
-    close, open_at, zone = facts
+    close, open_at, zone = facts.auto_close_time, facts.auto_open_time, facts.zone_offset_minutes
     students = students_of(config, HOLD_STUDENTS_KEY)
     skipped_close = _skipped_close_moment(hold["started_at"], _fact_minute(close), zone)
     now_real_local = _now_utc().astimezone(timezone(timedelta(minutes=zone)))
@@ -473,7 +474,7 @@ async def _resume_if_due(session: Session, device_id: str, hold: dict[str, Any])
 # ── 校正（following_schedule 下才进行；hold 期间的偏差是故意的）────────────
 
 
-async def _correct_clock(session: Session, device_id: str, config: JsonObject, facts: tuple[str, str, int]) -> None:
+async def _correct_clock(session: Session, device_id: str, config: JsonObject, facts: DeviceFacts) -> None:
     """自动校时：偏差超过阈值且无人占用时，把墙钟一次性写准（绝对钟面）。
 
     目标 = 真实当地钟面（服务端轴 + 上报时区）。营业时段内（open→close）写准后
@@ -491,7 +492,7 @@ async def _correct_clock(session: Session, device_id: str, config: JsonObject, f
     skew = device_clock.get(device_id)
     if abs(skew) < TIME_SYNC_THRESHOLD_S:
         return
-    close, open_at, zone = facts
+    close, open_at, zone = facts.auto_close_time, facts.auto_open_time, facts.zone_offset_minutes
     close_minute = _fact_minute(close)
     open_minute = _fact_minute(open_at)
     local_real = _now_utc().astimezone(timezone(timedelta(minutes=zone)))
@@ -655,21 +656,21 @@ async def resume(session: Session, device_id: str, *, origin: HoldSource) -> dic
     hold = devices_crud.get_hold(session, device_id)
     if hold is None:
         return {"device_id": device_id, "resumed": False}
-    facts = devices_service.power_facts(session, device_id)
+    facts = devices_service.device_facts(session, device_id)
     if facts is None:
         if origin is HoldSource.AUTOMATED:
             _record("resume-failed", "上报事实缺失，无法写回墙钟", device_id, level="WARNING")
         else:
             log_event("WARNING", "power.resume-failed", "上报事实缺失，无法写回墙钟", device_id=device_id)
         return {"device_id": device_id, "resumed": False}
-    real_local = _now_utc().astimezone(timezone(timedelta(minutes=facts[2])))
+    real_local = _now_utc().astimezone(timezone(timedelta(minutes=facts.zone_offset_minutes)))
     if not await _step_wall_clock(session, device_id, _wall_text(real_local), rearm=False):
         if origin is HoldSource.AUTOMATED:
             _record("resume-failed", "墙钟写回没成功，hold 保持，下一轮重试", device_id, level="WARNING")
         else:
             log_event("WARNING", "power.resume-failed", "墙钟写回没成功，hold 保持，下一轮重试", device_id=device_id)
         return {"device_id": device_id, "resumed": False}
-    await _cancel_arming_if_pending(session, device_id, hold, facts[1], real_local)
+    await _cancel_arming_if_pending(session, device_id, hold, facts.auto_open_time, real_local)
     devices_crud.clear_hold(session, device_id)
     if origin is HoldSource.AUTOMATED:
         _record("resumed", "已恢复常规电源计划", device_id)

@@ -43,6 +43,12 @@ class Device(TimestampMixin, Base):
     auto_open_time: Mapped[str | None] = mapped_column(String(5), default=None)
     #: 设备默认时区偏移（分钟；UTC+8 = 480）。浴室 App 判时刻用的是本机时区。
     zone_offset_minutes: Mapped[int | None] = mapped_column(Integer, default=None)
+    # ── 出水与占用阈值（device.status 帧，分钟）：同一份参数文件里的三根线 ──
+    # 各楼配置不同（2026-11-23 体检：六楼占用上限 30 分钟、其余 20 分钟），段长上限、
+    # 盲区划断与续期阈值按设备取值；缺报回退 contracts 的默认。
+    max_batch_time_min: Mapped[int | None] = mapped_column(Integer, default=None)
+    max_in_space_time_min: Mapped[int | None] = mapped_column(Integer, default=None)
+    max_batch_space_time_min: Mapped[int | None] = mapped_column(Integer, default=None)
     facts_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
     # ── hold 状态：非空即「今晚在 hold 中」（恒温器 Hold Until 语义，一次性）──
     hold_started_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)

@@ -157,7 +157,7 @@ object RuntimeConfig {
     @Volatile var bathDbArchiveEnabled = ConfigDefaults.BATH_DB_ARCHIVE_ENABLED
         private set
 
-    // ── 电源计划：开关机时刻改由设备本地事实（PowerFacts）自持，不再是服务端下发键 ──
+    // ── 电源计划：开关机时刻改由设备本地事实（BathAppFacts）自持，不再是服务端下发键 ──
 
     /**
      * 把每个键复位为 [ConfigDefaults] 的值。

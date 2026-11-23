@@ -78,7 +78,7 @@ object TimeSync {
         if (rearm) {
             // 重布目标取设备本地事实（浴室 App 参数里的平台计划），不依赖服务端下发——
             // 写钟与重布的配对不变式在设备侧自洽，服务端离线时同样成立。
-            val facts = PowerFacts.read()
+            val facts = BathAppFacts.read()
             if (facts == null) {
                 Log.w(TAG, "rearm skipped: power facts unavailable")
                 deviceLog.error("clock.set-rearm-skipped", "本地电源计划事实缺失，跳过重布")

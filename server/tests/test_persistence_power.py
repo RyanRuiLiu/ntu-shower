@@ -32,16 +32,16 @@ def _register(fresh_db: str) -> None:
 def test_power_facts_round_trip(fresh_db: str) -> None:
     _register(fresh_db)
     with session_scope() as session:
-        assert devices_store.power_facts(session, DEVICE) is None  # 未上报
-        assert devices_store.set_power_facts(session, DEVICE, "23:58", "10:55", 480) is True
+        assert devices_store.device_facts(session, DEVICE) is None  # 未上报
+        assert devices_store.set_device_facts(session, DEVICE, "23:58", "10:55", 480, 20, 5, 5) is True
     with session_scope() as session:
-        assert devices_store.power_facts(session, DEVICE) == ("23:58", "10:55", 480)
+        assert tuple(devices_store.device_facts(session, DEVICE)) == ("23:58", "10:55", 480, 20, 5, 5)
 
 
 def test_power_facts_for_unknown_device_is_a_no_op(fresh_db: str) -> None:
     with session_scope() as session:
-        assert devices_store.set_power_facts(session, "ghost", "23:58", "10:55", 480) is False
-        assert devices_store.power_facts(session, "ghost") is None
+        assert devices_store.set_device_facts(session, "ghost", "23:58", "10:55", 480, 20, 5, 5) is False
+        assert devices_store.device_facts(session, "ghost") is None
 
 
 def test_hold_lifecycle_round_trip(fresh_db: str) -> None:

@@ -13,7 +13,7 @@ device.update 的 payload 是精简档案（DeviceSummary）：版本、来源 I
 
 from sqlalchemy.orm import Session
 
-from app.contracts import DeviceLogKind, LinkEvent
+from app.contracts import DeviceCaps, DeviceLogKind, LinkEvent
 from app.core import device_clock, events
 from app.core.clock import now_rfc3339, parse_rfc3339
 from app.core.connections import manager
@@ -21,7 +21,7 @@ from app.core.problems import DEVICE_NOT_FOUND, ApiProblemError
 from app.db.base import utcnow
 
 from . import crud
-from .schemas import DeviceRecord, DeviceSummary
+from .schemas import DeviceFacts, DeviceRecord, DeviceSummary
 
 
 def get_device(session: Session, device_id: str) -> DeviceRecord | None:
@@ -120,20 +120,52 @@ def record_log_upload(session: Session, device_id: str, kind: str, content: str)
     crud.append_device_log(session, device_id, DeviceLogKind(kind), content, utcnow())
 
 
-def record_status_report(
+def record_device_status(
     session: Session,
     device_id: str,
     auto_close_time: str,
     auto_open_time: str,
     zone_offset_minutes: int,
+    max_batch_time_min: int | None,
+    max_in_space_time_min: int | None,
+    max_batch_space_time_min: int | None,
 ) -> bool:
-    """落一份 device.status 上报事实（开关机计划与时区）。设备不在册返回 False。"""
-    return crud.set_power_facts(session, device_id, auto_close_time, auto_open_time, zone_offset_minutes)
+    """落一份 device.status 上报事实（开关机计划与出水/占用阈值）。设备不在册返回 False。"""
+    return crud.set_device_facts(
+        session,
+        device_id,
+        auto_close_time,
+        auto_open_time,
+        zone_offset_minutes,
+        max_batch_time_min,
+        max_in_space_time_min,
+        max_batch_space_time_min,
+    )
 
 
-def power_facts(session: Session, device_id: str) -> tuple[str, str, int] | None:
-    """上报事实的唯一消费入口：hold 对账、voice 当地时刻、设备页展示共用。"""
-    return crud.power_facts(session, device_id)
+def device_facts(session: Session, device_id: str) -> DeviceFacts | None:
+    """上报事实的唯一消费入口：hold 对账、voice 当地时刻、阈值取值、设备页展示共用。"""
+    facts = crud.device_facts(session, device_id)
+    if facts is None:
+        return None
+    return facts
+
+
+def device_caps(session: Session, device_id: str) -> DeviceCaps:
+    """设备的浴室 App 参数上限（秒）：facts 换算；缺报（旧 APK/读取失败）回退 fleet 默认。"""
+    facts = device_facts(session, device_id)
+    if (
+        facts is None
+        or facts.max_batch_time_min is None
+        or facts.max_in_space_time_min is None
+        or facts.max_batch_space_time_min is None
+    ):
+        return DeviceCaps()
+    return DeviceCaps(
+        session_cap_s=facts.max_batch_time_min * 60,
+        in_space_cap_s=facts.max_in_space_time_min * 60,
+        batch_space_cap_s=facts.max_batch_space_time_min * 60,
+    )
 
 
 def latest_device_log(session: Session, device_id: str, kind: str) -> dict[str, str] | None:

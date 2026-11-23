@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import StrEnum
 
 from typing_extensions import TypedDict
@@ -376,6 +377,28 @@ class KeyRecord(TypedDict):
     revoked_at: str
 
 
+#: 各楼浴室 App 配置不同（2026-11-23 生产体检：六楼占用上限 30 分钟、其余 20 分钟），
+#: 段长与占用的判定值按设备取值（见 [DeviceCaps]）；这三个是 facts 缺报时的最终回退值——
+#: 取值为 fleet 实测的多数配置（1200 秒断崖四处独立数据实证、无水释放 300 秒）。
+DEFAULT_SESSION_CAP_S = 1200
+DEFAULT_IN_SPACE_CAP_S = 300
+DEFAULT_BATCH_SPACE_CAP_S = 300
+
+
+@dataclass(frozen=True)
+class DeviceCaps:
+    """一台设备的浴室 App 参数上限（秒）：段长与占用判定的按设备取值。
+
+    由组合根从设备自报 facts（`device.status` 的 maxbatchtime/maxinspacetime/
+    maxbatchspacetime，分钟）换算传入；facts 缺报时用 [DEFAULT_SESSION_CAP_S] 等
+    回退值构造，判定行为与历史上写死常量的时代一致。
+    """
+
+    session_cap_s: int = DEFAULT_SESSION_CAP_S
+    in_space_cap_s: int = DEFAULT_IN_SPACE_CAP_S
+    batch_space_cap_s: int = DEFAULT_BATCH_SPACE_CAP_S
+
+
 __all__: list[str] = [
     "ASSIGNABLE_STATES",
     "OCCUPIED_STATES",
@@ -385,6 +408,7 @@ __all__: list[str] = [
     "CommandAuditRecord",
     "CommandOutcome",
     "CommandStatus",
+    "DeviceCaps",
     "DeviceLogKind",
     "DeviceRecord",
     "DeviceSummary",

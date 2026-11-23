@@ -779,7 +779,14 @@ def test_device_status_frame_lands_power_facts(client: TestClient, fresh_db: str
         assert err["payload"]["code"] == "proto.unknown_type"
 
         with session_scope() as session:
-            assert devices_store.power_facts(session, "dev-status-frame") == ("23:58", "10:55", 480)
+            assert tuple(devices_store.device_facts(session, "dev-status-frame")) == (
+                "23:58",
+                "10:55",
+                480,
+                None,
+                None,
+                None,
+            )
 
         ws.send_text(
             frames.frame(

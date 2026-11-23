@@ -79,12 +79,12 @@ def _prepare(
 
     with session_scope() as session:
         if facts:
-            devices_store.set_power_facts(session, DEVICE, CLOSE, OPEN_AT, ZONE_MINUTES)
+            devices_store.set_device_facts(session, DEVICE, CLOSE, OPEN_AT, ZONE_MINUTES, 20, 5, 5)
 
 
 def _seed_facts(fresh_db: str) -> None:
     with session_scope() as session:
-        devices_store.set_power_facts(session, DEVICE, CLOSE, OPEN_AT, ZONE_MINUTES)
+        devices_store.set_device_facts(session, DEVICE, CLOSE, OPEN_AT, ZONE_MINUTES, 20, 5, 5)
 
 
 def _with_session(open_time: str, cert_no: str = "9999999001", door_no: int = 3) -> None:
@@ -361,7 +361,7 @@ def test_late_close_hold_dials_to_close_plus_margin(fresh_db: str, monkeypatch: 
     sent: list[tuple[str, object]] = []
     _prepare(monkeypatch, "2026-11-21 00:25:00", sent)
     with session_scope() as session:
-        devices_store.set_power_facts(session, DEVICE, "00:30", OPEN_AT, ZONE_MINUTES)
+        devices_store.set_device_facts(session, DEVICE, "00:30", OPEN_AT, ZONE_MINUTES, 20, 5, 5)
 
     with session_scope() as session:
         power.request_hold(session, DEVICE)
@@ -928,13 +928,13 @@ def test_resume_endpoint_is_idempotent_when_not_holding(
     assert resp.json()["resumed"] is False
 
 
-def test_record_status_report_lands_the_shadow_row(fresh_db: str) -> None:
+def test_record_device_status_lands_the_shadow_row(fresh_db: str) -> None:
     """上报事实落影子行：三个值整组进出（缺哪项都按整体缺失处理）。"""
 
     device_link.register_trusted_device(DEVICE)
     with session_scope() as session:
-        assert devices_service.record_status_report(session, DEVICE, CLOSE, OPEN_AT, 480) is True
-        assert devices_service.power_facts(session, DEVICE) == (CLOSE, OPEN_AT, 480)
+        assert devices_service.record_device_status(session, DEVICE, CLOSE, OPEN_AT, 480, 20, 5, 5) is True
+        assert tuple(devices_service.device_facts(session, DEVICE)) == (CLOSE, OPEN_AT, 480, 20, 5, 5)
     assert _get_hold(fresh_db) is None  # 上报事实不改变 hold 状态
 
 
@@ -1115,7 +1115,7 @@ def test_holds_view_without_reported_facts_reports_recovery_undecided(
     _prepare(monkeypatch, "2026-11-20 23:51:00", skew_s=-660.0)
     _seed_applied_hold_with_assignment(fresh_db, "2026-11-20T15:49:00.000Z", monkeypatch)
     with session_scope() as session:
-        devices_store.set_power_facts(session, DEVICE, "", "", 0)  # 模拟事实被清
+        devices_store.set_device_facts(session, DEVICE, "", "", 0, 20, 5, 5)  # 模拟事实被清
 
     with session_scope() as session:
         holds = power.holds(session)
@@ -1240,12 +1240,12 @@ def test_stop_awaits_inflight_reassign_tasks(fresh_db: str, monkeypatch: pytest.
 def test_hold_crud_guards_return_on_unknown_device(fresh_db: str) -> None:
     """影子行不存在时的读与写一律静默返回（设备先注册再操作的守卫在上层）。"""
     with session_scope() as session:
-        devices_store.set_power_facts(session, "ghost", "23:58", "10:55", 480)
+        devices_store.set_device_facts(session, "ghost", "23:58", "10:55", 480, 20, 5, 5)
         devices_store.start_hold(session, "ghost", HoldSource.MANUAL)
         devices_store.mark_hold_applied(session, "ghost", 660, [], utcnow())
         devices_store.clear_hold(session, "ghost")
         devices_store.mark_assignment(session, "ghost", 0, done=True)
-        assert devices_store.power_facts(session, "ghost") is None
+        assert devices_store.device_facts(session, "ghost") is None
         assert devices_store.get_hold(session, "ghost") is None
         assert devices_store.set_retired(session, "ghost", True) is False
 

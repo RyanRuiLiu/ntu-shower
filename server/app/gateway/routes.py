@@ -45,6 +45,7 @@ from app.modules.devices import crud as devices_crud
 from app.modules.devices import service as devices_service
 from app.modules.devices.schemas import LINK_OFFLINE, LINK_ONLINE
 from app.modules.doors import service as doors_service
+from app.modules.doors.events import SnapshotResult
 from app.modules.ota import crud as ota_crud
 from app.modules.power import service as power_service
 from app.modules.sessions import scheduler as sessions_scheduler
@@ -356,7 +357,7 @@ async def _handle_frame(
         # 回执语义：**收到 ack ⇔ 帧已受理**。派生的失败已在 service 内部止住并照常返回
         # ok：回执让设备删掉发件箱那一行，队列继续流动，失败记入 doors.snapshot-derive-failed。
         # 扣下回执救不回什么——重发同一条帧不会得到不同的结果，漏掉的边沿由下一帧补上。
-        result = await _call(ws, doors_service.process_snapshot, device_id, payload)
+        result = await _call(ws, _process_snapshot_with_caps, device_id, payload)
         # 帧是后台任务的心跳：门刚被占用、刚被释放，都只能从帧看出来。调度器据此重算这台
         # 设备每个喷头的"下一个到点"，并把待补的那次分配接上——**不轮询**。
         sessions_scheduler.on_frame(device_id)
@@ -406,6 +407,14 @@ async def _handle_frame(
         close = payload.get("auto_close_time")
         open_at = payload.get("auto_open_time")
         zone = payload.get("zone_offset_minutes")
+        max_batch = payload.get("max_batch_time_min")
+        max_in_space = payload.get("max_in_space_time_min")
+        max_batch_space = payload.get("max_batch_space_time_min")
+
+        def _threshold(value: object) -> bool:
+            """阈值三键可缺报（旧 APK）：给了就必须是正整数。"""
+            return value is None or (isinstance(value, int) and not isinstance(value, bool) and value >= 1)
+
         valid = (
             isinstance(close, str)
             and parse_time(close) is not None
@@ -414,11 +423,24 @@ async def _handle_frame(
             and isinstance(zone, int)
             and not isinstance(zone, bool)
             and -720 <= zone <= 840
+            and _threshold(max_batch)
+            and _threshold(max_in_space)
+            and _threshold(max_batch_space)
         )
         if not valid:
             await ws.send_text(protocol.error(reason_codes.BAD_JSON.code, "上报事实形状不对", reply_to=frame_id))
             return
-        await _call(ws, devices_service.record_status_report, device_id, close, open_at, zone)
+        await _call(
+            ws,
+            devices_service.record_device_status,
+            device_id,
+            close,
+            open_at,
+            zone,
+            max_batch,
+            max_in_space,
+            max_batch_space,
+        )
         log_event(
             "INFO",
             "gateway.status-reported",
@@ -457,6 +479,16 @@ async def _handle_frame(
 #: 刻度；链路判活不在此列，由 uvicorn 的 WS 协议层 ping 承担（默认 20 秒）。
 #: 曾是配置键（运维从未改过，2026-11-17 精简收编为常量）。
 PING_INTERVAL_S = 300
+
+
+def _process_snapshot_with_caps(session: Session, device_id: str, payload: JsonObject) -> SnapshotResult:
+    """门帧处理 + 该设备的浴室 App 参数上限。
+
+    doors 域不读 devices 域（业务模块零引用的上行合同），caps 在组合根换算后传入：
+    facts 缺报回退 fleet 默认（contracts.DeviceCaps 的回退值）。
+    """
+    caps = devices_service.device_caps(session, device_id)
+    return doors_service.process_snapshot(session, device_id, payload, caps)
 
 
 async def _anchor_ping_loop(ws: WebSocket, device_id: str) -> None:

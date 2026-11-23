@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from app.contracts import DoorState
+from app.contracts import DeviceCaps, DoorState
 from app.core.clock import seconds_between
 from app.core.protocol import JsonObject
 
@@ -44,13 +44,19 @@ class JobSpec:
     students_key: str
     """名单在配置里、三份各自独立——同一个人可以只开其中一个功能。名单是"允许对谁动手"的
     唯一出处：不在名单里就什么都不做；凭证也跟着这份名单走（见 [students_of]）。"""
-    threshold_s: int
-    """到点阈值（秒）：起算时刻经过这么久就该动手。
+    margin_s: int | None
+    """到点提前量（秒）：实际阈值 = 设备对应上限 − margin。与 [threshold_s] 二选一。
 
-    曾是配置键（运维从未改过，2026-11-17 精简收编为常量）；取值有物理出处——
-    预约续期 270 = 浴室 App 无水释放 300 秒 − 30 秒提前量；会话续期 1140 =
-    SESSION_MAX_S（1200）− 60 秒提前量；自动结算 90 给"人走后回来"的实测间隔
-    （63 秒案例）留余量。"""
+    取值有物理出处——预约续期 30 = 提前设备无水释放线 30 秒动手；会话续期 60 =
+    提前设备占用上限 60 秒动手。上限各楼不同（六楼 30 分钟、其余 20 分钟），
+    所以只存提前量，阈值按设备现算。
+    """
+    cap_field: str | None
+    """margin 减在哪个上限上：DeviceCaps 的字段名（数据，与 enabled_key 同形态）。
+    与 margin_s 成对出现；定值阈值的功能它为 None。"""
+    threshold_s: int | None
+    """定值阈值（秒）：与设备上限无关的功能用（自动结算 90 给"人走后回来"的实测间隔
+    留余量）。与 margin_s 二选一。"""
 
     states: tuple[DoorState, ...]
     """哪些状态下这个任务适用。"""
@@ -69,7 +75,9 @@ JOBS: tuple[JobSpec, ...] = (
         key=JOB_RENEW_WAIT,
         enabled_key="renew_wait_enabled",
         students_key="renew_wait_students",
-        threshold_s=270,
+        margin_s=30,
+        cap_field="in_space_cap_s",
+        threshold_s=None,
         states=(DoorState.WAITING,),
         start="assigned_at",
         max_duration_s=1200,
@@ -79,7 +87,9 @@ JOBS: tuple[JobSpec, ...] = (
         key=JOB_RENEW_SESSION,
         enabled_key="renew_session_enabled",
         students_key="renew_session_students",
-        threshold_s=1140,
+        margin_s=60,
+        cap_field="session_cap_s",
+        threshold_s=None,
         states=(DoorState.BATHING,),
         start="assigned_at",
         max_duration_s=None,
@@ -89,6 +99,8 @@ JOBS: tuple[JobSpec, ...] = (
         key=JOB_AUTO_SETTLE,
         enabled_key="auto_settle_enabled",
         students_key="auto_settle_students",
+        margin_s=None,
+        cap_field=None,
         threshold_s=90,
         states=(DoorState.PAUSED,),
         start="paused_at",
@@ -163,11 +175,12 @@ def password_of(config: JsonObject, job: str, cert_no: str) -> str:
     return students_of(config, JOBS_BY_KEY[job].students_key).get(cert_no, "")
 
 
-def decide(candidate: Candidate, config: JsonObject, now: str) -> Trigger | None:
+def decide(candidate: Candidate, config: JsonObject, now: str, caps: DeviceCaps | None = None) -> Trigger | None:
     """这个喷头此刻下一个该动手的是什么；没有则 None。
 
-    返回值的 `delay_s` 是"还有多久到点"，**负数表示已经过点了**——调用方仍然要动手，
-    因为到点只说明"该看一眼了"，成不成立由 [recheck] 判。
+    caps 是这台设备的浴室 App 参数上限：margin 类判据的阈值按它现算，缺省回退
+    fleet 通用值。返回值的 `delay_s` 是"还有多久到点"，**负数表示已经过点了**——
+    调用方仍然要动手，因为到点只说明"该看一眼了"，成不成立由 [recheck] 判。
     """
     hits: list[Trigger] = []
 
@@ -179,12 +192,25 @@ def decide(candidate: Candidate, config: JsonObject, now: str) -> Trigger | None
         started = _started_at(candidate, spec, now)
         if started is None:
             continue
-        threshold = spec.threshold_s
+        threshold = _threshold(spec, caps or DeviceCaps())
         hits.append(Trigger(job=spec.key, delay_s=threshold - seconds_between(started, now), threshold_s=threshold))
 
     if not hits:
         return None
     return min(hits, key=lambda hit: hit.delay_s)
+
+
+def _threshold(spec: JobSpec, caps: DeviceCaps) -> int:
+    """这一功能的实际阈值：定值直取；margin 类 = 设备对应上限 − 提前量。
+
+    cap_field 是登记数据（DeviceCaps 的字段名，与 enabled_key 同形态），所以这里
+    一处按功能的分叉都没有。
+    """
+    if spec.margin_s is None:
+        assert spec.threshold_s is not None  # 登记保证：margin 与 threshold 二选一
+        return spec.threshold_s
+    assert spec.cap_field is not None
+    return int(getattr(caps, spec.cap_field)) - spec.margin_s
 
 
 def _started_at(candidate: Candidate, spec: JobSpec, now: str) -> str | None:
