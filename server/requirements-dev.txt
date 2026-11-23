@@ -15,7 +15,7 @@ ruff==0.17.5
 # 本地提交前质量门（.githooks/pre-commit 调用）
 pre-commit==4.7.0
 # 架构边界：模型层不依赖业务模块（pyproject [tool.importlinter]）
-import-linter==2.16
+import-linter==2.17
 # semgrep 不进应用依赖集：fastapi 0.162.0 起硬依赖 opentelemetry-api>=1.44.0，
 # 与 semgrep 1.184.0 的 ~=1.37.0 无法在同一个 venv 共存。它由 pre-commit 的
 # 隔离环境（.pre-commit-config.yaml 的 semgrep 钩子）与 CI 的独立 semgrep job 执行。
