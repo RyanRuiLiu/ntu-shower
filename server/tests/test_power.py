@@ -313,6 +313,30 @@ def test_expired_intent_is_abandoned_after_close(fresh_db: str, monkeypatch: pyt
     assert sent == []
 
 
+def test_armed_intent_survives_close_until_its_deadline(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """布防已写入而拨钟没完成就跨过 close：保留 hold 到布防截止，避免整夜覆盖布防失去跟踪。"""
+    sent: list[tuple[str, object]] = []
+    _prepare(monkeypatch, "2026-11-21 00:30:00", sent, skew_s=0.0)
+    _seed_hold(fresh_db, "2026-11-20T15:49:00.000Z", offset_s=None, monkeypatch=monkeypatch)
+    deadline = datetime(2026, 11, 21, 15, 58, tzinfo=UTC)
+    with session_scope() as session:
+        devices_store.mark_hold_armed(session, DEVICE, deadline)
+
+    _tick()
+
+    hold = _get_hold(fresh_db)
+    assert hold is not None
+    assert hold["arming_deadline"] == deadline
+    assert sent == []
+
+    # 布防周期走完（要么已断电、要么已被 MCU 丢弃）：残留意图可以安全作废
+    monkeypatch.setattr(power, "_now_utc", lambda: deadline + timedelta(minutes=12))
+    _tick()
+
+    assert _get_hold(fresh_db) is None
+    assert sent == []
+
+
 def test_hold_requested_after_midnight_pends_until_tonight(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """午夜后（昨晚 close 已过）手动请求延长：意图保留到今晚触发窗再施加。
 
@@ -460,7 +484,7 @@ def test_intent_outside_the_window_pends_without_commands(fresh_db: str, monkeyp
 
 
 def test_armed_hold_sends_no_further_commands(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """已施加的 hold 不再下发任何布防/写钟：布防只有一次，滚动续写与 MCU 的钟面
+    """已施加的 hold 不再下发任何布防/拨钟：布防只有一次，滚动续写与 MCU 的钟面
     检查语义冲突（每次续写的截止可能更早，会抢先或拉前——2026-11-20 事故）。
 
     hold 起点取白天（表盘 00:30 之后的意图，恢复时刻在当晚）：恢复判定不在本用例触发。
@@ -1220,6 +1244,7 @@ def test_resume_endpoint_offline_keeps_the_hold(
     [
         ("timeout", "deadline.exceeded", 504, "device-timeout"),
         ("failed", "clock.write_failed", 502, "device-command-failed"),
+        ("rejected", "", 409, "server-overloaded"),
     ],
 )
 def test_resume_endpoint_maps_device_command_failure(
@@ -1232,7 +1257,7 @@ def test_resume_endpoint_maps_device_command_failure(
     expected_status: int,
     problem_code: str,
 ) -> None:
-    """墙钟写入的其他失败按命令终态映射为 504/502，hold 保持不变。"""
+    """墙钟写入的其他失败按命令终态映射为 409/504/502，hold 保持不变。"""
     _register_device_for_http()
     _seed_facts(fresh_db)
     _seed_hold(fresh_db, "2026-11-20T15:49:00.000Z", offset_s=660, monkeypatch=monkeypatch)
@@ -1302,7 +1327,7 @@ def test_hold_view_without_reported_facts_reports_recovery_undecided_2(
 
 
 def test_hold_view_reports_derived_state_and_resume_at(fresh_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """看板状态是派生的：applied 给恢复时刻，arming 只给布防截止，pending 两者皆空。"""
+    """看板状态是派生的：applied 给恢复时刻，arming 只给布防截止（pending 见上一条用例）。"""
     _prepare(monkeypatch, "2026-11-20 23:51:00", skew_s=-660.0)
     _seed_hold(fresh_db, "2026-11-20T15:49:00.000Z", offset_s=660, monkeypatch=monkeypatch)
 

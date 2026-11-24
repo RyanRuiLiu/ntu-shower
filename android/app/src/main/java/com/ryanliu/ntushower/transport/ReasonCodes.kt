@@ -32,6 +32,9 @@ object ReasonCodes {
     /** 设备离线 */
     const val DEVICE_OFFLINE = "device.offline"
 
+    /** 设备已停用 */
+    const val DEVICE_RETIRED = "device.retired"
+
     /** 设备未声明该能力，无法执行 */
     const val DEVICE_UNSUPPORTED_ACTION = "device.unsupported_action"
 

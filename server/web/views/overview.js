@@ -432,11 +432,11 @@ function renderTaskBoard(data) {
                 <div class="task-entry">
                   <div class="task-line">
                     ${deviceCell(hold.device_id, 'task-dev')}
-                    <span class="muted">${HOLD_COPY.overview.state(applied)}（${esc(HOLD_COPY.overview.source(hold.hold_source === 'manual'))}，${esc(fmtDateTime(hold.hold_started_at))}）</span>
+                    <span class="muted">${HOLD_COPY.overview.state(hold.state)}（${esc(HOLD_COPY.source(hold.hold_source === 'manual'))}，${esc(fmtDateTime(hold.hold_started_at))}）</span>
                   </div>
                   <div class="task-sub">
                     ${applied ? `<span>${HOLD_COPY.overview.resumeAt} <span class="mono">${esc(fmtFullDateTime(hold.resume_at))}</span></span>` : ''}
-                    <span>${HOLD_COPY.overview.armingDeadline} <span class="mono">${esc(fmtFullDateTime(hold.arming_deadline))}</span></span>
+                    ${hold.arming_deadline ? `<span>${HOLD_COPY.overview.armingDeadline} <span class="mono">${esc(fmtFullDateTime(hold.arming_deadline))}</span></span>` : ''}
                     <span>${HOLD_COPY.overview.reassigned} ${hold.reassigned_count}/${hold.total}</span>
                     ${flags}
                   </div>

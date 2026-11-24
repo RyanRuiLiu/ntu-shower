@@ -151,8 +151,8 @@ function renderHoldStatus() {
     $('btnHold').textContent = HOLD_COPY.buttonNone
     return
   }
-  const source = currentHold.hold_source === 'manual' ? '手动' : '自动'
-  const offline = selectedDevice()?.online === false ? ' · 设备离线' : ''
+  const source = HOLD_COPY.source(currentHold.hold_source === 'manual')
+  const offline = selectedDevice()?.online === false ? HOLD_COPY.offlineSuffix : ''
   if (currentHold.state === 'applied') {
     node.textContent = HOLD_COPY.applied(
       source,
@@ -170,16 +170,20 @@ function renderHoldStatus() {
 
 /** 拉一次当前设备的 hold 状态；404 是“未建立”的有效回答，不是错误。 */
 async function refreshHoldStatus() {
-  if (!store.deviceId) return
+  const deviceId = store.deviceId
+  if (!deviceId) return
   if (!sessionActive()) {
     currentHold = null
     renderHoldStatus()
     return
   }
   try {
-    currentHold = await api.holdStatus(store.deviceId)
+    const hold = await api.holdStatus(deviceId)
+    if (deviceId !== store.deviceId) return
+    currentHold = hold
     holdStatusFailed = false
   } catch (error) {
+    if (deviceId !== store.deviceId) return
     currentHold = null
     holdStatusFailed = error.status !== 404
     if (holdStatusFailed) {
@@ -355,8 +359,10 @@ async function doAppRestart() {
 
 /** 重启整机：设备离线一段时间，重连后由全貌帧重建现态。这是四个里最重的一个，排在最后。 */
 async function doHold() {
+  const deviceId = store.deviceId
   // 页面可能跨过恢复时刻：先取最新状态，确认框才不会把“已自动恢复”误当成仍在延长
   await refreshHoldStatus()
+  if (deviceId !== store.deviceId) return
   const device = selectedDevice()
   const online = device?.online === true
   const prompt = currentHold
@@ -367,7 +373,11 @@ async function doHold() {
   if (!window.confirm(prompt)) return
   report('maintResult', HOLD_COPY.setting, 'info')
   try {
-    const result = await api.hold(store.deviceId)
+    const result = await api.hold(deviceId)
+    if (deviceId !== store.deviceId) {
+      report('maintResult', '设备已切换，本次结果作废', 'info')
+      return
+    }
     currentHold = result
     holdStatusFailed = false
     let text
@@ -378,6 +388,7 @@ async function doHold() {
     report('maintResult', text, result.state === 'applied' ? 'info' : 'ok')
     renderHoldStatus()
   } catch (error) {
+    if (deviceId !== store.deviceId) return
     report('maintResult', problemText(error), 'err')
   }
 }
@@ -392,17 +403,23 @@ function holdLocksPowerRewrite() {
 }
 
 async function doResume() {
+  const deviceId = store.deviceId
   report('maintResult', HOLD_COPY.resuming, 'info')
   try {
-    const result = await api.resume(store.deviceId)
+    const result = await api.resume(deviceId)
+    if (deviceId !== store.deviceId) {
+      report('maintResult', '设备已切换，本次结果作废', 'info')
+      return
+    }
     currentHold = null
     holdStatusFailed = false
     renderHoldStatus()
-    report('maintResult', HOLD_COPY.resumeOutcome[result.outcome] || HOLD_COPY.resumeFallback, result.outcome === 'not-holding' ? 'info' : 'ok')
+    report('maintResult', HOLD_COPY.resumeOutcome[result.outcome], result.outcome === 'not-holding' ? 'info' : 'ok')
   } catch (error) {
-    // 失败（正在施加、布防半施加、事实缺失、离线/超时）都走 problem+json；
+    // 失败（正在写入设备、布防已写入但拨钟未完成、事实缺失、离线/超时）都走 problem+json；
     // 重新拉一次状态，让按钮与状态行保持真实。
     await refreshHoldStatus()
+    if (deviceId !== store.deviceId) return
     report('maintResult', problemText(error), 'err')
   }
 }
@@ -648,8 +665,7 @@ export const devicesView = {
             <div class="result" id="bridgeResult"></div>
 
             <div class="muted" id="bridgeHint">
-              点击「开启通道」，然后在本机执行此处给出的连接命令。连接成功后，
-              <code class="mono">adb devices</code> 中将出现该设备。
+              点击「开启通道」，然后在本机执行此处给出的连接命令。连接成功后，<code class="mono">adb devices</code> 中将出现该设备。
             </div>
 
             <div class="field" id="bridgeSteps" hidden>

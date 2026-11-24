@@ -203,7 +203,7 @@ def start_hold(session: Session, device_id: str, source: HoldSource) -> None:
 def mark_hold_armed(session: Session, device_id: str, arming_deadline: datetime) -> None:
     """布防已写入、拨钟未完成：先记下 MCU 截止。
 
-    这一步让「意图尚未发任何命令」与「整夜布防已在位、只是偏置未落」可区分
+    这一步让「意图尚未发任何命令」与「整夜覆盖布防已在位、只是偏置未落」可区分
     （见 power.service 的恢复分支）：前者取消意图不碰设备，后者清状态会把整夜
     覆盖布防留在 MCU 上。
 

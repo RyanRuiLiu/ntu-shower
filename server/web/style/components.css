@@ -95,6 +95,18 @@
   margin-top: var(--sp-3);
 }
 
+/* 说明文字与按需展开的字段同样没有上间距：直接跟在按钮行或结果区后面时会贴住。
+   说明文字取 sp-2 与结果区一致，展开字段取 sp-3，和上一条保持同一层次。 */
+.panel-body .btn-row + .muted,
+.panel-body .result + .muted {
+  margin-top: var(--sp-2);
+}
+
+.panel-body .result + .field,
+.panel-body .muted + .field {
+  margin-top: var(--sp-3);
+}
+
 /* ── 字段 ───────────────────────────────────────────────── */
 
 .field {

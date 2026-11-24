@@ -1,4 +1,4 @@
-"""电源计划域：上报事实、今晚延长（hold）与钟面校正的统一对账器。
+"""电源计划域：上报事实、今晚延长服务（hold）与钟面校正的统一对账器。
 
 ## 行业原型
 
@@ -98,7 +98,7 @@ from .schemas import DoorAssignment, HoldState, HoldStatus, ResumeOutcome, Resum
 TICK_INTERVAL_S = 30.0
 
 #: hold 触发提前量（分钟）：浴室 App 自己的新人分配闸门在 close − 8 分钟，触发线
-#: 再提前 2 分钟——布防与写钟两条命令在这段窗内从容完成。是相对余量（策略），
+#: 再提前 2 分钟——布防与拨钟两条命令在这段窗内从容完成。是相对余量（策略），
 #: 不是自定时刻。
 HOLD_TRIGGER_MARGIN_MIN = 10
 
@@ -356,7 +356,7 @@ async def _maybe_request_automated_hold(
     log_event(
         "INFO",
         "power.hold-requested",
-        "名单内学生仍在占用，建立今晚 hold",
+        "名单内学生仍在占用，建立今晚延长服务",
         device_id=device_id,
         students=len(occupying),
     )
@@ -379,9 +379,30 @@ async def _apply_hold(
     skipped_close = _skipped_close_moment(hold["started_at"], _fact_minute(close), zone)
     now_real_local = _now_utc().astimezone(timezone(timedelta(minutes=zone)))
     if now_real_local > skipped_close:
+        if hold["arming_deadline"] is not None:
+            # 布防已在 MCU 上、拨钟没完成就跨过了 close：清状态会把整夜覆盖留在设备上
+            # 而失去跟踪，也违背 resume 对 arming 的判定。保留到布防截止——那时这轮
+            # 布防要么已断电、要么已被 MCU 丢弃，再清不会留下无人跟踪的今晚延长服务。
+            if _now_utc() < hold["arming_deadline"]:
+                if _warn_once(
+                    device_id,
+                    "armed-close-passed",
+                    "power.armed-close-passed",
+                    "关机时刻已过但整夜覆盖布防已在位，今晚延长服务保留待人工确认",
+                ):
+                    _record(
+                        "hold-failed",
+                        "关机时刻已过但整夜覆盖布防已在位，请人工确认今晚是否延长",
+                        device_id,
+                        level="WARNING",
+                    )
+                return
+            devices_crud.clear_hold(session, device_id)
+            _record("skipped", "布防周期已走完，作废残留的今晚延长服务意图", device_id, level="WARNING")
+            return
         # close 已过（离线错过整窗、或意图拖到次日）：作废本轮 hold，不无意义拨钟
         devices_crud.clear_hold(session, device_id)
-        _record("skipped", "close 已过，hold 意图作废", device_id, level="WARNING")
+        _record("skipped", "关机时刻已过，今晚延长服务意图作废", device_id, level="WARNING")
         return
     if not _hold_due(now_real_local, _fact_minute(close)):
         return  # 触发窗未到：意图保持到窗内再施加（手动提前点击在此等待）
@@ -401,7 +422,7 @@ async def _apply_hold(
 
     # ① 整夜覆盖布防：断电目标 = 次日 auto_close_time（off_day_offset=1 顺延一天），
     # 上电延时随同一布防写入（断电后次日 auto_open_time）。布防写在拨钟前（此刻表盘
-    # =真实轴），拨钟把表盘推过午夜进入次日——布防截止在表盘轴上是次日 23:58，偏置
+    # = 真实轴），拨钟把表盘推过午夜进入次日——布防截止在表盘轴上是次日 23:58，偏置
     # 存续期与写准回退后都不会在今晚触发。恢复时的墙钟写回把表盘拨回真实轴，截止的
     # 真实映射随之固定为真实次日 23:58。
     close_minute = _fact_minute(close)
@@ -429,7 +450,9 @@ async def _apply_hold(
         assignments,
         arming_deadline,
     )
-    _record("hold-applied", "今晚 hold 已施加（整夜覆盖）", device_id, offset_s=offset_s, students=len(assignments))
+    _record(
+        "hold-applied", "今晚延长服务已生效（整夜覆盖布防）", device_id, offset_s=offset_s, students=len(assignments)
+    )
 
 
 def note_install_started(device_id: str) -> None:
@@ -467,8 +490,8 @@ async def _resume_if_due(session: Session, device_id: str, hold: dict[str, Any])
 
     恢复等**恢复时刻**，不等被跳过的 close——延长的全部意义就是越过 close，close 一过
     就恢复等于没延长（2026-11-20 事故：六台在 23:58 被恢复，午夜前后集体断电）。
-    恢复本身不动钟面、不发命令：钟面写回由 following_schedule 的自动校时承担
-    （恢复后偏差 = 偏移量，超阈值即触发）；今晚的断电由布防截止承担。
+    恢复本身由 [resume] 完成：写回真实墙钟（无条件，不依赖 time_sync 开关）后清 hold；
+    今晚的断电由整夜覆盖布防的截止承担。
     """
     started_at = hold["started_at"]
     offset_s = hold["offset_s"]
@@ -614,7 +637,7 @@ async def _reassign(
 
 
 def request_hold(session: Session, device_id: str) -> HoldStatus:
-    """今晚延长（manual hold）：建立意图，对账器在触发窗内施加。
+    """今晚延长服务（manual hold）：建立意图，对账器在触发窗内施加。
 
     已在 hold 中时幂等返回现状；主开关关闭时拒绝。不要求设备在线——意图持久，
     离线错过触发窗由对账器的作废守卫处理；触发窗前的点击在对账器里 pending 到窗内。
@@ -626,18 +649,18 @@ def request_hold(session: Session, device_id: str) -> HoldStatus:
         raise ApiProblemError(problems.DEVICE_RETIRED, f"设备 {device_id} 已停用")
     config = config_store.effective(session, device_id)
     if not config.get(HOLD_ENABLED_KEY):
-        raise ApiProblemError(problems.HOLD_DISABLED, "延长服务已停用")
+        raise ApiProblemError(problems.HOLD_DISABLED, "今晚延长服务已停用")
     existing = devices_crud.get_hold(session, device_id)
     if existing is None:
         devices_crud.start_hold(session, device_id, HoldSource.MANUAL)
-        log_event("INFO", "power.hold-requested", "运维手动建立今晚 hold", device_id=device_id)
+        log_event("INFO", "power.hold-requested", "运维手动建立今晚延长服务", device_id=device_id)
         existing = devices_crud.get_hold(session, device_id)
     assert existing is not None  # start_hold 刚建立了它；设备不在册的早一步被守卫挡下
     return _hold_view(session, device_id, existing)
 
 
 def hold_status(session: Session, device_id: str) -> HoldStatus:
-    """今晚延长的只读现状（GET /hold）：未建立意图时 404。
+    """今晚延长服务的只读现状（GET /hold）：未建立意图时 404。
 
     纯读：不建立、不清除、不施加——意图登记走 POST /hold，恢复走 POST /resume；
     形状与派生判据同源（[_hold_view]），与看板的 holds 列表逐字段一致。
@@ -646,7 +669,7 @@ def hold_status(session: Session, device_id: str) -> HoldStatus:
         raise ApiProblemError(DEVICE_NOT_FOUND, f"设备 {device_id} 不在档案里")
     hold = devices_crud.get_hold(session, device_id)
     if hold is None:
-        raise HTTPException(status_code=404, detail=f"设备 {device_id} 未在今晚 hold 中")
+        raise HTTPException(status_code=404, detail=f"设备 {device_id} 未建立今晚延长服务")
     return _hold_view(session, device_id, hold)
 
 
@@ -656,6 +679,8 @@ def _clock_failure_problem(outcome: CommandOutcome) -> problems.Problem:
         return problems.DEVICE_OFFLINE
     if str(outcome.get("status") or "") == outcomes.TIMEOUT.value:
         return problems.DEVICE_TIMEOUT
+    if str(outcome.get("status") or "") == outcomes.REJECTED.value:
+        return problems.SERVER_OVERLOADED  # 下发队列满：与 actions.reject_overloaded 同一语义
     return problems.DEVICE_COMMAND_FAILED
 
 
@@ -684,8 +709,8 @@ async def resume(session: Session, device_id: str, *, origin: HoldSource) -> Res
     （POST /resume 与由此下发的 clock.set），只留 stdout 日志。
 
     返回 `ResumeResult` 只覆盖成功族：`resumed` / `cancelled` / `not-holding`。
-    失败（离线、超时、事实缺失、正在施加、布防半施加）一律抛 problem+json，由
-    HTTP 状态码与 problem type 表达，不再用 `resumed=false` 混装。
+    失败（离线、超时、事实缺失、正在写入设备、布防已写入但拨钟未完成）一律抛
+    problem+json，由 HTTP 状态码与 problem type 表达，不再用 `resumed=false` 混装。
     """
     if devices_service.get_device(session, device_id) is None:
         raise ApiProblemError(problems.DEVICE_NOT_FOUND, f"设备 {device_id} 不在档案里")
@@ -702,12 +727,12 @@ async def resume(session: Session, device_id: str, *, origin: HoldSource) -> Res
             log_event(
                 "WARNING",
                 "power.resume-blocked",
-                "整夜布防已写入但拨钟未完成，不能只清状态",
+                "整夜覆盖布防已写入但拨钟未完成，不能只清状态",
                 device_id=device_id,
             )
             raise ApiProblemError(
                 problems.HOLD_ARMING_PENDING,
-                "整夜布防已设置，设备时间尚未写入，请稍后重试",
+                "整夜覆盖布防已写入，拨钟尚未完成，请稍后重试",
                 headers={"Retry-After": str(int(TICK_INTERVAL_S))},
             )
         facts = devices_service.device_facts(session, device_id)
@@ -723,14 +748,14 @@ async def resume(session: Session, device_id: str, *, origin: HoldSource) -> Res
             ):
                 # 触发窗内且设备在线：对账器可能正在施加（命令 await 期间状态仍是
                 # pending）。让它跑完这一轮，下一轮再按 applied/arming 的路径恢复。
-                log_event("INFO", "power.resume-deferred", "hold 正在施加，暂缓取消", device_id=device_id)
+                log_event("INFO", "power.resume-deferred", "今晚延长服务正在写入设备，暂缓取消", device_id=device_id)
                 raise ApiProblemError(
                     problems.HOLD_APPLYING,
-                    "今晚延长正在生效，请稍后重试",
+                    "今晚延长服务正在写入设备，请稍后重试",
                     headers={"Retry-After": str(int(TICK_INTERVAL_S))},
                 )
         devices_crud.clear_hold(session, device_id)
-        log_event("INFO", "power.resumed", "运维取消尚未施加的今晚 hold（未下发任何命令）", device_id=device_id)
+        log_event("INFO", "power.resumed", "运维取消尚未生效的今晚延长服务（未下发任何命令）", device_id=device_id)
         return {
             "device_id": device_id,
             "previous_state": HoldState.PENDING,

@@ -21,7 +21,7 @@
 
 hold 存在时（含尚未施加的意图），`clock-set`、`restart-bath`、`reboot` 额外
 拒绝（409 hold-active）：这三条都会让 MCU 截止在真实时间里平移或让 App/
-SmdtService 按偏置钟面重布，破坏整夜延长；意图可能下一轮就施加。破例走调试
+SmdtService 按偏置钟面重布，破坏今晚延长服务；意图可能下一轮就施加。破例走调试
 终端。
 """
 
@@ -146,7 +146,7 @@ def _reject_power_rewrite_during_hold(session: Session, device_id: str) -> None:
     """hold 存在时，禁止改写设备钟或 MCU 布防（含尚未施加的意图）。
 
     改钟会让 MCU 的钟面截止在真实时间里平移，重启浴室 App/整机会让浴室 App 或
-    SmdtService 按偏置后的钟面重布 MCU——两者都会破坏 hold 的单次整夜布防。
+    SmdtService 按偏置后的钟面重布 MCU——两者都会破坏 hold 的单次整夜覆盖布防。
     意图可能下一轮就施加，命令交错同样会破坏它；取消意图是零命令操作，先恢复
     再维护。需要破例时走调试终端 `device.exec`，它的审计与权限本来就是运维的
     最后入口。
@@ -154,7 +154,7 @@ def _reject_power_rewrite_during_hold(session: Session, device_id: str) -> None:
     if service.hold_blocks_power_rewrite(session, device_id):
         raise ApiProblemError(
             HOLD_ACTIVE,
-            "设备当前处于今晚延长状态，该操作会修改设备时间或 MCU 布防。"
+            "设备当前处于今晚延长服务中，该操作会修改设备时间或 MCU 布防。"
             "请先恢复常规电源计划；无法恢复时请使用调试终端。",
         )
 

@@ -13,7 +13,7 @@ class HoldState(StrEnum):
     """hold 的派生状态（不落库，由 hold 三列现算）。
 
     - `pending`：意图已建、尚未发任何命令；取消它不碰设备。
-    - `arming`：整夜布防已写入、拨钟未完成；取消会留下布防，只能等对账补完。
+    - `arming`：整夜覆盖布防已写入、拨钟未完成；取消会留下布防，只能等对账补完。
     - `applied`：偏置已施加；恢复必须写回墙钟。
     """
 
@@ -55,8 +55,8 @@ class HoldStatus(TypedDict):
 class ResumeOutcome(StrEnum):
     """恢复常规电源计划的结果（成功族）。
 
-    失败不走本枚举：设备离线、超时、事实缺失、正在施加、布防半施加一律抛
-    problem+json，由 HTTP 状态码与 problem type 表达。
+    失败不走本枚举：设备离线、超时、事实缺失、正在写入设备、布防已写入但拨钟未完成
+    一律抛 problem+json，由 HTTP 状态码与 problem type 表达。
     """
 
     RESUMED = "resumed"  # applied：墙钟已写回并清状态

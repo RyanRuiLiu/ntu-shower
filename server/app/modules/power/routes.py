@@ -1,4 +1,4 @@
-"""电源计划域 API：今晚延长（hold）与恢复（resume）。
+"""电源计划域 API：今晚延长服务（hold）与恢复（resume）。
 
 端点挂在 `/api/v1/devices/{device_id}` 下——hold 是对一台设备电源计划的临时例外。
 守卫与管理面一致：`devices:write` + 对象级 device_scope（router 级依赖）。
@@ -31,7 +31,7 @@ router = APIRouter(
 @router.post(
     "/{device_id}/hold",
     dependencies=[Security(caller, scopes=["devices:write"])],
-    summary="今晚延长（hold）",
+    summary="今晚延长服务（hold）",
 )
 def hold_device(device_id: str, session: Session = Depends(get_db)) -> HoldStatus:
     """建立今晚的 hold 意图：对账器在触发窗内施加偏置。
@@ -45,10 +45,10 @@ def hold_device(device_id: str, session: Session = Depends(get_db)) -> HoldStatu
 @router.get(
     "/{device_id}/hold",
     dependencies=[Security(caller, scopes=["devices:read"])],
-    summary="今晚延长状态",
+    summary="今晚延长服务状态",
 )
 def hold_status(device_id: str, session: Session = Depends(get_db)) -> HoldStatus:
-    """今晚延长的只读现状：不在 hold 中时 404。纯读——登记意图走 POST /hold。"""
+    """今晚延长服务的只读现状：不在 hold 中时 404。纯读——登记意图走 POST /hold。"""
     return service.hold_status(session, device_id)
 
 
@@ -61,8 +61,9 @@ async def resume_device(device_id: str, session: Session = Depends(get_db)) -> R
     """把墙钟写回真实时刻、清 hold 列，回到 following_schedule。
 
     成功族返回 `ResumeResult`：applied 写回钟并清状态、pending 零命令取消、本来
-    不在延长中三种幂等结果。失败（正在施加、布防半施加、事实缺失、设备离线/超时/
-    失败）一律 problem+json；`hold-applying` 与 `hold-arming-pending` 带 Retry-After。
+    不在延长中三种幂等结果。失败（正在写入设备、布防已写入但拨钟未完成、事实缺失、
+    设备离线/超时/失败）一律 problem+json；`hold-applying` 与 `hold-arming-pending`
+    带 Retry-After。
     """
     return await service.resume(session, device_id, origin=HoldSource.MANUAL)
 

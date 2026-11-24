@@ -468,9 +468,9 @@ def test_clock_set_rejects_malformed_datetime(client: TestClient, admin_headers:
 def test_power_rewrite_is_blocked_when_the_hold_has_power_effect(
     client: TestClient, admin_headers: dict[str, str], fresh_db: str
 ) -> None:
-    """偏置或布防已在位：改钟、重启浴室 App、重启整机都会破坏整夜布防，一律 409。
+    """偏置或布防已在位：改钟、重启浴室 App、重启整机都会破坏整夜覆盖布防，一律 409。
 
-    仅凭意图（尚未发命令）不拦；这里种的是已施加 hold。
+    这里种的是已施加 hold；pending 同样拦（见下一条用例）。
     """
     device_link.register_trusted_device(DEVICE_ID)
     with session_scope() as session:
@@ -533,7 +533,7 @@ def test_power_rewrite_is_released_after_the_hold_is_cleared(
 def test_power_rewrite_is_blocked_while_arming_is_half_applied(
     client: TestClient, admin_headers: dict[str, str], fresh_db: str
 ) -> None:
-    """布防已写入、拨钟未完成：同样不能改写，否则整夜布防会留在 MCU 上。"""
+    """布防已写入、拨钟未完成：同样不能改写，否则整夜覆盖布防会留在 MCU 上。"""
     device_link.register_trusted_device(DEVICE_ID)
     with session_scope() as session:
         devices_store.start_hold(session, DEVICE_ID, HoldSource.MANUAL)
