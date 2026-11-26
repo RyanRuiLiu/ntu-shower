@@ -6,7 +6,7 @@ httpx2==2.16.2
 jsonschema==4.26.0
 mypy==2.4.1
 # 属性测试（tests/test_properties.py）：Python 生态属性测试的事实标准，pytest 插件形态
-hypothesis==6.170.16
+hypothesis==6.170.17
 pytest-cov==7.1.0
 pytest-timeout==2.4.0
 pytest-xdist==3.8.0
