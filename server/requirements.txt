@@ -8,7 +8,7 @@ python-multipart==0.0.34
 websockets==17.4
 typing-extensions==4.16.0
 # 数据层：ORM 与迁移
-sqlalchemy==2.1.8
+sqlalchemy==2.1.9
 alembic==1.20.1
 # 口令哈希：Argon2id 是当前密码哈希的推荐算法（RFC 9106）
 argon2-cffi==25.1.0
